@@ -13,13 +13,109 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _userName = '';
-  String? _selectedRole; // 'worker' | 'host'
+  String? _selectedRole;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     _loadUser();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showBetaModal());
+  }
+
+  void _showBetaModal() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(28),
+          decoration: BoxDecoration(
+            color: kCard,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: kBorder),
+            boxShadow: [
+              BoxShadow(
+                color: kBlue.withValues(alpha: 0.12),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: kAmber.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Center(
+                  child: Icon(Icons.science_outlined, color: kAmber, size: 32),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: kAmber.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: kAmber.withValues(alpha: 0.4)),
+                ),
+                child: const Text(
+                  'BETA VERSION',
+                  style: TextStyle(
+                    color: kAmber,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'You\'re using a Beta build',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Giggre is still in early access. Some features may be incomplete, change without notice, or behave unexpectedly.\n\nWe appreciate your patience as we continue building.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: kSub, fontSize: 13.5, height: 1.6),
+              ),
+              const SizedBox(height: 28),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kBlue,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                  ),
+                  child: const Text(
+                    'Got it, let\'s go!',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _loadUser() async {
@@ -128,7 +224,6 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ─── Greeting ───
               Text(
                 firstName.isNotEmpty ? 'Hey, $firstName 👋' : 'Welcome back 👋',
                 style: const TextStyle(
@@ -142,8 +237,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: TextStyle(color: kSub, fontSize: 14),
               ),
               const SizedBox(height: 32),
-
-              // ─── Role Cards ───
               _RoleCard(
                 role: 'worker',
                 title: 'Gig Worker',
@@ -163,8 +256,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 isSelected: _selectedRole == 'host',
                 onTap: () => _selectRole('host'),
               ),
-
-              // ─── Continue Button ───
               if (_selectedRole != null) ...[
                 const SizedBox(height: 32),
                 SizedBox(
@@ -174,7 +265,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     onPressed: _saving
                         ? null
                         : () {
-                            // TODO: Navigate to role-specific screen
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(
@@ -190,8 +280,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             );
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          _selectedRole == 'worker' ? kBlue : kAmber,
+                      backgroundColor: _selectedRole == 'worker' ? kBlue : kAmber,
                       foregroundColor: Colors.white,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
@@ -201,8 +290,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ? const SizedBox(
                             width: 22,
                             height: 22,
-                            child:
-                                CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                           )
                         : Text(
                             _selectedRole == 'worker'
@@ -223,7 +311,7 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ─────────────────────────────────────────────
-//  Role Card
+//  Role Card (unchanged)
 // ─────────────────────────────────────────────
 class _RoleCard extends StatelessWidget {
   final String role;
@@ -252,9 +340,7 @@ class _RoleCard extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: isSelected
-              ? accentColor.withValues(alpha: 0.12)
-              : kCard,
+          color: isSelected ? accentColor.withValues(alpha: 0.12) : kCard,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isSelected ? accentColor : kBorder,
@@ -272,7 +358,6 @@ class _RoleCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Icon container
             Container(
               width: 56,
               height: 56,
@@ -283,7 +368,6 @@ class _RoleCard extends StatelessWidget {
               child: Icon(icon, color: accentColor, size: 28),
             ),
             const SizedBox(width: 16),
-            // Text
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -300,7 +384,6 @@ class _RoleCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            // Check indicator
             AnimatedOpacity(
               opacity: isSelected ? 1.0 : 0.0,
               duration: const Duration(milliseconds: 200),
