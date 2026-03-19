@@ -369,7 +369,7 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
     switch (key) {
       case 'google':
         iconWidget  = Image.network(
-          'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/768px-Google_%22G%22_logo.svg.png',
+          'https://developers.google.com/identity/images/g-logo.png',
           height: 26, width: 26,
         );
         borderColor = active ? Colors.redAccent : Colors.grey[300]!;
@@ -463,7 +463,7 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
               icon: widget.isGoogleLoading
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                   : Image.network(
-                      'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/768px-Google_%22G%22_logo.svg.png',
+                      'https://developers.google.com/identity/images/g-logo.png',
                       height: 22, width: 22,
                     ),
               label: Text(

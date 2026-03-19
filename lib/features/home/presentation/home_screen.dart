@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../auth/presentation/login_screen.dart';
+import '../../gig_host/presentation/gig_host_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -265,19 +266,26 @@ class _HomeScreenState extends State<HomeScreen> {
                     onPressed: _saving
                         ? null
                         : () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  _selectedRole == 'worker'
-                                      ? 'Entering Gig Worker mode...'
-                                      : 'Entering Gig Host mode...',
+                            if (_selectedRole == 'host') {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const GigHostScreen(),
                                 ),
-                                backgroundColor: kBlue,
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12)),
-                              ),
-                            );
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: const Text(
+                                      'Gig Worker mode coming soon!'),
+                                  backgroundColor: kBlue,
+                                  behavior: SnackBarBehavior.floating,
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12)),
+                                ),
+                              );
+                            }
                           },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _selectedRole == 'worker' ? kBlue : kAmber,
