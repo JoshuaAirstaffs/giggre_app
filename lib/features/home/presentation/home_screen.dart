@@ -14,7 +14,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _userName = '';
-  String? _selectedRole;
+  String? _selectedRole; // 'worker' | 'host'
   bool _saving = false;
 
   @override
@@ -60,7 +60,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 20),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: kAmber.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(20),
@@ -122,7 +125,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadUser() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
     final data = doc.data();
     if (!mounted) return;
     setState(() {
@@ -133,14 +139,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _selectRole(String role) async {
     if (_saving) return;
-    setState(() { _saving = true; _selectedRole = role; });
+    setState(() {
+      _saving = true;
+      _selectedRole = role;
+    });
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .update({'role': role});
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'role': role,
+      });
     }
 
     if (mounted) setState(() => _saving = false);
@@ -153,8 +161,10 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: kCard,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Log Out', style: TextStyle(color: Colors.white)),
-        content: const Text('Are you sure you want to log out?',
-            style: TextStyle(color: kSub)),
+        content: const Text(
+          'Are you sure you want to log out?',
+          style: TextStyle(color: kSub),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -162,7 +172,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Log Out', style: TextStyle(color: Colors.redAccent)),
+            child: const Text(
+              'Log Out',
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
         ],
       ),
@@ -203,11 +216,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            const Text('Giggre',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18)),
+            const Text(
+              'Giggre',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+            ),
           ],
         ),
         actions: [
@@ -228,9 +244,10 @@ class _HomeScreenState extends State<HomeScreen> {
               Text(
                 firstName.isNotEmpty ? 'Hey, $firstName 👋' : 'Welcome back 👋',
                 style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold),
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 6),
               const Text(
@@ -288,31 +305,193 @@ class _HomeScreenState extends State<HomeScreen> {
                             }
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _selectedRole == 'worker' ? kBlue : kAmber,
+                      backgroundColor: _selectedRole == 'worker'
+                          ? kBlue
+                          : kAmber,
                       foregroundColor: Colors.white,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30)),
+                        borderRadius: BorderRadius.circular(30),
+                      ),
                     ),
                     child: _saving
                         ? const SizedBox(
                             width: 22,
                             height: 22,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
                           )
                         : Text(
                             _selectedRole == 'worker'
                                 ? 'Continue as Gig Worker'
                                 : 'Continue as Gig Host',
                             style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold),
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                   ),
                 ),
               ],
+              const SizedBox(height: 26),
+              Row(
+                children: [
+                  Expanded(
+                    child: const Text(
+                      'Giggre Updates',
+                      style: TextStyle(
+                        color: Color.fromARGB(255, 255, 255, 255),
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  const Text(
+                    "See All",
+                    style: TextStyle(color: kBlue, fontSize: 14),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _UpdateCard(
+                title: "Welcome to Giggre!",
+                icon: Icons.update,
+                date: "2025-10-15",
+                category: "Announcement",
+                description:
+                    "We are officially launching Giggre! We're excited to bring you the best gig economy platform. Join us and start your journey today!",
+              ),
+                const SizedBox(height: 16),
+              _UpdateCard(
+                title: "New Feature: Giggre Rewards",
+                icon: Icons.star,
+                date: "2025-10-15",
+                category: "Feature",
+                description:
+                    "We've added a new feature to Giggre! You can now earn rewards for completing gigs and referrals. Check it out and start earning today!",
+              ),
+              const SizedBox(height: 16),
+              _UpdateCard(
+                title: "New Feature: Giggre Rewards",
+                icon: Icons.star,
+                date: "2025-10-15",
+                category: "Feature",
+                description:
+                    "We've added a new feature to Giggre! You can now earn rewards for completing gigs and referrals. Check it out and start earning today!",
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _UpdateCard extends StatelessWidget {
+  final String title;
+  final String description;
+  final IconData icon;
+  final String date;
+  final String category;
+
+  const _UpdateCard({
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.date,
+    required this.category,
+  });
+
+  static const _indeedBlue = Color(0xFF1A56DB);
+  static const _indeedBlueBg = Color(0xFFEBF0FB);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color.fromARGB(255, 143, 143, 143)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color.fromARGB(255, 0, 27, 82),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, size: 20, color: kBlue),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Color.fromARGB(255, 0, 27, 82),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            category,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: Color.fromARGB(255, 141, 172, 241),
+                            ),
+                          ),
+                        ),
+                        Text(
+                          date,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF888888),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.white70,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -360,7 +539,7 @@ class _RoleCard extends StatelessWidget {
                     color: accentColor.withValues(alpha: 0.18),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
-                  )
+                  ),
                 ]
               : [],
         ),
@@ -380,14 +559,19 @@ class _RoleCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: TextStyle(
-                          color: isSelected ? accentColor : Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold)),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: isSelected ? accentColor : Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(subtitle,
-                      style: const TextStyle(color: kSub, fontSize: 13)),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(color: kSub, fontSize: 13),
+                  ),
                 ],
               ),
             ),
