@@ -173,7 +173,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
@@ -361,6 +361,8 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
     const double size = 52;
     final bool active       = _expanded == key;
     final bool isComingSoon = key == 'apple' || key == 'facebook';
+    final surfaceColor = Theme.of(context).colorScheme.surface;
+    final surfaceVariant = Theme.of(context).colorScheme.surfaceContainerHighest;
 
     Widget iconWidget;
     Color borderColor;
@@ -400,8 +402,8 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
                 shape: BoxShape.circle,
                 border: Border.all(color: borderColor, width: active ? 2 : 1),
                 color: isComingSoon
-                    ? Colors.grey[100]
-                    : (active ? borderColor.withValues(alpha: 0.07) : Colors.white),
+                    ? surfaceVariant
+                    : (active ? borderColor.withValues(alpha: 0.07) : surfaceColor),
                 boxShadow: active && !isComingSoon
                     ? [BoxShadow(color: borderColor.withValues(alpha: 0.18), blurRadius: 8, offset: const Offset(0, 3))]
                     : [],

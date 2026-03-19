@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/theme_provider.dart';
 import '../../auth/presentation/login_screen.dart';
 import '../../gig_host/presentation/gig_host_screen.dart';
 
@@ -28,107 +30,106 @@ class _HomeScreenState extends State<HomeScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.all(28),
-          decoration: BoxDecoration(
-            color: kCard,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: kBorder),
-            boxShadow: [
-              BoxShadow(
-                color: kBlue.withValues(alpha: 0.12),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: kAmber.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
+      builder: (ctx) {
+        final cardColor = Theme.of(ctx).cardColor;
+        final borderColor = Theme.of(ctx).dividerColor;
+        final onSurface = Theme.of(ctx).colorScheme.onSurface;
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: borderColor),
+              boxShadow: [
+                BoxShadow(
+                  color: kBlue.withValues(alpha: 0.12),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
                 ),
-                child: const Center(
-                  child: Icon(Icons.science_outlined, color: kAmber, size: 32),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: kAmber.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: kAmber.withValues(alpha: 0.4)),
-                ),
-                child: const Text(
-                  'BETA VERSION',
-                  style: TextStyle(
-                    color: kAmber,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: kAmber.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.science_outlined, color: kAmber, size: 32),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'You\'re using a Beta build',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Giggre is still in early access. Some features may be incomplete, change without notice, or behave unexpectedly.\n\nWe appreciate your patience as we continue building.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: kSub, fontSize: 13.5, height: 1.6),
-              ),
-              const SizedBox(height: 28),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: kBlue,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
+                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: kAmber.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: kAmber.withValues(alpha: 0.4)),
                   ),
                   child: const Text(
-                    'Got it, let\'s go!',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    'BETA VERSION',
+                    style: TextStyle(
+                      color: kAmber,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                Text(
+                  'You\'re using a Beta build',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Giggre is still in early access. Some features may be incomplete, change without notice, or behave unexpectedly.\n\nWe appreciate your patience as we continue building.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: kSub, fontSize: 13.5, height: 1.6),
+                ),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kBlue,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    child: const Text(
+                      'Got it, let\'s go!',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
   Future<void> _loadUser() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .get();
+    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
     final data = doc.data();
     if (!mounted) return;
     setState(() {
@@ -158,9 +159,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: kCard,
+        backgroundColor: Theme.of(context).cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Log Out', style: TextStyle(color: Colors.white)),
+        title: Text(
+          'Log Out',
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+        ),
         content: const Text(
           'Are you sure you want to log out?',
           style: TextStyle(color: kSub),
@@ -172,10 +176,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Log Out',
-              style: TextStyle(color: Colors.redAccent),
-            ),
+            child: const Text('Log Out', style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -195,11 +196,15 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final firstName = _userName.split(' ').first;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final themeProvider = context.read<ThemeProvider>();
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
 
     return Scaffold(
-      backgroundColor: kBg,
+      backgroundColor: bgColor,
       appBar: AppBar(
-        backgroundColor: kBg,
+        backgroundColor: bgColor,
         elevation: 0,
         automaticallyImplyLeading: false,
         title: Row(
@@ -216,10 +221,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            const Text(
+            Text(
               'Giggre',
               style: TextStyle(
-                color: Colors.white,
+                color: onSurface,
                 fontWeight: FontWeight.bold,
                 fontSize: 18,
               ),
@@ -227,6 +232,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+            icon: Icon(
+              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              color: kSub,
+            ),
+            onPressed: () => themeProvider.toggle(),
+          ),
           IconButton(
             tooltip: 'Log Out',
             icon: const Icon(Icons.logout_rounded, color: kSub),
@@ -243,8 +256,8 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Text(
                 firstName.isNotEmpty ? 'Hey, $firstName 👋' : 'Welcome back 👋',
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: onSurface,
                   fontSize: 26,
                   fontWeight: FontWeight.bold,
                 ),
@@ -286,28 +299,22 @@ class _HomeScreenState extends State<HomeScreen> {
                             if (_selectedRole == 'host') {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(
-                                  builder: (_) => const GigHostScreen(),
-                                ),
+                                MaterialPageRoute(builder: (_) => const GigHostScreen()),
                               );
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: const Text(
-                                      'Gig Worker mode coming soon!'),
+                                  content: const Text('Gig Worker mode coming soon!'),
                                   backgroundColor: kBlue,
                                   behavior: SnackBarBehavior.floating,
                                   shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(12)),
+                                      borderRadius: BorderRadius.circular(12)),
                                 ),
                               );
                             }
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _selectedRole == 'worker'
-                          ? kBlue
-                          : kAmber,
+                      backgroundColor: _selectedRole == 'worker' ? kBlue : kAmber,
                       foregroundColor: Colors.white,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
@@ -339,18 +346,12 @@ class _HomeScreenState extends State<HomeScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: const Text(
+                    child: Text(
                       'Giggre Updates',
-                      style: TextStyle(
-                        color: Color.fromARGB(255, 255, 255, 255),
-                        fontSize: 14,
-                      ),
+                      style: TextStyle(color: onSurface, fontSize: 14),
                     ),
                   ),
-                  const Text(
-                    "See All",
-                    style: TextStyle(color: kBlue, fontSize: 14),
-                  ),
+                  const Text('See All', style: TextStyle(color: kBlue, fontSize: 14)),
                 ],
               ),
               const SizedBox(height: 16),
@@ -362,7 +363,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 description:
                     "We are officially launching Giggre! We're excited to bring you the best gig economy platform. Join us and start your journey today!",
               ),
-                const SizedBox(height: 16),
+              const SizedBox(height: 16),
               _UpdateCard(
                 title: "New Feature: Giggre Rewards",
                 icon: Icons.star,
@@ -388,6 +389,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+// ─────────────────────────────────────────────
+//  Update Card
+// ─────────────────────────────────────────────
 class _UpdateCard extends StatelessWidget {
   final String title;
   final String description;
@@ -403,14 +407,19 @@ class _UpdateCard extends StatelessWidget {
     required this.category,
   });
 
-  static const _indeedBlue = Color(0xFF1A56DB);
-  static const _indeedBlueBg = Color(0xFFEBF0FB);
-
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final iconBg = isDark ? const Color(0xFF001B52) : const Color(0xFFEBF0FB);
+    final badgeBg = isDark ? const Color(0xFF001B52) : const Color(0xFFDDE9FB);
+    final badgeText = Theme.of(context).colorScheme.primary;
+    final titleColor = Theme.of(context).colorScheme.onSurface;
+    final descColor = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.65);
+    final borderColor = Theme.of(context).dividerColor;
+
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: const Color.fromARGB(255, 143, 143, 143)),
+        border: Border.all(color: borderColor),
         borderRadius: BorderRadius.circular(12),
       ),
       padding: const EdgeInsets.all(16),
@@ -425,7 +434,7 @@ class _UpdateCard extends StatelessWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: const Color.fromARGB(255, 0, 27, 82),
+                  color: iconBg,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(icon, size: 20, color: kBlue),
@@ -439,39 +448,33 @@ class _UpdateCard extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: Color.fromARGB(255, 0, 27, 82),
+                            color: badgeBg,
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
                             category,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
-                              color: Color.fromARGB(255, 141, 172, 241),
+                              color: badgeText,
                             ),
                           ),
                         ),
                         Text(
                           date,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF888888),
-                          ),
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF888888)),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                        color: Colors.white,
+                        color: titleColor,
                         height: 1.4,
                       ),
                     ),
@@ -480,11 +483,7 @@ class _UpdateCard extends StatelessWidget {
                       description,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Colors.white70,
-                        height: 1.5,
-                      ),
+                      style: TextStyle(fontSize: 13, color: descColor, height: 1.5),
                     ),
                   ],
                 ),
@@ -498,7 +497,7 @@ class _UpdateCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
-//  Role Card (unchanged)
+//  Role Card
 // ─────────────────────────────────────────────
 class _RoleCard extends StatelessWidget {
   final String role;
@@ -521,16 +520,20 @@ class _RoleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final titleColor = Theme.of(context).colorScheme.onSurface;
+
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: isSelected ? accentColor.withValues(alpha: 0.12) : kCard,
+          color: isSelected ? accentColor.withValues(alpha: 0.12) : cardColor,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected ? accentColor : kBorder,
+            color: isSelected ? accentColor : borderColor,
             width: isSelected ? 2 : 1,
           ),
           boxShadow: isSelected
@@ -562,7 +565,7 @@ class _RoleCard extends StatelessWidget {
                   Text(
                     title,
                     style: TextStyle(
-                      color: isSelected ? accentColor : Colors.white,
+                      color: isSelected ? accentColor : titleColor,
                       fontSize: 17,
                       fontWeight: FontWeight.bold,
                     ),

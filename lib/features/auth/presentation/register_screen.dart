@@ -107,10 +107,11 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bg = Theme.of(context).scaffoldBackgroundColor;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: bg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: bg,
         elevation: 0,
         leading: const BackButton(color: _blue),
       ),
@@ -389,7 +390,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
@@ -608,6 +609,8 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
     const double size   = 52;
     final bool active       = _expanded == key;
     final bool isComingSoon = key == 'apple' || key == 'facebook';
+    final surfaceColor = Theme.of(context).colorScheme.surface;
+    final surfaceVariant = Theme.of(context).colorScheme.surfaceContainerHighest;
 
     Widget iconWidget;
     Color borderColor;
@@ -616,7 +619,7 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
     switch (key) {
       case 'google':
         iconWidget  = Image.network(
-          'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/768px-Google_%22G%22_logo.svg.png',
+          'https://developers.google.com/identity/images/g-logo.png',
           height: 26, width: 26,
         );
         borderColor = active ? Colors.redAccent : Colors.grey[300]!;
@@ -647,8 +650,8 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
                 shape: BoxShape.circle,
                 border: Border.all(color: borderColor, width: active ? 2 : 1),
                 color: isComingSoon
-                    ? Colors.grey[100]
-                    : (active ? borderColor.withValues(alpha: 0.07) : Colors.white),
+                    ? surfaceVariant
+                    : (active ? borderColor.withValues(alpha: 0.07) : surfaceColor),
                 boxShadow: active && !isComingSoon
                     ? [BoxShadow(color: borderColor.withValues(alpha: 0.18), blurRadius: 8, offset: const Offset(0, 3))]
                     : [],
@@ -710,7 +713,7 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
               icon: widget.isGoogleLoading
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                   : Image.network(
-                      'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/768px-Google_%22G%22_logo.svg.png',
+                      'https://developers.google.com/identity/images/g-logo.png',
                       height: 22, width: 22,
                     ),
               label: Text(
