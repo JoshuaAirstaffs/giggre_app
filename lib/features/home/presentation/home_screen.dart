@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:giggre_app/core/widgets/update_card.dart';
+import 'package:giggre_app/screens/giggre-updates.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../auth/presentation/login_screen.dart';
 import '../../gig_host/presentation/gig_host_screen.dart';
@@ -347,14 +349,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ),
-                  const Text(
-                    "See All",
-                    style: TextStyle(color: kBlue, fontSize: 14),
+                  GestureDetector(
+                    onTap: () {
+                      // Navigate to updates screen
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => GiggreUpdates(),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      "See All",
+                      style: TextStyle(color: kBlue, fontSize: 14),
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
-              _UpdateCard(
+              UpdateCard(
                 title: "Welcome to Giggre!",
                 icon: Icons.update,
                 date: "2025-10-15",
@@ -363,7 +376,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     "We are officially launching Giggre! We're excited to bring you the best gig economy platform. Join us and start your journey today!",
               ),
                 const SizedBox(height: 16),
-              _UpdateCard(
+              UpdateCard(
                 title: "New Feature: Giggre Rewards",
                 icon: Icons.star,
                 date: "2025-10-15",
@@ -372,7 +385,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     "We've added a new feature to Giggre! You can now earn rewards for completing gigs and referrals. Check it out and start earning today!",
               ),
               const SizedBox(height: 16),
-              _UpdateCard(
+              UpdateCard(
                 title: "New Feature: Giggre Rewards",
                 icon: Icons.star,
                 date: "2025-10-15",
@@ -383,115 +396,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _UpdateCard extends StatelessWidget {
-  final String title;
-  final String description;
-  final IconData icon;
-  final String date;
-  final String category;
-
-  const _UpdateCard({
-    required this.title,
-    required this.description,
-    required this.icon,
-    required this.date,
-    required this.category,
-  });
-
-  static const _indeedBlue = Color(0xFF1A56DB);
-  static const _indeedBlueBg = Color(0xFFEBF0FB);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: const Color.fromARGB(255, 143, 143, 143)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: const Color.fromARGB(255, 0, 27, 82),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, size: 20, color: kBlue),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Color.fromARGB(255, 0, 27, 82),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            category,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: Color.fromARGB(255, 141, 172, 241),
-                            ),
-                          ),
-                        ),
-                        Text(
-                          date,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF888888),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white,
-                        height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Colors.white70,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
