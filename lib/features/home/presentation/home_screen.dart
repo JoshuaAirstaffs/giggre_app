@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:provider/provider.dart';
+import 'package:giggre_app/core/widgets/update_card.dart';
+import 'package:giggre_app/screens/giggre-updates.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../auth/presentation/login_screen.dart';
@@ -351,11 +352,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: TextStyle(color: onSurface, fontSize: 14),
                     ),
                   ),
-                  const Text('See All', style: TextStyle(color: kBlue, fontSize: 14)),
+                  GestureDetector(
+                    onTap: () {
+                      // Navigate to updates screen
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => GiggreUpdates(),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      "See All",
+                      style: TextStyle(color: kBlue, fontSize: 14),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
-              _UpdateCard(
+              UpdateCard(
                 title: "Welcome to Giggre!",
                 icon: Icons.update,
                 date: "2025-10-15",
@@ -363,8 +378,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 description:
                     "We are officially launching Giggre! We're excited to bring you the best gig economy platform. Join us and start your journey today!",
               ),
-              const SizedBox(height: 16),
-              _UpdateCard(
+                const SizedBox(height: 16),
+              UpdateCard(
                 title: "New Feature: Giggre Rewards",
                 icon: Icons.star,
                 date: "2025-10-15",
@@ -373,7 +388,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     "We've added a new feature to Giggre! You can now earn rewards for completing gigs and referrals. Check it out and start earning today!",
               ),
               const SizedBox(height: 16),
-              _UpdateCard(
+              UpdateCard(
                 title: "New Feature: Giggre Rewards",
                 icon: Icons.star,
                 date: "2025-10-15",
@@ -384,113 +399,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-//  Update Card
-// ─────────────────────────────────────────────
-class _UpdateCard extends StatelessWidget {
-  final String title;
-  final String description;
-  final IconData icon;
-  final String date;
-  final String category;
-
-  const _UpdateCard({
-    required this.title,
-    required this.description,
-    required this.icon,
-    required this.date,
-    required this.category,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final iconBg = isDark ? const Color(0xFF001B52) : const Color(0xFFEBF0FB);
-    final badgeBg = isDark ? const Color(0xFF001B52) : const Color(0xFFDDE9FB);
-    final badgeText = Theme.of(context).colorScheme.primary;
-    final titleColor = Theme.of(context).colorScheme.onSurface;
-    final descColor = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.65);
-    final borderColor = Theme.of(context).dividerColor;
-
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: borderColor),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: iconBg,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, size: 20, color: kBlue),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: badgeBg,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            category,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: badgeText,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          date,
-                          style: const TextStyle(fontSize: 12, color: Color(0xFF888888)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: titleColor,
-                        height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 13, color: descColor, height: 1.5),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
