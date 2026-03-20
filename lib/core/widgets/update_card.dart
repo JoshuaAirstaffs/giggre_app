@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_colors.dart';
 
 class UpdateCard extends StatelessWidget {
   final String title;
@@ -16,14 +17,19 @@ class UpdateCard extends StatelessWidget {
     required this.category,
   });
 
-  static const _indeedBlue = Color(0xFF1A56DB);
-  static const _darkNavy = Color.fromARGB(255, 0, 27, 82);
-
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final iconBg = isDark ? const Color(0xFF001B52) : const Color(0xFFEBF0FB);
+    final badgeBg = isDark ? const Color(0xFF001B52) : const Color(0xFFDDE9FB);
+    final badgeText = Theme.of(context).colorScheme.primary;
+    final titleColor = Theme.of(context).colorScheme.onSurface;
+    final descColor = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.65);
+    final borderColor = Theme.of(context).dividerColor;
+
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: const Color.fromARGB(255, 143, 143, 143)),
+        border: Border.all(color: borderColor),
         borderRadius: BorderRadius.circular(12),
       ),
       padding: const EdgeInsets.all(16),
@@ -38,10 +44,10 @@ class UpdateCard extends StatelessWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: _darkNavy,
+                  color: iconBg,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, size: 20, color: const Color.fromARGB(255, 255, 255, 255)),
+                child: Icon(icon, size: 20, color: kBlue),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -53,38 +59,34 @@ class UpdateCard extends StatelessWidget {
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
+                              horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: _darkNavy,
+                            color: badgeBg,
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
                             category,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
-                              color: Color.fromARGB(255, 141, 172, 241),
+                              color: badgeText,
                             ),
                           ),
                         ),
                         Text(
                           date,
                           style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF888888),
-                          ),
+                              fontSize: 12, color: Color(0xFF888888)),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                        color: Colors.white,
+                        color: titleColor,
                         height: 1.4,
                       ),
                     ),
@@ -93,11 +95,8 @@ class UpdateCard extends StatelessWidget {
                       description,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Colors.white70,
-                        height: 1.5,
-                      ),
+                      style: TextStyle(
+                          fontSize: 13, color: descColor, height: 1.5),
                     ),
                   ],
                 ),

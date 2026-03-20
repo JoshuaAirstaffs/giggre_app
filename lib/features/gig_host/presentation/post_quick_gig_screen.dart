@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/theme_provider.dart';
 import '../models/quick_gig_model.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -33,25 +34,12 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   bool _posting = false;
 
   static const _categories = [
-    'Dishwashing',
-    'Cleaning',
-    'Delivery',
-    'Errands',
-    'Moving',
-    'Gardening',
-    'Laundry',
-    'Cooking',
-    'Pet Care',
-    'Other',
+    'Dishwashing', 'Cleaning', 'Delivery', 'Errands',
+    'Moving', 'Gardening', 'Laundry', 'Cooking', 'Pet Care', 'Other',
   ];
 
   static const _durations = [
-    '1 hour',
-    '2 hours',
-    '3 hours',
-    '4 hours',
-    'Half Day',
-    'Full Day',
+    '1 hour', '2 hours', '3 hours', '4 hours', 'Half Day', 'Full Day',
   ];
 
   @override
@@ -69,10 +57,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   }
 
   Future<void> _fetchLocation() async {
-    setState(() {
-      _loadingLocation = true;
-      _locationError = null;
-    });
+    setState(() { _loadingLocation = true; _locationError = null; });
 
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -98,14 +83,11 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       }
 
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
 
       final placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
+        position.latitude, position.longitude,
       );
 
       String address = 'Unknown location';
@@ -122,11 +104,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       }
 
       if (!mounted) return;
-      setState(() {
-        _position = position;
-        _address = address;
-        _loadingLocation = false;
-      });
+      setState(() { _position = position; _address = address; _loadingLocation = false; });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -138,14 +116,8 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_selectedCategory == null) {
-      _showSnack('Please select a category.');
-      return;
-    }
-    if (_position == null) {
-      _showSnack('Location is required. Please enable GPS.');
-      return;
-    }
+    if (_selectedCategory == null) { _showSnack('Please select a category.'); return; }
+    if (_position == null) { _showSnack('Location is required. Please enable GPS.'); return; }
 
     setState(() => _posting = true);
 
@@ -164,9 +136,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         status: 'scanning',
       );
 
-      await FirebaseFirestore.instance
-          .collection('quick_gigs')
-          .add(gig.toMap());
+      await FirebaseFirestore.instance.collection('quick_gigs').add(gig.toMap());
 
       if (!mounted) return;
       setState(() => _posting = false);
@@ -182,7 +152,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
-        backgroundColor: kCard,
+        backgroundColor: Theme.of(context).cardColor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
@@ -197,8 +167,8 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       backgroundColor: Colors.transparent,
       builder: (_) => _ScanningSheet(
         onDone: () {
-          Navigator.pop(context); // close sheet
-          Navigator.pop(context); // back to gig host screen
+          Navigator.pop(context);
+          Navigator.pop(context);
         },
       ),
     );
@@ -206,14 +176,17 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
     return Scaffold(
-      backgroundColor: kBg,
+      backgroundColor: bgColor,
       appBar: AppBar(
-        backgroundColor: kBg,
+        backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
-          icon:
-              const Icon(Icons.arrow_back_ios_new_rounded, color: kSub, size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              color: kSub, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -225,17 +198,17 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 color: kAmber.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
               ),
-              child:
-                  const Icon(Icons.flash_on_rounded, color: kAmber, size: 17),
+              child: const Icon(Icons.flash_on_rounded, color: kAmber, size: 17),
             ),
             const SizedBox(width: 10),
-            const Text('Post Quick Gig',
+            Text('Post Quick Gig',
                 style: TextStyle(
-                    color: Colors.white,
+                    color: onSurface,
                     fontWeight: FontWeight.bold,
                     fontSize: 16)),
           ],
         ),
+        actions: const [ThemeToggleButton()],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -285,16 +258,13 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                         controller: _budgetCtrl,
                         label: 'Pay (₱)',
                         hint: '0.00',
-                        keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: [
                           FilteringTextInputFormatter.allow(
                               RegExp(r'^\d+\.?\d{0,2}')),
                         ],
                         validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Enter pay amount';
-                          }
+                          if (v == null || v.trim().isEmpty) return 'Enter pay amount';
                           final n = double.tryParse(v.trim());
                           if (n == null || n <= 0) return 'Enter a valid amount';
                           return null;
@@ -313,23 +283,25 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text('Duration',
-                              style:
-                                  TextStyle(color: kSub, fontSize: 12)),
+                              style: TextStyle(color: kSub, fontSize: 12)),
                           const SizedBox(height: 6),
                           Container(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 14),
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
                             decoration: BoxDecoration(
-                              color: kCard,
+                              color: Theme.of(context).cardColor,
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: kBorder),
+                              border: Border.all(
+                                  color: Theme.of(context).dividerColor),
                             ),
                             child: DropdownButtonHideUnderline(
                               child: DropdownButton<String>(
                                 value: _selectedDuration,
-                                dropdownColor: kCard,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 14),
+                                dropdownColor: Theme.of(context).cardColor,
+                                style: TextStyle(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface,
+                                    fontSize: 14),
                                 isExpanded: true,
                                 items: _durations
                                     .map((d) => DropdownMenuItem(
@@ -410,6 +382,10 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     String? Function(String?)? validator,
     Widget? prefix,
   }) {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final textColor = Theme.of(context).colorScheme.onSurface;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -421,23 +397,23 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           keyboardType: keyboardType,
           inputFormatters: inputFormatters,
           validator: validator,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
+          style: TextStyle(color: textColor, fontSize: 14),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle:
-                const TextStyle(color: Color(0xFF4A5568), fontSize: 14),
+            hintStyle: TextStyle(
+                color: textColor.withValues(alpha: 0.35), fontSize: 14),
             prefix: prefix,
             filled: true,
-            fillColor: kCard,
+            fillColor: cardColor,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: kBorder),
+              borderSide: BorderSide(color: borderColor),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: kBorder),
+              borderSide: BorderSide(color: borderColor),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
@@ -472,8 +448,8 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(text,
-        style: const TextStyle(
-            color: Colors.white,
+        style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurface,
             fontSize: 15,
             fontWeight: FontWeight.bold));
   }
@@ -495,6 +471,9 @@ class _CategoryGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -504,15 +483,12 @@ class _CategoryGrid extends StatelessWidget {
           onTap: () => onSelect(cat),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: isSelected
-                  ? kAmber.withValues(alpha: 0.18)
-                  : kCard,
+              color: isSelected ? kAmber.withValues(alpha: 0.18) : cardColor,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: isSelected ? kAmber : kBorder,
+                color: isSelected ? kAmber : borderColor,
                 width: isSelected ? 1.5 : 1,
               ),
             ),
@@ -550,15 +526,17 @@ class _LocationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: kCard,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
             color: error != null
                 ? Colors.redAccent.withValues(alpha: 0.5)
-                : kBorder),
+                : Theme.of(context).dividerColor),
       ),
       child: Row(
         children: [
@@ -602,16 +580,18 @@ class _LocationCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            address.isNotEmpty ? address : 'Location detected',
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 13),
+                            address.isNotEmpty
+                                ? address
+                                : 'Location detected',
+                            style: TextStyle(
+                                color: onSurface, fontSize: 13),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 2),
                           const Text('Current GPS location',
-                              style:
-                                  TextStyle(color: kSub, fontSize: 11)),
+                              style: TextStyle(
+                                  color: kSub, fontSize: 11)),
                         ],
                       ),
           ),
@@ -676,9 +656,10 @@ class _ScanningSheetState extends State<_ScanningSheet>
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
-      decoration: const BoxDecoration(
-        color: kCard,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius:
+            const BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 400),
@@ -688,17 +669,18 @@ class _ScanningSheetState extends State<_ScanningSheet>
   }
 
   Widget _buildScanning() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
     return Column(
       key: const ValueKey('scanning'),
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Pulse animation
         SizedBox(
           width: 140,
           height: 140,
           child: AnimatedBuilder(
             animation: _pulseCtrl,
-            builder: (_, __) {
+            builder: (ctx, child) {
               return Stack(
                 alignment: Alignment.center,
                 children: [
@@ -726,12 +708,10 @@ class _ScanningSheetState extends State<_ScanningSheet>
           ),
         ),
         const SizedBox(height: 20),
-        const Text(
+        Text(
           'Scanning for Gig Workers...',
           style: TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold),
+              color: onSurface, fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
         const Text(
@@ -741,8 +721,7 @@ class _ScanningSheetState extends State<_ScanningSheet>
         ),
         const SizedBox(height: 16),
         Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
             color: kAmber.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(20),
@@ -750,7 +729,9 @@ class _ScanningSheetState extends State<_ScanningSheet>
           ),
           child: const Text('Your gig is now live',
               style: TextStyle(
-                  color: kAmber, fontSize: 12, fontWeight: FontWeight.w600)),
+                  color: kAmber,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600)),
         ),
         const SizedBox(height: 8),
       ],
@@ -758,6 +739,8 @@ class _ScanningSheetState extends State<_ScanningSheet>
   }
 
   Widget _buildSuccess() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
     return Column(
       key: const ValueKey('success'),
       mainAxisSize: MainAxisSize.min,
@@ -776,12 +759,10 @@ class _ScanningSheetState extends State<_ScanningSheet>
               color: Color(0xFF22C55E), size: 40),
         ),
         const SizedBox(height: 20),
-        const Text(
+        Text(
           'Workers Notified!',
           style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.bold),
+              color: onSurface, fontSize: 20, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
         const Text(
@@ -803,8 +784,8 @@ class _ScanningSheetState extends State<_ScanningSheet>
                   borderRadius: BorderRadius.circular(30)),
             ),
             child: const Text('View My Gigs',
-                style:
-                    TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                style: TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.bold)),
           ),
         ),
         const SizedBox(height: 8),
@@ -831,7 +812,7 @@ class _PulseCircle extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: animation,
-      builder: (_, __) {
+      builder: (ctx, child) {
         double t = (animation.value + delay) % 1.0;
         final scale = 0.3 + t * 0.7;
         final opacity = (1.0 - t) * 0.5;

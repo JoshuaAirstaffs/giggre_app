@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'app_colors.dart';
 
 class ThemeProvider extends ChangeNotifier {
-  ThemeMode _mode = ThemeMode.dark;
+  ThemeMode _mode = ThemeMode.light; // default: light
 
   ThemeMode get mode => _mode;
   bool get isDark => _mode == ThemeMode.dark;
@@ -33,4 +34,24 @@ class ThemeProvider extends ChangeNotifier {
         cardColor: kCard,
         dividerColor: kBorder,
       );
+}
+
+// ─────────────────────────────────────────────
+//  Reusable theme toggle icon button
+// ─────────────────────────────────────────────
+class ThemeToggleButton extends StatelessWidget {
+  const ThemeToggleButton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return IconButton(
+      tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+      icon: Icon(
+        isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+        color: kSub,
+      ),
+      onPressed: () => context.read<ThemeProvider>().toggle(),
+    );
+  }
 }

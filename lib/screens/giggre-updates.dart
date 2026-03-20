@@ -1,38 +1,36 @@
 import 'package:flutter/material.dart';
-import 'package:giggre_app/core/theme/app_colors.dart';
+import 'package:giggre_app/core/theme/theme_provider.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
 
-class GiggreUpdates extends StatefulWidget {
-  GiggreUpdates({Key? key}) : super(key: key);
+class GiggreUpdates extends StatelessWidget {
+  const GiggreUpdates({super.key});
 
-  @override
-  _GiggreUpdatesState createState() => _GiggreUpdatesState();
-}
-
-class _GiggreUpdatesState extends State<GiggreUpdates> {
   @override
   Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
     return Scaffold(
-      backgroundColor: kBg,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: kBg,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white), // ← add this
-        title: const Text(
+        iconTheme: IconThemeData(color: onSurface),
+        title: Text(
           'Giggre Updates',
           style: TextStyle(
-            color: Colors.white,
+            color: onSurface,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),
         ),
+        actions: const [ThemeToggleButton()],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Column(
             spacing: 16,
-            children: [
+            children: const [
               UpdateCard(
                 title: "Welcome to Giggre!",
                 icon: Icons.update,

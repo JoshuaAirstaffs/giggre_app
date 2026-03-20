@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/theme_provider.dart';
 import '../../auth/presentation/login_screen.dart';
 import 'post_quick_gig_screen.dart';
 
@@ -34,11 +35,11 @@ class _GigHostScreenState extends State<GigHostScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: kCard,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title:
-            const Text('Log Out', style: TextStyle(color: Colors.white)),
+        backgroundColor: Theme.of(context).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Log Out',
+            style:
+                TextStyle(color: Theme.of(context).colorScheme.onSurface)),
         content: const Text('Are you sure you want to log out?',
             style: TextStyle(color: kSub)),
         actions: [
@@ -69,15 +70,18 @@ class _GigHostScreenState extends State<GigHostScreen> {
   Widget build(BuildContext context) {
     final firstName = _userName.split(' ').first;
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
 
     return Scaffold(
-      backgroundColor: kBg,
+      backgroundColor: bgColor,
       appBar: AppBar(
-        backgroundColor: kBg,
+        backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
           tooltip: 'Switch Role',
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: kSub, size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              color: kSub, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -98,19 +102,20 @@ class _GigHostScreenState extends State<GigHostScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
-              children: const [
+              children: [
                 Text('Gig Host',
                     style: TextStyle(
-                        color: Colors.white,
+                        color: onSurface,
                         fontWeight: FontWeight.bold,
                         fontSize: 16)),
-                Text('Dashboard',
+                const Text('Dashboard',
                     style: TextStyle(color: kSub, fontSize: 11)),
               ],
             ),
           ],
         ),
         actions: [
+          const ThemeToggleButton(),
           IconButton(
             tooltip: 'Log Out',
             icon: const Icon(Icons.logout_rounded, color: kSub),
@@ -121,18 +126,15 @@ class _GigHostScreenState extends State<GigHostScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Greeting ──────────────────────────────────────
               Text(
-                firstName.isNotEmpty
-                    ? 'Hey, $firstName 👋'
-                    : 'Welcome, Host!',
-                style: const TextStyle(
-                    color: Colors.white,
+                firstName.isNotEmpty ? 'Hey, $firstName 👋' : 'Welcome, Host!',
+                style: TextStyle(
+                    color: onSurface,
                     fontSize: 24,
                     fontWeight: FontWeight.bold),
               ),
@@ -146,9 +148,9 @@ class _GigHostScreenState extends State<GigHostScreen> {
               const SizedBox(height: 28),
 
               // ── Post a Gig ────────────────────────────────────
-              const Text('Post a Gig',
+              Text('Post a Gig',
                   style: TextStyle(
-                      color: Colors.white,
+                      color: onSurface,
                       fontSize: 17,
                       fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
@@ -193,9 +195,9 @@ class _GigHostScreenState extends State<GigHostScreen> {
               const SizedBox(height: 28),
 
               // ── Recent Gigs ───────────────────────────────────
-              const Text('Your Gigs',
+              Text('Your Gigs',
                   style: TextStyle(
-                      color: Colors.white,
+                      color: onSurface,
                       fontSize: 17,
                       fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
@@ -238,7 +240,10 @@ class _StatsRow extends StatelessWidget {
           children: [
             _StatCard(label: 'Posted', value: total, color: kAmber),
             const SizedBox(width: 10),
-            _StatCard(label: 'Active', value: active, color: const Color(0xFF22C55E)),
+            _StatCard(
+                label: 'Active',
+                value: active,
+                color: const Color(0xFF22C55E)),
             const SizedBox(width: 10),
             _StatCard(label: 'Done', value: completed, color: kBlue),
           ],
@@ -261,9 +266,9 @@ class _StatCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14),
         decoration: BoxDecoration(
-          color: kCard,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: kBorder),
+          border: Border.all(color: Theme.of(context).dividerColor),
         ),
         child: Column(
           children: [
@@ -311,18 +316,22 @@ class _GigTypeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = onTap != null;
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final titleColor = Theme.of(context).colorScheme.onSurface;
+
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: enabled
-              ? accentColor.withValues(alpha: 0.08)
-              : kCard,
+          color: enabled ? accentColor.withValues(alpha: 0.08) : cardColor,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: enabled ? accentColor.withValues(alpha: 0.5) : kBorder,
+            color: enabled
+                ? accentColor.withValues(alpha: 0.5)
+                : borderColor,
           ),
         ),
         child: Row(
@@ -351,8 +360,8 @@ class _GigTypeCard extends StatelessWidget {
                         title,
                         style: TextStyle(
                             color: enabled
-                                ? Colors.white
-                                : Colors.white.withValues(alpha: 0.4),
+                                ? titleColor
+                                : titleColor.withValues(alpha: 0.4),
                             fontSize: 15,
                             fontWeight: FontWeight.bold),
                       ),
@@ -425,7 +434,8 @@ class _RecentGigsList extends StatelessWidget {
           return const Center(
             child: Padding(
               padding: EdgeInsets.all(32),
-              child: CircularProgressIndicator(color: kAmber, strokeWidth: 2),
+              child: CircularProgressIndicator(
+                  color: kAmber, strokeWidth: 2),
             ),
           );
         }
@@ -448,13 +458,14 @@ class _RecentGigsList extends StatelessWidget {
                       color: kAmber, size: 30),
                 ),
                 const SizedBox(height: 16),
-                const Text('No gigs posted yet',
+                Text('No gigs posted yet',
                     style: TextStyle(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onSurface,
                         fontSize: 15,
                         fontWeight: FontWeight.w600)),
                 const SizedBox(height: 6),
-                const Text('Tap "Quick Gig" above to post your first gig.',
+                const Text(
+                    'Tap "Quick Gig" above to post your first gig.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: kSub, fontSize: 13)),
               ],
@@ -481,6 +492,7 @@ class _GigTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = data['status'] ?? 'scanning';
     final statusColor = _statusColor(status);
+    final titleColor = Theme.of(context).colorScheme.onSurface;
 
     final createdAt = data['createdAt'] != null
         ? (data['createdAt'] as Timestamp).toDate()
@@ -496,9 +508,9 @@ class _GigTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: kCard,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: kBorder),
+        border: Border.all(color: Theme.of(context).dividerColor),
       ),
       child: Row(
         children: [
@@ -519,8 +531,8 @@ class _GigTile extends StatelessWidget {
               children: [
                 Text(
                   data['title'] ?? 'Untitled Gig',
-                  style: const TextStyle(
-                      color: Colors.white,
+                  style: TextStyle(
+                      color: titleColor,
                       fontSize: 14,
                       fontWeight: FontWeight.w600),
                   maxLines: 1,
@@ -534,14 +546,17 @@ class _GigTile extends StatelessWidget {
                             const TextStyle(color: kSub, fontSize: 12)),
                     const Text(' · ',
                         style: TextStyle(color: kSub, fontSize: 12)),
-                    Text('₱${data['budget']?.toStringAsFixed(0) ?? '0'}',
+                    Text(
+                        '₱${data['budget']?.toStringAsFixed(0) ?? '0'}',
                         style: const TextStyle(
-                            color: kAmber, fontSize: 12, fontWeight: FontWeight.w600)),
+                            color: kAmber,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600)),
                     const Text(' · ',
                         style: TextStyle(color: kSub, fontSize: 12)),
                     Text(timeAgo,
-                        style:
-                            const TextStyle(color: kSub, fontSize: 12)),
+                        style: const TextStyle(
+                            color: kSub, fontSize: 12)),
                   ],
                 ),
               ],

@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../../../main.dart';
 import '../../../utils/user_utils.dart';
+import '../../../core/theme/theme_provider.dart';
 import 'dashboard_screen.dart';
 import '../../../services/sound_service.dart';
 
@@ -114,6 +115,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         backgroundColor: bg,
         elevation: 0,
         leading: const BackButton(color: _blue),
+        actions: const [ThemeToggleButton()],
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -391,6 +393,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: const [ThemeToggleButton()],
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
