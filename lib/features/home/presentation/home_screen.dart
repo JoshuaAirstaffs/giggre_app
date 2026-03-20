@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
+import 'package:giggre_app/screens/about_giggre.dart';
 import 'package:giggre_app/screens/giggre-updates.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
@@ -224,12 +225,25 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            Text(
-              'Giggre',
-              style: TextStyle(
-                color: onSurface,
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
+            GestureDetector(
+              onTap: () {
+                showModalBottomSheet(
+                  context: context,
+                  backgroundColor: const Color(0xFF1E1E2C),
+                  isScrollControlled: true,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  builder: (_) => const _GiggreMenu(),
+                );
+              },
+              child: const Text(
+                'Giggre',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
               ),
             ),
           ],
@@ -404,6 +418,110 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+//GIGGRE MENU
+class _GiggreMenu extends StatelessWidget {
+  const _GiggreMenu({super.key});
+
+  static final List<Map<String, dynamic>> gigMenuData = [
+    {'title': 'About Giggre', 'icon': Icons.info, 'screen': AboutGiggre()},
+    {'title': 'Terms & Conditions', 'icon': Icons.description},
+    {'title': 'Privacy Policy', 'icon': Icons.privacy_tip},
+    {'title': 'Help/FAQ', 'icon': Icons.help},
+    {'title': 'Contact Us', 'icon': Icons.contact_support},
+  ];
+
+
+  @override
+  Widget build(BuildContext context) {
+
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.5,
+      minChildSize: 0.3,
+      maxChildSize: 0.9,
+      expand: false,
+      builder: (context, scrollController) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final iconBg = isDark ? const Color(0xFF001B52) : const Color(0xFFEBF0FB);
+        return Container(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              // Header
+              Column(
+                children: [
+                  Image.asset('assets/images/logo.png', height: 60),
+                  const SizedBox(height: 12),
+                   Text(
+                    "Version 1.0.0.0.0.0",
+                    style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 14),
+                  ),
+                  const SizedBox(height: 12),
+                   Text(
+                    "The fastest way to find jobs or hire workers near you",
+                    style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 10),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ),
+              Divider(color: isDark ? Colors.white24 : Colors.black26),
+              const SizedBox(height: 16),
+
+              // Menu items
+              Expanded(
+                child: ListView.separated(
+                  controller: scrollController,
+                  itemCount: gigMenuData.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 16),
+                  itemBuilder: (context, index) {
+                    final item = gigMenuData[index];
+                    return GestureDetector(
+                      onTap: () {
+                        // handle tap per item
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => item['screen'] as Widget));
+                      },
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  color: iconBg,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  item['icon'] as IconData,
+                                  color: kBlue,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                item['title'] as String,
+                                style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                              ),
+                            ],
+                          ),
+                          Icon(Icons.chevron_right, color: isDark ? Colors.white : Colors.black),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        );
+      },
     );
   }
 }
