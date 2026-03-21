@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' hide Path;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../auth/presentation/login_screen.dart';
 import 'post_quick_gig_screen.dart';
+import 'post_open_gig_screen.dart';
 
 class GigHostScreen extends StatefulWidget {
   const GigHostScreen({super.key});
@@ -29,6 +32,125 @@ class _GigHostScreenState extends State<GigHostScreen> {
         await FirebaseFirestore.instance.collection('users').doc(uid).get();
     if (!mounted) return;
     setState(() => _userName = doc.data()?['name'] ?? '');
+  }
+
+  void _showProfile() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final cardColor = Theme.of(context).cardColor;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: kAmber.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.account_circle_outlined, color: kAmber, size: 36),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              _userName.isNotEmpty ? _userName : 'Gig Host',
+              style: TextStyle(color: onSurface, fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              FirebaseAuth.instance.currentUser?.email ?? '',
+              style: const TextStyle(color: kSub, fontSize: 13),
+            ),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: kAmber.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: kAmber.withValues(alpha: 0.3)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.construction_rounded, color: kAmber, size: 16),
+                  SizedBox(width: 8),
+                  Text('Profile editing coming soon', style: TextStyle(color: kAmber, fontSize: 13)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showTemplates() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final cardColor = Theme.of(context).cardColor;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: kBlue.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.bookmark_add_outlined, color: kBlue, size: 32),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Saved Templates',
+              style: TextStyle(color: onSurface, fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Save your gig posts as templates\nfor faster reposting.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: kSub, fontSize: 13, height: 1.5),
+            ),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: kBlue.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: kBlue.withValues(alpha: 0.3)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.construction_rounded, color: kBlue, size: 16),
+                  SizedBox(width: 8),
+                  Text('Templates coming soon', style: TextStyle(color: kBlue, fontSize: 13)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _logout() async {
@@ -78,6 +200,7 @@ class _GigHostScreenState extends State<GigHostScreen> {
       appBar: AppBar(
         backgroundColor: bgColor,
         elevation: 0,
+        titleSpacing: 0,
         leading: IconButton(
           tooltip: 'Switch Role',
           icon: const Icon(Icons.arrow_back_ios_new_rounded,
@@ -85,20 +208,21 @@ class _GigHostScreenState extends State<GigHostScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 36,
-              height: 36,
+              width: 30,
+              height: 30,
               decoration: BoxDecoration(
                 color: kAmber.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
               ),
               child: const Center(
                 child: Icon(Icons.business_center_outlined,
-                    color: kAmber, size: 18),
+                    color: kAmber, size: 16),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -107,14 +231,24 @@ class _GigHostScreenState extends State<GigHostScreen> {
                     style: TextStyle(
                         color: onSurface,
                         fontWeight: FontWeight.bold,
-                        fontSize: 16)),
+                        fontSize: 14)),
                 const Text('Dashboard',
-                    style: TextStyle(color: kSub, fontSize: 11)),
+                    style: TextStyle(color: kSub, fontSize: 10)),
               ],
             ),
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Profile',
+            icon: const Icon(Icons.account_circle_outlined, color: kSub),
+            onPressed: _showProfile,
+          ),
+          IconButton(
+            tooltip: 'Saved Templates',
+            icon: const Icon(Icons.bookmark_add_outlined, color: kSub),
+            onPressed: _showTemplates,
+          ),
           const ThemeToggleButton(),
           IconButton(
             tooltip: 'Log Out',
@@ -147,6 +281,10 @@ class _GigHostScreenState extends State<GigHostScreen> {
               _StatsRow(uid: uid),
               const SizedBox(height: 28),
 
+              // ── Workers Map ───────────────────────────────────
+              const _WorkerMapSection(),
+              const SizedBox(height: 28),
+
               // ── Post a Gig ────────────────────────────────────
               Text('Post a Gig',
                   style: TextStyle(
@@ -177,9 +315,15 @@ class _GigHostScreenState extends State<GigHostScreen> {
                 example: 'e.g. Plumbing, Web Dev, Accounting',
                 icon: Icons.workspace_premium_outlined,
                 accentColor: kBlue,
-                badge: 'COMING SOON',
-                badgeColor: kSub,
-                onTap: null,
+                badge: 'AVAILABLE',
+                badgeColor: kBlue,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        PostOpenGigScreen(hostName: _userName),
+                  ),
+                ),
               ),
               const SizedBox(height: 10),
               _GigTypeCard(
@@ -602,4 +746,414 @@ class _GigTile extends StatelessWidget {
         return kSub;
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Dummy Worker Data  (replace with Firestore stream later)
+// ─────────────────────────────────────────────────────────────────────────────
+class _DummyWorker {
+  final String id;
+  final String name;
+  final String skill;
+  final LatLng position;
+
+  _DummyWorker({
+    required this.id,
+    required this.name,
+    required this.skill,
+    required this.position,
+  });
+}
+
+final _kDummyWorkers = [
+  // Makati / BGC cluster
+  _DummyWorker(id: 'w1', name: 'Juan Dela Cruz',   skill: 'Cleaning',    position: LatLng(14.5547, 121.0244)),
+  _DummyWorker(id: 'w2', name: 'Maria Santos',      skill: 'Delivery',    position: LatLng(14.5515, 121.0290)),
+  _DummyWorker(id: 'w3', name: 'Pedro Reyes',       skill: 'Dishwashing', position: LatLng(14.5568, 121.0211)),
+  // Quezon City cluster
+  _DummyWorker(id: 'w4', name: 'Ana Garcia',        skill: 'Sorting',     position: LatLng(14.6760, 121.0437)),
+  _DummyWorker(id: 'w5', name: 'Ben Torres',        skill: 'Cleaning',    position: LatLng(14.6790, 121.0395)),
+  // Ortigas / Pasig cluster
+  _DummyWorker(id: 'w6', name: 'Carlo Lim',         skill: 'Delivery',    position: LatLng(14.5876, 121.0603)),
+  _DummyWorker(id: 'w7', name: 'Diana Cruz',        skill: 'Packing',     position: LatLng(14.5841, 121.0644)),
+  _DummyWorker(id: 'w8', name: 'Greg Tan',          skill: 'Delivery',    position: LatLng(14.5764, 121.0851)),
+  // Manila proper
+  _DummyWorker(id: 'w9',  name: 'Eduardo Chan',     skill: 'Dishwashing', position: LatLng(14.5942, 120.9821)),
+  _DummyWorker(id: 'w10', name: 'Fe Ramos',         skill: 'Cleaning',    position: LatLng(14.5902, 120.9775)),
+  // Mandaluyong
+  _DummyWorker(id: 'w11', name: 'Helen Ng',         skill: 'Sorting',     position: LatLng(14.5794, 121.0359)),
+  // Taguig
+  _DummyWorker(id: 'w12', name: 'Ivan Sy',          skill: 'Cleaning',    position: LatLng(14.5176, 121.0509)),
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Worker Map Section
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkerCluster {
+  final LatLng center;
+  final int count;
+  final _DummyWorker? singleWorker;
+
+  const _WorkerCluster({
+    required this.center,
+    required this.count,
+    this.singleWorker,
+  });
+}
+
+class _WorkerMapSection extends StatefulWidget {
+  const _WorkerMapSection();
+
+  @override
+  State<_WorkerMapSection> createState() => _WorkerMapSectionState();
+}
+
+class _WorkerMapSectionState extends State<_WorkerMapSection> {
+  final _mapController = MapController();
+  double _zoom = 12.0;
+
+  @override
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
+  }
+
+  // Grid cell size shrinks as zoom increases — smaller = less grouping
+  static double _gridSize(double zoom) {
+    if (zoom < 10) return 0.15;
+    if (zoom < 11) return 0.08;
+    if (zoom < 12) return 0.04;
+    if (zoom < 13) return 0.02;
+    if (zoom < 14) return 0.008;
+    return 0.0; // individual markers
+  }
+
+  List<_WorkerCluster> _buildClusters() {
+    final gridSize = _gridSize(_zoom);
+
+    if (gridSize == 0.0) {
+      return _kDummyWorkers
+          .map((w) => _WorkerCluster(center: w.position, count: 1, singleWorker: w))
+          .toList();
+    }
+
+    final Map<String, List<_DummyWorker>> grid = {};
+    for (final w in _kDummyWorkers) {
+      final latKey = (w.position.latitude / gridSize).floor();
+      final lngKey = (w.position.longitude / gridSize).floor();
+      grid.putIfAbsent('$latKey:$lngKey', () => []).add(w);
+    }
+
+    return grid.values.map((group) {
+      final avgLat = group.fold(0.0, (s, w) => s + w.position.latitude) / group.length;
+      final avgLng = group.fold(0.0, (s, w) => s + w.position.longitude) / group.length;
+      return _WorkerCluster(
+        center: LatLng(avgLat, avgLng),
+        count: group.length,
+        singleWorker: group.length == 1 ? group.first : null,
+      );
+    }).toList();
+  }
+
+  List<Marker> _buildMarkers() {
+    return _buildClusters().map((cluster) {
+      if (cluster.count == 1 && cluster.singleWorker != null) {
+        return Marker(
+          point: cluster.center,
+          width: 40,
+          height: 48,
+          child: _WorkerPin(worker: cluster.singleWorker!),
+        );
+      }
+      return Marker(
+        point: cluster.center,
+        width: 56,
+        height: 56,
+        child: _ClusterBadge(count: cluster.count),
+      );
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final borderColor = Theme.of(context).dividerColor;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Section header
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Workers Near You',
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF22C55E),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${_kDummyWorkers.length} Online',
+                    style: const TextStyle(
+                      color: Color(0xFF22C55E),
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // Map
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            height: 280,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: borderColor),
+            ),
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: LatLng(14.5995, 120.9842),
+                initialZoom: 12.0,
+                minZoom: 9.0,
+                maxZoom: 18.0,
+                onMapEvent: (event) {
+                  final newZoom = _mapController.camera.zoom;
+                  if ((newZoom - _zoom).abs() >= 0.3) {
+                    setState(() => _zoom = newZoom);
+                  }
+                },
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.giggre.app',
+                ),
+                MarkerLayer(markers: _buildMarkers()),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: Text(
+            'Zoom in to see individual workers · Tap a pin for details',
+            style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 11),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Individual Worker Pin
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkerPin extends StatelessWidget {
+  final _DummyWorker worker;
+  const _WorkerPin({required this.worker});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _showWorkerSheet(context),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: kBlue,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2.5),
+              boxShadow: [
+                BoxShadow(
+                  color: kBlue.withValues(alpha: 0.45),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: const Icon(Icons.person, color: Colors.white, size: 20),
+          ),
+          // Pointer triangle
+          CustomPaint(
+            painter: _TrianglePainter(color: kBlue),
+            size: const Size(10, 6),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showWorkerSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final cardColor = Theme.of(ctx).cardColor;
+        final onSurface = Theme.of(ctx).colorScheme.onSurface;
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: kBlue.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.person, color: kBlue, size: 30),
+              ),
+              const SizedBox(height: 12),
+              Text(worker.name,
+                  style: TextStyle(color: onSurface, fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(worker.skill, style: const TextStyle(color: kSub, fontSize: 13)),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF22C55E),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Text('Online now',
+                      style: TextStyle(color: Color(0xFF22C55E), fontSize: 12)),
+                ],
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton.icon(
+                  onPressed: () => Navigator.pop(ctx),
+                  icon: const Icon(Icons.send_rounded, size: 16),
+                  label: const Text('Offer a Gig',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kBlue,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cluster Badge
+// ─────────────────────────────────────────────────────────────────────────────
+class _ClusterBadge extends StatelessWidget {
+  final int count;
+  const _ClusterBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: kAmber.withValues(alpha: 0.18),
+        shape: BoxShape.circle,
+        border: Border.all(color: kAmber, width: 2.5),
+        boxShadow: [
+          BoxShadow(
+            color: kAmber.withValues(alpha: 0.35),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '$count',
+            style: const TextStyle(
+              color: kAmber,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+              height: 1,
+            ),
+          ),
+          const Text(
+            'workers',
+            style: TextStyle(color: kAmber, fontSize: 8, letterSpacing: 0.3),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Triangle pointer painter for worker pin
+// ─────────────────────────────────────────────────────────────────────────────
+class _TrianglePainter extends CustomPainter {
+  final Color color;
+  const _TrianglePainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color;
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_TrianglePainter old) => old.color != color;
 }

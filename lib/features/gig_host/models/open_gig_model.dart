@@ -1,32 +1,32 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class QuickGigModel {
+class OpenGigModel {
   final String? id;
   final String hostId;
   final String hostName;
   final String title;
   final String description;
-  final String category;
+  final List<String> requiredSkills;
+  final String experienceLevel; // 'entry' | 'intermediate' | 'expert'
   final double budget;
-  final String duration;
+  final String status;
   final GeoPoint location;
   final String address;
-  final String status;
   final DateTime createdAt;
   final DateTime? scheduledDate;
 
-  QuickGigModel({
+  OpenGigModel({
     this.id,
     required this.hostId,
     required this.hostName,
     required this.title,
     required this.description,
-    required this.category,
+    required this.requiredSkills,
+    required this.experienceLevel,
     required this.budget,
-    required this.duration,
     required this.location,
     required this.address,
-    this.status = 'scanning',
+    this.status = 'open',
     DateTime? createdAt,
     this.scheduledDate,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -36,32 +36,32 @@ class QuickGigModel {
         'hostName': hostName,
         'title': title,
         'description': description,
-        'category': category,
+        'requiredSkills': requiredSkills,
+        'experienceLevel': experienceLevel,
         'budget': budget,
-        'duration': duration,
         'location': location,
         'address': address,
         'status': status,
-        'gigType': 'quick',
+        'gigType': 'open',
         'createdAt': Timestamp.fromDate(createdAt),
         if (scheduledDate != null)
           'scheduledDate': Timestamp.fromDate(scheduledDate!),
       };
 
-  factory QuickGigModel.fromDoc(DocumentSnapshot doc) {
+  factory OpenGigModel.fromDoc(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
-    return QuickGigModel(
+    return OpenGigModel(
       id: doc.id,
       hostId: d['hostId'] ?? '',
       hostName: d['hostName'] ?? '',
       title: d['title'] ?? '',
       description: d['description'] ?? '',
-      category: d['category'] ?? '',
+      requiredSkills: List<String>.from(d['requiredSkills'] ?? []),
+      experienceLevel: d['experienceLevel'] ?? 'entry',
       budget: (d['budget'] ?? 0).toDouble(),
-      duration: d['duration'] ?? '',
       location: d['location'] as GeoPoint,
       address: d['address'] ?? '',
-      status: d['status'] ?? 'scanning',
+      status: d['status'] ?? 'open',
       createdAt: (d['createdAt'] as Timestamp).toDate(),
       scheduledDate: d['scheduledDate'] != null
           ? (d['scheduledDate'] as Timestamp).toDate()

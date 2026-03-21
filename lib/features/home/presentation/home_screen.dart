@@ -270,9 +270,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 'How do you want to use Giggre today?',
                 style: TextStyle(color: kSub, fontSize: 14),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               const _TestimonialCarousel(),
-              const SizedBox(height: 32),
+              const SizedBox(height: 28),
               _RoleCard(
                 role: 'worker',
                 title: 'Gig Worker',
@@ -282,7 +282,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 isSelected: _selectedRole == 'worker',
                 onTap: () => _selectRole('worker'),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               _RoleCard(
                 role: 'host',
                 title: 'Gig Host',
@@ -293,7 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onTap: () => _selectRole('host'),
               ),
               if (_selectedRole != null) ...[
-                const SizedBox(height: 32),
+                const SizedBox(height: 20),
                 SizedBox(
                   width: double.infinity,
                   height: 52,
@@ -347,7 +347,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ],
-              const SizedBox(height: 26),
+              const SizedBox(height: 20),
               Row(
                 children: [
                   Expanded(
@@ -413,51 +413,29 @@ class _HomeScreenState extends State<HomeScreen> {
 // ─────────────────────────────────────────────
 class _TestimonialSlide {
   final String imageUrl;
-  final String quote;
-  final String name;
-  final String role;
 
   const _TestimonialSlide({
     required this.imageUrl,
-    required this.quote,
-    required this.name,
-    required this.role,
   });
 }
 
 const _kSlides = [
   _TestimonialSlide(
     imageUrl: 'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?w=800&q=80',
-    quote: '"Giggre helped me find steady weekend work. I earned enough in a month to cover my bills!"',
-    name: 'Maria Santos',
-    role: 'Gig Worker',
   ),
   _TestimonialSlide(
     imageUrl: 'https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=800&q=80',
-    quote: '"We hired three reliable workers through Giggre in just 24 hours. Incredibly fast!"',
-    name: 'Carlo Reyes',
-    role: 'Gig Host · Events',
   ),
   _TestimonialSlide(
     imageUrl: 'https://images.unsplash.com/photo-1556761175-4b46a572b786?w=800&q=80',
-    quote: '"The platform is simple and the pay is always on time. Best side hustle app I\'ve tried."',
-    name: 'Ana Dela Cruz',
-    role: 'Gig Worker',
   ),
   _TestimonialSlide(
     imageUrl: 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=800&q=80',
-    quote: '"Giggre made staffing our pop-up store effortless. We\'ll use it for every event."',
-    name: 'James Tan',
-    role: 'Gig Host · Retail',
   ),
   _TestimonialSlide(
     imageUrl: 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=800&q=80',
-    quote: '"From sign-up to first gig in under an hour. Giggre just works!"',
-    name: 'Lena Villanueva',
-    role: 'Gig Worker',
   ),
 ];
-
 class _TestimonialCarousel extends StatefulWidget {
   const _TestimonialCarousel();
 
@@ -472,22 +450,25 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        CarouselSlider.builder(
-          itemCount: _kSlides.length,
-          options: CarouselOptions(
-            height: 200,
-            viewportFraction: 1.0,
-            enlargeCenterPage: false,
-            autoPlay: true,
-            autoPlayInterval: const Duration(seconds: 5),
-            autoPlayAnimationDuration: const Duration(milliseconds: 600),
-            autoPlayCurve: Curves.easeInOut,
-            onPageChanged: (index, _) => setState(() => _current = index),
+        SizedBox(
+          width: double.infinity, // 👈 FORCE full width inside padding
+          child: CarouselSlider.builder(
+            itemCount: _kSlides.length,
+            options: CarouselOptions(
+              viewportFraction: 1.0,
+              padEnds: false, // 👈 VERY IMPORTANT (removes side gaps)
+              enlargeCenterPage: false,
+              autoPlay: true,
+              autoPlayInterval: const Duration(seconds: 5),
+              autoPlayAnimationDuration: const Duration(milliseconds: 600),
+              autoPlayCurve: Curves.easeInOut,
+              onPageChanged: (index, _) => setState(() => _current = index),
+            ),
+            itemBuilder: (context, index, _) {
+              final slide = _kSlides[index];
+              return _SlideItem(slide: slide);
+            },
           ),
-          itemBuilder: (context, index, _) {
-            final slide = _kSlides[index];
-            return _SlideItem(slide: slide);
-          },
         ),
         const SizedBox(height: 10),
         Row(
@@ -520,97 +501,23 @@ class _SlideItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Background image
-          Image.network(
-            slide.imageUrl,
-            fit: BoxFit.cover,
-            errorBuilder: (ctx, err, stack) => Container(color: kCard),
-            loadingBuilder: (context, child, progress) {
-              if (progress == null) return child;
-              return Container(
-                color: kCard,
-                child: const Center(
-                  child: CircularProgressIndicator(color: kBlue, strokeWidth: 2),
-                ),
-              );
-            },
-          ),
-          // Dark gradient overlay
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  Color(0xCC000000),
-                ],
-                stops: [0.3, 1.0],
+      child: AspectRatio(
+        aspectRatio: 16 / 9, // 👈 FORCE SAME SIZE FOR ALL
+        child: Image.network(
+          slide.imageUrl,
+          fit: BoxFit.cover, // fills nicely
+          width: double.infinity,
+          errorBuilder: (ctx, err, stack) => Container(color: kCard),
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) return child;
+            return Container(
+              color: kCard,
+              child: const Center(
+                child: CircularProgressIndicator(color: kBlue, strokeWidth: 2),
               ),
-            ),
-          ),
-          // Testimonial text
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 16,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  slide.quote,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontStyle: FontStyle.italic,
-                    height: 1.5,
-                    shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: kBlue,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 1.5),
-                      ),
-                      child: const Icon(Icons.person, color: Colors.white, size: 16),
-                    ),
-                    const SizedBox(width: 8),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          slide.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          slide.role,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.75),
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
+            );
+          },
+        ),
       ),
     );
   }

@@ -9,24 +9,65 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
-import '../models/quick_gig_model.dart';
+import '../models/open_gig_model.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Post Quick Gig Screen
+//  Static skill tags (managed by admin — static for now)
 // ─────────────────────────────────────────────────────────────────────────────
-class PostQuickGigScreen extends StatefulWidget {
+const _kStaticSkills = [
+  'Plumbing',
+  'Electrical Work',
+  'Carpentry',
+  'Painting',
+  'Web Development',
+  'Mobile Development',
+  'Graphic Design',
+  'Accounting',
+  'Photography',
+  'Videography',
+  'Cooking',
+  'Tutoring',
+  'Translation',
+  'Content Writing',
+  'Data Entry',
+  'HVAC',
+  'Welding',
+  'Landscaping',
+  'IT Support',
+  'SEO / Marketing',
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Experience level options
+// ─────────────────────────────────────────────────────────────────────────────
+const _kLevels = [
+  ('entry', 'Entry Level', 'No prior experience needed'),
+  ('intermediate', 'Intermediate', '1–3 years of experience'),
+  ('expert', 'Expert', '3+ years of experience'),
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Post Open Gig Screen
+// ─────────────────────────────────────────────────────────────────────────────
+class PostOpenGigScreen extends StatefulWidget {
   final String hostName;
-  const PostQuickGigScreen({super.key, required this.hostName});
+  const PostOpenGigScreen({super.key, required this.hostName});
 
   @override
-  State<PostQuickGigScreen> createState() => _PostQuickGigScreenState();
+  State<PostOpenGigScreen> createState() => _PostOpenGigScreenState();
 }
 
-class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
+class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _budgetCtrl = TextEditingController();
+
+  // Skills
+  final Set<String> _selectedSkills = {};
+
+  // Experience level
+  String _experienceLevel = 'entry';
 
   // Schedule
   DateTime? _scheduledDate;
@@ -132,8 +173,8 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: Theme.of(ctx).colorScheme.copyWith(
-                primary: kAmber,
-                onPrimary: Colors.black,
+                primary: kBlue,
+                onPrimary: Colors.white,
               ),
         ),
         child: child!,
@@ -149,8 +190,8 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: Theme.of(ctx).colorScheme.copyWith(
-                primary: kAmber,
-                onPrimary: Colors.black,
+                primary: kBlue,
+                onPrimary: Colors.white,
               ),
         ),
         child: child!,
@@ -187,6 +228,11 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
+    if (_selectedSkills.isEmpty) {
+      _showSnack('Please select at least one required skill.');
+      return;
+    }
+
     final hasLocation =
         _useMapLocation ? _mapPosition != null : _gpsPosition != null;
     if (!hasLocation) {
@@ -214,25 +260,24 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         );
       }
 
-      final gig = QuickGigModel(
+      final gig = OpenGigModel(
         hostId: uid,
         hostName: widget.hostName,
         title: _titleCtrl.text.trim(),
         description: _descCtrl.text.trim(),
-        category: 'Quick',
+        requiredSkills: _selectedSkills.toList(),
+        experienceLevel: _experienceLevel,
         budget: double.parse(_budgetCtrl.text.trim()),
-        duration: 'Flexible',
         location: geoPoint,
         address: _address,
-        status: 'scanning',
         scheduledDate: scheduledAt,
       );
 
-      await FirebaseFirestore.instance.collection('quick_gigs').add(gig.toMap());
+      await FirebaseFirestore.instance.collection('open_gigs').add(gig.toMap());
 
       if (!mounted) return;
       setState(() => _posting = false);
-      _showScanningSheet();
+      _showSuccessSheet();
     } catch (e) {
       if (!mounted) return;
       setState(() => _posting = false);
@@ -251,13 +296,13 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     );
   }
 
-  void _showScanningSheet() {
+  void _showSuccessSheet() {
     showModalBottomSheet(
       context: context,
       isDismissible: false,
       enableDrag: false,
       backgroundColor: Colors.transparent,
-      builder: (_) => _ScanningSheet(
+      builder: (_) => _SuccessSheet(
         onDone: () {
           Navigator.pop(context);
           Navigator.pop(context);
@@ -288,14 +333,14 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: kAmber.withValues(alpha: 0.18),
+                color: kBlue.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
               ),
-              child:
-                  const Icon(Icons.flash_on_rounded, color: kAmber, size: 17),
+              child: const Icon(Icons.workspace_premium_outlined,
+                  color: kBlue, size: 17),
             ),
             const SizedBox(width: 10),
-            Text('Post Quick Gig',
+            Text('Post Open Gig',
                 style: TextStyle(
                     color: onSurface,
                     fontWeight: FontWeight.bold,
@@ -317,7 +362,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 const SizedBox(height: 10),
                 _buildTextField(
                   controller: _titleCtrl,
-                  hint: 'e.g. Wash dishes after event',
+                  hint: 'e.g. Build an e-commerce website',
                   validator: (v) =>
                       v == null || v.trim().isEmpty ? 'Title is required' : null,
                 ),
@@ -328,9 +373,27 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 const SizedBox(height: 10),
                 _buildTextField(
                   controller: _descCtrl,
-                  hint: 'Add any details the worker should know...',
-                  maxLines: 3,
+                  hint: 'Describe the task, deliverables, and expectations...',
+                  maxLines: 4,
                 ),
+                const SizedBox(height: 20),
+
+                // ── Required Skills ───────────────────────────────
+                _SectionLabel('Required Skills'),
+                const SizedBox(height: 6),
+                Text(
+                  'Select all skills the worker must have',
+                  style: TextStyle(
+                      color: kSub.withValues(alpha: 0.8), fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                _buildSkillsGrid(),
+                const SizedBox(height: 20),
+
+                // ── Experience Level ──────────────────────────────
+                _SectionLabel('Experience Level'),
+                const SizedBox(height: 10),
+                _buildExperienceSelector(),
                 const SizedBox(height: 20),
 
                 // ── Amount ────────────────────────────────────────
@@ -353,7 +416,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                   },
                   prefix: const Text(r'$ ',
                       style: TextStyle(
-                          color: kAmber,
+                          color: kBlue,
                           fontSize: 15,
                           fontWeight: FontWeight.bold)),
                 ),
@@ -395,7 +458,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 _buildLocationSection(),
                 const SizedBox(height: 36),
 
-                // ── Dispatch Button ───────────────────────────────
+                // ── Post Button ───────────────────────────────────
                 SizedBox(
                   width: double.infinity,
                   height: 54,
@@ -406,18 +469,19 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                                color: Colors.black, strokeWidth: 2.5),
+                                color: Colors.white, strokeWidth: 2.5),
                           )
-                        : const Icon(Icons.send_rounded, size: 18),
+                        : const Icon(Icons.workspace_premium_outlined,
+                            size: 18),
                     label: Text(
-                      _posting ? 'Dispatching...' : 'Dispatch Quick Gig',
+                      _posting ? 'Posting...' : 'Post Open Gig',
                       style: const TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: kAmber,
-                      foregroundColor: Colors.black,
-                      disabledBackgroundColor: kAmber.withValues(alpha: 0.4),
+                      backgroundColor: kBlue,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: kBlue.withValues(alpha: 0.4),
                       elevation: 0,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(30)),
@@ -430,6 +494,139 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  // ── Skills Grid ───────────────────────────────────────────────────────────────
+  Widget _buildSkillsGrid() {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: _kStaticSkills.map((skill) {
+          final selected = _selectedSkills.contains(skill);
+          return GestureDetector(
+            onTap: () => setState(() {
+              if (selected) {
+                _selectedSkills.remove(skill);
+              } else {
+                _selectedSkills.add(skill);
+              }
+            }),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color:
+                    selected ? kBlue.withValues(alpha: 0.12) : Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: selected
+                      ? kBlue.withValues(alpha: 0.7)
+                      : borderColor,
+                  width: selected ? 1.5 : 1,
+                ),
+              ),
+              child: Text(
+                skill,
+                style: TextStyle(
+                  color: selected ? kBlue : kSub,
+                  fontSize: 12,
+                  fontWeight:
+                      selected ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  // ── Experience Selector ────────────────────────────────────────────────────────
+  Widget _buildExperienceSelector() {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Column(
+      children: _kLevels.map((level) {
+        final (value, label, sub) = level;
+        final selected = _experienceLevel == value;
+
+        return GestureDetector(
+          onTap: () => setState(() => _experienceLevel = value),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color:
+                  selected ? kBlue.withValues(alpha: 0.08) : cardColor,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: selected
+                    ? kBlue.withValues(alpha: 0.6)
+                    : borderColor,
+                width: selected ? 1.5 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color:
+                        selected ? kBlue : Colors.transparent,
+                    border: Border.all(
+                      color: selected ? kBlue : borderColor,
+                      width: 2,
+                    ),
+                  ),
+                  child: selected
+                      ? const Icon(Icons.check,
+                          color: Colors.white, size: 12)
+                      : null,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          color: selected ? kBlue : onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        sub,
+                        style: const TextStyle(color: kSub, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -448,27 +645,26 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 
     return Row(
       children: [
-        // Date button
         Expanded(
           child: GestureDetector(
             onTap: _pickDate,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               decoration: BoxDecoration(
-                color: dateSet ? kAmber.withValues(alpha: 0.08) : cardColor,
+                color: dateSet ? kBlue.withValues(alpha: 0.08) : cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color:
-                      dateSet ? kAmber.withValues(alpha: 0.6) : borderColor,
+                  color: dateSet
+                      ? kBlue.withValues(alpha: 0.6)
+                      : borderColor,
                   width: dateSet ? 1.5 : 1,
                 ),
               ),
               child: Row(
                 children: [
                   Icon(Icons.calendar_today_rounded,
-                      color: dateSet ? kAmber : kSub, size: 16),
+                      color: dateSet ? kBlue : kSub, size: 16),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -476,16 +672,16 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                       style: TextStyle(
                         color: dateSet ? onSurface : kSub,
                         fontSize: 13,
-                        fontWeight: dateSet
-                            ? FontWeight.w600
-                            : FontWeight.normal,
+                        fontWeight:
+                            dateSet ? FontWeight.w600 : FontWeight.normal,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   if (dateSet)
                     GestureDetector(
-                      onTap: () => setState(() => _scheduledDate = null),
+                      onTap: () =>
+                          setState(() => _scheduledDate = null),
                       child: const Icon(Icons.close_rounded,
                           color: kSub, size: 14),
                     ),
@@ -495,27 +691,26 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           ),
         ),
         const SizedBox(width: 10),
-        // Time button
         Expanded(
           child: GestureDetector(
             onTap: _pickTime,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               decoration: BoxDecoration(
-                color: timeSet ? kAmber.withValues(alpha: 0.08) : cardColor,
+                color: timeSet ? kBlue.withValues(alpha: 0.08) : cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color:
-                      timeSet ? kAmber.withValues(alpha: 0.6) : borderColor,
+                  color: timeSet
+                      ? kBlue.withValues(alpha: 0.6)
+                      : borderColor,
                   width: timeSet ? 1.5 : 1,
                 ),
               ),
               child: Row(
                 children: [
                   Icon(Icons.access_time_rounded,
-                      color: timeSet ? kAmber : kSub, size: 16),
+                      color: timeSet ? kBlue : kSub, size: 16),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -523,15 +718,15 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                       style: TextStyle(
                         color: timeSet ? onSurface : kSub,
                         fontSize: 13,
-                        fontWeight: timeSet
-                            ? FontWeight.w600
-                            : FontWeight.normal,
+                        fontWeight:
+                            timeSet ? FontWeight.w600 : FontWeight.normal,
                       ),
                     ),
                   ),
                   if (timeSet)
                     GestureDetector(
-                      onTap: () => setState(() => _scheduledTime = null),
+                      onTap: () =>
+                          setState(() => _scheduledTime = null),
                       child: const Icon(Icons.close_rounded,
                           color: kSub, size: 14),
                     ),
@@ -554,7 +749,6 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Address card
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -574,7 +768,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 decoration: BoxDecoration(
                   color: (_useMapLocation
                           ? kBlue
-                          : (hasError ? Colors.redAccent : kAmber))
+                          : (hasError ? Colors.redAccent : kBlue))
                       .withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -586,7 +780,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                           : Icons.location_on_rounded),
                   color: _useMapLocation
                       ? kBlue
-                      : (hasError ? Colors.redAccent : kAmber),
+                      : (hasError ? Colors.redAccent : kBlue),
                   size: 20,
                 ),
               ),
@@ -599,12 +793,11 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                             width: 16,
                             height: 16,
                             child: CircularProgressIndicator(
-                                color: kAmber, strokeWidth: 2),
+                                color: kBlue, strokeWidth: 2),
                           ),
                           SizedBox(width: 10),
                           Text('Detecting location...',
-                              style:
-                                  TextStyle(color: kSub, fontSize: 13)),
+                              style: TextStyle(color: kSub, fontSize: 13)),
                         ],
                       )
                     : hasError
@@ -618,8 +811,8 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                                 _address.isNotEmpty
                                     ? _address
                                     : 'Location ready',
-                                style: TextStyle(
-                                    color: onSurface, fontSize: 13),
+                                style:
+                                    TextStyle(color: onSurface, fontSize: 13),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -640,8 +833,6 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           ),
         ),
         const SizedBox(height: 10),
-
-        // Mode toggle buttons
         Row(
           children: [
             Expanded(
@@ -649,7 +840,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 icon: Icons.my_location_rounded,
                 label: 'Use My Location',
                 active: !_useMapLocation,
-                accentColor: kAmber,
+                accentColor: kBlue,
                 onTap: () {
                   setState(() => _useMapLocation = false);
                   if (_gpsPosition == null) _fetchGpsLocation();
@@ -712,7 +903,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: kAmber, width: 1.5),
+          borderSide: const BorderSide(color: kBlue, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -724,8 +915,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           borderSide:
               const BorderSide(color: Colors.redAccent, width: 1.5),
         ),
-        errorStyle:
-            const TextStyle(color: Colors.redAccent, fontSize: 11),
+        errorStyle: const TextStyle(color: Colors.redAccent, fontSize: 11),
       ),
     );
   }
@@ -772,8 +962,7 @@ class _LocationModeButton extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding:
-            const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+        padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
         decoration: BoxDecoration(
           color: active
               ? accentColor.withValues(alpha: 0.1)
@@ -816,7 +1005,6 @@ class _LocationModeButton extends StatelessWidget {
 class _PickedLocation {
   final LatLng position;
   final String address;
-
   const _PickedLocation({required this.position, required this.address});
 }
 
@@ -863,8 +1051,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         final p = placemarks.first;
         final parts = [
           if (p.street != null && p.street!.isNotEmpty) p.street,
-          if (p.subLocality != null && p.subLocality!.isNotEmpty)
-            p.subLocality,
+          if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality,
           if (p.locality != null && p.locality!.isNotEmpty) p.locality,
           if (p.administrativeArea != null &&
               p.administrativeArea!.isNotEmpty)
@@ -930,12 +1117,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       ),
       body: Stack(
         children: [
-          // ── Map ──────────────────────────────────────────────
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter:
-                  widget.initialPosition ?? _defaultCenter,
+              initialCenter: widget.initialPosition ?? _defaultCenter,
               initialZoom: 14.0,
               onTap: _onMapTap,
             ),
@@ -958,8 +1143,6 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                 ),
             ],
           ),
-
-          // ── Hint banner (no pin yet) ──────────────────────────
           if (_picked == null)
             Positioned(
               top: 16,
@@ -986,42 +1169,36 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: kAmber.withValues(alpha: 0.15),
+                        color: kBlue.withValues(alpha: 0.15),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.touch_app_rounded,
-                          color: kAmber, size: 18),
+                          color: kBlue, size: 18),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         'Tap anywhere on the map to drop a pin at the gig location',
                         style: TextStyle(
-                            color: onSurface,
-                            fontSize: 13,
-                            height: 1.4),
+                            color: onSurface, fontSize: 13, height: 1.4),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-
-          // ── Confirm card (pin placed) ─────────────────────────
           if (_picked != null)
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
               child: Container(
-                padding:
-                    const EdgeInsets.fromLTRB(20, 18, 20, 32),
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
                 decoration: BoxDecoration(
                   color: cardColor,
                   borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(24)),
-                  border: Border(
-                      top: BorderSide(color: borderColor)),
+                  border: Border(top: BorderSide(color: borderColor)),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.1),
@@ -1039,15 +1216,11 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                           width: 40,
                           height: 40,
                           decoration: BoxDecoration(
-                            color:
-                                kAmber.withValues(alpha: 0.15),
-                            borderRadius:
-                                BorderRadius.circular(10),
+                            color: kBlue.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(
-                              Icons.location_on_rounded,
-                              color: kAmber,
-                              size: 20),
+                          child: const Icon(Icons.location_on_rounded,
+                              color: kBlue, size: 20),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -1057,17 +1230,13 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                                     SizedBox(
                                       width: 14,
                                       height: 14,
-                                      child:
-                                          CircularProgressIndicator(
-                                              color: kAmber,
-                                              strokeWidth: 2),
+                                      child: CircularProgressIndicator(
+                                          color: kBlue, strokeWidth: 2),
                                     ),
                                     SizedBox(width: 8),
-                                    Text(
-                                        'Getting address...',
+                                    Text('Getting address...',
                                         style: TextStyle(
-                                            color: kSub,
-                                            fontSize: 13)),
+                                            color: kSub, fontSize: 13)),
                                   ],
                                 )
                               : Column(
@@ -1081,18 +1250,14 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                                       style: TextStyle(
                                           color: onSurface,
                                           fontSize: 13,
-                                          fontWeight:
-                                              FontWeight.w500),
+                                          fontWeight: FontWeight.w500),
                                       maxLines: 2,
-                                      overflow:
-                                          TextOverflow.ellipsis,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                     const SizedBox(height: 2),
-                                    const Text(
-                                        'Tap map to reposition pin',
+                                    const Text('Tap map to reposition pin',
                                         style: TextStyle(
-                                            color: kSub,
-                                            fontSize: 11)),
+                                            color: kSub, fontSize: 11)),
                                   ],
                                 ),
                         ),
@@ -1104,21 +1269,19 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                       height: 50,
                       child: ElevatedButton.icon(
                         onPressed: _geocoding ? null : _confirm,
-                        icon: const Icon(Icons.check_rounded,
-                            size: 18),
+                        icon: const Icon(Icons.check_rounded, size: 18),
                         label: const Text('Confirm Location',
                             style: TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: kAmber,
-                          foregroundColor: Colors.black,
+                          backgroundColor: kBlue,
+                          foregroundColor: Colors.white,
                           disabledBackgroundColor:
-                              kAmber.withValues(alpha: 0.4),
+                              kBlue.withValues(alpha: 0.4),
                           elevation: 0,
                           shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(30)),
+                              borderRadius: BorderRadius.circular(30)),
                         ),
                       ),
                     ),
@@ -1147,12 +1310,12 @@ class _MapPinWidget extends StatelessWidget {
           width: 36,
           height: 36,
           decoration: BoxDecoration(
-            color: kAmber,
+            color: kBlue,
             shape: BoxShape.circle,
             border: Border.all(color: Colors.white, width: 2.5),
             boxShadow: [
               BoxShadow(
-                color: kAmber.withValues(alpha: 0.5),
+                color: kBlue.withValues(alpha: 0.5),
                 blurRadius: 8,
                 offset: const Offset(0, 3),
               ),
@@ -1162,7 +1325,7 @@ class _MapPinWidget extends StatelessWidget {
               color: Colors.white, size: 18),
         ),
         CustomPaint(
-          painter: _TrianglePainter(color: kAmber),
+          painter: _TrianglePainter(color: kBlue),
           size: const Size(10, 7),
         ),
       ],
@@ -1190,221 +1353,69 @@ class _TrianglePainter extends CustomPainter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Scanning Bottom Sheet
+//  Success Bottom Sheet
 // ─────────────────────────────────────────────────────────────────────────────
-class _ScanningSheet extends StatefulWidget {
+class _SuccessSheet extends StatelessWidget {
   final VoidCallback onDone;
-  const _ScanningSheet({required this.onDone});
-
-  @override
-  State<_ScanningSheet> createState() => _ScanningSheetState();
-}
-
-class _ScanningSheetState extends State<_ScanningSheet>
-    with TickerProviderStateMixin {
-  late final AnimationController _pulseCtrl;
-  bool _done = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat();
-
-    Future.delayed(const Duration(seconds: 3), () {
-      if (!mounted) return;
-      _pulseCtrl.stop();
-      setState(() => _done = true);
-    });
-  }
-
-  @override
-  void dispose() {
-    _pulseCtrl.dispose();
-    super.dispose();
-  }
+  const _SuccessSheet({required this.onDone});
 
   @override
   Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius:
-            const BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 400),
-        child: _done ? _buildSuccess() : _buildScanning(),
-      ),
-    );
-  }
-
-  Widget _buildScanning() {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    return Column(
-      key: const ValueKey('scanning'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 140,
-          height: 140,
-          child: AnimatedBuilder(
-            animation: _pulseCtrl,
-            builder: (ctx, child) {
-              return Stack(
-                alignment: Alignment.center,
-                children: [
-                  _PulseCircle(
-                      animation: _pulseCtrl, delay: 0.0, color: kAmber),
-                  _PulseCircle(
-                      animation: _pulseCtrl, delay: 0.33, color: kAmber),
-                  _PulseCircle(
-                      animation: _pulseCtrl, delay: 0.66, color: kAmber),
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: kAmber.withValues(alpha: 0.18),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                          color: kAmber.withValues(alpha: 0.6),
-                          width: 2),
-                    ),
-                    child: const Icon(Icons.person_search_rounded,
-                        color: kAmber, size: 28),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 20),
-        Text('Scanning for Gig Workers...',
-            style: TextStyle(
-                color: onSurface,
-                fontSize: 18,
-                fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        const Text(
-          'Looking for available workers near your location.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: kSub, fontSize: 13, height: 1.5),
-        ),
-        const SizedBox(height: 16),
-        Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: kAmber.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: kAmber.withValues(alpha: 0.3)),
-          ),
-          child: const Text('Your gig is now live',
-              style: TextStyle(
-                  color: kAmber,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600)),
-        ),
-        const SizedBox(height: 8),
-      ],
-    );
-  }
-
-  Widget _buildSuccess() {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    return Column(
-      key: const ValueKey('success'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 80,
-          height: 80,
-          decoration: BoxDecoration(
-            color: const Color(0xFF22C55E).withValues(alpha: 0.15),
-            shape: BoxShape.circle,
-            border: Border.all(
-                color: const Color(0xFF22C55E).withValues(alpha: 0.5),
-                width: 2),
-          ),
-          child: const Icon(Icons.check_rounded,
-              color: Color(0xFF22C55E), size: 40),
-        ),
-        const SizedBox(height: 20),
-        Text('Workers Notified!',
-            style: TextStyle(
-                color: onSurface,
-                fontSize: 20,
-                fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        const Text(
-          'Nearby Gig Workers scanning for quick gigs\nhave been notified about your post.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: kSub, fontSize: 13, height: 1.5),
-        ),
-        const SizedBox(height: 28),
-        SizedBox(
-          width: double.infinity,
-          height: 50,
-          child: ElevatedButton(
-            onPressed: widget.onDone,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: kAmber,
-              foregroundColor: Colors.black,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30)),
-            ),
-            child: const Text('View My Gigs',
-                style: TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.bold)),
-          ),
-        ),
-        const SizedBox(height: 8),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Pulse Circle
-// ─────────────────────────────────────────────────────────────────────────────
-class _PulseCircle extends StatelessWidget {
-  final Animation<double> animation;
-  final double delay;
-  final Color color;
-
-  const _PulseCircle({
-    required this.animation,
-    required this.delay,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: animation,
-      builder: (ctx, child) {
-        final t = (animation.value + delay) % 1.0;
-        final scale = 0.3 + t * 0.7;
-        final opacity = (1.0 - t) * 0.5;
-        return Transform.scale(
-          scale: scale,
-          child: Container(
-            width: 140,
-            height: 140,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 80,
+            height: 80,
             decoration: BoxDecoration(
+              color: kBlue.withValues(alpha: 0.15),
               shape: BoxShape.circle,
               border: Border.all(
-                color: color.withValues(alpha: opacity),
-                width: 2,
+                  color: kBlue.withValues(alpha: 0.5), width: 2),
+            ),
+            child: const Icon(Icons.workspace_premium_outlined,
+                color: kBlue, size: 38),
+          ),
+          const SizedBox(height: 20),
+          Text('Open Gig Posted!',
+              style: TextStyle(
+                  color: onSurface,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          const Text(
+            'Qualified workers matching your\nrequirements will be notified.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: kSub, fontSize: 13, height: 1.5),
+          ),
+          const SizedBox(height: 28),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              onPressed: onDone,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kBlue,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30)),
               ),
+              child: const Text('View My Gigs',
+                  style:
+                      TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             ),
           ),
-        );
-      },
+          const SizedBox(height: 8),
+        ],
+      ),
     );
   }
 }
