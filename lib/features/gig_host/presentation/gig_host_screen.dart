@@ -8,6 +8,7 @@ import '../../../core/theme/theme_provider.dart';
 import '../../auth/presentation/login_screen.dart';
 import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
+import 'post_offered_gig_screen.dart';
 
 class GigHostScreen extends StatefulWidget {
   const GigHostScreen({super.key});
@@ -265,12 +266,27 @@ class _GigHostScreenState extends State<GigHostScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Greeting ──────────────────────────────────────
-              Text(
-                firstName.isNotEmpty ? 'Hey, $firstName 👋' : 'Welcome, Host!',
-                style: TextStyle(
-                    color: onSurface,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold),
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: kAmber.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.account_circle_rounded,
+                        color: kAmber, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    firstName.isNotEmpty ? 'Hey, $firstName 👋' : 'Welcome, Host!',
+                    style: TextStyle(
+                        color: onSurface,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ],
               ),
               const SizedBox(height: 4),
               const Text('Manage your gigs and find workers.',
@@ -332,9 +348,15 @@ class _GigHostScreenState extends State<GigHostScreen> {
                 example: 'e.g. Invite someone you trust',
                 icon: Icons.send_rounded,
                 accentColor: const Color(0xFF8B5CF6),
-                badge: 'COMING SOON',
-                badgeColor: kSub,
-                onTap: null,
+                badge: 'AVAILABLE',
+                badgeColor: const Color(0xFF8B5CF6),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        PostOfferedGigScreen(hostName: _userName),
+                  ),
+                ),
               ),
               const SizedBox(height: 28),
 

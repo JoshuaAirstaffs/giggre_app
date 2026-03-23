@@ -9,12 +9,12 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
-import '../models/open_gig_model.dart';
+import '../models/offered_gig_model.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Static skill tags (managed by admin — static for now)
+//  Static skill tags
 // ─────────────────────────────────────────────────────────────────────────────
-const _kStaticSkills = [
+const _kSkills = [
   'Plumbing',
   'Electrical Work',
   'Carpentry',
@@ -46,25 +46,40 @@ const _kLevels = [
   ('expert', 'Expert', '3+ years of experience'),
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Post Open Gig Screen
-// ─────────────────────────────────────────────────────────────────────────────
-class PostOpenGigScreen extends StatefulWidget {
-  final String hostName;
-  const PostOpenGigScreen({super.key, required this.hostName});
+const _kPurple = Color(0xFF8B5CF6);
 
-  @override
-  State<PostOpenGigScreen> createState() => _PostOpenGigScreenState();
+// ─────────────────────────────────────────────────────────────────────────────
+//  Worker data model for picker
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkerEntry {
+  final String uid;
+  final String name;
+  final String email;
+  const _WorkerEntry({required this.uid, required this.name, required this.email});
 }
 
-class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
+// ─────────────────────────────────────────────────────────────────────────────
+//  Post Offered Gig Screen
+// ─────────────────────────────────────────────────────────────────────────────
+class PostOfferedGigScreen extends StatefulWidget {
+  final String hostName;
+  const PostOfferedGigScreen({super.key, required this.hostName});
+
+  @override
+  State<PostOfferedGigScreen> createState() => _PostOfferedGigScreenState();
+}
+
+class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _budgetCtrl = TextEditingController();
 
-  // Skills
-  final Set<String> _selectedSkills = {};
+  // Worker selection
+  _WorkerEntry? _selectedWorker;
+
+  // Skill
+  String? _selectedSkill;
 
   // Experience level
   String _experienceLevel = 'entry';
@@ -127,12 +142,10 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       }
 
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
 
-      final placemarks =
-          await placemarkFromCoordinates(pos.latitude, pos.longitude);
+      final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
       String address = 'Unknown location';
       if (placemarks.isNotEmpty) {
         final p = placemarks.first;
@@ -140,8 +153,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
           if (p.street != null && p.street!.isNotEmpty) p.street,
           if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality,
           if (p.locality != null && p.locality!.isNotEmpty) p.locality,
-          if (p.administrativeArea != null &&
-              p.administrativeArea!.isNotEmpty)
+          if (p.administrativeArea != null && p.administrativeArea!.isNotEmpty)
             p.administrativeArea,
         ];
         address = parts.join(', ');
@@ -173,7 +185,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: Theme.of(ctx).colorScheme.copyWith(
-                primary: kBlue,
+                primary: _kPurple,
                 onPrimary: Colors.white,
               ),
         ),
@@ -190,7 +202,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: Theme.of(ctx).colorScheme.copyWith(
-                primary: kBlue,
+                primary: _kPurple,
                 onPrimary: Colors.white,
               ),
         ),
@@ -224,17 +236,35 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     }
   }
 
+  // ── Worker picker ─────────────────────────────────────────────────────────────
+  Future<void> _openWorkerPicker() async {
+    final result = await showModalBottomSheet<_WorkerEntry>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _WorkerPickerSheet(
+        excludeUid: FirebaseAuth.instance.currentUser?.uid,
+      ),
+    );
+    if (result != null) {
+      setState(() => _selectedWorker = result);
+    }
+  }
+
   // ── Submit ───────────────────────────────────────────────────────────────────
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_selectedSkills.isEmpty) {
-      _showSnack('Please select at least one required skill.');
+    if (_selectedWorker == null) {
+      _showSnack('Please select a gig worker.');
+      return;
+    }
+    if (_selectedSkill == null || _selectedSkill!.isEmpty) {
+      _showSnack('Please select a required skill.');
       return;
     }
 
-    final hasLocation =
-        _useMapLocation ? _mapPosition != null : _gpsPosition != null;
+    final hasLocation = _useMapLocation ? _mapPosition != null : _gpsPosition != null;
     if (!hasLocation) {
       _showSnack('Location is required. Please enable GPS or select on map.');
       return;
@@ -260,12 +290,14 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         );
       }
 
-      final gig = OpenGigModel(
+      final gig = OfferedGigModel(
         hostId: uid,
         hostName: widget.hostName,
+        workerId: _selectedWorker!.uid,
+        workerName: _selectedWorker!.name,
         title: _titleCtrl.text.trim(),
         description: _descCtrl.text.trim(),
-        requiredSkills: _selectedSkills.toList(),
+        skillRequired: _selectedSkill!,
         experienceLevel: _experienceLevel,
         budget: double.parse(_budgetCtrl.text.trim()),
         location: geoPoint,
@@ -273,7 +305,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         scheduledDate: scheduledAt,
       );
 
-      await FirebaseFirestore.instance.collection('open_gigs').add(gig.toMap());
+      await FirebaseFirestore.instance.collection('offered_gigs').add(gig.toMap());
 
       if (!mounted) return;
       setState(() => _posting = false);
@@ -323,8 +355,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: kSub, size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: kSub, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -333,18 +364,15 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: kBlue.withValues(alpha: 0.18),
+                color: _kPurple.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.workspace_premium_outlined,
-                  color: kBlue, size: 17),
+              child: const Icon(Icons.send_rounded, color: _kPurple, size: 16),
             ),
             const SizedBox(width: 10),
-            Text('Post Open Gig',
+            Text('Post Offered Gig',
                 style: TextStyle(
-                    color: onSurface,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16)),
+                    color: onSurface, fontWeight: FontWeight.bold, fontSize: 16)),
           ],
         ),
         actions: const [ThemeToggleButton()],
@@ -357,12 +385,23 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Title ────────────────────────────────────────
+                // ── Gig Worker ────────────────────────────────────
+                _SectionLabel('Gig Worker'),
+                const SizedBox(height: 6),
+                const Text(
+                  'Select the worker you want to offer this gig to',
+                  style: TextStyle(color: kSub, fontSize: 12),
+                ),
+                const SizedBox(height: 10),
+                _buildWorkerField(),
+                const SizedBox(height: 20),
+
+                // ── Title ─────────────────────────────────────────
                 _SectionLabel('Title'),
                 const SizedBox(height: 10),
                 _buildTextField(
                   controller: _titleCtrl,
-                  hint: 'e.g. Build an e-commerce website',
+                  hint: 'e.g. Fix the plumbing in my bathroom',
                   validator: (v) =>
                       v == null || v.trim().isEmpty ? 'Title is required' : null,
                 ),
@@ -373,21 +412,15 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                 const SizedBox(height: 10),
                 _buildTextField(
                   controller: _descCtrl,
-                  hint: 'Describe the task, deliverables, and expectations...',
+                  hint: 'Describe the task, expectations, and any special notes...',
                   maxLines: 4,
                 ),
                 const SizedBox(height: 20),
 
-                // ── Required Skills ───────────────────────────────
-                _SectionLabel('Required Skills'),
-                const SizedBox(height: 6),
-                Text(
-                  'Select all skills the worker must have',
-                  style: TextStyle(
-                      color: kSub.withValues(alpha: 0.8), fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                _buildSkillsDropdown(),
+                // ── Skill Required ────────────────────────────────
+                _SectionLabel('Skill Required'),
+                const SizedBox(height: 10),
+                _buildSkillDropdown(),
                 const SizedBox(height: 20),
 
                 // ── Experience Level ──────────────────────────────
@@ -402,11 +435,9 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                 _buildTextField(
                   controller: _budgetCtrl,
                   hint: '0.00',
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [
-                    FilteringTextInputFormatter.allow(
-                        RegExp(r'^\d+\.?\d{0,2}')),
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
                   ],
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'Enter amount';
@@ -416,7 +447,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                   },
                   prefix: const Text(r'$ ',
                       style: TextStyle(
-                          color: kBlue,
+                          color: _kPurple,
                           fontSize: 15,
                           fontWeight: FontWeight.bold)),
                 ),
@@ -432,13 +463,11 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                             fontWeight: FontWeight.bold)),
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: kSub.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(8),
-                        border:
-                            Border.all(color: kSub.withValues(alpha: 0.25)),
+                        border: Border.all(color: kSub.withValues(alpha: 0.25)),
                       ),
                       child: const Text('Optional',
                           style: TextStyle(
@@ -471,17 +500,16 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                             child: CircularProgressIndicator(
                                 color: Colors.white, strokeWidth: 2.5),
                           )
-                        : const Icon(Icons.workspace_premium_outlined,
-                            size: 18),
+                        : const Icon(Icons.send_rounded, size: 18),
                     label: Text(
-                      _posting ? 'Posting...' : 'Post Open Gig',
+                      _posting ? 'Sending Offer...' : 'Send Offered Gig',
                       style: const TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: kBlue,
+                      backgroundColor: _kPurple,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor: kBlue.withValues(alpha: 0.4),
+                      disabledBackgroundColor: _kPurple.withValues(alpha: 0.4),
                       elevation: 0,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(30)),
@@ -497,195 +525,111 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     );
   }
 
-  // ── Skills Dropdown ───────────────────────────────────────────────────────────
-  Widget _buildSkillsDropdown() {
+  // ── Worker Field ──────────────────────────────────────────────────────────────
+  Widget _buildWorkerField() {
     final cardColor = Theme.of(context).cardColor;
     final borderColor = Theme.of(context).dividerColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final hasWorker = _selectedWorker != null;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        GestureDetector(
-          onTap: _showSkillsPicker,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _selectedSkills.isNotEmpty
-                    ? kBlue.withValues(alpha: 0.6)
-                    : borderColor,
-                width: _selectedSkills.isNotEmpty ? 1.5 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _selectedSkills.isEmpty
-                        ? 'Select required skills...'
-                        : '${_selectedSkills.length} skill${_selectedSkills.length > 1 ? 's' : ''} selected',
-                    style: TextStyle(
-                      color: _selectedSkills.isEmpty ? kSub : kBlue,
-                      fontSize: 14,
-                      fontWeight: _selectedSkills.isEmpty
-                          ? FontWeight.normal
-                          : FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const Icon(Icons.keyboard_arrow_down_rounded,
-                    color: kSub, size: 20),
-              ],
-            ),
+    return GestureDetector(
+      onTap: _openWorkerPicker,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: hasWorker ? _kPurple.withValues(alpha: 0.6) : borderColor,
+            width: hasWorker ? 1.5 : 1,
           ),
         ),
-        if (_selectedSkills.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: _selectedSkills
-                .map((skill) => Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: kBlue.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                            color: kBlue.withValues(alpha: 0.4)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(skill,
-                              style: const TextStyle(
-                                  color: kBlue,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500)),
-                          const SizedBox(width: 6),
-                          GestureDetector(
-                            onTap: () =>
-                                setState(() => _selectedSkills.remove(skill)),
-                            child: const Icon(Icons.close_rounded,
-                                color: kBlue, size: 12),
-                          ),
-                        ],
-                      ),
-                    ))
-                .toList(),
-          ),
-        ],
-      ],
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: hasWorker
+                    ? _kPurple.withValues(alpha: 0.12)
+                    : kSub.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.person_search_rounded,
+                color: hasWorker ? _kPurple : kSub,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: hasWorker
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _selectedWorker!.name,
+                          style: TextStyle(
+                              color: onSurface,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _selectedWorker!.email,
+                          style: const TextStyle(color: kSub, fontSize: 12),
+                        ),
+                      ],
+                    )
+                  : const Text(
+                      'Search by name or ID...',
+                      style: TextStyle(color: kSub, fontSize: 14),
+                    ),
+            ),
+            Icon(
+              hasWorker ? Icons.swap_horiz_rounded : Icons.keyboard_arrow_down_rounded,
+              color: kSub,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  void _showSkillsPicker() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setModalState) {
-          final cardColor = Theme.of(ctx).cardColor;
-          final onSurface = Theme.of(ctx).colorScheme.onSurface;
-          final borderColor = Theme.of(ctx).dividerColor;
-          return Container(
-            height: MediaQuery.of(ctx).size.height * 0.7,
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: kSub.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text('Select Skills',
-                    style: TextStyle(
-                        color: onSurface,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                const Text('Select all skills the worker must have',
-                    style: TextStyle(color: kSub, fontSize: 12)),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: _kStaticSkills.length,
-                    separatorBuilder: (_, _) =>
-                        Divider(color: borderColor, height: 1),
-                    itemBuilder: (_, i) {
-                      final skill = _kStaticSkills[i];
-                      final selected = _selectedSkills.contains(skill);
-                      return ListTile(
-                        dense: true,
-                        onTap: () {
-                          setModalState(() {
-                            if (selected) {
-                              _selectedSkills.remove(skill);
-                            } else {
-                              _selectedSkills.add(skill);
-                            }
-                          });
-                          setState(() {});
-                        },
-                        title: Text(skill,
-                            style: TextStyle(
-                                color: selected ? kBlue : onSurface,
-                                fontSize: 14,
-                                fontWeight: selected
-                                    ? FontWeight.w600
-                                    : FontWeight.normal)),
-                        trailing: selected
-                            ? const Icon(Icons.check_circle_rounded,
-                                color: kBlue, size: 20)
-                            : Icon(Icons.radio_button_unchecked_rounded,
-                                color: kSub.withValues(alpha: 0.5),
-                                size: 20),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kBlue,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30)),
-                    ),
-                    child: Text(
-                      _selectedSkills.isEmpty
-                          ? 'Done (None selected)'
-                          : 'Done (${_selectedSkills.length} selected)',
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+  // ── Skill Dropdown ────────────────────────────────────────────────────────────
+  Widget _buildSkillDropdown() {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _selectedSkill != null
+              ? _kPurple.withValues(alpha: 0.6)
+              : borderColor,
+          width: _selectedSkill != null ? 1.5 : 1,
+        ),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _selectedSkill,
+          isExpanded: true,
+          dropdownColor: cardColor,
+          hint: const Text('Select a skill...', style: TextStyle(color: kSub, fontSize: 14)),
+          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: kSub),
+          style: TextStyle(color: onSurface, fontSize: 14),
+          items: _kSkills.map((skill) => DropdownMenuItem(
+            value: skill,
+            child: Text(skill, style: TextStyle(color: onSurface, fontSize: 14)),
+          )).toList(),
+          onChanged: (v) => setState(() => _selectedSkill = v),
+        ),
       ),
     );
   }
@@ -701,7 +645,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         color: cardColor,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: kBlue.withValues(alpha: 0.6),
+          color: _kPurple.withValues(alpha: 0.6),
           width: 1.5,
         ),
       ),
@@ -745,11 +689,9 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final dateSet = _scheduledDate != null;
     final timeSet = _scheduledTime != null;
-    final dateLabel = dateSet
-        ? DateFormat('EEE, MMM d').format(_scheduledDate!)
-        : 'Pick a date';
-    final timeLabel =
-        timeSet ? _scheduledTime!.format(context) : 'Pick a time';
+    final dateLabel =
+        dateSet ? DateFormat('EEE, MMM d').format(_scheduledDate!) : 'Pick a date';
+    final timeLabel = timeSet ? _scheduledTime!.format(context) : 'Pick a time';
 
     return Row(
       children: [
@@ -760,19 +702,17 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
               duration: const Duration(milliseconds: 150),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               decoration: BoxDecoration(
-                color: dateSet ? kBlue.withValues(alpha: 0.08) : cardColor,
+                color: dateSet ? _kPurple.withValues(alpha: 0.08) : cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: dateSet
-                      ? kBlue.withValues(alpha: 0.6)
-                      : borderColor,
+                  color: dateSet ? _kPurple.withValues(alpha: 0.6) : borderColor,
                   width: dateSet ? 1.5 : 1,
                 ),
               ),
               child: Row(
                 children: [
                   Icon(Icons.calendar_today_rounded,
-                      color: dateSet ? kBlue : kSub, size: 16),
+                      color: dateSet ? _kPurple : kSub, size: 16),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -780,18 +720,15 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                       style: TextStyle(
                         color: dateSet ? onSurface : kSub,
                         fontSize: 13,
-                        fontWeight:
-                            dateSet ? FontWeight.w600 : FontWeight.normal,
+                        fontWeight: dateSet ? FontWeight.w600 : FontWeight.normal,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   if (dateSet)
                     GestureDetector(
-                      onTap: () =>
-                          setState(() => _scheduledDate = null),
-                      child: const Icon(Icons.close_rounded,
-                          color: kSub, size: 14),
+                      onTap: () => setState(() => _scheduledDate = null),
+                      child: const Icon(Icons.close_rounded, color: kSub, size: 14),
                     ),
                 ],
               ),
@@ -806,19 +743,17 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
               duration: const Duration(milliseconds: 150),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               decoration: BoxDecoration(
-                color: timeSet ? kBlue.withValues(alpha: 0.08) : cardColor,
+                color: timeSet ? _kPurple.withValues(alpha: 0.08) : cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: timeSet
-                      ? kBlue.withValues(alpha: 0.6)
-                      : borderColor,
+                  color: timeSet ? _kPurple.withValues(alpha: 0.6) : borderColor,
                   width: timeSet ? 1.5 : 1,
                 ),
               ),
               child: Row(
                 children: [
                   Icon(Icons.access_time_rounded,
-                      color: timeSet ? kBlue : kSub, size: 16),
+                      color: timeSet ? _kPurple : kSub, size: 16),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -826,17 +761,14 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                       style: TextStyle(
                         color: timeSet ? onSurface : kSub,
                         fontSize: 13,
-                        fontWeight:
-                            timeSet ? FontWeight.w600 : FontWeight.normal,
+                        fontWeight: timeSet ? FontWeight.w600 : FontWeight.normal,
                       ),
                     ),
                   ),
                   if (timeSet)
                     GestureDetector(
-                      onTap: () =>
-                          setState(() => _scheduledTime = null),
-                      child: const Icon(Icons.close_rounded,
-                          color: kSub, size: 14),
+                      onTap: () => setState(() => _scheduledTime = null),
+                      child: const Icon(Icons.close_rounded, color: kSub, size: 14),
                     ),
                 ],
               ),
@@ -875,8 +807,8 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                 height: 42,
                 decoration: BoxDecoration(
                   color: (_useMapLocation
-                          ? kBlue
-                          : (hasError ? Colors.redAccent : kBlue))
+                          ? _kPurple
+                          : (hasError ? Colors.redAccent : _kPurple))
                       .withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -887,8 +819,8 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                           ? Icons.location_off_outlined
                           : Icons.location_on_rounded),
                   color: _useMapLocation
-                      ? kBlue
-                      : (hasError ? Colors.redAccent : kBlue),
+                      ? _kPurple
+                      : (hasError ? Colors.redAccent : _kPurple),
                   size: 20,
                 ),
               ),
@@ -901,7 +833,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                             width: 16,
                             height: 16,
                             child: CircularProgressIndicator(
-                                color: kBlue, strokeWidth: 2),
+                                color: _kPurple, strokeWidth: 2),
                           ),
                           SizedBox(width: 10),
                           Text('Detecting location...',
@@ -919,8 +851,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                                 _address.isNotEmpty
                                     ? _address
                                     : 'Location ready',
-                                style:
-                                    TextStyle(color: onSurface, fontSize: 13),
+                                style: TextStyle(color: onSurface, fontSize: 13),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -930,7 +861,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                                     ? 'Map-selected location'
                                     : 'Current GPS location',
                                 style: TextStyle(
-                                  color: _useMapLocation ? kBlue : kSub,
+                                  color: _useMapLocation ? _kPurple : kSub,
                                   fontSize: 11,
                                 ),
                               ),
@@ -948,7 +879,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                 icon: Icons.my_location_rounded,
                 label: 'Use My Location',
                 active: !_useMapLocation,
-                accentColor: kBlue,
+                accentColor: _kPurple,
                 onTap: () {
                   setState(() => _useMapLocation = false);
                   if (_gpsPosition == null) _fetchGpsLocation();
@@ -961,7 +892,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                 icon: Icons.map_outlined,
                 label: 'Select on Map',
                 active: _useMapLocation,
-                accentColor: kBlue,
+                accentColor: _kPurple,
                 onTap: _openMapPicker,
               ),
             ),
@@ -994,13 +925,11 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       style: TextStyle(color: textColor, fontSize: 14),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle:
-            TextStyle(color: textColor.withValues(alpha: 0.35), fontSize: 14),
+        hintStyle: TextStyle(color: textColor.withValues(alpha: 0.35), fontSize: 14),
         prefix: prefix,
         filled: true,
         fillColor: cardColor,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: borderColor),
@@ -1011,19 +940,203 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: kBlue, width: 1.5),
+          borderSide: const BorderSide(color: _kPurple, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide:
-              const BorderSide(color: Colors.redAccent, width: 1.5),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
         ),
         focusedErrorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide:
-              const BorderSide(color: Colors.redAccent, width: 1.5),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
         ),
         errorStyle: const TextStyle(color: Colors.redAccent, fontSize: 11),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Worker Picker Bottom Sheet
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkerPickerSheet extends StatefulWidget {
+  final String? excludeUid;
+  const _WorkerPickerSheet({this.excludeUid});
+
+  @override
+  State<_WorkerPickerSheet> createState() => _WorkerPickerSheetState();
+}
+
+class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
+  final _searchCtrl = TextEditingController();
+  List<_WorkerEntry> _allWorkers = [];
+  List<_WorkerEntry> _filtered = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWorkers();
+    _searchCtrl.addListener(_filter);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadWorkers() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('users').get();
+      final workers = snap.docs
+          .where((d) => d.id != widget.excludeUid)
+          .map((d) => _WorkerEntry(
+                uid: d.id,
+                name: d.data()['name'] ?? 'Unknown',
+                email: d.data()['email'] ?? '',
+              ))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _allWorkers = workers;
+        _filtered = workers;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  void _filter() {
+    final q = _searchCtrl.text.toLowerCase();
+    setState(() {
+      _filtered = _allWorkers
+          .where((w) =>
+              w.name.toLowerCase().contains(q) ||
+              w.email.toLowerCase().contains(q) ||
+              w.uid.toLowerCase().contains(q))
+          .toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final borderColor = Theme.of(context).dividerColor;
+    const purple = _kPurple;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.75,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: kSub.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text('Select Gig Worker',
+              style: TextStyle(
+                  color: onSurface, fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          const Text('Search by name, email, or worker ID',
+              style: TextStyle(color: kSub, fontSize: 12)),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _searchCtrl,
+            style: TextStyle(color: onSurface, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Search workers...',
+              hintStyle: TextStyle(
+                  color: onSurface.withValues(alpha: 0.35), fontSize: 14),
+              filled: true,
+              fillColor: Theme.of(context).scaffoldBackgroundColor,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              prefixIcon:
+                  const Icon(Icons.search_rounded, color: kSub, size: 20),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: borderColor),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: borderColor),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: purple, width: 1.5),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: _loading
+                ? const Center(
+                    child: CircularProgressIndicator(color: purple),
+                  )
+                : _filtered.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.person_off_outlined,
+                                color: kSub.withValues(alpha: 0.5), size: 40),
+                            const SizedBox(height: 10),
+                            const Text('No workers found',
+                                style: TextStyle(color: kSub, fontSize: 14)),
+                          ],
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: _filtered.length,
+                        separatorBuilder: (_, _) =>
+                            Divider(color: borderColor, height: 1),
+                        itemBuilder: (_, i) {
+                          final w = _filtered[i];
+                          return ListTile(
+                            onTap: () => Navigator.pop(context, w),
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 4),
+                            leading: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: purple.withValues(alpha: 0.12),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.person_rounded,
+                                  color: purple, size: 20),
+                            ),
+                            title: Text(w.name,
+                                style: TextStyle(
+                                    color: onSurface,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500)),
+                            subtitle: Text(w.email,
+                                style: const TextStyle(
+                                    color: kSub, fontSize: 12)),
+                            trailing: const Icon(Icons.chevron_right_rounded,
+                                color: kSub, size: 18),
+                          );
+                        },
+                      ),
+          ),
+        ],
       ),
     );
   }
@@ -1094,8 +1207,7 @@ class _LocationModeButton extends StatelessWidget {
                 style: TextStyle(
                   color: active ? accentColor : kSub,
                   fontSize: 12,
-                  fontWeight:
-                      active ? FontWeight.w600 : FontWeight.normal,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.normal,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1151,8 +1263,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     if (!mounted) return;
     setState(() => _geocoding = true);
     try {
-      final placemarks =
-          await placemarkFromCoordinates(pos.latitude, pos.longitude);
+      final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
       if (!mounted) return;
       String address = 'Selected location';
       if (placemarks.isNotEmpty) {
@@ -1161,8 +1272,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
           if (p.street != null && p.street!.isNotEmpty) p.street,
           if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality,
           if (p.locality != null && p.locality!.isNotEmpty) p.locality,
-          if (p.administrativeArea != null &&
-              p.administrativeArea!.isNotEmpty)
+          if (p.administrativeArea != null && p.administrativeArea!.isNotEmpty)
             p.administrativeArea,
         ];
         address = parts.join(', ');
@@ -1205,6 +1315,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final cardColor = Theme.of(context).cardColor;
     final borderColor = Theme.of(context).dividerColor;
+    const purple = _kPurple;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -1212,15 +1323,12 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: kSub, size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: kSub, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text('Select Location',
             style: TextStyle(
-                color: onSurface,
-                fontWeight: FontWeight.bold,
-                fontSize: 16)),
+                color: onSurface, fontWeight: FontWeight.bold, fontSize: 16)),
         actions: const [ThemeToggleButton()],
       ),
       body: Stack(
@@ -1234,8 +1342,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
             ),
             children: [
               TileLayer(
-                urlTemplate:
-                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.giggre.app',
               ),
               if (_picked != null)
@@ -1245,7 +1352,34 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                       point: _picked!,
                       width: 40,
                       height: 50,
-                      child: const _MapPinWidget(),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: purple,
+                              shape: BoxShape.circle,
+                              border:
+                                  Border.all(color: Colors.white, width: 2.5),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: purple.withValues(alpha: 0.5),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                            child: const Icon(Icons.location_on_rounded,
+                                color: Colors.white, size: 18),
+                          ),
+                          CustomPaint(
+                            painter: _TrianglePainter(color: purple),
+                            size: const Size(10, 7),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -1257,8 +1391,8 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
               left: 16,
               right: 16,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
                   color: cardColor.withValues(alpha: 0.96),
                   borderRadius: BorderRadius.circular(14),
@@ -1277,18 +1411,18 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: kBlue.withValues(alpha: 0.15),
+                        color: purple.withValues(alpha: 0.15),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.touch_app_rounded,
-                          color: kBlue, size: 18),
+                          color: purple, size: 18),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         'Tap anywhere on the map to drop a pin at the gig location',
-                        style: TextStyle(
-                            color: onSurface, fontSize: 13, height: 1.4),
+                        style:
+                            TextStyle(color: onSurface, fontSize: 13, height: 1.4),
                       ),
                     ),
                   ],
@@ -1304,16 +1438,9 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
                 decoration: BoxDecoration(
                   color: cardColor,
-                  borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(24)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
                   border: Border(top: BorderSide(color: borderColor)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 20,
-                      offset: const Offset(0, -4),
-                    ),
-                  ],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -1324,11 +1451,11 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                           width: 40,
                           height: 40,
                           decoration: BoxDecoration(
-                            color: kBlue.withValues(alpha: 0.15),
+                            color: purple.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: const Icon(Icons.location_on_rounded,
-                              color: kBlue, size: 20),
+                              color: purple, size: 20),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -1339,7 +1466,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                                       width: 14,
                                       height: 14,
                                       child: CircularProgressIndicator(
-                                          color: kBlue, strokeWidth: 2),
+                                          color: purple, strokeWidth: 2),
                                     ),
                                     SizedBox(width: 8),
                                     Text('Getting address...',
@@ -1348,8 +1475,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                                   ],
                                 )
                               : Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       _address.isNotEmpty
@@ -1380,13 +1506,11 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                         icon: const Icon(Icons.check_rounded, size: 18),
                         label: const Text('Confirm Location',
                             style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
+                                fontSize: 15, fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: kBlue,
+                          backgroundColor: purple,
                           foregroundColor: Colors.white,
-                          disabledBackgroundColor:
-                              kBlue.withValues(alpha: 0.4),
+                          disabledBackgroundColor: purple.withValues(alpha: 0.4),
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(30)),
@@ -1399,44 +1523,6 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
             ),
         ],
       ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Map Pin Widget
-// ─────────────────────────────────────────────────────────────────────────────
-class _MapPinWidget extends StatelessWidget {
-  const _MapPinWidget();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: kBlue,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2.5),
-            boxShadow: [
-              BoxShadow(
-                color: kBlue.withValues(alpha: 0.5),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: const Icon(Icons.location_on_rounded,
-              color: Colors.white, size: 18),
-        ),
-        CustomPaint(
-          painter: _TrianglePainter(color: kBlue),
-          size: const Size(10, 7),
-        ),
-      ],
     );
   }
 }
@@ -1483,23 +1569,22 @@ class _SuccessSheet extends StatelessWidget {
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: kBlue.withValues(alpha: 0.15),
+              color: _kPurple.withValues(alpha: 0.15),
               shape: BoxShape.circle,
-              border: Border.all(
-                  color: kBlue.withValues(alpha: 0.5), width: 2),
+              border: Border.all(color: _kPurple.withValues(alpha: 0.5), width: 2),
             ),
-            child: const Icon(Icons.workspace_premium_outlined,
-                color: kBlue, size: 38),
+            child:
+                const Icon(Icons.send_rounded, color: _kPurple, size: 38),
           ),
           const SizedBox(height: 20),
-          Text('Open Gig Posted!',
+          Text('Offered Gig Sent!',
               style: TextStyle(
                   color: onSurface,
                   fontSize: 20,
                   fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           const Text(
-            'Qualified workers matching your\nrequirements will be notified.',
+            'Your offer has been sent to the worker.\nThey will be notified shortly.',
             textAlign: TextAlign.center,
             style: TextStyle(color: kSub, fontSize: 13, height: 1.5),
           ),
@@ -1510,15 +1595,14 @@ class _SuccessSheet extends StatelessWidget {
             child: ElevatedButton(
               onPressed: onDone,
               style: ElevatedButton.styleFrom(
-                backgroundColor: kBlue,
+                backgroundColor: _kPurple,
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(30)),
               ),
               child: const Text('View My Gigs',
-                  style:
-                      TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             ),
           ),
           const SizedBox(height: 8),

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
 import 'package:giggre_app/screens/about_giggre.dart';
 import 'package:giggre_app/screens/giggre-updates.dart';
@@ -237,10 +238,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   builder: (_) => const _GiggreMenu(),
                 );
               },
-              child: const Text(
+              child: Text(
                 'Giggre',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: onSurface,
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
                 ),
@@ -271,13 +272,28 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                firstName.isNotEmpty ? 'Hey, $firstName 👋' : 'Welcome back 👋',
-                style: TextStyle(
-                  color: onSurface,
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
-                ),
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: kBlue.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.account_circle_rounded,
+                        color: kBlue, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    firstName.isNotEmpty ? 'Hey, $firstName 👋' : 'Welcome back 👋',
+                    style: TextStyle(
+                      color: onSurface,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 6),
               const Text(
@@ -529,31 +545,20 @@ class _GiggreMenu extends StatelessWidget {
 // ─────────────────────────────────────────────
 //  Testimonial Carousel
 // ─────────────────────────────────────────────
-class _TestimonialSlide {
-  final String imageUrl;
+class _CarouselItem {
+  final String picture;
+  final int sortNumber;
 
-  const _TestimonialSlide({
-    required this.imageUrl,
-  });
+  const _CarouselItem({required this.picture, required this.sortNumber});
+
+  factory _CarouselItem.fromMap(Map<String, dynamic> data) {
+    return _CarouselItem(
+      picture: data['picture'] as String? ?? '',
+      sortNumber: (data['sortNumber'] as num?)?.toInt() ?? 0,
+    );
+  }
 }
 
-const _kSlides = [
-  _TestimonialSlide(
-    imageUrl: 'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?w=800&q=80',
-  ),
-  _TestimonialSlide(
-    imageUrl: 'https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=800&q=80',
-  ),
-  _TestimonialSlide(
-    imageUrl: 'https://images.unsplash.com/photo-1556761175-4b46a572b786?w=800&q=80',
-  ),
-  _TestimonialSlide(
-    imageUrl: 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=800&q=80',
-  ),
-  _TestimonialSlide(
-    imageUrl: 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=800&q=80',
-  ),
-];
 class _TestimonialCarousel extends StatefulWidget {
   const _TestimonialCarousel();
 
@@ -563,18 +568,68 @@ class _TestimonialCarousel extends StatefulWidget {
 
 class _TestimonialCarouselState extends State<_TestimonialCarousel> {
   int _current = 0;
+  List<_CarouselItem> _slides = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchSlides();
+  }
+
+  Future<void> _fetchSlides() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('app_content')
+          .doc('carousel_items')
+          .collection('items')
+          .get();
+
+      final items = snapshot.docs
+          .map((doc) => _CarouselItem.fromMap(doc.data()))
+          .where((item) => item.sortNumber != 0 && item.picture.isNotEmpty)
+          .toList()
+        ..sort((a, b) => a.sortNumber.compareTo(b.sortNumber));
+
+      if (mounted) {
+        setState(() {
+          _slides = items;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: Container(
+            color: kCard,
+            child: const Center(
+              child: CircularProgressIndicator(color: kBlue, strokeWidth: 2),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_slides.isEmpty) return const SizedBox.shrink();
+
     return Column(
       children: [
         SizedBox(
-          width: double.infinity, // 👈 FORCE full width inside padding
+          width: double.infinity,
           child: CarouselSlider.builder(
-            itemCount: _kSlides.length,
+            itemCount: _slides.length,
             options: CarouselOptions(
               viewportFraction: 1.0,
-              padEnds: false, // 👈 VERY IMPORTANT (removes side gaps)
+              padEnds: false,
               enlargeCenterPage: false,
               autoPlay: true,
               autoPlayInterval: const Duration(seconds: 5),
@@ -583,15 +638,14 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
               onPageChanged: (index, _) => setState(() => _current = index),
             ),
             itemBuilder: (context, index, _) {
-              final slide = _kSlides[index];
-              return _SlideItem(slide: slide);
+              return _SlideItem(pictureUrl: _slides[index].picture);
             },
           ),
         ),
         const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(_kSlides.length, (i) {
+          children: List.generate(_slides.length, (i) {
             final active = i == _current;
             return AnimatedContainer(
               duration: const Duration(milliseconds: 250),
@@ -611,30 +665,27 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
 }
 
 class _SlideItem extends StatelessWidget {
-  final _TestimonialSlide slide;
+  final String pictureUrl;
 
-  const _SlideItem({required this.slide});
+  const _SlideItem({required this.pictureUrl});
 
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: AspectRatio(
-        aspectRatio: 16 / 9, // 👈 FORCE SAME SIZE FOR ALL
-        child: Image.network(
-          slide.imageUrl,
-          fit: BoxFit.cover, // fills nicely
+        aspectRatio: 16 / 9,
+        child: CachedNetworkImage(
+          imageUrl: pictureUrl,
+          fit: BoxFit.cover,
           width: double.infinity,
-          errorBuilder: (ctx, err, stack) => Container(color: kCard),
-          loadingBuilder: (context, child, progress) {
-            if (progress == null) return child;
-            return Container(
-              color: kCard,
-              child: const Center(
-                child: CircularProgressIndicator(color: kBlue, strokeWidth: 2),
-              ),
-            );
-          },
+          placeholder: (context, url) => Container(
+            color: kCard,
+            child: const Center(
+              child: CircularProgressIndicator(color: kBlue, strokeWidth: 2),
+            ),
+          ),
+          errorWidget: (context, url, error) => Container(color: kCard),
         ),
       ),
     );
