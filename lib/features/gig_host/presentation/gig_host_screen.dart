@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +10,7 @@ import '../../auth/presentation/login_screen.dart';
 import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
+import 'gig_host_profile_screen.dart';
 
 class GigHostScreen extends StatefulWidget {
   const GigHostScreen({super.key});
@@ -36,61 +38,9 @@ class _GigHostScreenState extends State<GigHostScreen> {
   }
 
   void _showProfile() {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    final cardColor = Theme.of(context).cardColor;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: kAmber.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.account_circle_outlined, color: kAmber, size: 36),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              _userName.isNotEmpty ? _userName : 'Gig Host',
-              style: TextStyle(color: onSurface, fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              FirebaseAuth.instance.currentUser?.email ?? '',
-              style: const TextStyle(color: kSub, fontSize: 13),
-            ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: kAmber.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: kAmber.withValues(alpha: 0.3)),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.construction_rounded, color: kAmber, size: 16),
-                  SizedBox(width: 8),
-                  Text('Profile editing coming soon', style: TextStyle(color: kAmber, fontSize: 13)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const GigHostProfileScreen()),
     );
   }
 
@@ -379,42 +329,67 @@ class _GigHostScreenState extends State<GigHostScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Stats Row
 // ─────────────────────────────────────────────────────────────────────────────
-class _StatsRow extends StatelessWidget {
+class _StatsRow extends StatefulWidget {
   final String uid;
   const _StatsRow({required this.uid});
 
   @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('quick_gigs')
-          .where('hostId', isEqualTo: uid)
-          .snapshots(),
-      builder: (context, snap) {
-        final docs = snap.data?.docs ?? [];
-        final total = docs.length;
-        final active = docs
-            .where((d) =>
-                (d.data() as Map)['status'] == 'active' ||
-                (d.data() as Map)['status'] == 'scanning')
-            .length;
-        final completed = docs
-            .where((d) => (d.data() as Map)['status'] == 'completed')
-            .length;
+  State<_StatsRow> createState() => _StatsRowState();
+}
 
-        return Row(
-          children: [
-            _StatCard(label: 'Posted', value: total, color: kAmber),
-            const SizedBox(width: 10),
-            _StatCard(
-                label: 'Active',
-                value: active,
-                color: const Color(0xFF22C55E)),
-            const SizedBox(width: 10),
-            _StatCard(label: 'Done', value: completed, color: kBlue),
-          ],
-        );
-      },
+class _StatsRowState extends State<_StatsRow> {
+  int _total = 0, _active = 0, _done = 0;
+  List<Map> _quick = [], _open = [], _offered = [];
+  late StreamSubscription _quickSub, _openSub, _offeredSub;
+
+  static bool _isActive(String s) =>
+      s == 'scanning' || s == 'active' || s == 'open' || s == 'offered';
+
+  void _recompute() {
+    final all = [..._quick, ..._open, ..._offered];
+    setState(() {
+      _total = all.length;
+      _active = all.where((d) => _isActive(d['status'] as String? ?? '')).length;
+      _done = all.where((d) => d['status'] == 'completed').length;
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final db = FirebaseFirestore.instance;
+    _quickSub = db.collection('quick_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
+      _quick = s.docs.map((d) => d.data() as Map).toList();
+      _recompute();
+    });
+    _openSub = db.collection('open_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
+      _open = s.docs.map((d) => d.data() as Map).toList();
+      _recompute();
+    });
+    _offeredSub = db.collection('offered_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
+      _offered = s.docs.map((d) => d.data() as Map).toList();
+      _recompute();
+    });
+  }
+
+  @override
+  void dispose() {
+    _quickSub.cancel();
+    _openSub.cancel();
+    _offeredSub.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _StatCard(label: 'Posted', value: _total, color: kAmber),
+        const SizedBox(width: 10),
+        _StatCard(label: 'Active', value: _active, color: const Color(0xFF22C55E)),
+        const SizedBox(width: 10),
+        _StatCard(label: 'Done', value: _done, color: kBlue),
+      ],
     );
   }
 }
@@ -580,90 +555,388 @@ class _GigTypeCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Recent Gigs List
+//  Your Gigs List  (all 3 types, filterable)
 // ─────────────────────────────────────────────────────────────────────────────
-class _RecentGigsList extends StatelessWidget {
+class _RecentGigsList extends StatefulWidget {
   final String uid;
   const _RecentGigsList({required this.uid});
 
   @override
+  State<_RecentGigsList> createState() => _RecentGigsListState();
+}
+
+class _RecentGigsListState extends State<_RecentGigsList> {
+  String _filter = 'all';
+  List<Map<String, dynamic>> _quick = [], _open = [], _offered = [];
+  bool _loading = true;
+  late StreamSubscription _quickSub, _openSub, _offeredSub;
+
+  @override
+  void initState() {
+    super.initState();
+    final db = FirebaseFirestore.instance;
+
+    _quickSub = db
+        .collection('quick_gigs')
+        .where('hostId', isEqualTo: widget.uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen((s) => setState(() {
+              _quick = s.docs.map((d) {
+                final m = Map<String, dynamic>.from(d.data());
+                m['gigType'] = m['gigType'] ?? 'quick';
+                m['docId'] = d.id;
+                return m;
+              }).toList();
+              _loading = false;
+            }));
+
+    _openSub = db
+        .collection('open_gigs')
+        .where('hostId', isEqualTo: widget.uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen((s) => setState(() {
+              _open = s.docs.map((d) {
+                final m = Map<String, dynamic>.from(d.data());
+                m['gigType'] = m['gigType'] ?? 'open';
+                m['docId'] = d.id;
+                return m;
+              }).toList();
+              _loading = false;
+            }));
+
+    _offeredSub = db
+        .collection('offered_gigs')
+        .where('hostId', isEqualTo: widget.uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen((s) => setState(() {
+              _offered = s.docs.map((d) {
+                final m = Map<String, dynamic>.from(d.data());
+                m['gigType'] = m['gigType'] ?? 'offered';
+                m['docId'] = d.id;
+                return m;
+              }).toList();
+              _loading = false;
+            }));
+  }
+
+  @override
+  void dispose() {
+    _quickSub.cancel();
+    _openSub.cancel();
+    _offeredSub.cancel();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> get _filtered {
+    final List<Map<String, dynamic>> all;
+    switch (_filter) {
+      case 'quick':
+        all = List.from(_quick);
+        break;
+      case 'open':
+        all = List.from(_open);
+        break;
+      case 'offered':
+        all = List.from(_offered);
+        break;
+      default:
+        all = [..._quick, ..._open, ..._offered];
+    }
+    all.sort((a, b) {
+      final aTs = a['createdAt'] as Timestamp?;
+      final bTs = b['createdAt'] as Timestamp?;
+      if (aTs == null || bTs == null) return 0;
+      return bTs.toDate().compareTo(aTs.toDate());
+    });
+    return all;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('quick_gigs')
-          .where('hostId', isEqualTo: uid)
-          .orderBy('createdAt', descending: true)
-          .limit(10)
-          .snapshots(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: CircularProgressIndicator(
-                  color: kAmber, strokeWidth: 2),
-            ),
-          );
-        }
+    if (_loading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: CircularProgressIndicator(color: kAmber, strokeWidth: 2),
+        ),
+      );
+    }
 
-        final docs = snap.data?.docs ?? [];
+    final filtered = _filtered;
 
-        if (docs.isEmpty) {
-          return Container(
-            padding: const EdgeInsets.symmetric(vertical: 40),
-            child: Column(
-              children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    color: kAmber.withValues(alpha: 0.08),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.inbox_outlined,
-                      color: kAmber, size: 30),
-                ),
-                const SizedBox(height: 16),
-                Text('No gigs posted yet',
-                    style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 6),
-                const Text(
-                    'Tap "Quick Gig" above to post your first gig.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: kSub, fontSize: 13)),
-              ],
-            ),
-          );
-        }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Filter tabs ──────────────────────────────────────────
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _FilterTab(label: 'All', selected: _filter == 'all', onTap: () => setState(() => _filter = 'all')),
+              const SizedBox(width: 8),
+              _FilterTab(label: 'Quick', selected: _filter == 'quick', color: kAmber, onTap: () => setState(() => _filter = 'quick')),
+              const SizedBox(width: 8),
+              _FilterTab(label: 'Open', selected: _filter == 'open', color: kBlue, onTap: () => setState(() => _filter = 'open')),
+              const SizedBox(width: 8),
+              _FilterTab(label: 'Offered', selected: _filter == 'offered', color: const Color(0xFF8B5CF6), onTap: () => setState(() => _filter = 'offered')),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
 
-        return Column(
-          children: docs.map((doc) {
-            final d = doc.data() as Map<String, dynamic>;
-            return _GigTile(data: d);
-          }).toList(),
-        );
-      },
+        // ── Gig tiles ────────────────────────────────────────────
+        if (filtered.isEmpty)
+          _EmptyGigsPlaceholder(filter: _filter)
+        else
+          ...filtered.map((d) => _GigTile(data: d)),
+      ],
     );
   }
 }
 
-class _GigTile extends StatelessWidget {
+class _FilterTab extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final Color color;
+
+  const _FilterTab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.color = kSub,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = selected ? color : kSub;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? accent.withValues(alpha: 0.15) : Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? accent.withValues(alpha: 0.5) : Theme.of(context).dividerColor,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? accent : kSub,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyGigsPlaceholder extends StatelessWidget {
+  final String filter;
+  const _EmptyGigsPlaceholder({required this.filter});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = filter == 'all' ? 'gigs' : '$filter gigs';
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 40),
+      child: Column(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: kAmber.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.inbox_outlined, color: kAmber, size: 30),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No $label posted yet',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Use the post options above to create a gig.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: kSub, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GigTile extends StatefulWidget {
   final Map<String, dynamic> data;
   const _GigTile({required this.data});
 
   @override
+  State<_GigTile> createState() => _GigTileState();
+}
+
+class _GigTileState extends State<_GigTile> {
+  static String _collectionFor(String gigType) {
+    switch (gigType) {
+      case 'open':    return 'open_gigs';
+      case 'offered': return 'offered_gigs';
+      default:        return 'quick_gigs';
+    }
+  }
+
+  Future<void> _confirmCancel() async {
+    final gigType = widget.data['gigType'] as String? ?? 'quick';
+    final docId   = widget.data['docId']   as String? ?? '';
+    if (docId.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Cancel Gig',
+            style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface)),
+        content: const Text(
+            'Mark this gig as cancelled? Workers will no longer see it.',
+            style: TextStyle(color: kSub)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No', style: TextStyle(color: kSub)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cancel Gig',
+                style: TextStyle(color: Colors.orange)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    await FirebaseFirestore.instance
+        .collection(_collectionFor(gigType))
+        .doc(docId)
+        .update({'status': 'cancelled'});
+    messenger.showSnackBar(const SnackBar(
+      content: Text('Gig cancelled'),
+      backgroundColor: Colors.orange,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  Future<void> _confirmDelete() async {
+    final gigType = widget.data['gigType'] as String? ?? 'quick';
+    final docId   = widget.data['docId']   as String? ?? '';
+    if (docId.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Delete Gig',
+            style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface)),
+        content: const Text(
+            'This will permanently remove the gig. This cannot be undone.',
+            style: TextStyle(color: kSub)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep', style: TextStyle(color: kSub)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    await FirebaseFirestore.instance
+        .collection(_collectionFor(gigType))
+        .doc(docId)
+        .delete();
+    messenger.showSnackBar(const SnackBar(
+      content: Text('Gig deleted'),
+      backgroundColor: Colors.redAccent,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'scanning':  return kAmber;
+      case 'open':      return const Color(0xFF22C55E);
+      case 'offered':   return const Color(0xFF8B5CF6);
+      case 'active':    return const Color(0xFF22C55E);
+      case 'assigned':  return kBlue;
+      case 'completed': return const Color(0xFF22C55E);
+      case 'cancelled': return Colors.redAccent;
+      default:          return kSub;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final status = data['status'] ?? 'scanning';
+    final data      = widget.data;
+    final gigType   = data['gigType'] as String? ?? 'quick';
+    final status    = data['status']  as String? ?? 'scanning';
     final statusColor = _statusColor(status);
-    final titleColor = Theme.of(context).colorScheme.onSurface;
+    final titleColor  = Theme.of(context).colorScheme.onSurface;
+    final isClosed    = status == 'cancelled' || status == 'completed';
+
+    final IconData typeIcon;
+    final Color typeColor;
+    final String typeLabel;
+    switch (gigType) {
+      case 'open':
+        typeIcon  = Icons.workspace_premium_outlined;
+        typeColor = kBlue;
+        typeLabel = 'Open';
+        break;
+      case 'offered':
+        typeIcon  = Icons.send_rounded;
+        typeColor = const Color(0xFF8B5CF6);
+        typeLabel = 'Offered';
+        break;
+      default:
+        typeIcon  = Icons.flash_on_rounded;
+        typeColor = kAmber;
+        typeLabel = 'Quick';
+    }
+
+    String subtitle = '';
+    if (gigType == 'open') {
+      final skills = List<String>.from(data['requiredSkills'] ?? []);
+      subtitle = skills.take(2).join(', ');
+    } else if (gigType == 'offered') {
+      final workerName = data['workerName'] as String? ?? '';
+      if (workerName.isNotEmpty) subtitle = '→ $workerName';
+    } else {
+      subtitle = data['category'] as String? ?? '';
+    }
 
     final createdAt = data['createdAt'] != null
         ? (data['createdAt'] as Timestamp).toDate()
         : DateTime.now();
-    final diff = DateTime.now().difference(createdAt);
+    final diff    = DateTime.now().difference(createdAt);
     final timeAgo = diff.inMinutes < 60
         ? '${diff.inMinutes}m ago'
         : diff.inHours < 24
@@ -680,93 +953,158 @@ class _GigTile extends StatelessWidget {
       ),
       child: Row(
         children: [
+          // ── Type icon ──────────────────────────────
           Container(
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: kAmber.withValues(alpha: 0.12),
+              color: typeColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.flash_on_rounded,
-                color: kAmber, size: 22),
+            child: Icon(typeIcon, color: typeColor, size: 22),
           ),
           const SizedBox(width: 12),
+
+          // ── Title + subtitle ───────────────────────
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  data['title'] ?? 'Untitled Gig',
-                  style: TextStyle(
-                      color: titleColor,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        data['title'] as String? ?? 'Untitled Gig',
+                        style: TextStyle(
+                            color: titleColor,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: typeColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        typeLabel,
+                        style: TextStyle(
+                            color: typeColor,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 3),
                 Row(
                   children: [
-                    Text(data['category'] ?? '',
-                        style:
-                            const TextStyle(color: kSub, fontSize: 12)),
-                    const Text(' · ',
-                        style: TextStyle(color: kSub, fontSize: 12)),
+                    if (subtitle.isNotEmpty) ...[
+                      Flexible(
+                        child: Text(subtitle,
+                            style:
+                                const TextStyle(color: kSub, fontSize: 12),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      const Text(' · ',
+                          style: TextStyle(color: kSub, fontSize: 12)),
+                    ],
                     Text(
-                        '₱${data['budget']?.toStringAsFixed(0) ?? '0'}',
-                        style: const TextStyle(
-                            color: kAmber,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600)),
+                      '₱${(data['budget'] as num?)?.toStringAsFixed(0) ?? '0'}',
+                      style: const TextStyle(
+                          color: kAmber,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600),
+                    ),
                     const Text(' · ',
                         style: TextStyle(color: kSub, fontSize: 12)),
                     Text(timeAgo,
-                        style: const TextStyle(
-                            color: kSub, fontSize: 12)),
+                        style: const TextStyle(color: kSub, fontSize: 12)),
                   ],
                 ),
               ],
             ),
           ),
           const SizedBox(width: 8),
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
-              border:
-                  Border.all(color: statusColor.withValues(alpha: 0.4)),
-            ),
-            child: Text(
-              status.toUpperCase(),
-              style: TextStyle(
-                  color: statusColor,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5),
-            ),
+
+          // ── Status badge + menu ────────────────────
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border:
+                      Border.all(color: statusColor.withValues(alpha: 0.4)),
+                ),
+                child: Text(
+                  status.toUpperCase(),
+                  style: TextStyle(
+                      color: statusColor,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5),
+                ),
+              ),
+              const SizedBox(height: 4),
+              SizedBox(
+                height: 20,
+                width: 20,
+                child: PopupMenuButton<String>(
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(Icons.more_horiz_rounded,
+                      color: kSub, size: 18),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  onSelected: (val) {
+                    if (val == 'cancel') _confirmCancel();
+                    if (val == 'delete') _confirmDelete();
+                  },
+                  itemBuilder: (ctx) => [
+                    if (!isClosed)
+                      const PopupMenuItem(
+                        value: 'cancel',
+                        child: Row(
+                          children: [
+                            Icon(Icons.cancel_outlined,
+                                color: Colors.orange, size: 18),
+                            SizedBox(width: 10),
+                            Text('Cancel Gig',
+                                style: TextStyle(color: Colors.orange)),
+                          ],
+                        ),
+                      ),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline_rounded,
+                              color: Colors.redAccent, size: 18),
+                          SizedBox(width: 10),
+                          Text('Delete',
+                              style: TextStyle(color: Colors.redAccent)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
-  }
-
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'scanning':
-        return kAmber;
-      case 'active':
-        return const Color(0xFF22C55E);
-      case 'assigned':
-        return kBlue;
-      case 'completed':
-        return const Color(0xFF22C55E);
-      case 'cancelled':
-        return Colors.redAccent;
-      default:
-        return kSub;
-    }
   }
 }
 
@@ -815,10 +1153,12 @@ class _WorkerCluster {
   final LatLng center;
   final int count;
   final _DummyWorker? singleWorker;
+  final List<_DummyWorker> workers;
 
   const _WorkerCluster({
     required this.center,
     required this.count,
+    required this.workers,
     this.singleWorker,
   });
 }
@@ -855,7 +1195,12 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
 
     if (gridSize == 0.0) {
       return _kDummyWorkers
-          .map((w) => _WorkerCluster(center: w.position, count: 1, singleWorker: w))
+          .map((w) => _WorkerCluster(
+                center: w.position,
+                count: 1,
+                workers: [w],
+                singleWorker: w,
+              ))
           .toList();
     }
 
@@ -872,6 +1217,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
       return _WorkerCluster(
         center: LatLng(avgLat, avgLng),
         count: group.length,
+        workers: group,
         singleWorker: group.length == 1 ? group.first : null,
       );
     }).toList();
@@ -891,7 +1237,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         point: cluster.center,
         width: 56,
         height: 56,
-        child: _ClusterBadge(count: cluster.count),
+        child: _ClusterBadge(count: cluster.count, workers: cluster.workers),
       );
     }).toList();
   }
@@ -1117,42 +1463,202 @@ class _WorkerPin extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _ClusterBadge extends StatelessWidget {
   final int count;
-  const _ClusterBadge({required this.count});
+  final List<_DummyWorker> workers;
+  const _ClusterBadge({required this.count, required this.workers});
+
+  void _showWorkerList(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final cardColor = Theme.of(ctx).cardColor;
+        final onSurface = Theme.of(ctx).colorScheme.onSurface;
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(0, 20, 0, 16),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: kBorder,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: kAmber.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.people_alt_outlined,
+                          color: kAmber, size: 18),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('$count Workers in this area',
+                            style: TextStyle(
+                                color: onSurface,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold)),
+                        const Text('Tap a worker to offer a gig',
+                            style: TextStyle(color: kSub, fontSize: 11)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Divider(
+                  color: isDark
+                      ? kBorder.withValues(alpha: 0.5)
+                      : Colors.grey.withValues(alpha: 0.15)),
+              // Worker list
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.45,
+                ),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8),
+                  itemCount: workers.length,
+                  separatorBuilder: (_, i) => Divider(
+                    height: 1,
+                    color: isDark
+                        ? kBorder.withValues(alpha: 0.4)
+                        : Colors.grey.withValues(alpha: 0.1),
+                  ),
+                  itemBuilder: (_, i) {
+                    final w = workers[i];
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      leading: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: kBlue.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.person,
+                            color: kBlue, size: 22),
+                      ),
+                      title: Text(w.name,
+                          style: TextStyle(
+                              color: onSurface,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600)),
+                      subtitle: Row(
+                        children: [
+                          const Icon(Icons.work_outline_rounded,
+                              color: kSub, size: 12),
+                          const SizedBox(width: 4),
+                          Text(w.skill,
+                              style: const TextStyle(
+                                  color: kSub, fontSize: 12)),
+                          const SizedBox(width: 10),
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF22C55E),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Text('Online',
+                              style: TextStyle(
+                                  color: Color(0xFF22C55E),
+                                  fontSize: 11)),
+                        ],
+                      ),
+                      trailing: TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        style: TextButton.styleFrom(
+                          backgroundColor:
+                              kBlue.withValues(alpha: 0.1),
+                          foregroundColor: kBlue,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                          minimumSize: Size.zero,
+                          tapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text('Offer',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 56,
-      height: 56,
-      decoration: BoxDecoration(
-        color: kAmber.withValues(alpha: 0.18),
-        shape: BoxShape.circle,
-        border: Border.all(color: kAmber, width: 2.5),
-        boxShadow: [
-          BoxShadow(
-            color: kAmber.withValues(alpha: 0.35),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            '$count',
-            style: const TextStyle(
-              color: kAmber,
-              fontSize: 17,
-              fontWeight: FontWeight.bold,
-              height: 1,
+    return GestureDetector(
+      onTap: () => _showWorkerList(context),
+      child: Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: kAmber,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2.5),
+          boxShadow: [
+            BoxShadow(
+              color: kAmber.withValues(alpha: 0.45),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
             ),
-          ),
-          const Text(
-            'workers',
-            style: TextStyle(color: kAmber, fontSize: 8, letterSpacing: 0.3),
-          ),
-        ],
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '$count',
+              style: const TextStyle(
+                color: Colors.black,
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+                height: 1,
+              ),
+            ),
+            const Text(
+              'workers',
+              style: TextStyle(
+                  color: Colors.black87, fontSize: 8, letterSpacing: 0.3),
+            ),
+          ],
+        ),
       ),
     );
   }

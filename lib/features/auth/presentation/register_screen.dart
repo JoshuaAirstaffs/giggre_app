@@ -67,6 +67,9 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         'skills'          : [],
         'openGigsUnlocked': false,
         'signInMethod'    : 'google',
+        'ratingAsWorker'  : 5.0,
+        'ratingAsHost'    : 5.0,
+        'ratingCount'     : 0,
       });
 
       if (mounted) {
@@ -334,6 +337,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'skills'          : [],
         'openGigsUnlocked': false,
         'signInMethod'    : 'email',
+        'ratingAsWorker'  : 5.0,
+        'ratingAsHost'    : 5.0,
+        'ratingCount'     : 0,
       });
 
       if (mounted) {
