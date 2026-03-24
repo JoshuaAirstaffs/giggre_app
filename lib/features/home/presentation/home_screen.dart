@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:giggre_app/screens/app_contents/contact_us.dart';
+import 'package:giggre_app/screens/app_contents/help_faq.dart';
+import 'package:giggre_app/screens/app_contents/privacy_policy.dart';
+import 'package:giggre_app/screens/app_contents/terms_and_conditions.dart';
+import 'package:giggre_app/screens/chat/home_chat.dart';
 import 'package:provider/provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
-import 'package:giggre_app/screens/about_giggre.dart';
+import 'package:giggre_app/screens/app_contents/about_giggre.dart';
 import 'package:giggre_app/screens/giggre-updates.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
@@ -259,6 +264,13 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () => themeProvider.toggle(),
           ),
           IconButton(
+            tooltip: 'Messages',
+            icon: const Icon(Icons.message_outlined, color: kSub),
+            onPressed: () {
+             Navigator.push(context, MaterialPageRoute(builder: (context) => HomeChat()));
+            },
+          ),
+          IconButton(
             tooltip: 'Log Out',
             icon: const Icon(Icons.logout_rounded, color: kSub),
             onPressed: _logout,
@@ -444,10 +456,10 @@ class _GiggreMenu extends StatelessWidget {
 
   static final List<Map<String, dynamic>> gigMenuData = [
     {'title': 'About Giggre', 'icon': Icons.info, 'screen': AboutGiggre()},
-    {'title': 'Terms & Conditions', 'icon': Icons.description},
-    {'title': 'Privacy Policy', 'icon': Icons.privacy_tip},
-    {'title': 'Help/FAQ', 'icon': Icons.help},
-    {'title': 'Contact Us', 'icon': Icons.contact_support},
+    {'title': 'Terms & Conditions', 'icon': Icons.description, 'screen': TermsAndConditions()},
+    {'title': 'Privacy Policy', 'icon': Icons.privacy_tip, 'screen': PrivacyPolicy()},
+    {'title': 'Help/FAQ', 'icon': Icons.help, 'screen': HelpFaq()},
+    {'title': 'Contact Us', 'icon': Icons.contact_support, 'screen': ContactUs()},
   ];
 
 
@@ -842,3 +854,4 @@ class _RoleCard extends StatelessWidget {
     );
   }
 }
+

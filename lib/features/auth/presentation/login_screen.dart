@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:provider/provider.dart';
 import '../../../utils/user_utils.dart';
 import '../../../core/theme/theme_provider.dart';
 import 'register_screen.dart';
@@ -90,6 +92,12 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       if (!mounted) return;
+
+      context.read<CurrentUserProvider>().setCurrentUserInfo(
+        cred.user?.email,
+        doc.data()?['name'],
+        uid,
+      );
       _navigateByRole(doc.data()?['role']);
 
     } on FirebaseAuthException catch (e) {
