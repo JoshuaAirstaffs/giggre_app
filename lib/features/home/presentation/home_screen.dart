@@ -559,6 +559,54 @@ class _CarouselItem {
   }
 }
 
+class _UpdateItem {
+  final String title;
+  final String body;
+  final String category;
+  final int sortNumber;
+  final DateTime? dateCreated;
+
+  const _UpdateItem({
+    required this.title,
+    required this.body,
+    required this.category,
+    required this.sortNumber,
+    this.dateCreated,
+  });
+
+  factory _UpdateItem.fromMap(Map<String, dynamic> data) {
+    return _UpdateItem(
+      title: data['title'] as String? ?? '',
+      body: data['body'] as String? ?? '',
+      category: data['category'] as String? ?? '',
+      sortNumber: (data['sortNumber'] as num?)?.toInt() ?? 0,
+      dateCreated: data['dateCreated'] != null
+          ? (data['dateCreated'] as Timestamp).toDate()
+          : null,
+    );
+  }
+
+  String get formattedDate {
+    if (dateCreated == null) return '';
+    return '${dateCreated!.month.toString().padLeft(2, '0')}/${dateCreated!.day.toString().padLeft(2, '0')}/${dateCreated!.year}';
+  }
+
+  IconData get icon {
+    switch (category.toLowerCase()) {
+      case 'announcement':
+        return Icons.campaign;
+      case 'feature':
+        return Icons.star;
+      case 'bug fix':
+        return Icons.bug_report;
+      case 'improvement':
+        return Icons.trending_up;
+      default:
+        return Icons.update;
+    }
+  }
+}
+
 class _TestimonialCarousel extends StatefulWidget {
   const _TestimonialCarousel();
 
