@@ -29,10 +29,15 @@ class _AboutGiggreState extends State<AboutGiggre> {
           .collection('app_content')
           .doc('about_giggre')
           .get();
+      final sampleData = await FirebaseFirestore.instance
+    .collection('app_content')
+    .doc('about_giggre')
+    .collection('items')  // 👈 subcollection
+    .get();
 
+    debugPrint(sampleData.docs.map((doc) => doc.data()).toString());
       if (mounted) {
         setState(() {
-          debugPrint(List<String>.from(response.data()?['how_it_works'] ?? []).toString());
           _mission = response.data()?['mission'] ?? '';
           _whatIsGiggre = response.data()?['what_is_giggre'] ?? '';
           _website = response.data()?['website'] ?? '';

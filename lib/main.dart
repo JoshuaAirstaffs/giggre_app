@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:giggre_app/screens/chat/chat.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'features/auth/presentation/login_screen.dart';
@@ -18,11 +20,14 @@ void main() async {
     firebaseError = e.toString();
   }
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => ThemeProvider(),
-      child: GiggreApp(firebaseError: firebaseError),
-    ),
-  );
+  MultiProvider(
+    providers: [
+      ChangeNotifierProvider(create: (_) => ThemeProvider()),
+      ChangeNotifierProvider(create: (_) => CurrentUserProvider()),
+    ],
+    child: GiggreApp(firebaseError: firebaseError),
+  ),
+);
 }
 
 class _FirebaseErrorScreen extends StatelessWidget {
@@ -78,6 +83,16 @@ class GiggreApp extends StatelessWidget {
         '/gigworker': (_) => const MainNavigation(),
         '/gighost':   (_) => const MainNavigation(),
       },
+       onGenerateRoute: (settings) {
+      // /chat/:roomId
+      if (settings.name?.startsWith('/chat/') == true) {
+        final roomId = settings.name!.split('/').last;
+        return MaterialPageRoute(
+          builder: (_) => Chat(roomId: roomId),
+        );
+      }
+      return null; // fallback to routes map
+    },
     );
   }
 }
