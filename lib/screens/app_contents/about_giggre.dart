@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_html/flutter_html.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -54,6 +55,7 @@ class _AboutGiggreState extends State<AboutGiggre> {
 
   @override
   Widget build(BuildContext context) {
+      final String htmlData = '<ul><li><i>fdsfsfdsdfsd<b>222222222222</b></i>fsdsfsdfsdfHIsfsdf</li><li>safsdfsd</li></ul>';
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(

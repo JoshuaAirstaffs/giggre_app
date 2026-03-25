@@ -757,7 +757,7 @@ class _FormsState extends State<_Forms> {
       final roomId =
           FirebaseFirestore.instance.collection('chat_rooms').doc().id;
 
-      // 1. create the ticket
+      // 1. create the support ticket
       await FirebaseFirestore.instance.collection('support_tickets').add({
         'userId': uid,
         'name': name,
@@ -770,7 +770,7 @@ class _FormsState extends State<_Forms> {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // 2. create the chat_rooms document with user's first message
+      // 2. create the chat_room document
       final roomRef = FirebaseFirestore.instance
           .collection('chat_rooms')
           .doc(roomId);
@@ -781,6 +781,7 @@ class _FormsState extends State<_Forms> {
         'subject': subject,
         'sendTo': 'Giggre Support',
         'status': 'open',
+        'isSupport': true,                          // ✅ required for unread badge query
         'lastMessage': message,
         'lastMessageSender': 'You',
         'lastMessageAt': FieldValue.serverTimestamp(),
@@ -793,10 +794,11 @@ class _FormsState extends State<_Forms> {
         'isSupport': false,
         'name': name,
         'text': message,
+        'hasSeen': true,                            // ✅ user's own message is already seen
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // 4. auto-reply from support after slight delay
+      // 4. auto-reply from support
       await Future.delayed(const Duration(seconds: 2));
 
       const autoReply =
@@ -807,10 +809,11 @@ class _FormsState extends State<_Forms> {
         'isSupport': true,
         'name': 'Giggre Support',
         'text': autoReply,
+        'hasSeen': false,                           // ✅ unread until user opens chat
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // 5. update chat_rooms with latest message (auto-reply)
+      // 5. update chat_room with latest message (auto-reply)
       await roomRef.update({
         'lastMessage': autoReply,
         'lastMessageSender': 'Support',

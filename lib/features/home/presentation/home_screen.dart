@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -26,14 +28,68 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _userName = '';
-  String? _selectedRole; // 'worker' | 'host'
+  String? _selectedRole;
   bool _saving = false;
+  bool _hasUnreadMessages = false;
+  StreamSubscription? _roomsStreamSub;        // ← rooms-level sub
+  final List<StreamSubscription> _roomSubs = []; // ← message-level subs
 
   @override
   void initState() {
     super.initState();
     _loadUser();
     WidgetsBinding.instance.addPostFrameCallback((_) => _showBetaModal());
+    _listenForUnreadMessages();
+  }
+
+  @override
+  void dispose() {
+    _roomsStreamSub?.cancel();
+    for (final sub in _roomSubs) sub.cancel();
+    super.dispose();
+  }
+
+  void _listenForUnreadMessages() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _roomsStreamSub = FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .where('userId', isEqualTo: uid)
+        .where('isSupport', isEqualTo: true)
+        .snapshots()
+        .listen((roomsSnap) {
+          // Cancel old message subs before setting up new ones
+          for (final sub in _roomSubs) sub.cancel();
+          _roomSubs.clear();
+
+          if (roomsSnap.docs.isEmpty) {
+            if (mounted) setState(() => _hasUnreadMessages = false);
+            return;
+          }
+
+          final Map<int, bool> roomUnread = {};
+
+          for (int i = 0; i < roomsSnap.docs.length; i++) {
+            final room = roomsSnap.docs[i];
+            final sub = FirebaseFirestore.instance
+                .collection('chat_rooms')
+                .doc(room.id)
+                .collection('messages')
+                .where('isSupport', isEqualTo: true)
+                .where('hasSeen', isEqualTo: false)
+                .limit(1)
+                .snapshots()
+                .map((s) => s.docs.isNotEmpty)
+                .listen((hasUnread) {
+                  roomUnread[i] = hasUnread;
+                  final anyUnread = roomUnread.values.any((v) => v);
+                  if (mounted) setState(() => _hasUnreadMessages = anyUnread);
+                  debugPrint('[Unread] Badge → $anyUnread');
+                });
+            _roomSubs.add(sub);
+          }
+        });
   }
 
   void _showBetaModal() {
@@ -265,9 +321,30 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             tooltip: 'Messages',
-            icon: const Icon(Icons.message_outlined, color: kSub),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.message_outlined, color: kSub),
+                if (_hasUnreadMessages)
+                  Positioned(
+                    top: -2,
+                    right: -2,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             onPressed: () {
-             Navigator.push(context, MaterialPageRoute(builder: (context) => HomeChat()));
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const HomeChat()),
+              );
             },
           ),
           IconButton(
@@ -400,7 +477,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   GestureDetector(
                     onTap: () {
-                      // Navigate to updates screen
                       Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -424,7 +500,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 description:
                     "We are officially launching Giggre! We're excited to bring you the best gig economy platform. Join us and start your journey today!",
               ),
-                const SizedBox(height: 16),
+              const SizedBox(height: 16),
               UpdateCard(
                 title: "New Feature: Giggre Rewards",
                 icon: Icons.star,
@@ -462,11 +538,8 @@ class _GiggreMenu extends StatelessWidget {
     {'title': 'Contact Us', 'icon': Icons.contact_support, 'screen': ContactUs()},
   ];
 
-
   @override
   Widget build(BuildContext context) {
-
-
     return DraggableScrollableSheet(
       initialChildSize: 0.5,
       minChildSize: 0.3,
@@ -478,76 +551,69 @@ class _GiggreMenu extends StatelessWidget {
         return Container(
           color: Theme.of(context).scaffoldBackgroundColor,
           child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              // Header
-              Column(
-                children: [
-                  Image.asset('assets/images/logo.png', height: 60),
-                  const SizedBox(height: 12),
-                   Text(
-                    "Version 1.0.0.0.0.0",
-                    style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 14),
-                  ),
-                  const SizedBox(height: 12),
-                   Text(
-                    "The fastest way to find jobs or hire workers near you",
-                    style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 10),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-              ),
-              Divider(color: isDark ? Colors.white24 : Colors.black26),
-              const SizedBox(height: 16),
-
-              // Menu items
-              Expanded(
-                child: ListView.separated(
-                  controller: scrollController,
-                  itemCount: gigMenuData.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 16),
-                  itemBuilder: (context, index) {
-                    final item = gigMenuData[index];
-                    return GestureDetector(
-                      onTap: () {
-                        // handle tap per item
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => item['screen'] as Widget));
-                      },
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 40,
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  color: iconBg,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Icon(
-                                  item['icon'] as IconData,
-                                  color: kBlue,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                item['title'] as String,
-                                style: TextStyle(color: isDark ? Colors.white : Colors.black),
-                              ),
-                            ],
-                          ),
-                          Icon(Icons.chevron_right, color: isDark ? Colors.white : Colors.black),
-                        ],
-                      ),
-                    );
-                  },
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                Column(
+                  children: [
+                    Image.asset('assets/images/logo.png', height: 60),
+                    const SizedBox(height: 12),
+                    Text(
+                      "Version 1.0.0.0.0.0",
+                      style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 14),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      "The fastest way to find jobs or hire workers near you",
+                      style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 10),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                 ),
-              ),
-            ],
+                Divider(color: isDark ? Colors.white24 : Colors.black26),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: ListView.separated(
+                    controller: scrollController,
+                    itemCount: gigMenuData.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 16),
+                    itemBuilder: (context, index) {
+                      final item = gigMenuData[index];
+                      return GestureDetector(
+                        onTap: () {
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => item['screen'] as Widget));
+                        },
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: iconBg,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(item['icon'] as IconData, color: kBlue),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  item['title'] as String,
+                                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                                ),
+                              ],
+                            ),
+                            Icon(Icons.chevron_right, color: isDark ? Colors.white : Colors.black),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
         );
       },
     );
@@ -854,4 +920,3 @@ class _RoleCard extends StatelessWidget {
     );
   }
 }
-

@@ -21,6 +21,32 @@ class _ChatState extends State<Chat> {
       .doc(widget.roomId)
       .collection('messages');
 
+  @override
+  void initState() {
+    super.initState();
+    _markSupportMessagesAsSeen(); // ✅ mark as seen when chat is opened
+  }
+
+  // Mark all unread support messages as seen when user opens the chat
+  Future<void> _markSupportMessagesAsSeen() async {
+    try {
+      final snap = await _messagesRef
+          .where('isSupport', isEqualTo: true)
+          .where('hasSeen', isEqualTo: false)
+          .get();
+
+      if (snap.docs.isEmpty) return;
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in snap.docs) {
+        batch.update(doc.reference, {'hasSeen': true});
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('Mark seen error: $e');
+    }
+  }
+
   Future<void> _sendMessage() async {
     final text = _msgController.text.trim();
     if (text.isEmpty || _isSending) return;
@@ -37,6 +63,7 @@ class _ChatState extends State<Chat> {
         'isSupport': false,
         'name': name,
         'text': text,
+        'hasSeen': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
