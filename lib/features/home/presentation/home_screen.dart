@@ -16,6 +16,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../auth/presentation/login_screen.dart';
 import '../../gig_host/presentation/gig_host_screen.dart';
+import '../../gig_worker/presentation/gig_worker_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -349,14 +350,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                 MaterialPageRoute(builder: (_) => const GigHostScreen()),
                               );
                             } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: const Text('Gig Worker mode coming soon!'),
-                                  backgroundColor: kBlue,
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12)),
-                                ),
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const GigWorkerScreen()),
                               );
                             }
                           },

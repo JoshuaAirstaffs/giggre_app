@@ -1017,7 +1017,7 @@ class _GigTileState extends State<_GigTile> {
                           style: TextStyle(color: kSub, fontSize: 12)),
                     ],
                     Text(
-                      '₱${(data['budget'] as num?)?.toStringAsFixed(0) ?? '0'}',
+                      '\$${(data['budget'] as num?)?.toStringAsFixed(0) ?? '0'}',
                       style: const TextStyle(
                           color: kAmber,
                           fontSize: 12,

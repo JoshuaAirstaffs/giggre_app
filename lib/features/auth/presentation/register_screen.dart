@@ -632,10 +632,7 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
 
     switch (key) {
       case 'google':
-        iconWidget  = Image.network(
-          'https://developers.google.com/identity/images/g-logo.png',
-          height: 26, width: 26,
-        );
+        iconWidget  = Image.asset('assets/images/g-logo.png', width: 26, height: 26);
         borderColor = active ? Colors.redAccent : Colors.grey[300]!;
         label       = 'Google';
         break;
@@ -726,10 +723,7 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
               onPressed: widget.isGoogleLoading ? null : widget.onGoogleTap,
               icon: widget.isGoogleLoading
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Image.network(
-                      'https://developers.google.com/identity/images/g-logo.png',
-                      height: 22, width: 22,
-                    ),
+                  : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
               label: Text(
                 widget.isGoogleLoading ? 'Signing in...' : 'Continue with Google',
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87),
@@ -764,3 +758,5 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
     );
   }
 }
+
+
