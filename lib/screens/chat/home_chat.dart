@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -13,17 +15,56 @@ class HomeChat extends StatefulWidget {
 class _HomeChatState extends State<HomeChat>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
+  bool _hasUnread = false;
+  final List<StreamSubscription> _roomSubs = [];
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _listenForUnread();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    for (final sub in _roomSubs) sub.cancel();
     super.dispose();
+  }
+
+  void _listenForUnread() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .where('userId', isEqualTo: uid)
+        .where('isSupport', isEqualTo: true)
+        .get()
+        .then((roomsSnap) {
+          if (roomsSnap.docs.isEmpty) return;
+
+          final Map<int, bool> roomUnread = {};
+
+          for (int i = 0; i < roomsSnap.docs.length; i++) {
+            final room = roomsSnap.docs[i];
+            final sub = FirebaseFirestore.instance
+                .collection('chat_rooms')
+                .doc(room.id)
+                .collection('messages')
+                .where('isSupport', isEqualTo: true)
+                .where('hasSeen', isEqualTo: false)
+                .limit(1)
+                .snapshots()
+                .map((s) => s.docs.isNotEmpty)
+                .listen((hasUnread) {
+                  roomUnread[i] = hasUnread;
+                  final anyUnread = roomUnread.values.any((v) => v);
+                  if (mounted) setState(() => _hasUnread = anyUnread);
+                });
+            _roomSubs.add(sub);
+          }
+        });
   }
 
   @override
@@ -51,10 +92,28 @@ class _HomeChatState extends State<HomeChat>
             fontSize: 13,
             fontWeight: FontWeight.w600,
           ),
-          tabs: const [
-            Tab(icon: Icon(Icons.people_outline), text: 'Friends'),
+          tabs: [
+            const Tab(icon: Icon(Icons.people_outline), text: 'Friends'),
             Tab(
-              icon: Icon(Icons.confirmation_number_outlined),
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.confirmation_number_outlined),
+                  if (_hasUnread)
+                    Positioned(
+                      top: -2,
+                      right: -2,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               text: 'Support',
             ),
           ],
@@ -151,7 +210,6 @@ class _SupportTabState extends State<_SupportTab> {
       if (snapshot.docs.isNotEmpty) {
         _lastDoc = snapshot.docs.last;
         _rooms.addAll(snapshot.docs.map((d) => {...d.data(), 'roomId': d.id}));
-        debugPrint(_rooms.toString());
       }
 
       if (snapshot.docs.length < _limit) _hasMore = false;
@@ -196,12 +254,12 @@ class _SupportTabState extends State<_SupportTab> {
 
           final room = _rooms[i];
           final rawDate = room['lastMessageAt'] ?? room['createdAt'];
-          final date = rawDate != null ? (rawDate as Timestamp).toDate() : null;
+          final date =
+              rawDate != null ? (rawDate as Timestamp).toDate() : null;
           final sender = room['lastMessageSender'] as String? ?? '';
           final lastMessage = room['lastMessage'] as String? ?? '';
-          final displayMessage = sender.isNotEmpty
-              ? '$sender: $lastMessage'
-              : lastMessage;
+          final displayMessage =
+              sender.isNotEmpty ? '$sender: $lastMessage' : lastMessage;
 
           return _ChatHomeItem(
             roomId: room['roomId'] ?? '',
@@ -219,7 +277,7 @@ class _SupportTabState extends State<_SupportTab> {
 
 // ── Chat Home Item ────────────────────────────────────────────────────────────
 
-class _ChatHomeItem extends StatelessWidget {
+class _ChatHomeItem extends StatefulWidget {
   const _ChatHomeItem({
     required this.subject,
     required this.message,
@@ -236,6 +294,48 @@ class _ChatHomeItem extends StatelessWidget {
   final String sendTo;
   final DateTime? date;
 
+  @override
+  State<_ChatHomeItem> createState() => _ChatHomeItemState();
+}
+
+class _ChatHomeItemState extends State<_ChatHomeItem> {
+  // Realtime stream per item
+  late final Stream<bool> _unreadStream = FirebaseFirestore.instance
+      .collection('chat_rooms')
+      .doc(widget.roomId)
+      .collection('messages')
+      .where('isSupport', isEqualTo: true)
+      .where('hasSeen', isEqualTo: false)
+      .limit(1)
+      .snapshots()
+      .map((snap) => snap.docs.isNotEmpty);
+
+  // Mark all unread support messages as seen
+  Future<void> _markMessagesAsSeen() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .doc(widget.roomId)
+        .collection('messages')
+        .where('isSupport', isEqualTo: true)
+        .where('hasSeen', isEqualTo: false)
+        .get();
+
+    if (snap.docs.isEmpty) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+    for (final doc in snap.docs) {
+      batch.update(doc.reference, {'hasSeen': true});
+    }
+    await batch.commit();
+  }
+
+  Future<void> _onTap() async {
+
+    if (!mounted) return;
+    await Navigator.pushNamed(context, '/chat/${widget.roomId}');
+    await _markMessagesAsSeen();
+  }
+
   String _formatDate(DateTime dt) {
     final now = DateTime.now();
     if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
@@ -247,88 +347,125 @@ class _ChatHomeItem extends StatelessWidget {
     return '${dt.month}/${dt.day}/${dt.year}';
   }
 
-  Color get _statusColor => switch (status) {
-    'resolved' => Colors.green,
-    'in_progress' => Colors.orange,
-    _ => const Color(0xFFFBBF24),
-  };
+  Color get _statusColor => switch (widget.status) {
+        'resolved' => Colors.green,
+        'in_progress' => Colors.orange,
+        _ => const Color(0xFFFBBF24),
+      };
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.pushNamed(context, '/chat/$roomId');
-      },
-      child: Container(
-        // 👈 child: added
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(14.0),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: _statusColor,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.support_agent, color: Colors.white),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final backgroundColor = isDarkMode ? Colors.grey[900] : Colors.white;
+
+    return StreamBuilder<bool>(
+      stream: _unreadStream,
+      builder: (context, snapshot) {
+        final hasUnread = snapshot.data ?? false;
+
+        return GestureDetector(
+          onTap: _onTap,
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14.0),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _statusColor,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.support_agent, color: Colors.white),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Text(
-                            sendTo,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.sendTo,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
+                            if (hasUnread) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: kBlue,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'New',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (widget.date != null) ...[
+                              const SizedBox(width: 6),
+                              Text(
+                                _formatDate(widget.date!),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDarkMode
+                                      ? Colors.grey[400]
+                                      : Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        Text(
+                          'Subject: ${widget.subject}',
+                          style: const TextStyle(fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        SizedBox(
+                          width: 200,
+                          child: Text(
+                            widget.message,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (date != null)
-                          Text(
-                            _formatDate(date!),
                             style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey[500],
+                              fontSize: 12,
+                              color: isDarkMode
+                                  ? Colors.grey[400]
+                                  : Colors.grey[600],
                             ),
                           ),
+                        ),
                       ],
                     ),
-                    Text(
-                      'Subject: $subject',
-                      style: const TextStyle(fontSize: 12),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    SizedBox(
-                      width: 200,
-                      child: Text(
-                        message,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ), // 👈 closing ) for GestureDetector
+        );
+      },
     );
   }
 }
