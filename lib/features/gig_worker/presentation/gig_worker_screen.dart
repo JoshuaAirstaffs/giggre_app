@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
+import 'package:geolocator/geolocator.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../auth/presentation/login_screen.dart';
 
@@ -18,7 +19,8 @@ class GigWorkerScreen extends StatefulWidget {
   State<GigWorkerScreen> createState() => _GigWorkerScreenState();
 }
 
-class _GigWorkerScreenState extends State<GigWorkerScreen> {
+class _GigWorkerScreenState extends State<GigWorkerScreen>
+    with WidgetsBindingObserver {
   bool _loading = true;
 
   // Profile data
@@ -43,10 +45,45 @@ class _GigWorkerScreenState extends State<GigWorkerScreen> {
   // Active quick gig (when working)
   _GigMarkerData? _activeQuickGig;
 
+  // Incoming dispatch offer
+  _GigMarkerData? _dispatchedGig;
+  StreamSubscription? _dispatchSub;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadProfile();
+    _setOnlineStatus(true);
+  }
+
+  @override
+  void dispose() {
+    _dispatchSub?.cancel();
+    _setOnlineStatus(false);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _setOnlineStatus(true);
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _setOnlineStatus(false);
+    }
+  }
+
+  Future<void> _setOnlineStatus(bool online) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({'isOnline': online});
+    } catch (_) {}
   }
 
   Future<void> _loadProfile() async {
@@ -111,6 +148,63 @@ class _GigWorkerScreenState extends State<GigWorkerScreen> {
       _completedGigs = completed;
       _loading = false;
     });
+    _saveLocationToFirestore();
+    _startDispatchSub(uid);
+  }
+
+  void _startDispatchSub(String uid) {
+    _dispatchSub?.cancel();
+    _dispatchSub = FirebaseFirestore.instance
+        .collection('quick_gigs')
+        .where('assignedWorkerId', isEqualTo: uid)
+        .where('status', isEqualTo: 'dispatched')
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      if (snap.docs.isEmpty) {
+        setState(() => _dispatchedGig = null);
+        return;
+      }
+      final doc = snap.docs.first;
+      final data = doc.data();
+      final geo = data['location'] as GeoPoint?;
+      if (geo == null) return;
+      setState(() {
+        _dispatchedGig = _GigMarkerData(
+          id: doc.id,
+          title: data['title'] as String? ?? 'Quick Gig',
+          gigType: 'quick',
+          budget: (data['budget'] as num?)?.toDouble() ?? 0,
+          status: 'dispatched',
+          hostName: data['hostName'] as String? ?? '',
+          address: data['address'] as String? ?? '',
+          position: LatLng(geo.latitude, geo.longitude),
+          assignedWorkerId: uid,
+        );
+      });
+    });
+  }
+
+  Future<void> _saveLocationToFirestore() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      bool enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return;
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) return;
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'location': GeoPoint(pos.latitude, pos.longitude),
+      });
+    } catch (_) {}
   }
 
   Future<void> _setToggle(String field, bool value) async {
@@ -127,7 +221,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final updates = <String, dynamic>{'seekingQuickGigs': value};
-    if (value) updates['availableForGigs'] = true;
+    if (value) {
+      updates['availableForGigs'] = true;
+      updates['slot'] = 'AVAILABLE';
+    }
     await FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
@@ -139,13 +236,80 @@ class _GigWorkerScreenState extends State<GigWorkerScreen> {
     setState(() => _activeQuickGig = gig);
   }
 
-  void _finishQuickGig() {
-    setState(() => _activeQuickGig = null);
+  Future<void> _acceptDispatch(_GigMarkerData gig) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    await FirebaseFirestore.instance
+        .collection('quick_gigs')
+        .doc(gig.id)
+        .update({
+      'status': 'accepted',
+      'acceptedAt': FieldValue.serverTimestamp(),
+      'workerId': uid,
+    });
+    await FirebaseFirestore.instance.collection('users').doc(uid).update({
+      'slot': 'BUSY',
+      'acceptanceRate': FieldValue.increment(0.02),
+    });
+    if (mounted) {
+      setState(() {
+        _dispatchedGig = null;
+        _activeQuickGig = gig;
+      });
+    }
+  }
+
+  Future<void> _declineDispatch(_GigMarkerData gig) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    await FirebaseFirestore.instance
+        .collection('quick_gigs')
+        .doc(gig.id)
+        .update({
+      'status': 'scanning',
+      'assignedWorkerId': FieldValue.delete(),
+      'assignedWorkerName': FieldValue.delete(),
+      'exclusionList': FieldValue.arrayUnion([uid]),
+    });
+    await FirebaseFirestore.instance.collection('users').doc(uid).update({
+      'acceptanceRate': FieldValue.increment(-0.10),
+    });
+    if (mounted) setState(() => _dispatchedGig = null);
+  }
+
+  Future<void> _finishQuickGig() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null && _activeQuickGig != null) {
+      await FirebaseFirestore.instance
+          .collection('quick_gigs')
+          .doc(_activeQuickGig!.id)
+          .update({
+        'status': 'completed',
+        'completedAt': FieldValue.serverTimestamp(),
+        'workerId': uid,
+      });
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({'slot': 'AVAILABLE'});
+    }
+    if (mounted) setState(() => _activeQuickGig = null);
     _toggleQuickGigs(false);
   }
 
-  void _cancelQuickGig() {
-    setState(() => _activeQuickGig = null);
+  Future<void> _cancelQuickGig() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null && _activeQuickGig != null) {
+      await FirebaseFirestore.instance
+          .collection('quick_gigs')
+          .doc(_activeQuickGig!.id)
+          .update({'status': 'cancelled'});
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({'slot': 'AVAILABLE'});
+    }
+    if (mounted) setState(() => _activeQuickGig = null);
   }
 
   void _showComingSoon(String title) {
@@ -264,7 +428,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen> {
               onComplete: _finishQuickGig,
               onCancel: _cancelQuickGig,
             )
-          : CustomScrollView(
+          : Stack(
+              children: [
+                CustomScrollView(
               slivers: [
                 SliverToBoxAdapter(
                   child: _Header(
@@ -397,6 +563,232 @@ class _GigWorkerScreenState extends State<GigWorkerScreen> {
                 ),
               ],
             ),
+                if (_dispatchedGig != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _DispatchOfferCard(
+                      gig: _dispatchedGig!,
+                      onAccept: () => _acceptDispatch(_dispatchedGig!),
+                      onDecline: () => _declineDispatch(_dispatchedGig!),
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Dispatch Offer Card
+// ─────────────────────────────────────────────────────────────────────────────
+class _DispatchOfferCard extends StatefulWidget {
+  final _GigMarkerData gig;
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
+
+  const _DispatchOfferCard({
+    required this.gig,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  @override
+  State<_DispatchOfferCard> createState() => _DispatchOfferCardState();
+}
+
+class _DispatchOfferCardState extends State<_DispatchOfferCard> {
+  late Timer _timer;
+  int _seconds = 30;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _seconds--);
+      if (_seconds <= 0) {
+        _timer.cancel();
+        widget.onDecline();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final divider = Theme.of(context).dividerColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    const green = Color(0xFF22C55E);
+
+    final timerColor = _seconds > 20
+        ? green
+        : _seconds > 10
+            ? kAmber
+            : Colors.redAccent;
+
+    return Container(
+      margin: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: kAmber.withValues(alpha: 0.6), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: kAmber.withValues(alpha: isDark ? 0.2 : 0.15),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: kAmber.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.flash_on_rounded,
+                    color: kAmber, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Quick Gig Offer!',
+                      style: TextStyle(
+                          color: kAmber,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5),
+                    ),
+                    Text(
+                      widget.gig.title,
+                      style: TextStyle(
+                          color: onSurface,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: timerColor, width: 2),
+                  color: timerColor.withValues(alpha: 0.1),
+                ),
+                child: Center(
+                  child: Text(
+                    '$_seconds',
+                    style: TextStyle(
+                        color: timerColor,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Divider(color: divider),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.person_outline_rounded, color: kSub, size: 14),
+              const SizedBox(width: 6),
+              Text(
+                widget.gig.hostName.isNotEmpty ? widget.gig.hostName : 'Host',
+                style: const TextStyle(color: kSub, fontSize: 12),
+              ),
+              const SizedBox(width: 16),
+              const Icon(Icons.attach_money_rounded, color: kAmber, size: 14),
+              Text(
+                '₱${widget.gig.budget.toStringAsFixed(0)}',
+                style: const TextStyle(
+                    color: kAmber,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          if (widget.gig.address.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.location_on_outlined, color: kSub, size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    widget.gig.address,
+                    style: const TextStyle(color: kSub, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: widget.onDecline,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: kSub,
+                    side: BorderSide(color: divider),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('Decline',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed: widget.onAccept,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: green,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('Accept Gig',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -529,6 +921,7 @@ class _GigMarkerData {
   final String hostName;
   final String address;
   final LatLng position;
+  final String? assignedWorkerId;
 
   const _GigMarkerData({
     required this.id,
@@ -539,6 +932,7 @@ class _GigMarkerData {
     required this.hostName,
     required this.address,
     required this.position,
+    this.assignedWorkerId,
   });
 }
 
@@ -574,6 +968,7 @@ class _GigMapSection extends StatefulWidget {
 class _GigMapSectionState extends State<_GigMapSection> {
   final _mapController = MapController();
   double _zoom = 12.0;
+  LatLng? _myLocation;
 
   List<_GigMarkerData> _quickGigs = [];
   List<_GigMarkerData> _openGigs = [];
@@ -589,6 +984,27 @@ class _GigMapSectionState extends State<_GigMapSection> {
     _startOpenSub(db);
     _startOfferedSub(db);
     if (widget.seekingQuickGigs) _startQuickSub(db);
+    _fetchAndCenterMap();
+  }
+
+  Future<void> _fetchAndCenterMap() async {
+    try {
+      bool enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return;
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) return;
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      if (!mounted) return;
+      setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));
+      _mapController.move(_myLocation!, 14.0);
+    } catch (_) {}
   }
 
   @override
@@ -608,14 +1024,20 @@ class _GigMapSectionState extends State<_GigMapSection> {
   void _startQuickSub(FirebaseFirestore db) {
     _quickSub = db
         .collection('quick_gigs')
-        .where('status', isEqualTo: 'scanning')
+        .where('status', whereIn: ['scanning', 'dispatched'])
         .snapshots()
         .listen((s) {
-      final all = s.docs
-          .map((d) => _toMarker(d.id, d.data(), 'quick'))
-          .whereType<_GigMarkerData>()
-          .toList();
-      setState(() => _quickGigs = all.take(1).toList());
+      final all = s.docs.map((d) {
+        final data = d.data();
+        final status = data['status'] as String? ?? '';
+        // Only show dispatched gigs assigned to this worker
+        if (status == 'dispatched' &&
+            data['assignedWorkerId'] != widget.uid) {
+          return null;
+        }
+        return _toMarker(d.id, data, 'quick');
+      }).whereType<_GigMarkerData>().toList();
+      setState(() => _quickGigs = all);
     });
   }
 
@@ -672,6 +1094,7 @@ class _GigMapSectionState extends State<_GigMapSection> {
       hostName: data['hostName'] as String? ?? '',
       address: data['address'] as String? ?? '',
       position: LatLng(geo.latitude, geo.longitude),
+      assignedWorkerId: data['assignedWorkerId'] as String?,
     );
   }
 
@@ -735,7 +1158,8 @@ class _GigMapSectionState extends State<_GigMapSection> {
           height: 48,
           child: _GigPin(
             gig: singleGig,
-            onStart: singleGig.gigType == 'quick'
+            onStart: singleGig.gigType == 'quick' &&
+                    singleGig.assignedWorkerId == widget.uid
                 ? () => widget.onQuickGigStarted?.call(singleGig)
                 : null,
           ),
@@ -860,6 +1284,30 @@ class _GigMapSectionState extends State<_GigMapSection> {
                   userAgentPackageName: 'com.giggre.app',
                 ),
                 MarkerLayer(markers: _buildMarkers()),
+                if (_myLocation != null)
+                  MarkerLayer(
+                    markers: [
+                      Marker(
+                        point: _myLocation!,
+                        width: 22,
+                        height: 22,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: kBlue,
+                            shape: BoxShape.circle,
+                            border:
+                                Border.all(color: Colors.white, width: 2.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: kBlue.withValues(alpha: 0.45),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),

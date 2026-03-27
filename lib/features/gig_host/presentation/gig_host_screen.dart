@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
+import 'package:geolocator/geolocator.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../auth/presentation/login_screen.dart';
@@ -11,6 +12,7 @@ import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
 import 'gig_host_profile_screen.dart';
+import '../services/quick_gig_matching_service.dart';
 
 class GigHostScreen extends StatefulWidget {
   const GigHostScreen({super.key});
@@ -880,16 +882,62 @@ class _GigTileState extends State<_GigTile> {
     ));
   }
 
+  Future<void> _dispatchGig() async {
+    final gigType = widget.data['gigType'] as String? ?? 'quick';
+    if (gigType != 'quick') return;
+    final docId = widget.data['docId'] as String? ?? '';
+    if (docId.isEmpty) return;
+    final location = widget.data['location'] as GeoPoint?;
+    if (location == null) return;
+
+    // Reset to scanning (keep exclusion list — workers who declined stay excluded)
+    await FirebaseFirestore.instance.collection('quick_gigs').doc(docId).update({
+      'status': 'scanning',
+      'assignedWorkerId': null,
+      'assignedWorkerName': null,
+      'searchStartedAt': FieldValue.serverTimestamp(),
+    });
+
+    // Start smart dispatch
+    QuickGigMatchingService.startAutoSearch(gigId: docId, gigLocation: location);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Searching for available workers...'),
+          backgroundColor: kAmber,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
+  }
+
   Color _statusColor(String status) {
     switch (status) {
-      case 'scanning':  return kAmber;
-      case 'open':      return const Color(0xFF22C55E);
-      case 'offered':   return const Color(0xFF8B5CF6);
-      case 'active':    return const Color(0xFF22C55E);
-      case 'assigned':  return kBlue;
-      case 'completed': return const Color(0xFF22C55E);
-      case 'cancelled': return Colors.redAccent;
-      default:          return kSub;
+      case 'scanning':   return kAmber;
+      case 'dispatched': return kBlue;
+      case 'accepted':   return const Color(0xFF22C55E);
+      case 'open':       return const Color(0xFF22C55E);
+      case 'offered':    return const Color(0xFF8B5CF6);
+      case 'active':     return const Color(0xFF22C55E);
+      case 'assigned':   return kBlue;
+      case 'no_worker':  return Colors.redAccent;
+      case 'completed':  return const Color(0xFF22C55E);
+      case 'cancelled':  return Colors.redAccent;
+      default:           return kSub;
+    }
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'scanning':   return 'SCANNING';
+      case 'dispatched': return 'DISPATCHED';
+      case 'accepted':   return 'ACCEPTED';
+      case 'no_worker':  return 'NO WORKER';
+      case 'completed':  return 'COMPLETED';
+      case 'cancelled':  return 'CANCELLED';
+      default:           return status.toUpperCase();
     }
   }
 
@@ -930,7 +978,16 @@ class _GigTileState extends State<_GigTile> {
       final workerName = data['workerName'] as String? ?? '';
       if (workerName.isNotEmpty) subtitle = '→ $workerName';
     } else {
-      subtitle = data['category'] as String? ?? '';
+      final assignedWorkerName = data['assignedWorkerName'] as String?;
+      if ((status == 'dispatched' || status == 'accepted') &&
+          assignedWorkerName != null &&
+          assignedWorkerName.isNotEmpty) {
+        subtitle = '→ $assignedWorkerName';
+      } else if (status == 'no_worker') {
+        subtitle = 'No worker found';
+      } else {
+        subtitle = data['category'] as String? ?? '';
+      }
     }
 
     final createdAt = data['createdAt'] != null
@@ -1049,7 +1106,7 @@ class _GigTileState extends State<_GigTile> {
                       Border.all(color: statusColor.withValues(alpha: 0.4)),
                 ),
                 child: Text(
-                  status.toUpperCase(),
+                  _statusLabel(status),
                   style: TextStyle(
                       color: statusColor,
                       fontSize: 10,
@@ -1068,10 +1125,27 @@ class _GigTileState extends State<_GigTile> {
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                   onSelected: (val) {
+                    if (val == 'dispatch') _dispatchGig();
                     if (val == 'cancel') _confirmCancel();
                     if (val == 'delete') _confirmDelete();
                   },
                   itemBuilder: (ctx) => [
+                    if (!isClosed &&
+                        gigType == 'quick' &&
+                        (status == 'scanning' ||
+                            status == 'no_worker' ||
+                            status == 'dispatched'))
+                      PopupMenuItem(
+                        value: 'dispatch',
+                        child: Row(
+                          children: [
+                            Icon(Icons.send_rounded, color: kAmber, size: 18),
+                            const SizedBox(width: 10),
+                            Text('Dispatch',
+                                style: TextStyle(color: kAmber)),
+                          ],
+                        ),
+                      ),
                     if (!isClosed)
                       const PopupMenuItem(
                         value: 'cancel',
@@ -1109,15 +1183,15 @@ class _GigTileState extends State<_GigTile> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Dummy Worker Data  (replace with Firestore stream later)
+//  Worker Data
 // ─────────────────────────────────────────────────────────────────────────────
-class _DummyWorker {
+class _WorkerData {
   final String id;
   final String name;
   final String skill;
   final LatLng position;
 
-  _DummyWorker({
+  _WorkerData({
     required this.id,
     required this.name,
     required this.skill,
@@ -1125,35 +1199,14 @@ class _DummyWorker {
   });
 }
 
-final _kDummyWorkers = [
-  // Makati / BGC cluster
-  _DummyWorker(id: 'w1', name: 'Juan Dela Cruz',   skill: 'Cleaning',    position: LatLng(14.5547, 121.0244)),
-  _DummyWorker(id: 'w2', name: 'Maria Santos',      skill: 'Delivery',    position: LatLng(14.5515, 121.0290)),
-  _DummyWorker(id: 'w3', name: 'Pedro Reyes',       skill: 'Dishwashing', position: LatLng(14.5568, 121.0211)),
-  // Quezon City cluster
-  _DummyWorker(id: 'w4', name: 'Ana Garcia',        skill: 'Sorting',     position: LatLng(14.6760, 121.0437)),
-  _DummyWorker(id: 'w5', name: 'Ben Torres',        skill: 'Cleaning',    position: LatLng(14.6790, 121.0395)),
-  // Ortigas / Pasig cluster
-  _DummyWorker(id: 'w6', name: 'Carlo Lim',         skill: 'Delivery',    position: LatLng(14.5876, 121.0603)),
-  _DummyWorker(id: 'w7', name: 'Diana Cruz',        skill: 'Packing',     position: LatLng(14.5841, 121.0644)),
-  _DummyWorker(id: 'w8', name: 'Greg Tan',          skill: 'Delivery',    position: LatLng(14.5764, 121.0851)),
-  // Manila proper
-  _DummyWorker(id: 'w9',  name: 'Eduardo Chan',     skill: 'Dishwashing', position: LatLng(14.5942, 120.9821)),
-  _DummyWorker(id: 'w10', name: 'Fe Ramos',         skill: 'Cleaning',    position: LatLng(14.5902, 120.9775)),
-  // Mandaluyong
-  _DummyWorker(id: 'w11', name: 'Helen Ng',         skill: 'Sorting',     position: LatLng(14.5794, 121.0359)),
-  // Taguig
-  _DummyWorker(id: 'w12', name: 'Ivan Sy',          skill: 'Cleaning',    position: LatLng(14.5176, 121.0509)),
-];
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Worker Map Section
 // ─────────────────────────────────────────────────────────────────────────────
 class _WorkerCluster {
   final LatLng center;
   final int count;
-  final _DummyWorker? singleWorker;
-  final List<_DummyWorker> workers;
+  final _WorkerData? singleWorker;
+  final List<_WorkerData> workers;
 
   const _WorkerCluster({
     required this.center,
@@ -1173,11 +1226,64 @@ class _WorkerMapSection extends StatefulWidget {
 class _WorkerMapSectionState extends State<_WorkerMapSection> {
   final _mapController = MapController();
   double _zoom = 12.0;
+  LatLng? _myLocation;
+  List<_WorkerData> _workers = [];
+  StreamSubscription? _workerSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchAndCenterMap();
+    _startWorkersSub();
+  }
 
   @override
   void dispose() {
+    _workerSub?.cancel();
     _mapController.dispose();
     super.dispose();
+  }
+
+  Future<void> _fetchAndCenterMap() async {
+    try {
+      bool enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return;
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) return;
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      if (!mounted) return;
+      setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));
+      _mapController.move(_myLocation!, 14.0);
+    } catch (_) {}
+  }
+
+  void _startWorkersSub() {
+    _workerSub = FirebaseFirestore.instance
+        .collection('users')
+        .where('isOnline', isEqualTo: true)
+        .snapshots()
+        .listen((snap) {
+      final workers = snap.docs.where((d) => d.data()['availableForGigs'] == true).map((d) {
+        final data = d.data();
+        final geo = data['location'] as GeoPoint?;
+        if (geo == null) return null;
+        final skills = (data['skills'] as List?)?.cast<String>() ?? [];
+        return _WorkerData(
+          id: d.id,
+          name: data['name'] as String? ?? 'Worker',
+          skill: skills.isNotEmpty ? skills.first : 'General',
+          position: LatLng(geo.latitude, geo.longitude),
+        );
+      }).whereType<_WorkerData>().toList();
+      if (mounted) setState(() => _workers = workers);
+    });
   }
 
   // Grid cell size shrinks as zoom increases — smaller = less grouping
@@ -1194,7 +1300,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     final gridSize = _gridSize(_zoom);
 
     if (gridSize == 0.0) {
-      return _kDummyWorkers
+      return _workers
           .map((w) => _WorkerCluster(
                 center: w.position,
                 count: 1,
@@ -1204,8 +1310,8 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
           .toList();
     }
 
-    final Map<String, List<_DummyWorker>> grid = {};
-    for (final w in _kDummyWorkers) {
+    final Map<String, List<_WorkerData>> grid = {};
+    for (final w in _workers) {
       final latKey = (w.position.latitude / gridSize).floor();
       final lngKey = (w.position.longitude / gridSize).floor();
       grid.putIfAbsent('$latKey:$lngKey', () => []).add(w);
@@ -1283,7 +1389,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    '${_kDummyWorkers.length} Online',
+                    '${_workers.length} Online',
                     style: const TextStyle(
                       color: Color(0xFF22C55E),
                       fontSize: 11,
@@ -1326,6 +1432,29 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                   userAgentPackageName: 'com.giggre.app',
                 ),
                 MarkerLayer(markers: _buildMarkers()),
+                if (_myLocation != null)
+                  MarkerLayer(
+                    markers: [
+                      Marker(
+                        point: _myLocation!,
+                        width: 22,
+                        height: 22,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF22C55E),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF22C55E).withValues(alpha: 0.45),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -1346,7 +1475,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
 //  Individual Worker Pin
 // ─────────────────────────────────────────────────────────────────────────────
 class _WorkerPin extends StatelessWidget {
-  final _DummyWorker worker;
+  final _WorkerData worker;
   const _WorkerPin({required this.worker});
 
   @override
@@ -1463,7 +1592,7 @@ class _WorkerPin extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _ClusterBadge extends StatelessWidget {
   final int count;
-  final List<_DummyWorker> workers;
+  final List<_WorkerData> workers;
   const _ClusterBadge({required this.count, required this.workers});
 
   void _showWorkerList(BuildContext context) {

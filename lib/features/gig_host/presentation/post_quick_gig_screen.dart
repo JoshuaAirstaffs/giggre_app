@@ -10,6 +10,7 @@ import 'package:latlong2/latlong.dart' hide Path;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../models/quick_gig_model.dart';
+import '../services/quick_gig_matching_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Post Quick Gig Screen
@@ -228,7 +229,13 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         scheduledDate: scheduledAt,
       );
 
-      await FirebaseFirestore.instance.collection('quick_gigs').add(gig.toMap());
+      final docRef = await FirebaseFirestore.instance.collection('quick_gigs').add(gig.toMap());
+
+      // Start smart dispatch in background (do not await)
+      QuickGigMatchingService.startAutoSearch(
+        gigId: docRef.id,
+        gigLocation: geoPoint,
+      );
 
       if (!mounted) return;
       setState(() => _posting = false);

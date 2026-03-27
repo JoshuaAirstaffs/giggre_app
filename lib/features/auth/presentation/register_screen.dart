@@ -340,6 +340,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'ratingAsWorker'  : 5.0,
         'ratingAsHost'    : 5.0,
         'ratingCount'     : 0,
+        'slot'           : 'AVAILABLE',
+        'acceptanceRate' : 1.0,
       });
 
       if (mounted) {

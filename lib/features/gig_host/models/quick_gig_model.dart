@@ -14,6 +14,9 @@ class QuickGigModel {
   final String status;
   final DateTime createdAt;
   final DateTime? scheduledDate;
+  final String? assignedWorkerId;
+  final String? assignedWorkerName;
+  final List<String> exclusionList;
 
   QuickGigModel({
     this.id,
@@ -29,6 +32,9 @@ class QuickGigModel {
     this.status = 'scanning',
     DateTime? createdAt,
     this.scheduledDate,
+    this.assignedWorkerId,
+    this.assignedWorkerName,
+    this.exclusionList = const [],
   }) : createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toMap() => {
@@ -66,6 +72,9 @@ class QuickGigModel {
       scheduledDate: d['scheduledDate'] != null
           ? (d['scheduledDate'] as Timestamp).toDate()
           : null,
+      assignedWorkerId: d['assignedWorkerId'] as String?,
+      assignedWorkerName: d['assignedWorkerName'] as String?,
+      exclusionList: List<String>.from(d['exclusionList'] ?? []),
     );
   }
 }

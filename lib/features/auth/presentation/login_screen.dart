@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -123,16 +124,20 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> signInWithGoogle() async {
     setState(() { isGoogleLoading = true; _error = ''; });
     try {
-      final googleUser = await GoogleSignIn().signIn();
-      if (googleUser == null) { setState(() => isGoogleLoading = false); return; }
-
-      final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken:     googleAuth.idToken,
-      );
-
-      final userCred = await FirebaseAuth.instance.signInWithCredential(credential);
+      UserCredential userCred;
+      if (kIsWeb) {
+        final provider = GoogleAuthProvider();
+        userCred = await FirebaseAuth.instance.signInWithPopup(provider);
+      } else {
+        final googleUser = await GoogleSignIn().signIn();
+        if (googleUser == null) { setState(() => isGoogleLoading = false); return; }
+        final googleAuth = await googleUser.authentication;
+        final credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken:     googleAuth.idToken,
+        );
+        userCred = await FirebaseAuth.instance.signInWithCredential(credential);
+      }
       await _handlePostSignIn(userCred.user!);
 
     } on FirebaseAuthException catch (e) {
