@@ -79,12 +79,16 @@ class QuickGigMatchingService {
     required String workerId,
     required String workerName,
   }) async {
-    await FirebaseFirestore.instance.collection('quick_gigs').doc(gigId).update({
-      'status': 'dispatched',
-      'assignedWorkerId': workerId,
-      'assignedWorkerName': workerName,
-      'dispatchedAt': FieldValue.serverTimestamp(),
-    });
+    final db = FirebaseFirestore.instance;
+    await Future.wait([
+      db.collection('quick_gigs').doc(gigId).update({
+        'status': 'in_progress',
+        'assignedWorkerId': workerId,
+        'assignedWorkerName': workerName,
+        'dispatchedAt': FieldValue.serverTimestamp(),
+      }),
+      db.collection('users').doc(workerId).update({'slot': 'LOCKED'}),
+    ]);
   }
 
   // ── Auto-search loop (up to 5 minutes) ─────────────────────────────────────
@@ -125,7 +129,7 @@ class QuickGigMatchingService {
         final gigData = gigSnap.data()!;
         final status = gigData['status'] as String? ?? '';
 
-        if (['cancelled', 'accepted', 'working', 'completed', 'no_worker']
+        if (['cancelled', 'navigating', 'arrived', 'working', 'completed', 'no_worker']
             .contains(status)) {
           return;
         }
@@ -154,21 +158,21 @@ class QuickGigMatchingService {
 
         // ── Wait up to 30 s for worker response ────────────
         final deadline = DateTime.now().add(_workerResponseTimeout);
-        String finalStatus = 'dispatched';
+        String finalStatus = 'in_progress';
 
         while (DateTime.now().isBefore(deadline)) {
           await Future.delayed(_pollInterval);
           final check = await gigRef.get();
           if (!check.exists) return;
           final cs = check.data()!['status'] as String? ?? '';
-          if (cs != 'dispatched') {
+          if (cs != 'in_progress') {
             finalStatus = cs;
             break;
           }
         }
 
         // Worker accepted / gig was cancelled
-        if (['accepted', 'working', 'completed', 'cancelled'].contains(finalStatus)) {
+        if (['navigating', 'arrived', 'working', 'completed', 'cancelled'].contains(finalStatus)) {
           return;
         }
 
@@ -177,15 +181,18 @@ class QuickGigMatchingService {
 
         // Timed out — exclude worker and try next
         final timedOutWorkerId = worker['id'] as String;
-        await gigRef.update({
-          'status': 'scanning',
-          'assignedWorkerId': null,
-          'assignedWorkerName': null,
-          'exclusionList': FieldValue.arrayUnion([timedOutWorkerId]),
-        });
-        await db.collection('users').doc(timedOutWorkerId).update({
-          'acceptanceRate': FieldValue.increment(-0.05),
-        });
+        await Future.wait([
+          gigRef.update({
+            'status': 'scanning',
+            'assignedWorkerId': null,
+            'assignedWorkerName': null,
+            'exclusionList': FieldValue.arrayUnion([timedOutWorkerId]),
+          }),
+          db.collection('users').doc(timedOutWorkerId).update({
+            'slot': 'AVAILABLE',
+            'acceptanceRate': FieldValue.increment(-0.05),
+          }),
+        ]);
       }
     } finally {
       _activeSearches.remove(gigId);

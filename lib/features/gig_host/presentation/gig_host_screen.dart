@@ -13,6 +13,7 @@ import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
 import 'gig_host_profile_screen.dart';
 import '../services/quick_gig_matching_service.dart';
+import 'widgets/gig_progress_tracker.dart';
 
 class GigHostScreen extends StatefulWidget {
   const GigHostScreen({super.key});
@@ -251,6 +252,10 @@ class _GigHostScreenState extends State<GigHostScreen> {
 
               // ── Workers Map ───────────────────────────────────
               const _WorkerMapSection(),
+              const SizedBox(height: 28),
+
+              // ── Active Gig Progress ───────────────────────────
+              GigProgressTracker(hostId: uid),
               const SizedBox(height: 28),
 
               // ── Post a Gig ────────────────────────────────────
@@ -916,7 +921,7 @@ class _GigTileState extends State<_GigTile> {
   Color _statusColor(String status) {
     switch (status) {
       case 'scanning':   return kAmber;
-      case 'dispatched': return kBlue;
+      case 'in_progress': return kBlue;
       case 'accepted':   return const Color(0xFF22C55E);
       case 'open':       return const Color(0xFF22C55E);
       case 'offered':    return const Color(0xFF8B5CF6);
@@ -932,7 +937,7 @@ class _GigTileState extends State<_GigTile> {
   String _statusLabel(String status) {
     switch (status) {
       case 'scanning':   return 'SCANNING';
-      case 'dispatched': return 'DISPATCHED';
+      case 'in_progress': return 'IN PROGRESS';
       case 'accepted':   return 'ACCEPTED';
       case 'no_worker':  return 'NO WORKER';
       case 'completed':  return 'COMPLETED';
@@ -979,7 +984,7 @@ class _GigTileState extends State<_GigTile> {
       if (workerName.isNotEmpty) subtitle = '→ $workerName';
     } else {
       final assignedWorkerName = data['assignedWorkerName'] as String?;
-      if ((status == 'dispatched' || status == 'accepted') &&
+      if (status == 'in_progress' &&
           assignedWorkerName != null &&
           assignedWorkerName.isNotEmpty) {
         subtitle = '→ $assignedWorkerName';
@@ -1134,7 +1139,7 @@ class _GigTileState extends State<_GigTile> {
                         gigType == 'quick' &&
                         (status == 'scanning' ||
                             status == 'no_worker' ||
-                            status == 'dispatched'))
+                            status == 'in_progress'))
                       PopupMenuItem(
                         value: 'dispatch',
                         child: Row(
