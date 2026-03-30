@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/screens/app_contents/contact_us.dart';
 import 'package:giggre_app/screens/app_contents/help_faq.dart';
 import 'package:giggre_app/screens/app_contents/privacy_policy.dart';
@@ -252,6 +253,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (confirm == true) {
       await FirebaseAuth.instance.signOut();
       if (mounted) {
+
+        //clear stored data when logging out
+        context.read<CurrentUserProvider>().clearUser();
+
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),
           (route) => false,
