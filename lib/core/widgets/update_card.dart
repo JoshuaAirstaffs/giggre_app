@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../theme/app_colors.dart';
 
 class UpdateCard extends StatelessWidget {
   final String title;
   final String description;
-  final IconData icon;
-  final String date;
+  final DateTime date; // ✅ clean DateTime, no Timestamp dependency
   final String category;
 
   const UpdateCard({
     super.key,
     required this.title,
     required this.description,
-    required this.icon,
     required this.date,
     required this.category,
   });
@@ -20,12 +19,13 @@ class UpdateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final iconBg = isDark ? const Color(0xFF001B52) : const Color(0xFFEBF0FB);
     final badgeBg = isDark ? const Color(0xFF001B52) : const Color(0xFFDDE9FB);
     final badgeText = Theme.of(context).colorScheme.primary;
     final titleColor = Theme.of(context).colorScheme.onSurface;
     final descColor = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.65);
     final borderColor = Theme.of(context).dividerColor;
+
+    final formattedDate = DateFormat('MMM dd, yyyy').format(date); // ✅ no cast needed
 
     return Container(
       decoration: BoxDecoration(
@@ -40,15 +40,6 @@ class UpdateCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: iconBg,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, size: 20, color: kBlue),
-              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -58,8 +49,7 @@ class UpdateCard extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: badgeBg,
                             borderRadius: BorderRadius.circular(20),
@@ -74,9 +64,8 @@ class UpdateCard extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          date,
-                          style: const TextStyle(
-                              fontSize: 12, color: Color(0xFF888888)),
+                          formattedDate,
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF888888)),
                         ),
                       ],
                     ),
@@ -95,8 +84,7 @@ class UpdateCard extends StatelessWidget {
                       description,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 13, color: descColor, height: 1.5),
+                      style: TextStyle(fontSize: 13, color: descColor, height: 1.5),
                     ),
                   ],
                 ),

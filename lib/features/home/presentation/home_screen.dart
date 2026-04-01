@@ -35,11 +35,13 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _hasUnreadMessages = false;
   StreamSubscription? _roomsStreamSub;        // ← rooms-level sub
   final List<StreamSubscription> _roomSubs = []; // ← message-level subs
+  List<Map<String, dynamic>> _updates = [];
 
   @override
   void initState() {
     super.initState();
     _loadUser();
+    _fetchUpdates();
     WidgetsBinding.instance.addPostFrameCallback((_) => _showBetaModal());
     _listenForUnreadMessages();
   }
@@ -50,6 +52,28 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final sub in _roomSubs) sub.cancel();
     super.dispose();
   }
+
+ Future<void> _fetchUpdates() async {
+  try {
+    final response = await FirebaseFirestore.instance
+        .collection('app_content')
+        .doc('updates')
+        .collection('items')
+        .get();
+    setState(() {
+      _updates = response.docs.map((doc) {
+        final data = doc.data();
+        if (data['dateUpdated'] is Timestamp) {
+          data['dateUpdated'] = (data['dateUpdated'] as Timestamp).toDate();
+        }
+        return data;
+      }).toList();
+    });
+  } catch (e) {
+    debugPrint('Error fetching updates: $e');
+  }
+}
+
 
   void _listenForUnreadMessages() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -494,32 +518,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-              UpdateCard(
-                title: "Welcome to Giggre!",
-                icon: Icons.update,
-                date: "2025-10-15",
-                category: "Announcement",
-                description:
-                    "We are officially launching Giggre! We're excited to bring you the best gig economy platform. Join us and start your journey today!",
-              ),
-              const SizedBox(height: 16),
-              UpdateCard(
-                title: "New Feature: Giggre Rewards",
-                icon: Icons.star,
-                date: "2025-10-15",
-                category: "Feature",
-                description:
-                    "We've added a new feature to Giggre! You can now earn rewards for completing gigs and referrals. Check it out and start earning today!",
-              ),
-              const SizedBox(height: 16),
-              UpdateCard(
-                title: "New Feature: Giggre Rewards",
-                icon: Icons.star,
-                date: "2025-10-15",
-                category: "Feature",
-                description:
-                    "We've added a new feature to Giggre! You can now earn rewards for completing gigs and referrals. Check it out and start earning today!",
-              ),
+              ..._updates
+              .where((u) => u['sortNumber'] == 1)
+              .map((update) => GestureDetector(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: UpdateCard(
+                        title: update['title'] as String,
+                        date: update['dateUpdated'] as DateTime,
+                        category: update['category'] as String,
+                        description: update['body'] as String,
+                      ),
+                    ),
+              )),
             ],
           ),
         ),
