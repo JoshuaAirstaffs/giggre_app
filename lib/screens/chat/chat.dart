@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_html/flutter_html.dart';
+import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
+import 'package:provider/provider.dart';
 
 class Chat extends StatefulWidget {
   final String roomId;
@@ -24,10 +27,9 @@ class _ChatState extends State<Chat> {
   @override
   void initState() {
     super.initState();
-    _markSupportMessagesAsSeen(); // ✅ mark as seen when chat is opened
+    _markSupportMessagesAsSeen();
   }
 
-  // Mark all unread support messages as seen when user opens the chat
   Future<void> _markSupportMessagesAsSeen() async {
     try {
       final snap = await _messagesRef
@@ -54,28 +56,29 @@ class _ChatState extends State<Chat> {
     setState(() => _isSending = true);
     _msgController.clear();
 
-    try {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      final name = FirebaseAuth.instance.currentUser?.displayName ?? 'You';
+    // ✅ Read context BEFORE any await
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final name = context.read<CurrentUserProvider>().currentName ?? '';
 
+    try {
       await _messagesRef.add({
         'senderId': uid,
         'isSupport': false,
         'name': name,
         'text': text,
         'hasSeen': false,
+        'isAutoReply': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // update lastMessage on chat_rooms doc
       await FirebaseFirestore.instance
           .collection('chat_rooms')
           .doc(widget.roomId)
           .update({
-        'lastMessage': text,
-        'lastMessageSender': 'You',
-        'lastMessageAt': FieldValue.serverTimestamp(),
-      });
+            'lastMessage': text,
+            'lastMessageSender': 'You',
+            'lastMessageAt': FieldValue.serverTimestamp(),
+          });
 
       _scrollToBottom();
     } catch (e) {
@@ -123,8 +126,11 @@ class _ChatState extends State<Chat> {
                 color: const Color(0xFFFBBF24),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.support_agent,
-                  color: Colors.white, size: 20),
+              child: const Icon(
+                Icons.support_agent,
+                color: Colors.white,
+                size: 20,
+              ),
             ),
             const SizedBox(width: 10),
             Column(
@@ -152,7 +158,7 @@ class _ChatState extends State<Chat> {
       ),
       body: Column(
         children: [
-          // ── Messages list ───────────────────────────────────────────────
+          // ── Messages list ──────────────────────────────────────────────
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: _messagesRef
@@ -171,14 +177,16 @@ class _ChatState extends State<Chat> {
                       'No messages yet.\nSay hello! 👋',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                          color: Colors.grey.shade400, fontSize: 14),
+                        color: Colors.grey.shade400,
+                        fontSize: 14,
+                      ),
                     ),
                   );
                 }
 
-                // auto scroll on new message
-                WidgetsBinding.instance
-                    .addPostFrameCallback((_) => _scrollToBottom());
+                WidgetsBinding.instance.addPostFrameCallback(
+                  (_) => _scrollToBottom(),
+                );
 
                 return ListView.builder(
                   controller: _scrollController,
@@ -190,6 +198,7 @@ class _ChatState extends State<Chat> {
                     final isSupport = data['isSupport'] as bool? ?? false;
                     final text = data['text'] as String? ?? '';
                     final ts = data['createdAt'] as Timestamp?;
+                    final isAutoReply = data['isAutoReply'] as bool? ?? false;
                     final time = ts != null ? _formatTime(ts.toDate()) : '';
 
                     return _MessageBubble(
@@ -198,6 +207,7 @@ class _ChatState extends State<Chat> {
                       isMe: isMe,
                       isSupport: isSupport,
                       isDark: isDark,
+                      isAutoReply: isAutoReply,
                     );
                   },
                 );
@@ -205,7 +215,7 @@ class _ChatState extends State<Chat> {
             ),
           ),
 
-          // ── Input bar ───────────────────────────────────────────────────
+          // ── Input bar ──────────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             decoration: BoxDecoration(
@@ -240,8 +250,7 @@ class _ChatState extends State<Chat> {
                           hintText: 'Type a message...',
                           border: InputBorder.none,
                           isDense: true,
-                          contentPadding:
-                              EdgeInsets.symmetric(vertical: 10),
+                          contentPadding: EdgeInsets.symmetric(vertical: 10),
                         ),
                         onSubmitted: (_) => _sendMessage(),
                       ),
@@ -257,8 +266,11 @@ class _ChatState extends State<Chat> {
                         color: _isSending ? Colors.grey : kBlue,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.send_rounded,
-                          color: Colors.white, size: 20),
+                      child: const Icon(
+                        Icons.send_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
                     ),
                   ),
                 ],
@@ -278,7 +290,7 @@ class _ChatState extends State<Chat> {
   }
 }
 
-// ── Message Bubble ────────────────────────────────────────────────────────────
+// ── Message Bubble ─────────────────────────────────────────────────────────────
 
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
@@ -287,6 +299,7 @@ class _MessageBubble extends StatelessWidget {
     required this.isMe,
     required this.isSupport,
     required this.isDark,
+    required this.isAutoReply,
   });
 
   final String text;
@@ -294,6 +307,10 @@ class _MessageBubble extends StatelessWidget {
   final bool isMe;
   final bool isSupport;
   final bool isDark;
+  final bool isAutoReply;
+
+  // Check if the text contains HTML tags
+  bool get _isHtml => text.contains('<') && text.contains('>');
 
   @override
   Widget build(BuildContext context) {
@@ -312,8 +329,11 @@ class _MessageBubble extends StatelessWidget {
                 color: const Color(0xFFFBBF24),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: const Icon(Icons.support_agent,
-                  color: Colors.white, size: 14),
+              child: const Icon(
+                Icons.support_agent,
+                color: Colors.white,
+                size: 14,
+              ),
             ),
             const SizedBox(width: 6),
           ],
@@ -321,19 +341,28 @@ class _MessageBubble extends StatelessWidget {
           // Bubble
           Flexible(
             child: Column(
-              crossAxisAlignment: isMe
-                  ? CrossAxisAlignment.end
-                  : CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
+                    border: (isMe && !isAutoReply)
+                        ? null
+                        : Border.all(
+                            color: isMe
+                                ? Colors.white.withValues(alpha: 0.3)
+                                : kAmber,
+                            width: 1.5,
+                          ),
                     color: isMe
                         ? kBlue
                         : isDark
-                            ? Colors.grey.shade800
-                            : Colors.grey.shade200,
+                        ? Colors.grey.shade800
+                        : Colors.grey.shade200,
                     borderRadius: BorderRadius.only(
                       topLeft: const Radius.circular(16),
                       topRight: const Radius.circular(16),
@@ -341,19 +370,73 @@ class _MessageBubble extends StatelessWidget {
                       bottomRight: Radius.circular(isMe ? 4 : 16),
                     ),
                   ),
-                  child: Text(
-                    text,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isMe ? Colors.white : null,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Auto reply label
+                      if (isAutoReply) ...[
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.auto_fix_high,
+                              size: 15,
+                              color: isMe ? Colors.white70 : Colors.grey.shade600,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Auto Reply',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isMe
+                                    ? Colors.white70
+                                    : Colors.grey.shade600,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+
+                      // ── Message content ──
+                      _isHtml
+                          ? Html(
+                              data: text,
+                              style: {
+                                'body': Style(
+                                  fontSize: FontSize(14),
+                                  color: isMe
+                                      ? Colors.white
+                                      : isDark
+                                      ? Colors.white
+                                      : Colors.black87,
+                                  margin: Margins.zero,
+                                  padding: HtmlPaddings.zero,
+                                ),
+                                'div': Style(
+                                  margin: Margins.zero,
+                                  padding: HtmlPaddings.zero,
+                                ),
+                              },
+                            )
+                          : Text(
+                              text,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isMe ? Colors.white : null,
+                              ),
+                            ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 3),
                 Text(
                   time,
                   style: TextStyle(
-                      fontSize: 10, color: Colors.grey.shade400),
+                    fontSize: 10,
+                    color: Colors.grey.shade400,
+                  ),
                 ),
               ],
             ),

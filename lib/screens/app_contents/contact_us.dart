@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_html/flutter_html.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:provider/provider.dart';
@@ -189,33 +190,140 @@ class _MyTicketsTab extends StatefulWidget {
 class _MyTicketsTabState extends State<_MyTicketsTab> {
   String? _filterStatus;
 
-  static const _statuses = ['open', 'in_progress', 'resolved'];
+  static const _statuses = ['open', 'in progress', 'resolved'];
 
   static Color _badgeColor(String status) => switch (status) {
         'resolved' => Colors.green,
-        'in_progress' => Colors.orange,
+        'in progress' => Colors.orange,
         _ => kBlue,
       };
 
   static IconData _badgeIcon(String status) => switch (status) {
         'resolved' => Icons.check_circle_outline,
-        'in_progress' => Icons.timelapse,
+        'in progress' => Icons.timelapse,
         _ => Icons.radio_button_unchecked,
       };
 
   String _formatDate(DateTime dt) =>
       '${dt.month}/${dt.day}/${dt.year} · ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
 
-  void _showTicketDetails(BuildContext context, Map<String, dynamic> data) {
+  // ── Always show details first, "View Message" button handles navigation ────
+  void _onTicketTap(
+    BuildContext context,
+    String ticketId,
+    Map<String, dynamic> data,
+  ) {
+    _showTicketDetails(context, ticketId, data);
+  }
+
+  // ── Lazily create chat room for admin broadcast tickets ───────────────────
+  Future<String?> _resolveRoomId(
+    BuildContext context,
+    String ticketId,
+    Map<String, dynamic> data,
+  ) async {
+    final source = data['source'] as String? ?? 'user';
+
+    // user-submitted — room already exists on the ticket doc
+    if (source == 'user') {
+      return data['roomId'] as String?;
+    }
+
+    // admin broadcast — check readBy subcollection
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+
+    final readByRef = FirebaseFirestore.instance
+        .collection('support_tickets')
+        .doc(ticketId)
+        .collection('readBy')
+        .doc(uid);
+
+    final readBySnap = await readByRef.get();
+
+    if (readBySnap.exists && readBySnap.data()?['roomId'] != null) {
+      return readBySnap.data()!['roomId'] as String;
+    }
+
+    // first tap — create room + auto-reply
+    try {
+      final currentUser = context.read<CurrentUserProvider>();
+      final roomRef =
+          FirebaseFirestore.instance.collection('chat_rooms').doc();
+
+      await roomRef.set({
+        'userId': uid,
+        'name': currentUser.currentName ?? '',
+        'subject': data['subject'] ?? '',
+        'sendTo': 'Giggre Support',
+        'status': 'open',
+        'isSupport': true,
+        'ticketId': ticketId,
+        'lastMessage': '',
+        'lastMessageSender': '',
+        'lastMessageAt': FieldValue.serverTimestamp(),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      final autoReplySnap = await FirebaseFirestore.instance
+          .collection('support_settings')
+          .doc('qGDefSx1JYdx86VxlznN')
+          .get();
+
+      debugPrint(
+          'Auto reply enabled: ${autoReplySnap.data()?['enabled_auto_reply']}');
+
+      final isAutoReplyEnabled =
+          autoReplySnap.data()?['enabled_auto_reply'] ?? false;
+      final autoReply = autoReplySnap.data()?['auto_reply_message'] ??
+          "Thank you for contacting us! We'll get back to you shortly.";
+
+      if (isAutoReplyEnabled) {
+        await roomRef.collection('messages').add({
+          'senderId': 'support',
+          'isSupport': true,
+          'name': 'Giggre Support',
+          'text': autoReply,
+          'hasSeen': false,
+          'createdAt': FieldValue.serverTimestamp(),
+          'isAutoReply': true,
+        });
+
+        await roomRef.update({
+          'lastMessage': autoReply,
+          'lastMessageSender': 'Support',
+          'lastMessageAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // mark as read + store roomId
+      await readByRef.set({
+        'readAt': FieldValue.serverTimestamp(),
+        'roomId': roomRef.id,
+      });
+
+      return roomRef.id;
+    } catch (e) {
+      debugPrint('Failed to create chat room for broadcast ticket: $e');
+      return null;
+    }
+  }
+
+  void _showTicketDetails(
+    BuildContext context,
+    String ticketId,
+    Map<String, dynamic> data,
+  ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final status = data['status'] as String? ?? 'open';
     final color = _badgeColor(status);
+    final isAdminTicket = data['source'] == 'admin';
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => Container(
+      builder: (sheetContext) => Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
@@ -226,6 +334,7 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // drag handle
               Center(
                 child: Container(
                   width: 40,
@@ -237,6 +346,8 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                 ),
               ),
               const SizedBox(height: 20),
+
+              // subject + status
               Row(
                 children: [
                   Icon(_badgeIcon(status), color: color, size: 18),
@@ -248,6 +359,25 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                           fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ),
+                  // admin badge
+                  if (isAdminTicket) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: kBlue.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'FROM GIGGRE',
+                        style: TextStyle(
+                            color: kBlue,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 4),
@@ -268,19 +398,29 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
               const SizedBox(height: 16),
               const Divider(),
               const SizedBox(height: 12),
-              _DetailRow(
+
+              // ticket number if present
+              if (data['ticket_number'] != null)
+                _DetailRow(
+                  icon: Icons.confirmation_number_outlined,
+                  label: 'Ticket No.',
+                  value: data['ticket_number'] as String,
+                ),
+
+              // only show name/email for user-submitted tickets
+              if (!isAdminTicket) ...[
+                _DetailRow(
                   icon: Icons.person_outline,
                   label: 'Name',
-                  value: data['name'] ?? ''),
-              _DetailRow(
+                  value: data['name'] ?? '',
+                ),
+                _DetailRow(
                   icon: Icons.email_outlined,
                   label: 'Email',
-                  value: data['email'] ?? ''),
-              if ((data['roomId'] as String?)?.isNotEmpty == true)
-                _DetailRow(
-                    icon: Icons.meeting_room_outlined,
-                    label: 'Room ID',
-                    value: data['roomId']),
+                  value: data['email'] ?? '',
+                ),
+              ],
+
               if (data['createdAt'] != null)
                 _DetailRow(
                   icon: Icons.access_time,
@@ -289,15 +429,23 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                       (data['createdAt'] as Timestamp).toDate()),
                 ),
               const SizedBox(height: 12),
-              const Text('Message',
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey)),
+              const Text(
+                'Message',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey),
+              ),
               const SizedBox(height: 6),
-              Text(data['message'] ?? '',
-                  style: const TextStyle(fontSize: 14)),
+              Html(data: data['message'] ?? ''),
               const SizedBox(height: 24),
+
+              // View Message button — resolves room lazily for admin tickets
+              _ViewMessageButton(
+                ticketId: ticketId,
+                data: data,
+                resolveRoomId: _resolveRoomId,
+              ),
             ],
           ),
         ),
@@ -315,19 +463,26 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
           child: Text('You must be logged in to view tickets.'));
     }
 
-    var query = FirebaseFirestore.instance
+    final userTicketsQuery = FirebaseFirestore.instance
         .collection('support_tickets')
         .where('userId', isEqualTo: uid)
         .orderBy('createdAt', descending: true);
 
-    if (_filterStatus != null) {
-      query = query.where('status', isEqualTo: _filterStatus);
-    }
+    final broadcastQuery = FirebaseFirestore.instance
+        .collection('support_tickets')
+        .where('recipientType', isEqualTo: 'all')
+        .orderBy('createdAt', descending: true);
+
+    final targetedQuery = FirebaseFirestore.instance
+        .collection('support_tickets')
+        .where('recipientType', isEqualTo: 'specific')
+        .where('recipients', arrayContains: uid)
+        .orderBy('createdAt', descending: true);
 
     return SafeArea(
       child: Column(
         children: [
-          // ── Filter chips ────────────────────────────────────────────────
+          // ── Filter chips ──────────────────────────────────────────────────
           SizedBox(
             height: 52,
             child: ListView(
@@ -355,16 +510,42 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
             ),
           ),
 
-          // ── Ticket list ─────────────────────────────────────────────────
+          // ── Ticket list ───────────────────────────────────────────────────
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: query.snapshots(),
+            child: StreamBuilder<List<QuerySnapshot>>(
+              stream: Stream.periodic(const Duration(seconds: 1)).asyncMap(
+                (_) => Future.wait([
+                  userTicketsQuery.get(),
+                  broadcastQuery.get(),
+                  targetedQuery.get(),
+                ]),
+              ),
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final docs = snapshot.data?.docs ?? [];
+                final allDocs = [
+                  ...snapshot.data![0].docs,
+                  ...snapshot.data![1].docs,
+                  ...snapshot.data![2].docs,
+                ];
+
+                allDocs.sort((a, b) {
+                  final aTime =
+                      (a.data() as Map)['createdAt'] as Timestamp?;
+                  final bTime =
+                      (b.data() as Map)['createdAt'] as Timestamp?;
+                  if (aTime == null || bTime == null) return 0;
+                  return bTime.compareTo(aTime);
+                });
+
+                final docs = _filterStatus == null
+                    ? allDocs
+                    : allDocs.where((d) {
+                        final data = d.data() as Map<String, dynamic>;
+                        return data['status'] == _filterStatus;
+                      }).toList();
 
                 if (docs.isEmpty) {
                   return Center(
@@ -395,20 +576,27 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                     itemCount: docs.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (context, i) {
-                      final data = docs[i].data() as Map<String, dynamic>;
-                      final status = data['status'] as String? ?? 'open';
+                      final docSnap = docs[i];
+                      final data =
+                          docSnap.data() as Map<String, dynamic>;
+                      final status =
+                          data['status'] as String? ?? 'open';
                       final color = _badgeColor(status);
+                      final isAdminTicket = data['source'] == 'admin';
 
                       return GestureDetector(
-                        onTap: () => _showTicketDetails(context, data),
+                        onTap: () =>
+                            _onTicketTap(context, docSnap.id, data),
                         child: Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: isDark ? Colors.black : Colors.white,
+                            color:
+                                isDark ? Colors.black : Colors.white,
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.grey.withValues(alpha: 0.08),
+                                color: Colors.grey
+                                    .withValues(alpha: 0.08),
                                 blurRadius: 10,
                                 offset: const Offset(0, 4),
                               ),
@@ -434,11 +622,35 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                                     ),
                                   ),
                                   const SizedBox(width: 8),
+                                  if (isAdminTicket) ...[
+                                    Container(
+                                      padding:
+                                          const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: kBlue
+                                            .withValues(alpha: 0.1),
+                                        borderRadius:
+                                            BorderRadius.circular(20),
+                                      ),
+                                      child: Text(
+                                        'FROM GIGGRE',
+                                        style: TextStyle(
+                                          color: kBlue,
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                  ],
                                   Container(
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 8, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: color.withValues(alpha: 0.1),
+                                      color: color
+                                          .withValues(alpha: 0.1),
                                       borderRadius:
                                           BorderRadius.circular(20),
                                     ),
@@ -456,14 +668,25 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                                 ],
                               ),
                               const SizedBox(height: 6),
-                              Text(
-                                data['message'] ?? '',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade500),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
+                             Html(
+                                data: data['message'] ?? '',
+                                style: {
+                                  'body': Style(
+                                    maxLines: 1,
+                                    textOverflow: TextOverflow.ellipsis,
+                                    color: Colors.grey.shade500,
+                                  ),
+                                  'p': Style(
+                                    margin: Margins.zero,
+                                    maxLines: 1,
+                                    textOverflow: TextOverflow.ellipsis,
+                                    color: Colors.grey.shade500,
+                                  ),
+                                  'br': Style(margin: Margins.zero),
+                                },
+                                shrinkWrap: true,
                               ),
+
                               if (data['createdAt'] != null) ...[
                                 const SizedBox(height: 8),
                                 Row(
@@ -473,9 +696,10 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                                         color: Colors.grey.shade400),
                                     const SizedBox(width: 4),
                                     Text(
-                                      _formatDate((data['createdAt']
-                                              as Timestamp)
-                                          .toDate()),
+                                      _formatDate(
+                                          (data['createdAt']
+                                                  as Timestamp)
+                                              .toDate()),
                                       style: TextStyle(
                                           fontSize: 11,
                                           color: Colors.grey.shade400),
@@ -483,8 +707,8 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                                     const Spacer(),
                                     Text(
                                       'Tap for details',
-                                      style:
-                                          TextStyle(fontSize: 11, color: kBlue),
+                                      style: TextStyle(
+                                          fontSize: 11, color: kBlue),
                                     ),
                                   ],
                                 ),
@@ -500,6 +724,72 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── View Message Button — handles loading state while resolving room ──────────
+
+class _ViewMessageButton extends StatefulWidget {
+  const _ViewMessageButton({
+    required this.ticketId,
+    required this.data,
+    required this.resolveRoomId,
+  });
+
+  final String ticketId;
+  final Map<String, dynamic> data;
+  final Future<String?> Function(
+      BuildContext, String, Map<String, dynamic>) resolveRoomId;
+
+  @override
+  State<_ViewMessageButton> createState() => _ViewMessageButtonState();
+}
+
+class _ViewMessageButtonState extends State<_ViewMessageButton> {
+  bool _loading = false;
+
+  Future<void> _handleTap() async {
+    setState(() => _loading = true);
+    try {
+      final roomId =
+          await widget.resolveRoomId(context, widget.ticketId, widget.data);
+      if (!mounted) return;
+      if (roomId != null) {
+        Navigator.pop(context); // close bottom sheet
+        Navigator.pushNamed(context, '/chat/$roomId');
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _loading ? null : _handleTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _loading ? Colors.grey : kBlue,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: _loading
+              ? const SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2),
+                )
+              : const Text(
+                  'View Message',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w600),
+                ),
+        ),
       ),
     );
   }
@@ -526,9 +816,11 @@ class _FilterChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         decoration: BoxDecoration(
-          color: selected ? color : color.withValues(alpha: 0.08),
+          color:
+              selected ? color : color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
@@ -678,7 +970,8 @@ class _CopyContainer extends StatelessWidget {
           children: [
             Icon(icon, color: kBlue),
             const SizedBox(height: 4),
-            Text(title, style: TextStyle(color: textColor, fontSize: 12)),
+            Text(title,
+                style: TextStyle(color: textColor, fontSize: 12)),
             const SizedBox(height: 4),
             Text(
               value,
@@ -689,7 +982,8 @@ class _CopyContainer extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            Text('Tap to copy', style: TextStyle(color: kBlue, fontSize: 12)),
+            Text('Tap to copy',
+                style: TextStyle(color: kBlue, fontSize: 12)),
           ],
         ),
       ),
@@ -754,74 +1048,87 @@ class _FormsState extends State<_Forms> {
 
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      final roomId =
-          FirebaseFirestore.instance.collection('chat_rooms').doc().id;
+      final roomRef =
+          FirebaseFirestore.instance.collection('chat_rooms').doc();
 
-      // 1. create the support ticket
+      // 1. generate ticket number
+      final ticketNumber = await _generateTicketNumber();
+
+      // 2. create the support ticket
       await FirebaseFirestore.instance.collection('support_tickets').add({
+        'source': 'user',
+        'ticket_number': ticketNumber,
         'userId': uid,
         'name': name,
         'email': email,
         'subject': subject,
         'message': message,
-        'roomId': roomId,
+        'roomId': roomRef.id,
         'status': 'open',
         'hasRead': false,
         'createdAt': FieldValue.serverTimestamp(),
+        'recipientType': null,
+        'recipients': [],
+        'createdBy': null,
       });
 
-      // 2. create the chat_room document
-      final roomRef = FirebaseFirestore.instance
-          .collection('chat_rooms')
-          .doc(roomId);
-
+      // 3. create the chat_room document
       await roomRef.set({
         'userId': uid,
         'name': name,
         'subject': subject,
         'sendTo': 'Giggre Support',
         'status': 'open',
-        'isSupport': true,                          // ✅ required for unread badge query
+        'isSupport': true,
+        'ticketId': null,
         'lastMessage': message,
         'lastMessageSender': 'You',
         'lastMessageAt': FieldValue.serverTimestamp(),
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // 3. save user's first message to subcollection
+      // 4. save user's first message
       await roomRef.collection('messages').add({
         'senderId': uid,
         'isSupport': false,
         'name': name,
         'text': message,
-        'hasSeen': true,                            // ✅ user's own message is already seen
+        'hasSeen': true,
         'createdAt': FieldValue.serverTimestamp(),
+        'isAutoReply': false,
       });
 
-      // 4. auto-reply from support
+      // 5. auto-reply
       await Future.delayed(const Duration(seconds: 2));
 
-      const autoReply =
-          'Thank you for contacting us! We\'ll get back to you shortly.';
+      final autoReplySnap = await FirebaseFirestore.instance
+          .collection('support_settings')
+          .doc('qGDefSx1JYdx86VxlznN')
+          .get();
 
-      await roomRef.collection('messages').add({
-        'senderId': 'support',
-        'isSupport': true,
-        'name': 'Giggre Support',
-        'text': autoReply,
-        'hasSeen': false,                           // ✅ unread until user opens chat
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      final isAutoReplyEnabled =
+          autoReplySnap.data()?['enabled_auto_reply'] ?? false;
+      final autoReply = autoReplySnap.data()?['auto_reply_message'] ??
+          "Thank you for contacting us! We'll get back to you shortly.";
 
-      // 5. update chat_room with latest message (auto-reply)
-      await roomRef.update({
-        'lastMessage': autoReply,
-        'lastMessageSender': 'Support',
-        'lastMessageAt': FieldValue.serverTimestamp(),
-      });
+      if (isAutoReplyEnabled) {
+        await roomRef.collection('messages').add({
+          'senderId': 'support',
+          'isSupport': true,
+          'name': 'Giggre Support',
+          'text': autoReply,
+          'hasSeen': false,
+          'createdAt': FieldValue.serverTimestamp(),
+          'isAutoReply': true,
+        });
 
-      _nameController.clear();
-      _emailController.clear();
+        await roomRef.update({
+          'lastMessage': autoReply,
+          'lastMessageSender': 'Support',
+          'lastMessageAt': FieldValue.serverTimestamp(),
+        });
+      }
+
       _subjectController.clear();
       _messageController.clear();
 
@@ -846,6 +1153,26 @@ class _FormsState extends State<_Forms> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  // ── Ticket number generator (mirrors Next.js lib/generateTicketNumber.ts) ──
+  Future<String> _generateTicketNumber() async {
+    final counterRef = FirebaseFirestore.instance
+        .collection('_counters')
+        .doc('support_tickets');
+    final year = DateTime.now().year;
+
+    final count = await FirebaseFirestore.instance
+        .runTransaction<int>((t) async {
+      final snap = await t.get(counterRef);
+      final current =
+          (snap.data()?['count_$year'] as int?) ?? 0;
+      final next = current + 1;
+      t.set(counterRef, {'count_$year': next}, SetOptions(merge: true));
+      return next;
+    });
+
+    return 'TKT-$year-${count.toString().padLeft(6, '0')}';
   }
 
   InputDecoration _inputDecoration({

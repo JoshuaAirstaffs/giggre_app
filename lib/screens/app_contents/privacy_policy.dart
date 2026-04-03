@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:giggre_app/core/theme/theme_provider.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class PrivacyPolicy extends StatefulWidget {
   PrivacyPolicy({Key? key}) : super(key: key);
@@ -13,6 +15,54 @@ class PrivacyPolicy extends StatefulWidget {
 
 
 class _PrivacyPolicyState extends State<PrivacyPolicy> {
+
+  List<Map<String, dynamic>> _privacyPolicyItems = [];
+  String _latestUpdateDate = '';
+  bool _isLoading = true;
+
+  Future<void> _loadPrivacyPolicy() async {
+    setState(() {
+      _isLoading = true;
+    });
+    try {
+
+        //get the latest date from updatedDate
+      final latestUpdate = await FirebaseFirestore.instance
+          .collection('app_content')
+          .doc('privacy')
+          .collection('items')
+          .where('sortNumber', isEqualTo: 1)
+          .orderBy('dateUpdated', descending: true)
+          .limit(1)
+          .get();
+
+      final formattedDate = DateFormat('MMMM d, y').format((latestUpdate.docs.first.data()['dateUpdated'] as Timestamp).toDate());
+      _latestUpdateDate = formattedDate;
+      final response = await FirebaseFirestore.instance
+          .collection('app_content')
+          .doc('privacy')
+          .collection('items')
+          .where('sortNumber', isEqualTo: 1)
+          .get();
+      final data = response.docs.map((doc) => doc.data()).toList();
+      setState(() {
+        _privacyPolicyItems = data;
+      });
+    } catch (e) {
+      debugPrint("Error loading privacy policy: $e");
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+  
+  @override
+  void initState() {
+    super.initState();
+    _loadPrivacyPolicy();
+  }
+  
   @override
   Widget build(BuildContext context) {
     final themeProvider = context.read<ThemeProvider>();
@@ -34,7 +84,15 @@ class _PrivacyPolicyState extends State<PrivacyPolicy> {
         ),
       ),
        body: SafeArea(
-        child: SingleChildScrollView(
+        child: 
+        _isLoading 
+        ? Center(
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: kBlue,
+          ),
+        )
+        : SingleChildScrollView(
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -55,24 +113,16 @@ class _PrivacyPolicyState extends State<PrivacyPolicy> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('Privacy Policy', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
-                          Text('Last updated: October 20, 2025', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                          Text('Last updated: $_latestUpdateDate', style: TextStyle(color: Colors.white70, fontSize: 12)),
                         ],
                       ),
                     ],
                   ),
                 ),
-                _PrivacyPolicyCard(
-                  title: 'Our Commitment to Your Privacy',
-                  content: 'At Giggre, we are committed to protecting your privacy and ensuring the security of your personal information. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application.',
-                ),
-                _PrivacyPolicyCard(
-                  title: 'Information We Collect',
-                  content: 'We may collect personal information such as your name, email address, and profile details when you create an account. We also collect usage data, such as your interactions with the app, to improve your experience.',
-                ),
-                _PrivacyPolicyCard(
-                  title: 'How We Use Your Information',
-                  content: 'We use the information we collect to provide and improve our services, personalize your experience, and communicate with you about updates and offers.',
-                ),
+                ..._privacyPolicyItems.map((item) => _PrivacyPolicyCard(
+                  title: item['title'] ?? '',
+                  content: item['body'] ?? '',
+                )),
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),

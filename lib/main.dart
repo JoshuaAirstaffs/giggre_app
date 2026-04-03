@@ -16,18 +16,19 @@ void main() async {
   String? firebaseError;
   try {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await CurrentUserProvider.initNotifications();
   } catch (e) {
     firebaseError = e.toString();
   }
   runApp(
-  MultiProvider(
-    providers: [
-      ChangeNotifierProvider(create: (_) => ThemeProvider()),
-      ChangeNotifierProvider(create: (_) => CurrentUserProvider()),
-    ],
-    child: GiggreApp(firebaseError: firebaseError),
-  ),
-);
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => CurrentUserProvider()),
+      ],
+      child: GiggreApp(firebaseError: firebaseError),
+    ),
+  );
 }
 
 class _FirebaseErrorScreen extends StatelessWidget {
@@ -83,16 +84,15 @@ class GiggreApp extends StatelessWidget {
         '/gigworker': (_) => const MainNavigation(),
         '/gighost':   (_) => const MainNavigation(),
       },
-       onGenerateRoute: (settings) {
-      // /chat/:roomId
-      if (settings.name?.startsWith('/chat/') == true) {
-        final roomId = settings.name!.split('/').last;
-        return MaterialPageRoute(
-          builder: (_) => Chat(roomId: roomId),
-        );
-      }
-      return null; // fallback to routes map
-    },
+      onGenerateRoute: (settings) {
+        if (settings.name?.startsWith('/chat/') == true) {
+          final roomId = settings.name!.split('/').last;
+          return MaterialPageRoute(
+            builder: (_) => Chat(roomId: roomId),
+          );
+        }
+        return null;
+      },
     );
   }
 }
