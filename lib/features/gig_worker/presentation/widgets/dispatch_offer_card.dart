@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/theme/app_colors.dart';
 import 'gig_map_section.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Dispatch Offer Card — 30 s countdown overlay for incoming quick gigs
+//  Dispatch Offer Card — countdown overlay for incoming quick gigs
+//  Countdown duration is driven by review_window_seconds in Firestore:
+//  /quick_gig_config/matching_engine
 // ─────────────────────────────────────────────────────────────────────────────
 class DispatchOfferCard extends StatefulWidget {
   final GigMarkerData gig;
@@ -23,17 +26,47 @@ class DispatchOfferCard extends StatefulWidget {
 }
 
 class _DispatchOfferCardState extends State<DispatchOfferCard> {
-  late Timer _timer;
-  int _seconds = 30;
+  static const _defaultSeconds = 30;
+  static const _configPath = 'quick_gig_config';
+  static const _configDoc = 'matching_engine';
+
+  Timer? _timer;
+  int _seconds = _defaultSeconds;
+  int _total = _defaultSeconds;
 
   @override
   void initState() {
     super.initState();
+    _loadConfigAndStart();
+  }
+
+  Future<void> _loadConfigAndStart() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection(_configPath)
+          .doc(_configDoc)
+          .get();
+      final reviewWindow =
+          (doc.data()?['review_window_seconds'] as num?)?.toInt() ??
+              _defaultSeconds;
+      if (mounted) {
+        setState(() {
+          _seconds = reviewWindow;
+          _total = reviewWindow;
+        });
+      }
+    } catch (_) {
+      // use defaults
+    }
+    _startTimer();
+  }
+
+  void _startTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() => _seconds--);
       if (_seconds <= 0) {
-        _timer.cancel();
+        _timer?.cancel();
         widget.onDecline();
       }
     });
@@ -41,7 +74,7 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
 
   @override
   void dispose() {
-    _timer.cancel();
+    _timer?.cancel();
     super.dispose();
   }
 
@@ -53,9 +86,9 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     const green = Color(0xFF22C55E);
 
-    final timerColor = _seconds > 20
+    final timerColor = _seconds > (_total * 0.66).round()
         ? green
-        : _seconds > 10
+        : _seconds > (_total * 0.33).round()
             ? kAmber
             : Colors.redAccent;
 

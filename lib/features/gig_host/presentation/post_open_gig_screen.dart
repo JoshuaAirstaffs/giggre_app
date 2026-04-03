@@ -12,32 +12,6 @@ import '../../../core/theme/theme_provider.dart';
 import '../models/open_gig_model.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Static skill tags (managed by admin — static for now)
-// ─────────────────────────────────────────────────────────────────────────────
-const _kStaticSkills = [
-  'Plumbing',
-  'Electrical Work',
-  'Carpentry',
-  'Painting',
-  'Web Development',
-  'Mobile Development',
-  'Graphic Design',
-  'Accounting',
-  'Photography',
-  'Videography',
-  'Cooking',
-  'Tutoring',
-  'Translation',
-  'Content Writing',
-  'Data Entry',
-  'HVAC',
-  'Welding',
-  'Landscaping',
-  'IT Support',
-  'SEO / Marketing',
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
 //  Experience level options
 // ─────────────────────────────────────────────────────────────────────────────
 const _kLevels = [
@@ -63,8 +37,9 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   final _descCtrl = TextEditingController();
   final _budgetCtrl = TextEditingController();
 
-  // Skills
-  final Set<String> _selectedSkills = {};
+  // Skills (loaded from Firestore /skills)
+  List<String> _skills = [];
+  String? _selectedSkill;
 
   // Experience level
   String _experienceLevel = 'entry';
@@ -77,6 +52,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   Position? _gpsPosition;
   LatLng? _mapPosition;
   String _address = '';
+  String _gpsAddress = '';
   bool _loadingLocation = false;
   String? _locationError;
   bool _useMapLocation = false;
@@ -87,6 +63,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   void initState() {
     super.initState();
     _fetchGpsLocation();
+    _fetchSkills();
   }
 
   @override
@@ -150,6 +127,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       if (!mounted) return;
       setState(() {
         _gpsPosition = pos;
+        _gpsAddress = address;
         if (!_useMapLocation) _address = address;
         _loadingLocation = false;
       });
@@ -228,8 +206,8 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_selectedSkills.isEmpty) {
-      _showSnack('Please select at least one required skill.');
+    if (_selectedSkill == null || _selectedSkill!.isEmpty) {
+      _showSnack('Please select a required skill.');
       return;
     }
 
@@ -265,7 +243,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         hostName: widget.hostName,
         title: _titleCtrl.text.trim(),
         description: _descCtrl.text.trim(),
-        requiredSkills: _selectedSkills.toList(),
+        requiredSkills: [_selectedSkill!],
         experienceLevel: _experienceLevel,
         budget: double.parse(_budgetCtrl.text.trim()),
         location: geoPoint,
@@ -382,12 +360,12 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                 _SectionLabel('Required Skills'),
                 const SizedBox(height: 6),
                 Text(
-                  'Select all skills the worker must have',
+                  'Select the skill required for this gig',
                   style: TextStyle(
                       color: kSub.withValues(alpha: 0.8), fontSize: 12),
                 ),
                 const SizedBox(height: 12),
-                _buildSkillsDropdown(),
+                _buildSkillDropdown(),
                 const SizedBox(height: 20),
 
                 // ── Experience Level ──────────────────────────────
@@ -497,198 +475,62 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     );
   }
 
-  // ── Skills Dropdown ───────────────────────────────────────────────────────────
-  Widget _buildSkillsDropdown() {
-    final cardColor = Theme.of(context).cardColor;
-    final borderColor = Theme.of(context).dividerColor;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        GestureDetector(
-          onTap: _showSkillsPicker,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _selectedSkills.isNotEmpty
-                    ? kBlue.withValues(alpha: 0.6)
-                    : borderColor,
-                width: _selectedSkills.isNotEmpty ? 1.5 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _selectedSkills.isEmpty
-                        ? 'Select required skills...'
-                        : '${_selectedSkills.length} skill${_selectedSkills.length > 1 ? 's' : ''} selected',
-                    style: TextStyle(
-                      color: _selectedSkills.isEmpty ? kSub : kBlue,
-                      fontSize: 14,
-                      fontWeight: _selectedSkills.isEmpty
-                          ? FontWeight.normal
-                          : FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const Icon(Icons.keyboard_arrow_down_rounded,
-                    color: kSub, size: 20),
-              ],
-            ),
-          ),
-        ),
-        if (_selectedSkills.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: _selectedSkills
-                .map((skill) => Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: kBlue.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                            color: kBlue.withValues(alpha: 0.4)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(skill,
-                              style: const TextStyle(
-                                  color: kBlue,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500)),
-                          const SizedBox(width: 6),
-                          GestureDetector(
-                            onTap: () =>
-                                setState(() => _selectedSkills.remove(skill)),
-                            child: const Icon(Icons.close_rounded,
-                                color: kBlue, size: 12),
-                          ),
-                        ],
-                      ),
-                    ))
-                .toList(),
-          ),
-        ],
-      ],
-    );
+  // ── Fetch skills from Firestore /skills ────────────────────────────────────
+  Future<void> _fetchSkills() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('skills').get();
+      final names = snap.docs
+          .where((d) => d.id != '_counter')
+          .map((d) => (d.data()['name'] as String?) ?? d.id)
+          .where((s) => s.isNotEmpty)
+          .toList()
+        ..sort();
+      if (mounted) setState(() => _skills = names);
+    } catch (_) {}
   }
 
-  void _showSkillsPicker() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setModalState) {
-          final cardColor = Theme.of(ctx).cardColor;
-          final onSurface = Theme.of(ctx).colorScheme.onSurface;
-          final borderColor = Theme.of(ctx).dividerColor;
-          return Container(
-            height: MediaQuery.of(ctx).size.height * 0.7,
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: kSub.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text('Select Skills',
-                    style: TextStyle(
-                        color: onSurface,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                const Text('Select all skills the worker must have',
-                    style: TextStyle(color: kSub, fontSize: 12)),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: _kStaticSkills.length,
-                    separatorBuilder: (_, _) =>
-                        Divider(color: borderColor, height: 1),
-                    itemBuilder: (_, i) {
-                      final skill = _kStaticSkills[i];
-                      final selected = _selectedSkills.contains(skill);
-                      return ListTile(
-                        dense: true,
-                        onTap: () {
-                          setModalState(() {
-                            if (selected) {
-                              _selectedSkills.remove(skill);
-                            } else {
-                              _selectedSkills.add(skill);
-                            }
-                          });
-                          setState(() {});
-                        },
-                        title: Text(skill,
-                            style: TextStyle(
-                                color: selected ? kBlue : onSurface,
-                                fontSize: 14,
-                                fontWeight: selected
-                                    ? FontWeight.w600
-                                    : FontWeight.normal)),
-                        trailing: selected
-                            ? const Icon(Icons.check_circle_rounded,
-                                color: kBlue, size: 20)
-                            : Icon(Icons.radio_button_unchecked_rounded,
-                                color: kSub.withValues(alpha: 0.5),
-                                size: 20),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kBlue,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30)),
-                    ),
-                    child: Text(
-                      _selectedSkills.isEmpty
-                          ? 'Done (None selected)'
-                          : 'Done (${_selectedSkills.length} selected)',
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+  // ── Skill Dropdown ────────────────────────────────────────────────────────────
+  Widget _buildSkillDropdown() {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _selectedSkill != null
+              ? kBlue.withValues(alpha: 0.6)
+              : borderColor,
+          width: _selectedSkill != null ? 1.5 : 1,
+        ),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _selectedSkill,
+          isExpanded: true,
+          dropdownColor: cardColor,
+          hint: Text(
+            _skills.isEmpty ? 'Loading skills...' : 'Select a skill...',
+            style: const TextStyle(color: kSub, fontSize: 14),
+          ),
+          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: kSub),
+          style: TextStyle(color: onSurface, fontSize: 14),
+          items: _skills
+              .map((skill) => DropdownMenuItem(
+                    value: skill,
+                    child: Text(skill,
+                        style: TextStyle(color: onSurface, fontSize: 14)),
+                  ))
+              .toList(),
+          onChanged: (v) => setState(() => _selectedSkill = v),
+        ),
       ),
     );
   }
+
 
   // ── Experience Dropdown ───────────────────────────────────────────────────────
   Widget _buildExperienceDropdown() {
@@ -950,7 +792,12 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                 active: !_useMapLocation,
                 accentColor: kBlue,
                 onTap: () {
-                  setState(() => _useMapLocation = false);
+                  setState(() {
+                    _useMapLocation = false;
+                    if (_gpsPosition != null && _gpsAddress.isNotEmpty) {
+                      _address = _gpsAddress;
+                    }
+                  });
                   if (_gpsPosition == null) _fetchGpsLocation();
                 },
               ),

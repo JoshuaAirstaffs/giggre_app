@@ -13,7 +13,8 @@ import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
 import 'gig_host_profile_screen.dart';
 import '../services/quick_gig_matching_service.dart';
-import 'widgets/gig_progress_tracker.dart';
+import 'widgets/gig_detail_sheet.dart';
+import 'host_gigs_screen.dart';
 
 class GigHostScreen extends StatefulWidget {
   const GigHostScreen({super.key});
@@ -254,10 +255,6 @@ class _GigHostScreenState extends State<GigHostScreen> {
               const _WorkerMapSection(),
               const SizedBox(height: 28),
 
-              // ── Active Gig Progress ───────────────────────────
-              GigProgressTracker(hostId: uid),
-              const SizedBox(height: 28),
-
               // ── Post a Gig ────────────────────────────────────
               Text('Post a Gig',
                   style: TextStyle(
@@ -318,13 +315,32 @@ class _GigHostScreenState extends State<GigHostScreen> {
               const SizedBox(height: 28),
 
               // ── Recent Gigs ───────────────────────────────────
-              Text('Your Gigs',
-                  style: TextStyle(
-                      color: onSurface,
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold)),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Your Gigs',
+                      style: TextStyle(
+                          color: onSurface,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold)),
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => HostGigsScreen(uid: uid)),
+                    ),
+                    child: const Text(
+                      'See All',
+                      style: TextStyle(
+                          color: kAmber,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
-              _RecentGigsList(uid: uid),
+              _GigPreviewList(uid: uid),
             ],
           ),
         ),
@@ -349,14 +365,18 @@ class _StatsRowState extends State<_StatsRow> {
   List<Map> _quick = [], _open = [], _offered = [];
   late StreamSubscription _quickSub, _openSub, _offeredSub;
 
-  static bool _isActive(String s) =>
-      s == 'scanning' || s == 'active' || s == 'open' || s == 'offered';
+  static bool _isActive(Map d) {
+    final s = d['status'] as String? ?? '';
+    if (s == 'completed' || s == 'cancelled' || s.isEmpty) return false;
+    final assignedWorker = d['assignedWorkerId'] as String?;
+    return assignedWorker != null && assignedWorker.isNotEmpty;
+  }
 
   void _recompute() {
     final all = [..._quick, ..._open, ..._offered];
     setState(() {
       _total = all.length;
-      _active = all.where((d) => _isActive(d['status'] as String? ?? '')).length;
+      _active = all.where((d) => _isActive(d)).length;
       _done = all.where((d) => d['status'] == 'completed').length;
     });
   }
@@ -562,18 +582,17 @@ class _GigTypeCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Your Gigs List  (all 3 types, filterable)
+//  Gig Area Preview — 5 most recent across all types
 // ─────────────────────────────────────────────────────────────────────────────
-class _RecentGigsList extends StatefulWidget {
+class _GigPreviewList extends StatefulWidget {
   final String uid;
-  const _RecentGigsList({required this.uid});
+  const _GigPreviewList({required this.uid});
 
   @override
-  State<_RecentGigsList> createState() => _RecentGigsListState();
+  State<_GigPreviewList> createState() => _GigPreviewListState();
 }
 
-class _RecentGigsListState extends State<_RecentGigsList> {
-  String _filter = 'all';
+class _GigPreviewListState extends State<_GigPreviewList> {
   List<Map<String, dynamic>> _quick = [], _open = [], _offered = [];
   bool _loading = true;
   late StreamSubscription _quickSub, _openSub, _offeredSub;
@@ -637,28 +656,15 @@ class _RecentGigsListState extends State<_RecentGigsList> {
     super.dispose();
   }
 
-  List<Map<String, dynamic>> get _filtered {
-    final List<Map<String, dynamic>> all;
-    switch (_filter) {
-      case 'quick':
-        all = List.from(_quick);
-        break;
-      case 'open':
-        all = List.from(_open);
-        break;
-      case 'offered':
-        all = List.from(_offered);
-        break;
-      default:
-        all = [..._quick, ..._open, ..._offered];
-    }
+  List<Map<String, dynamic>> get _latest {
+    final all = [..._quick, ..._open, ..._offered];
     all.sort((a, b) {
       final aTs = a['createdAt'] as Timestamp?;
       final bTs = b['createdAt'] as Timestamp?;
       if (aTs == null || bTs == null) return 0;
       return bTs.toDate().compareTo(aTs.toDate());
     });
-    return all;
+    return all.take(5).toList();
   }
 
   @override
@@ -672,517 +678,44 @@ class _RecentGigsListState extends State<_RecentGigsList> {
       );
     }
 
-    final filtered = _filtered;
+    final preview = _latest;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Filter tabs ──────────────────────────────────────────
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              _FilterTab(label: 'All', selected: _filter == 'all', onTap: () => setState(() => _filter = 'all')),
-              const SizedBox(width: 8),
-              _FilterTab(label: 'Quick', selected: _filter == 'quick', color: kAmber, onTap: () => setState(() => _filter = 'quick')),
-              const SizedBox(width: 8),
-              _FilterTab(label: 'Open', selected: _filter == 'open', color: kBlue, onTap: () => setState(() => _filter = 'open')),
-              const SizedBox(width: 8),
-              _FilterTab(label: 'Offered', selected: _filter == 'offered', color: const Color(0xFF8B5CF6), onTap: () => setState(() => _filter = 'offered')),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // ── Gig tiles ────────────────────────────────────────────
-        if (filtered.isEmpty)
-          _EmptyGigsPlaceholder(filter: _filter)
-        else
-          ...filtered.map((d) => _GigTile(data: d)),
-      ],
-    );
-  }
-}
-
-class _FilterTab extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final Color color;
-
-  const _FilterTab({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.color = kSub,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = selected ? color : kSub;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? accent.withValues(alpha: 0.15) : Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected ? accent.withValues(alpha: 0.5) : Theme.of(context).dividerColor,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? accent : kSub,
-            fontSize: 13,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyGigsPlaceholder extends StatelessWidget {
-  final String filter;
-  const _EmptyGigsPlaceholder({required this.filter});
-
-  @override
-  Widget build(BuildContext context) {
-    final label = filter == 'all' ? 'gigs' : '$filter gigs';
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 40),
-      child: Column(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: kAmber.withValues(alpha: 0.08),
-              shape: BoxShape.circle,
+    if (preview.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        child: Column(
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: kAmber.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.inbox_outlined, color: kAmber, size: 30),
             ),
-            child: const Icon(Icons.inbox_outlined, color: kAmber, size: 30),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No $label posted yet',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
+            const SizedBox(height: 16),
+            Text(
+              'No gigs posted yet',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Use the post options above to create a gig.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: kSub, fontSize: 13),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GigTile extends StatefulWidget {
-  final Map<String, dynamic> data;
-  const _GigTile({required this.data});
-
-  @override
-  State<_GigTile> createState() => _GigTileState();
-}
-
-class _GigTileState extends State<_GigTile> {
-  static String _collectionFor(String gigType) {
-    switch (gigType) {
-      case 'open':    return 'open_gigs';
-      case 'offered': return 'offered_gigs';
-      default:        return 'quick_gigs';
-    }
-  }
-
-  Future<void> _confirmCancel() async {
-    final gigType = widget.data['gigType'] as String? ?? 'quick';
-    final docId   = widget.data['docId']   as String? ?? '';
-    if (docId.isEmpty) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Cancel Gig',
-            style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface)),
-        content: const Text(
-            'Mark this gig as cancelled? Workers will no longer see it.',
-            style: TextStyle(color: kSub)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('No', style: TextStyle(color: kSub)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Cancel Gig',
-                style: TextStyle(color: Colors.orange)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    final messenger = ScaffoldMessenger.of(context);
-    await FirebaseFirestore.instance
-        .collection(_collectionFor(gigType))
-        .doc(docId)
-        .update({'status': 'cancelled'});
-    messenger.showSnackBar(const SnackBar(
-      content: Text('Gig cancelled'),
-      backgroundColor: Colors.orange,
-      behavior: SnackBarBehavior.floating,
-    ));
-  }
-
-  Future<void> _confirmDelete() async {
-    final gigType = widget.data['gigType'] as String? ?? 'quick';
-    final docId   = widget.data['docId']   as String? ?? '';
-    if (docId.isEmpty) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Delete Gig',
-            style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface)),
-        content: const Text(
-            'This will permanently remove the gig. This cannot be undone.',
-            style: TextStyle(color: kSub)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep', style: TextStyle(color: kSub)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete',
-                style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    final messenger = ScaffoldMessenger.of(context);
-    await FirebaseFirestore.instance
-        .collection(_collectionFor(gigType))
-        .doc(docId)
-        .delete();
-    messenger.showSnackBar(const SnackBar(
-      content: Text('Gig deleted'),
-      backgroundColor: Colors.redAccent,
-      behavior: SnackBarBehavior.floating,
-    ));
-  }
-
-  Future<void> _dispatchGig() async {
-    final gigType = widget.data['gigType'] as String? ?? 'quick';
-    if (gigType != 'quick') return;
-    final docId = widget.data['docId'] as String? ?? '';
-    if (docId.isEmpty) return;
-    final location = widget.data['location'] as GeoPoint?;
-    if (location == null) return;
-
-    // Reset to scanning (keep exclusion list — workers who declined stay excluded)
-    await FirebaseFirestore.instance.collection('quick_gigs').doc(docId).update({
-      'status': 'scanning',
-      'assignedWorkerId': null,
-      'assignedWorkerName': null,
-      'searchStartedAt': FieldValue.serverTimestamp(),
-    });
-
-    // Start smart dispatch
-    QuickGigMatchingService.startAutoSearch(gigId: docId, gigLocation: location);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Searching for available workers...'),
-          backgroundColor: kAmber,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            const SizedBox(height: 6),
+            const Text(
+              'Use the post options above to create a gig.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: kSub, fontSize: 13),
+            ),
+          ],
         ),
       );
     }
-  }
 
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'scanning':   return kAmber;
-      case 'in_progress': return kBlue;
-      case 'accepted':   return const Color(0xFF22C55E);
-      case 'open':       return const Color(0xFF22C55E);
-      case 'offered':    return const Color(0xFF8B5CF6);
-      case 'active':     return const Color(0xFF22C55E);
-      case 'assigned':   return kBlue;
-      case 'no_worker':  return Colors.redAccent;
-      case 'completed':  return const Color(0xFF22C55E);
-      case 'cancelled':  return Colors.redAccent;
-      default:           return kSub;
-    }
-  }
-
-  String _statusLabel(String status) {
-    switch (status) {
-      case 'scanning':   return 'SCANNING';
-      case 'in_progress': return 'IN PROGRESS';
-      case 'accepted':   return 'ACCEPTED';
-      case 'no_worker':  return 'NO WORKER';
-      case 'completed':  return 'COMPLETED';
-      case 'cancelled':  return 'CANCELLED';
-      default:           return status.toUpperCase();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final data      = widget.data;
-    final gigType   = data['gigType'] as String? ?? 'quick';
-    final status    = data['status']  as String? ?? 'scanning';
-    final statusColor = _statusColor(status);
-    final titleColor  = Theme.of(context).colorScheme.onSurface;
-    final isClosed    = status == 'cancelled' || status == 'completed';
-
-    final IconData typeIcon;
-    final Color typeColor;
-    final String typeLabel;
-    switch (gigType) {
-      case 'open':
-        typeIcon  = Icons.workspace_premium_outlined;
-        typeColor = kBlue;
-        typeLabel = 'Open';
-        break;
-      case 'offered':
-        typeIcon  = Icons.send_rounded;
-        typeColor = const Color(0xFF8B5CF6);
-        typeLabel = 'Offered';
-        break;
-      default:
-        typeIcon  = Icons.flash_on_rounded;
-        typeColor = kAmber;
-        typeLabel = 'Quick';
-    }
-
-    String subtitle = '';
-    if (gigType == 'open') {
-      final skills = List<String>.from(data['requiredSkills'] ?? []);
-      subtitle = skills.take(2).join(', ');
-    } else if (gigType == 'offered') {
-      final workerName = data['workerName'] as String? ?? '';
-      if (workerName.isNotEmpty) subtitle = '→ $workerName';
-    } else {
-      final assignedWorkerName = data['assignedWorkerName'] as String?;
-      if (status == 'in_progress' &&
-          assignedWorkerName != null &&
-          assignedWorkerName.isNotEmpty) {
-        subtitle = '→ $assignedWorkerName';
-      } else if (status == 'no_worker') {
-        subtitle = 'No worker found';
-      } else {
-        subtitle = data['category'] as String? ?? '';
-      }
-    }
-
-    final createdAt = data['createdAt'] != null
-        ? (data['createdAt'] as Timestamp).toDate()
-        : DateTime.now();
-    final diff    = DateTime.now().difference(createdAt);
-    final timeAgo = diff.inMinutes < 60
-        ? '${diff.inMinutes}m ago'
-        : diff.inHours < 24
-            ? '${diff.inHours}h ago'
-            : '${diff.inDays}d ago';
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Theme.of(context).dividerColor),
-      ),
-      child: Row(
-        children: [
-          // ── Type icon ──────────────────────────────
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: typeColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(typeIcon, color: typeColor, size: 22),
-          ),
-          const SizedBox(width: 12),
-
-          // ── Title + subtitle ───────────────────────
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        data['title'] as String? ?? 'Untitled Gig',
-                        style: TextStyle(
-                            color: titleColor,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: typeColor.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        typeLabel,
-                        style: TextStyle(
-                            color: typeColor,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    if (subtitle.isNotEmpty) ...[
-                      Flexible(
-                        child: Text(subtitle,
-                            style:
-                                const TextStyle(color: kSub, fontSize: 12),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                      const Text(' · ',
-                          style: TextStyle(color: kSub, fontSize: 12)),
-                    ],
-                    Text(
-                      '\$${(data['budget'] as num?)?.toStringAsFixed(0) ?? '0'}',
-                      style: const TextStyle(
-                          color: kAmber,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600),
-                    ),
-                    const Text(' · ',
-                        style: TextStyle(color: kSub, fontSize: 12)),
-                    Text(timeAgo,
-                        style: const TextStyle(color: kSub, fontSize: 12)),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          // ── Status badge + menu ────────────────────
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                  border:
-                      Border.all(color: statusColor.withValues(alpha: 0.4)),
-                ),
-                child: Text(
-                  _statusLabel(status),
-                  style: TextStyle(
-                      color: statusColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.5),
-                ),
-              ),
-              const SizedBox(height: 4),
-              SizedBox(
-                height: 20,
-                width: 20,
-                child: PopupMenuButton<String>(
-                  padding: EdgeInsets.zero,
-                  icon: const Icon(Icons.more_horiz_rounded,
-                      color: kSub, size: 18),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  onSelected: (val) {
-                    if (val == 'dispatch') _dispatchGig();
-                    if (val == 'cancel') _confirmCancel();
-                    if (val == 'delete') _confirmDelete();
-                  },
-                  itemBuilder: (ctx) => [
-                    if (!isClosed &&
-                        gigType == 'quick' &&
-                        (status == 'scanning' ||
-                            status == 'no_worker' ||
-                            status == 'in_progress'))
-                      PopupMenuItem(
-                        value: 'dispatch',
-                        child: Row(
-                          children: [
-                            Icon(Icons.send_rounded, color: kAmber, size: 18),
-                            const SizedBox(width: 10),
-                            Text('Dispatch',
-                                style: TextStyle(color: kAmber)),
-                          ],
-                        ),
-                      ),
-                    if (!isClosed)
-                      const PopupMenuItem(
-                        value: 'cancel',
-                        child: Row(
-                          children: [
-                            Icon(Icons.cancel_outlined,
-                                color: Colors.orange, size: 18),
-                            SizedBox(width: 10),
-                            Text('Cancel Gig',
-                                style: TextStyle(color: Colors.orange)),
-                          ],
-                        ),
-                      ),
-                    const PopupMenuItem(
-                      value: 'delete',
-                      child: Row(
-                        children: [
-                          Icon(Icons.delete_outline_rounded,
-                              color: Colors.redAccent, size: 18),
-                          SizedBox(width: 10),
-                          Text('Delete',
-                              style: TextStyle(color: Colors.redAccent)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+    return Column(
+      children: preview.map((d) => GigTile(data: d)).toList(),
     );
   }
 }

@@ -5,10 +5,47 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// Smart dispatch engine for quick gigs.
 /// Runs entirely client-side (no Cloud Functions).
 class QuickGigMatchingService {
-  static const _workerResponseTimeout = Duration(seconds: 30);
-  static const _autoSearchDuration = Duration(minutes: 5);
+  // Fallback defaults (used when Firestore config is unavailable)
+  static const _defaultReviewWindowSeconds = 30;
+  static const _defaultSearchTimeoutMinutes = 5;
+  static const _defaultMaxDispatchAttempts = 10;
+
   static const _retryInterval = Duration(seconds: 15);
   static const _pollInterval = Duration(seconds: 3);
+
+  // ── Fetch remote config ─────────────────────────────────────────────────────
+  static Future<({Duration reviewWindow, Duration searchTimeout, int maxAttempts})>
+      _fetchConfig() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('quick_gig_config')
+          .doc('matching_engine')
+          .get();
+      final data = doc.data() ?? {};
+      final reviewWindow = Duration(
+        seconds: (data['review_window_seconds'] as num?)?.toInt() ??
+            _defaultReviewWindowSeconds,
+      );
+      final searchTimeout = Duration(
+        minutes: (data['search_timeout_minutes'] as num?)?.toInt() ??
+            _defaultSearchTimeoutMinutes,
+      );
+      final maxAttempts =
+          (data['max_dispatch_attempts'] as num?)?.toInt() ??
+              _defaultMaxDispatchAttempts;
+      return (
+        reviewWindow: reviewWindow,
+        searchTimeout: searchTimeout,
+        maxAttempts: maxAttempts,
+      );
+    } catch (_) {
+      return (
+        reviewWindow: const Duration(seconds: _defaultReviewWindowSeconds),
+        searchTimeout: const Duration(minutes: _defaultSearchTimeoutMinutes),
+        maxAttempts: _defaultMaxDispatchAttempts,
+      );
+    }
+  }
 
   // Prevent duplicate concurrent searches for the same gig
   static final Set<String> _activeSearches = {};
@@ -91,9 +128,9 @@ class QuickGigMatchingService {
     ]);
   }
 
-  // ── Auto-search loop (up to 5 minutes) ─────────────────────────────────────
+  // ── Auto-search loop ────────────────────────────────────────────────────────
   /// Posts, dispatches, waits for response, retries with exclusion list.
-  /// Marks gig as 'no_worker' after 5 min with no acceptance.
+  /// Marks gig as 'no_worker' after timeout or max attempts with no acceptance.
   static Future<void> startAutoSearch({
     required String gigId,
     required GeoPoint gigLocation,
@@ -105,16 +142,30 @@ class QuickGigMatchingService {
     final gigRef = db.collection('quick_gigs').doc(gigId);
     final searchStart = DateTime.now();
 
+    final config = await _fetchConfig();
+
     // Initialise search metadata on the gig doc
     await gigRef.update({
       'searchStartedAt': FieldValue.serverTimestamp(),
       'exclusionList': FieldValue.arrayUnion([]),
     });
 
+    int dispatchAttempts = 0;
+
     try {
       while (true) {
-        // ── 5-minute global timeout ────────────────────────
-        if (DateTime.now().difference(searchStart) >= _autoSearchDuration) {
+        // ── Global timeout ─────────────────────────────────
+        if (DateTime.now().difference(searchStart) >= config.searchTimeout) {
+          await gigRef.update({
+            'status': 'no_worker',
+            'assignedWorkerId': null,
+            'assignedWorkerName': null,
+          });
+          return;
+        }
+
+        // ── Max dispatch attempts ──────────────────────────
+        if (dispatchAttempts >= config.maxAttempts) {
           await gigRef.update({
             'status': 'no_worker',
             'assignedWorkerId': null,
@@ -150,14 +201,15 @@ class QuickGigMatchingService {
         }
 
         // ── Dispatch ───────────────────────────────────────
+        dispatchAttempts++;
         await _dispatchToWorker(
           gigId: gigId,
           workerId: worker['id'] as String,
           workerName: worker['name'] as String,
         );
 
-        // ── Wait up to 30 s for worker response ────────────
-        final deadline = DateTime.now().add(_workerResponseTimeout);
+        // ── Wait for worker response ───────────────────────
+        final deadline = DateTime.now().add(config.reviewWindow);
         String finalStatus = 'in_progress';
 
         while (DateTime.now().isBefore(deadline)) {

@@ -37,6 +37,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   Position? _gpsPosition;
   LatLng? _mapPosition;
   String _address = '';
+  String _gpsAddress = '';
   bool _loadingLocation = false;
   String? _locationError;
   bool _useMapLocation = false;
@@ -91,28 +92,45 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
             const LocationSettings(accuracy: LocationAccuracy.high),
       );
 
-      final placemarks =
-          await placemarkFromCoordinates(pos.latitude, pos.longitude);
-      String address = 'Unknown location';
-      if (placemarks.isNotEmpty) {
-        final p = placemarks.first;
-        final parts = [
-          if (p.street != null && p.street!.isNotEmpty) p.street,
-          if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality,
-          if (p.locality != null && p.locality!.isNotEmpty) p.locality,
-          if (p.administrativeArea != null &&
-              p.administrativeArea!.isNotEmpty)
-            p.administrativeArea,
-        ];
-        address = parts.join(', ');
-      }
-
+      // Save position immediately — geocoding failure won't block submission
       if (!mounted) return;
       setState(() {
         _gpsPosition = pos;
-        if (!_useMapLocation) _address = address;
         _loadingLocation = false;
       });
+
+      // Geocoding is best-effort
+      try {
+        final placemarks =
+            await placemarkFromCoordinates(pos.latitude, pos.longitude);
+        String address = 'Unknown location';
+        if (placemarks.isNotEmpty) {
+          final p = placemarks.first;
+          final parts = [
+            if (p.street != null && p.street!.isNotEmpty) p.street,
+            if (p.subLocality != null && p.subLocality!.isNotEmpty)
+              p.subLocality,
+            if (p.locality != null && p.locality!.isNotEmpty) p.locality,
+            if (p.administrativeArea != null &&
+                p.administrativeArea!.isNotEmpty)
+              p.administrativeArea,
+          ];
+          address = parts.join(', ');
+        }
+        if (mounted) {
+          setState(() {
+            _gpsAddress = address;
+            if (!_useMapLocation) _address = address;
+          });
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _gpsAddress = 'GPS location ready';
+            if (!_useMapLocation) _address = 'GPS location ready';
+          });
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -562,7 +580,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Address card
-        Container(
+        GestureDetector(
+          onTap: hasError ? _fetchGpsLocation : null,
+          child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: cardColor,
@@ -646,6 +666,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
             ],
           ),
         ),
+        ),
         const SizedBox(height: 10),
 
         // Mode toggle buttons
@@ -658,7 +679,12 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 active: !_useMapLocation,
                 accentColor: kAmber,
                 onTap: () {
-                  setState(() => _useMapLocation = false);
+                  setState(() {
+                    _useMapLocation = false;
+                    if (_gpsPosition != null && _gpsAddress.isNotEmpty) {
+                      _address = _gpsAddress;
+                    }
+                  });
                   if (_gpsPosition == null) _fetchGpsLocation();
                 },
               ),
@@ -837,9 +863,12 @@ class _MapPickerScreen extends StatefulWidget {
 
 class _MapPickerScreenState extends State<_MapPickerScreen> {
   final _mapController = MapController();
+  final _searchCtrl = TextEditingController();
   LatLng? _picked;
   String _address = '';
   bool _geocoding = false;
+  bool _searching = false;
+  String? _searchError;
 
   static final _defaultCenter = LatLng(14.5995, 120.9842);
 
@@ -855,7 +884,44 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   @override
   void dispose() {
     _mapController.dispose();
+    _searchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _searchAddress() async {
+    final query = _searchCtrl.text.trim();
+    if (query.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _searching = true;
+      _searchError = null;
+    });
+    try {
+      final locations = await locationFromAddress(query);
+      if (!mounted) return;
+      if (locations.isEmpty) {
+        setState(() {
+          _searchError = 'No results found. Try a different address.';
+          _searching = false;
+        });
+        return;
+      }
+      final loc = locations.first;
+      final point = LatLng(loc.latitude, loc.longitude);
+      setState(() {
+        _picked = point;
+        _address = '';
+        _searching = false;
+      });
+      _mapController.move(point, 15.0);
+      _geocodePosition(point);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _searchError = 'Could not find location. Try again.';
+        _searching = false;
+      });
+    }
   }
 
   Future<void> _geocodePosition(LatLng pos) async {
@@ -966,10 +1032,82 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
             ],
           ),
 
+          // ── Search bar ───────────────────────────────────────
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: cardColor,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: borderColor),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    onSubmitted: (_) => _searchAddress(),
+                    style: TextStyle(color: onSurface, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Search address or place...',
+                      hintStyle: TextStyle(
+                          color: onSurface.withValues(alpha: 0.4),
+                          fontSize: 13),
+                      prefixIcon: const Icon(Icons.search_rounded,
+                          color: kSub, size: 20),
+                      suffixIcon: _searching
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                    color: kAmber, strokeWidth: 2),
+                              ),
+                            )
+                          : IconButton(
+                              icon: const Icon(Icons.arrow_forward_rounded,
+                                  color: kAmber, size: 20),
+                              onPressed: _searchAddress,
+                            ),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 14),
+                    ),
+                  ),
+                ),
+                if (_searchError != null)
+                  Container(
+                    margin: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: Colors.redAccent.withValues(alpha: 0.4)),
+                    ),
+                    child: Text(_searchError!,
+                        style: const TextStyle(
+                            color: Colors.redAccent, fontSize: 12)),
+                  ),
+              ],
+            ),
+          ),
+
           // ── Hint banner (no pin yet) ──────────────────────────
           if (_picked == null)
             Positioned(
-              top: 16,
+              top: 90,
               left: 16,
               right: 16,
               child: Container(

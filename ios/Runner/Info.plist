@@ -66,6 +66,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Giggre needs your location to set the gig location when posting a job.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Giggre needs your location to set the gig location when posting a job.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 	<dict>

@@ -55,6 +55,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   GigMarkerData? _dispatchedGig;
   StreamSubscription? _dispatchSub;
 
+  // Decline suspension
+  DateTime? _suspendedUntil;
+  Timer? _suspensionTimer;
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +70,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   @override
   void dispose() {
     _dispatchSub?.cancel();
+    _suspensionTimer?.cancel();
     _setOnlineStatus(false);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -75,6 +80,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _setOnlineStatus(true);
+      // Restore WorkingUI if worker has an ongoing gig they came back to
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) _checkForActiveGig(uid);
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _setOnlineStatus(false);
@@ -136,6 +144,13 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       memberSince = '${_monthName(d.month)} ${d.year}';
     }
 
+    final suspendedUntilTs = data['suspended_until'] as Timestamp?;
+    DateTime? suspendedUntil;
+    if (suspendedUntilTs != null) {
+      final dt = suspendedUntilTs.toDate();
+      if (dt.isAfter(DateTime.now())) suspendedUntil = dt;
+    }
+
     if (!mounted) return;
     setState(() {
       _name = data['name'] as String? ?? '';
@@ -152,10 +167,47 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       _totalEarnings = total;
       _weeklyEarnings = weekly;
       _completedGigs = completed;
+      _suspendedUntil = suspendedUntil;
       _loading = false;
     });
     _saveLocationToFirestore();
     _startDispatchSub(uid);
+    if (_suspendedUntil != null) _startSuspensionTimer();
+    await _checkForActiveGig(uid);
+  }
+
+  /// On app resume/init, restore WorkingUI if worker has an ongoing gig.
+  Future<void> _checkForActiveGig(String uid) async {
+    // Skip if already showing an active gig
+    if (_activeQuickGig != null) return;
+    const activeStatuses = [
+      'navigating', 'arrived', 'working', 'task_complete', 'payment'
+    ];
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('quick_gigs')
+          .where('workerId', isEqualTo: uid)
+          .where('status', whereIn: activeStatuses)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return;
+      final doc = snap.docs.first;
+      final data = doc.data();
+      final geo = data['location'] as GeoPoint?;
+      if (geo == null) return;
+      final gig = GigMarkerData(
+        id: doc.id,
+        title: data['title'] as String? ?? 'Quick Gig',
+        gigType: 'quick',
+        budget: (data['budget'] as num?)?.toDouble() ?? 0,
+        status: data['status'] as String? ?? 'navigating',
+        hostName: data['hostName'] as String? ?? '',
+        address: data['address'] as String? ?? '',
+        position: LatLng(geo.latitude, geo.longitude),
+        assignedWorkerId: uid,
+      );
+      if (mounted) setState(() => _activeQuickGig = gig);
+    } catch (_) {}
   }
 
   void _startDispatchSub(String uid) {
@@ -227,6 +279,11 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _toggleQuickGigs(bool value) async {
+    if (value &&
+        _suspendedUntil != null &&
+        DateTime.now().isBefore(_suspendedUntil!)) {
+      return; // blocked — suspension banner is already visible
+    }
     setState(() => _seekingQuickGigs = value);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -271,6 +328,14 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   Future<void> _declineDispatch(GigMarkerData gig) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
+
+    final userSnap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
+    final currentDeclineCount =
+        (userSnap.data()?['decline_count'] as num?)?.toInt() ?? 0;
+
     await Future.wait([
       FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id).update({
         'status': 'scanning',
@@ -285,6 +350,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       }),
     ]);
     if (mounted) setState(() => _dispatchedGig = null);
+    await _checkAndApplySuspension(uid, currentDeclineCount + 1);
   }
 
   // Called by WorkingUI when Firestore status becomes 'completed' (set by host).
@@ -314,6 +380,71 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           .update({'slot': 'AVAILABLE'});
     }
     if (mounted) setState(() => _activeQuickGig = null);
+  }
+
+  Future<void> _checkAndApplySuspension(
+      String uid, int newDeclineCount) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('quick_gig_config')
+          .doc('decline_suspension')
+          .get();
+      final data = doc.data() ?? {};
+      final freeLimit =
+          (data['free_decline_limit'] as num?)?.toInt() ?? 0;
+
+      if (newDeclineCount <= freeLimit) return;
+
+      final tierTable =
+          data['suspension_tier_table'] as List<dynamic>? ?? [];
+      if (tierTable.isEmpty) return;
+
+      // Find the highest matching tier
+      int? suspensionMinutes;
+      int highestTrigger = 0;
+      for (final tier in tierTable) {
+        final trigger =
+            (tier['decline_count_trigger'] as num?)?.toInt() ?? 0;
+        final mins =
+            (tier['suspension_duration_minutes'] as num?)?.toInt() ?? 0;
+        if (newDeclineCount >= trigger && trigger >= highestTrigger) {
+          highestTrigger = trigger;
+          suspensionMinutes = mins;
+        }
+      }
+
+      if (suspensionMinutes == null || suspensionMinutes <= 0) return;
+
+      final suspendedUntil =
+          DateTime.now().add(Duration(minutes: suspensionMinutes));
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'suspended_until': Timestamp.fromDate(suspendedUntil),
+        'seekingQuickGigs': false,
+        'slot': 'AVAILABLE',
+      });
+
+      if (!mounted) return;
+      setState(() {
+        _suspendedUntil = suspendedUntil;
+        _seekingQuickGigs = false;
+      });
+      _startSuspensionTimer();
+    } catch (_) {}
+  }
+
+  void _startSuspensionTimer() {
+    _suspensionTimer?.cancel();
+    _suspensionTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (_suspendedUntil == null ||
+          DateTime.now().isAfter(_suspendedUntil!)) {
+        _suspensionTimer?.cancel();
+        if (mounted) setState(() => _suspendedUntil = null);
+        return;
+      }
+      setState(() {});
+    });
   }
 
   void _showComingSoon(String title) {

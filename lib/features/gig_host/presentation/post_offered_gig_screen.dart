@@ -12,32 +12,6 @@ import '../../../core/theme/theme_provider.dart';
 import '../models/offered_gig_model.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Static skill tags
-// ─────────────────────────────────────────────────────────────────────────────
-const _kSkills = [
-  'Plumbing',
-  'Electrical Work',
-  'Carpentry',
-  'Painting',
-  'Web Development',
-  'Mobile Development',
-  'Graphic Design',
-  'Accounting',
-  'Photography',
-  'Videography',
-  'Cooking',
-  'Tutoring',
-  'Translation',
-  'Content Writing',
-  'Data Entry',
-  'HVAC',
-  'Welding',
-  'Landscaping',
-  'IT Support',
-  'SEO / Marketing',
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
 //  Experience level options
 // ─────────────────────────────────────────────────────────────────────────────
 const _kLevels = [
@@ -78,7 +52,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   // Worker selection
   _WorkerEntry? _selectedWorker;
 
-  // Skill
+  // Skill (loaded from Firestore /skills)
+  List<String> _skills = [];
   String? _selectedSkill;
 
   // Experience level
@@ -92,6 +67,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   Position? _gpsPosition;
   LatLng? _mapPosition;
   String _address = '';
+  String _gpsAddress = '';
   bool _loadingLocation = false;
   String? _locationError;
   bool _useMapLocation = false;
@@ -102,6 +78,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   void initState() {
     super.initState();
     _fetchGpsLocation();
+    _fetchSkills();
   }
 
   @override
@@ -162,6 +139,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       if (!mounted) return;
       setState(() {
         _gpsPosition = pos;
+        _gpsAddress = address;
         if (!_useMapLocation) _address = address;
         _loadingLocation = false;
       });
@@ -598,6 +576,20 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     );
   }
 
+  // ── Fetch skills from Firestore /skills ────────────────────────────────────
+  Future<void> _fetchSkills() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('skills').get();
+      final names = snap.docs
+          .where((d) => d.id != '_counter')
+          .map((d) => (d.data()['name'] as String?) ?? d.id)
+          .where((s) => s.isNotEmpty)
+          .toList()
+        ..sort();
+      if (mounted) setState(() => _skills = names);
+    } catch (_) {}
+  }
+
   // ── Skill Dropdown ────────────────────────────────────────────────────────────
   Widget _buildSkillDropdown() {
     final cardColor = Theme.of(context).cardColor;
@@ -621,13 +613,19 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
           value: _selectedSkill,
           isExpanded: true,
           dropdownColor: cardColor,
-          hint: const Text('Select a skill...', style: TextStyle(color: kSub, fontSize: 14)),
+          hint: Text(
+            _skills.isEmpty ? 'Loading skills...' : 'Select a skill...',
+            style: const TextStyle(color: kSub, fontSize: 14),
+          ),
           icon: const Icon(Icons.keyboard_arrow_down_rounded, color: kSub),
           style: TextStyle(color: onSurface, fontSize: 14),
-          items: _kSkills.map((skill) => DropdownMenuItem(
-            value: skill,
-            child: Text(skill, style: TextStyle(color: onSurface, fontSize: 14)),
-          )).toList(),
+          items: _skills
+              .map((skill) => DropdownMenuItem(
+                    value: skill,
+                    child: Text(skill,
+                        style: TextStyle(color: onSurface, fontSize: 14)),
+                  ))
+              .toList(),
           onChanged: (v) => setState(() => _selectedSkill = v),
         ),
       ),
@@ -881,7 +879,12 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 active: !_useMapLocation,
                 accentColor: _kPurple,
                 onTap: () {
-                  setState(() => _useMapLocation = false);
+                  setState(() {
+                    _useMapLocation = false;
+                    if (_gpsPosition != null && _gpsAddress.isNotEmpty) {
+                      _address = _gpsAddress;
+                    }
+                  });
                   if (_gpsPosition == null) _fetchGpsLocation();
                 },
               ),
