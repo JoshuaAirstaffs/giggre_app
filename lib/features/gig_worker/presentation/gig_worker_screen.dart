@@ -172,7 +172,11 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     });
     _saveLocationToFirestore();
     _startDispatchSub(uid);
-    if (_suspendedUntil != null) _startSuspensionTimer();
+    if (_suspendedUntil != null) {
+      _startSuspensionTimer();
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _showSuspensionDialog());
+    }
     await _checkForActiveGig(uid);
   }
 
@@ -445,6 +449,65 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       }
       setState(() {});
     });
+  }
+
+  void _showSuspensionDialog() {
+    if (!mounted || _suspendedUntil == null) return;
+    final until = _suspendedUntil!;
+    final dateStr =
+        '${until.day} ${_monthName(until.month)} ${until.year}'
+        ' at ${until.hour.toString().padLeft(2, '0')}:${until.minute.toString().padLeft(2, '0')}';
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: Container(
+          width: 52,
+          height: 52,
+          decoration: const BoxDecoration(
+            color: Color(0xFFFFEDED),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.block_rounded,
+              color: Colors.redAccent, size: 28),
+        ),
+        title: Text(
+          'Account Suspended',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+              color: Theme.of(ctx).colorScheme.onSurface,
+              fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'Your account has been temporarily suspended due to excessive gig declines.\n\n'
+          'You can resume accepting gigs after:\n$dateStr',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: kSub, fontSize: 14, height: 1.5),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Understood'),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showComingSoon(String title) {
