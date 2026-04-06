@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -289,6 +290,19 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  
+  
+  final GlobalKey<RefreshIndicatorState> _refreshKey = GlobalKey<RefreshIndicatorState>();
+  int _carouselRefreshKey = 0;
+
+  Future<void> _refreshAll() async {
+  await Future.wait([
+    _loadUser(),
+    _fetchUpdates()
+  ]);
+  if (mounted) setState(() => _carouselRefreshKey++);
+}
+
   @override
   Widget build(BuildContext context) {
     final firstName = _userName.split(' ').first;
@@ -296,6 +310,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final themeProvider = context.read<ThemeProvider>();
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
+
+    //get current year
+    final currentYear = DateTime.now().year;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -386,7 +403,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: RefreshIndicator(
+          key: _refreshKey,
+          onRefresh: _refreshAll, 
+          color: kBlue,
+          child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -420,7 +442,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: TextStyle(color: kSub, fontSize: 14),
               ),
               const SizedBox(height: 20),
-              const _TestimonialCarousel(),
+              _TestimonialCarousel(key: ValueKey(_carouselRefreshKey)),
               const SizedBox(height: 28),
               _RoleCard(
                 role: 'worker',
@@ -495,10 +517,19 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 20),
               Row(
                 children: [
+                  Container(
+                    width: 4,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      color: kAmber,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 18),
                   Expanded(
                     child: Text(
                       'Giggre Updates',
-                      style: TextStyle(color: onSurface, fontSize: 14),
+                      style: TextStyle(color: onSurface, fontSize: 14, fontWeight: FontWeight.bold),
                     ),
                   ),
                   GestureDetector(
@@ -531,10 +562,70 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
               )),
+               const SizedBox(height: 16),
+               Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: isDark ? Color(0xFF1E1E2C) : Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                ),
+                child: Padding(padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Image.asset('assets/images/logo.png', width: 94, height: 64),
+                    Text("The fatest way to find gigs or hire workers near you.", style: const TextStyle(fontSize: 12, color: kSub)),
+                    const SizedBox(height: 8),
+                    Divider(),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      spacing: 16,
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (context) => AboutGiggre() as Widget));
+                          },
+                          child: Text("About", style: const TextStyle(fontSize: 12, color: kBlue)),
+                        ),
+                         GestureDetector(
+                          onTap: () {
+                             Navigator.push(context, MaterialPageRoute(builder: (context) => TermsAndConditions() as Widget));
+                          },
+                          child: Text("Term", style: const TextStyle(fontSize: 12, color: kBlue)),
+                        ),
+                         GestureDetector(
+                          onTap: () {
+                             Navigator.push(context, MaterialPageRoute(builder: (context) => PrivacyPolicy() as Widget));
+                          },
+                          child: Text("Privacy", style: const TextStyle(fontSize: 12, color: kBlue)),
+                        ),
+                         GestureDetector(
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (context) => HelpFaq() as Widget));
+                          },
+                          child: Text("Help/FAQ", style: const TextStyle(fontSize: 12, color: kBlue)),
+                        ),
+                         GestureDetector(
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (context) => ContactUs() as Widget));
+                          },
+                          child: Text("Contact Us", style: const TextStyle(fontSize: 12, color: kBlue)),
+                        )
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Text("Copyright © $currentYear Giggre. All rights reserved.", style: const TextStyle(fontSize: 12, color: kSub)),
+                  ],
+                ),
+                )
+               )
             ],
           ),
         ),
       ),
+      )
     );
   }
 }
@@ -699,7 +790,7 @@ class _UpdateItem {
 }
 
 class _TestimonialCarousel extends StatefulWidget {
-  const _TestimonialCarousel();
+  const _TestimonialCarousel({super.key});
 
   @override
   State<_TestimonialCarousel> createState() => _TestimonialCarouselState();

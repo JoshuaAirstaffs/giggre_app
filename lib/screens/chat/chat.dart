@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -18,6 +19,7 @@ class _ChatState extends State<Chat> {
   final _msgController = TextEditingController();
   final _scrollController = ScrollController();
   bool _isSending = false;
+  StreamSubscription? _seenSub; // ← new
 
   CollectionReference get _messagesRef => FirebaseFirestore.instance
       .collection('chat_rooms')
@@ -28,8 +30,10 @@ class _ChatState extends State<Chat> {
   void initState() {
     super.initState();
     _markSupportMessagesAsSeen();
+    _listenAndMarkSeen(); // ← new
   }
 
+  // ── Mark all existing unseen support messages on open ──────────────────────
   Future<void> _markSupportMessagesAsSeen() async {
     try {
       final snap = await _messagesRef
@@ -49,6 +53,22 @@ class _ChatState extends State<Chat> {
     }
   }
 
+  // ── Live listener: mark any new unseen support messages instantly ──────────
+  void _listenAndMarkSeen() {
+    _seenSub = _messagesRef
+        .where('isSupport', isEqualTo: true)
+        .where('hasSeen', isEqualTo: false)
+        .snapshots()
+        .listen((snap) async {
+      if (snap.docs.isEmpty) return;
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in snap.docs) {
+        batch.update(doc.reference, {'hasSeen': true});
+      }
+      await batch.commit();
+    });
+  }
+
   Future<void> _sendMessage() async {
     final text = _msgController.text.trim();
     if (text.isEmpty || _isSending) return;
@@ -56,7 +76,6 @@ class _ChatState extends State<Chat> {
     setState(() => _isSending = true);
     _msgController.clear();
 
-    // ✅ Read context BEFORE any await
     final uid = FirebaseAuth.instance.currentUser?.uid;
     final name = context.read<CurrentUserProvider>().currentName ?? '';
 
@@ -66,7 +85,8 @@ class _ChatState extends State<Chat> {
         'isSupport': false,
         'name': name,
         'text': text,
-        'hasSeen': false,
+        'hasSeen': false,         // for user
+        'hasSeenByAdmin': false,  // for admin
         'isAutoReply': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -102,6 +122,7 @@ class _ChatState extends State<Chat> {
 
   @override
   void dispose() {
+    _seenSub?.cancel(); // ← new
     _msgController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -200,6 +221,8 @@ class _ChatState extends State<Chat> {
                     final ts = data['createdAt'] as Timestamp?;
                     final isAutoReply = data['isAutoReply'] as bool? ?? false;
                     final time = ts != null ? _formatTime(ts.toDate()) : '';
+                    final hasSeenByUser = data['hasSeen'] as bool? ?? false;
+                    final hasSeenByAdmin = data['hasSeenByAdmin'] as bool? ?? false;
 
                     return _MessageBubble(
                       text: text,
@@ -208,6 +231,8 @@ class _ChatState extends State<Chat> {
                       isSupport: isSupport,
                       isDark: isDark,
                       isAutoReply: isAutoReply,
+                      hasSeenByUser: hasSeenByUser,
+                      hasSeenBySupport: hasSeenByAdmin,
                     );
                   },
                 );
@@ -283,10 +308,33 @@ class _ChatState extends State<Chat> {
   }
 
   String _formatTime(DateTime dt) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final msgDay = DateTime(dt.year, dt.month, dt.day);
+    final diff = today.difference(msgDay).inDays;
+
     final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
     final m = dt.minute.toString().padLeft(2, '0');
-    final period = dt.hour >= 12 ? 'pm' : 'am';
-    return '$h:$m $period';
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    final timeStr = '$h:$m $period';
+
+    if (diff == 0) return timeStr;
+    if (diff == 1) return 'Yesterday $timeStr';
+    if (diff < 7) return '${_weekday(dt.weekday)} $timeStr';
+    return '${_shortDate(dt)} $timeStr';
+  }
+
+  String _weekday(int wd) {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return days[wd - 1];
+  }
+
+  String _shortDate(DateTime dt) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[dt.month - 1]} ${dt.day}';
   }
 }
 
@@ -300,6 +348,8 @@ class _MessageBubble extends StatelessWidget {
     required this.isSupport,
     required this.isDark,
     required this.isAutoReply,
+    required this.hasSeenByUser,
+    required this.hasSeenBySupport,
   });
 
   final String text;
@@ -308,8 +358,9 @@ class _MessageBubble extends StatelessWidget {
   final bool isSupport;
   final bool isDark;
   final bool isAutoReply;
+  final bool hasSeenByUser;
+  final bool hasSeenBySupport;
 
-  // Check if the text contains HTML tags
   bool get _isHtml => text.contains('<') && text.contains('>');
 
   @override
@@ -321,7 +372,6 @@ class _MessageBubble extends StatelessWidget {
             isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          // Support avatar
           if (!isMe) ...[
             Container(
               padding: const EdgeInsets.all(4),
@@ -337,8 +387,6 @@ class _MessageBubble extends StatelessWidget {
             ),
             const SizedBox(width: 6),
           ],
-
-          // Bubble
           Flexible(
             child: Column(
               crossAxisAlignment:
@@ -373,7 +421,6 @@ class _MessageBubble extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Auto reply label
                       if (isAutoReply) ...[
                         Row(
                           mainAxisSize: MainAxisSize.min,
@@ -398,8 +445,6 @@ class _MessageBubble extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                       ],
-
-                      // ── Message content ──
                       _isHtml
                           ? Html(
                               data: text,
@@ -431,12 +476,24 @@ class _MessageBubble extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  time,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.grey.shade400,
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  spacing: 4,
+                  children: [
+                    Text(
+                      time,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey.shade400,
+                      ),
+                    ),
+                    if (isMe && hasSeenBySupport)
+                      Icon(
+                        Icons.done_all,
+                        size: 12,
+                        color: Colors.grey.shade400,
+                      ),
+                  ],
                 ),
               ],
             ),

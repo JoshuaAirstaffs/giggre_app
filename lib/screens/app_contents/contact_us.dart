@@ -1087,20 +1087,7 @@ class _FormsState extends State<_Forms> {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // 4. save user's first message
-      await roomRef.collection('messages').add({
-        'senderId': uid,
-        'isSupport': false,
-        'name': name,
-        'text': message,
-        'hasSeen': true,
-        'createdAt': FieldValue.serverTimestamp(),
-        'isAutoReply': false,
-      });
-
-      // 5. auto-reply
-      await Future.delayed(const Duration(seconds: 2));
-
+      
       final autoReplySnap = await FirebaseFirestore.instance
           .collection('support_settings')
           .doc('qGDefSx1JYdx86VxlznN')
@@ -1111,6 +1098,22 @@ class _FormsState extends State<_Forms> {
       final autoReply = autoReplySnap.data()?['auto_reply_message'] ??
           "Thank you for contacting us! We'll get back to you shortly.";
 
+      // 4. save user's first message
+      await roomRef.collection('messages').add({
+        'senderId': uid,
+        'isSupport': false,
+        'name': name,
+        'text': message,
+        'hasSeen': true,
+        'hasSeenByAdmin': isAutoReplyEnabled ? true : false,
+        'createdAt': FieldValue.serverTimestamp(),
+        'isAutoReply': false,
+      });
+
+      // 5. auto-reply
+      await Future.delayed(const Duration(seconds: 2));
+
+
       if (isAutoReplyEnabled) {
         await roomRef.collection('messages').add({
           'senderId': 'support',
@@ -1118,6 +1121,7 @@ class _FormsState extends State<_Forms> {
           'name': 'Giggre Support',
           'text': autoReply,
           'hasSeen': false,
+          'hasSeenByAdmin': true,
           'createdAt': FieldValue.serverTimestamp(),
           'isAutoReply': true,
         });

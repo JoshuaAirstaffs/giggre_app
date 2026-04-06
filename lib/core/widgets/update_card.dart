@@ -29,6 +29,7 @@ class UpdateCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E2C) : Colors.white,
         border: Border.all(color: borderColor),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -84,7 +85,7 @@ class UpdateCard extends StatelessWidget {
                       description,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 13, color: descColor, height: 1.5),
+                      style: TextStyle(fontSize: 12, color: descColor, height: 1.5),
                     ),
                   ],
                 ),
