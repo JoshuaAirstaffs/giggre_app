@@ -26,8 +26,7 @@ void _showModal(
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: (isSuccess ? Colors.green : Colors.red)
-                  .withValues(alpha: 0.1),
+              color: (isSuccess ? Colors.green : Colors.red).withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -115,10 +114,7 @@ class _ContactUsState extends State<ContactUs>
           indicatorColor: kBlue,
           labelColor: kBlue,
           unselectedLabelColor: onSurface.withValues(alpha: 0.5),
-          labelStyle: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
+          labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
           tabs: const [
             Tab(text: 'Send Message'),
             Tab(text: 'My Tickets'),
@@ -189,9 +185,155 @@ class _MyTicketsTab extends StatefulWidget {
 
 class _MyTicketsTabState extends State<_MyTicketsTab> {
   String? _filterStatus;
-
+  static const _pageSize = 10;
   static const _statuses = ['open', 'in progress', 'resolved'];
 
+  // ── Pagination state ───────────────────────────────────────────────────────
+  final List<QueryDocumentSnapshot> _docs = [];
+  bool _isLoading = false;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+
+  DocumentSnapshot? _lastUser;
+  DocumentSnapshot? _lastBroadcast;
+  DocumentSnapshot? _lastTargeted;
+
+  bool _userDone = false;
+  bool _broadcastDone = false;
+  bool _targetedDone = false;
+
+  late final ScrollController _scrollController;
+  String? _uid;
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
+  @override
+  void initState() {
+    super.initState();
+    _uid = FirebaseAuth.instance.currentUser?.uid;
+    _scrollController = ScrollController()..addListener(_onScroll);
+    _fetchPage(reset: true);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      _fetchPage();
+    }
+  }
+
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+  Future<void> _fetchPage({bool reset = false}) async {
+    if (_uid == null) return;
+    if (!reset && (_isLoadingMore || !_hasMore)) return;
+
+    if (reset) {
+      setState(() {
+        _isLoading = true;
+        _docs.clear();
+        _lastUser = null;
+        _lastBroadcast = null;
+        _lastTargeted = null;
+        _userDone = false;
+        _broadcastDone = false;
+        _targetedDone = false;
+        _hasMore = true;
+      });
+    } else {
+      setState(() => _isLoadingMore = true);
+    }
+
+    try {
+      final results = await Future.wait([
+        _fetchSubQuery(
+          FirebaseFirestore.instance
+              .collection('support_tickets')
+              .where('userId', isEqualTo: _uid)
+              .orderBy('createdAt', descending: true),
+          _lastUser,
+          _userDone,
+        ),
+        _fetchSubQuery(
+          FirebaseFirestore.instance
+              .collection('support_tickets')
+              .where('recipientType', isEqualTo: 'all')
+              .orderBy('createdAt', descending: true),
+          _lastBroadcast,
+          _broadcastDone,
+        ),
+        _fetchSubQuery(
+          FirebaseFirestore.instance
+              .collection('support_tickets')
+              .where('recipientType', isEqualTo: 'specific')
+              .where('recipients', arrayContains: _uid)
+              .orderBy('createdAt', descending: true),
+          _lastTargeted,
+          _targetedDone,
+        ),
+      ]);
+
+      final userDocs = results[0];
+      final broadcastDocs = results[1];
+      final targetedDocs = results[2];
+
+      if (userDocs.isNotEmpty) _lastUser = userDocs.last;
+      if (broadcastDocs.isNotEmpty) _lastBroadcast = broadcastDocs.last;
+      if (targetedDocs.isNotEmpty) _lastTargeted = targetedDocs.last;
+
+      _userDone = userDocs.length < _pageSize;
+      _broadcastDone = broadcastDocs.length < _pageSize;
+      _targetedDone = targetedDocs.length < _pageSize;
+
+      final newDocs = [...userDocs, ...broadcastDocs, ...targetedDocs];
+      newDocs.sort((a, b) {
+        final aTime = (a.data() as Map)['createdAt'] as Timestamp?;
+        final bTime = (b.data() as Map)['createdAt'] as Timestamp?;
+        if (aTime == null || bTime == null) return 0;
+        return bTime.compareTo(aTime);
+      });
+
+      setState(() {
+        _docs.addAll(newDocs);
+        _hasMore = !_userDone || !_broadcastDone || !_targetedDone;
+        _isLoading = false;
+        _isLoadingMore = false;
+      });
+    } catch (e) {
+      debugPrint('Ticket fetch error: $e');
+      setState(() {
+        _isLoading = false;
+        _isLoadingMore = false;
+      });
+    }
+  }
+
+  Future<List<QueryDocumentSnapshot>> _fetchSubQuery(
+    Query query,
+    DocumentSnapshot? lastDoc,
+    bool isDone,
+  ) async {
+    if (isDone) return [];
+    Query q = query.limit(_pageSize);
+    if (lastDoc != null) q = q.startAfterDocument(lastDoc);
+    final snap = await q.get();
+    return snap.docs;
+  }
+
+  // ── Filtered docs ──────────────────────────────────────────────────────────
+  List<QueryDocumentSnapshot> get _filteredDocs {
+    if (_filterStatus == null) return _docs;
+    return _docs.where((d) {
+      final data = d.data() as Map<String, dynamic>;
+      return data['status'] == _filterStatus;
+    }).toList();
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
   static Color _badgeColor(String status) => switch (status) {
         'resolved' => Colors.green,
         'in progress' => Colors.orange,
@@ -207,16 +349,11 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
   String _formatDate(DateTime dt) =>
       '${dt.month}/${dt.day}/${dt.year} · ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
 
-  // ── Always show details first, "View Message" button handles navigation ────
-  void _onTicketTap(
-    BuildContext context,
-    String ticketId,
-    Map<String, dynamic> data,
-  ) {
+  void _onTicketTap(BuildContext context, String ticketId, Map<String, dynamic> data) {
     _showTicketDetails(context, ticketId, data);
   }
 
-  // ── Lazily create chat room for admin broadcast tickets ───────────────────
+  // ── Lazily create chat room for admin broadcast tickets ────────────────────
   Future<String?> _resolveRoomId(
     BuildContext context,
     String ticketId,
@@ -224,12 +361,10 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
   ) async {
     final source = data['source'] as String? ?? 'user';
 
-    // user-submitted — room already exists on the ticket doc
     if (source == 'user') {
       return data['roomId'] as String?;
     }
 
-    // admin broadcast — check readBy subcollection
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return null;
 
@@ -245,11 +380,9 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
       return readBySnap.data()!['roomId'] as String;
     }
 
-    // first tap — create room + auto-reply
     try {
       final currentUser = context.read<CurrentUserProvider>();
-      final roomRef =
-          FirebaseFirestore.instance.collection('chat_rooms').doc();
+      final roomRef = FirebaseFirestore.instance.collection('chat_rooms').doc();
 
       await roomRef.set({
         'userId': uid,
@@ -270,11 +403,9 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
           .doc('qGDefSx1JYdx86VxlznN')
           .get();
 
-      debugPrint(
-          'Auto reply enabled: ${autoReplySnap.data()?['enabled_auto_reply']}');
+      debugPrint('Auto reply enabled: ${autoReplySnap.data()?['enabled_auto_reply']}');
 
-      final isAutoReplyEnabled =
-          autoReplySnap.data()?['enabled_auto_reply'] ?? false;
+      final isAutoReplyEnabled = autoReplySnap.data()?['enabled_auto_reply'] ?? false;
       final autoReply = autoReplySnap.data()?['auto_reply_message'] ??
           "Thank you for contacting us! We'll get back to you shortly.";
 
@@ -296,7 +427,6 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
         });
       }
 
-      // mark as read + store roomId
       await readByRef.set({
         'readAt': FieldValue.serverTimestamp(),
         'roomId': roomRef.id,
@@ -309,6 +439,7 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
     }
   }
 
+  // ── Ticket details bottom sheet ────────────────────────────────────────────
   void _showTicketDetails(
     BuildContext context,
     String ticketId,
@@ -334,7 +465,6 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // drag handle
               Center(
                 child: Container(
                   width: 40,
@@ -346,8 +476,6 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                 ),
               ),
               const SizedBox(height: 20),
-
-              // subject + status
               Row(
                 children: [
                   Icon(_badgeIcon(status), color: color, size: 18),
@@ -359,11 +487,9 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                           fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ),
-                  // admin badge
                   if (isAdminTicket) ...[
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: kBlue.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
@@ -371,16 +497,13 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                       child: Text(
                         'FROM GIGGRE',
                         style: TextStyle(
-                            color: kBlue,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold),
+                            color: kBlue, fontSize: 9, fontWeight: FontWeight.bold),
                       ),
                     ),
                     const SizedBox(width: 6),
                   ],
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
@@ -388,9 +511,7 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                     child: Text(
                       status.replaceAll('_', ' ').toUpperCase(),
                       style: TextStyle(
-                          color: color,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold),
+                          color: color, fontSize: 10, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
@@ -398,16 +519,12 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
               const SizedBox(height: 16),
               const Divider(),
               const SizedBox(height: 12),
-
-              // ticket number if present
               if (data['ticket_number'] != null)
                 _DetailRow(
                   icon: Icons.confirmation_number_outlined,
                   label: 'Ticket No.',
                   value: data['ticket_number'] as String,
                 ),
-
-              // only show name/email for user-submitted tickets
               if (!isAdminTicket) ...[
                 _DetailRow(
                   icon: Icons.person_outline,
@@ -420,27 +537,21 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                   value: data['email'] ?? '',
                 ),
               ],
-
               if (data['createdAt'] != null)
                 _DetailRow(
                   icon: Icons.access_time,
                   label: 'Submitted',
-                  value: _formatDate(
-                      (data['createdAt'] as Timestamp).toDate()),
+                  value: _formatDate((data['createdAt'] as Timestamp).toDate()),
                 ),
               const SizedBox(height: 12),
               const Text(
                 'Message',
                 style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey),
+                    fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey),
               ),
               const SizedBox(height: 6),
               Html(data: data['message'] ?? ''),
               const SizedBox(height: 24),
-
-              // View Message button — resolves room lazily for admin tickets
               _ViewMessageButton(
                 ticketId: ticketId,
                 data: data,
@@ -453,42 +564,25 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
     );
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    if (uid == null) {
-      return const Center(
-          child: Text('You must be logged in to view tickets.'));
+    if (_uid == null) {
+      return const Center(child: Text('You must be logged in to view tickets.'));
     }
 
-    final userTicketsQuery = FirebaseFirestore.instance
-        .collection('support_tickets')
-        .where('userId', isEqualTo: uid)
-        .orderBy('createdAt', descending: true);
-
-    final broadcastQuery = FirebaseFirestore.instance
-        .collection('support_tickets')
-        .where('recipientType', isEqualTo: 'all')
-        .orderBy('createdAt', descending: true);
-
-    final targetedQuery = FirebaseFirestore.instance
-        .collection('support_tickets')
-        .where('recipientType', isEqualTo: 'specific')
-        .where('recipients', arrayContains: uid)
-        .orderBy('createdAt', descending: true);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final filtered = _filteredDocs;
 
     return SafeArea(
       child: Column(
         children: [
-          // ── Filter chips ──────────────────────────────────────────────────
+          // ── Filter chips ────────────────────────────────────────────────
           SizedBox(
             height: 52,
             child: ListView(
               scrollDirection: Axis.horizontal,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               children: [
                 _FilterChip(
                   label: 'All',
@@ -510,218 +604,173 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
             ),
           ),
 
-          // ── Ticket list ───────────────────────────────────────────────────
+          // ── List ────────────────────────────────────────────────────────
           Expanded(
-            child: StreamBuilder<List<QuerySnapshot>>(
-              stream: Stream.periodic(const Duration(seconds: 1)).asyncMap(
-                (_) => Future.wait([
-                  userTicketsQuery.get(),
-                  broadcastQuery.get(),
-                  targetedQuery.get(),
-                ]),
-              ),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final allDocs = [
-                  ...snapshot.data![0].docs,
-                  ...snapshot.data![1].docs,
-                  ...snapshot.data![2].docs,
-                ];
-
-                allDocs.sort((a, b) {
-                  final aTime =
-                      (a.data() as Map)['createdAt'] as Timestamp?;
-                  final bTime =
-                      (b.data() as Map)['createdAt'] as Timestamp?;
-                  if (aTime == null || bTime == null) return 0;
-                  return bTime.compareTo(aTime);
-                });
-
-                final docs = _filterStatus == null
-                    ? allDocs
-                    : allDocs.where((d) {
-                        final data = d.data() as Map<String, dynamic>;
-                        return data['status'] == _filterStatus;
-                      }).toList();
-
-                if (docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.inbox_outlined,
-                            size: 48, color: Colors.grey.shade400),
-                        const SizedBox(height: 12),
-                        Text(
-                          _filterStatus == null
-                              ? 'No tickets yet'
-                              : 'No ${_filterStatus!.replaceAll('_', ' ')} tickets',
-                          style: TextStyle(
-                              color: Colors.grey.shade500, fontSize: 14),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : filtered.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.inbox_outlined,
+                                size: 48, color: Colors.grey.shade400),
+                            const SizedBox(height: 12),
+                            Text(
+                              _filterStatus == null
+                                  ? 'No tickets yet'
+                                  : 'No ${_filterStatus!.replaceAll('_', ' ')} tickets',
+                              style: TextStyle(
+                                  color: Colors.grey.shade500, fontSize: 14),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  );
-                }
+                      )
+                    : RefreshIndicator(
+                        color: kBlue,
+                        onRefresh: () => _fetchPage(reset: true),
+                        child: ListView.separated(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                          itemCount: filtered.length + (_hasMore ? 1 : 0),
+                          separatorBuilder: (_, __) => const SizedBox(height: 12),
+                          itemBuilder: (context, i) {
+                            // ── Load more spinner ──────────────────────
+                            if (i == filtered.length) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 16),
+                                child: Center(
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              );
+                            }
 
-                return RefreshIndicator(
-                  color: kBlue,
-                  onRefresh: () async =>
-                      Future.delayed(const Duration(milliseconds: 500)),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                    itemCount: docs.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (context, i) {
-                      final docSnap = docs[i];
-                      final data =
-                          docSnap.data() as Map<String, dynamic>;
-                      final status =
-                          data['status'] as String? ?? 'open';
-                      final color = _badgeColor(status);
-                      final isAdminTicket = data['source'] == 'admin';
+                            // ── Ticket card ────────────────────────────
+                            final docSnap = filtered[i];
+                            final data = docSnap.data() as Map<String, dynamic>;
+                            final status = data['status'] as String? ?? 'open';
+                            final color = _badgeColor(status);
+                            final isAdminTicket = data['source'] == 'admin';
 
-                      return GestureDetector(
-                        onTap: () =>
-                            _onTicketTap(context, docSnap.id, data),
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color:
-                                isDark ? Colors.black : Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.grey
-                                    .withValues(alpha: 0.08),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(_badgeIcon(status),
-                                      color: color, size: 16),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Text(
-                                      data['subject'] ?? '',
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  if (isAdminTicket) ...[
-                                    Container(
-                                      padding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: kBlue
-                                            .withValues(alpha: 0.1),
-                                        borderRadius:
-                                            BorderRadius.circular(20),
-                                      ),
-                                      child: Text(
-                                        'FROM GIGGRE',
-                                        style: TextStyle(
-                                          color: kBlue,
-                                          fontSize: 8,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                  ],
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: color
-                                          .withValues(alpha: 0.1),
-                                      borderRadius:
-                                          BorderRadius.circular(20),
-                                    ),
-                                    child: Text(
-                                      status
-                                          .replaceAll('_', ' ')
-                                          .toUpperCase(),
-                                      style: TextStyle(
-                                        color: color,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                             Html(
-                                data: data['message'] ?? '',
-                                style: {
-                                  'body': Style(
-                                    maxLines: 1,
-                                    textOverflow: TextOverflow.ellipsis,
-                                    color: Colors.grey.shade500,
-                                  ),
-                                  'p': Style(
-                                    margin: Margins.zero,
-                                    maxLines: 1,
-                                    textOverflow: TextOverflow.ellipsis,
-                                    color: Colors.grey.shade500,
-                                  ),
-                                  'br': Style(margin: Margins.zero),
-                                },
-                                shrinkWrap: true,
-                              ),
-
-                              if (data['createdAt'] != null) ...[
-                                const SizedBox(height: 8),
-                                Row(
-                                  children: [
-                                    Icon(Icons.access_time,
-                                        size: 11,
-                                        color: Colors.grey.shade400),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      _formatDate(
-                                          (data['createdAt']
-                                                  as Timestamp)
-                                              .toDate()),
-                                      style: TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.grey.shade400),
-                                    ),
-                                    const Spacer(),
-                                    Text(
-                                      'Tap for details',
-                                      style: TextStyle(
-                                          fontSize: 11, color: kBlue),
+                            return GestureDetector(
+                              onTap: () => _onTicketTap(context, docSnap.id, data),
+                              child: Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: isDark ? Colors.black : Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.grey.withValues(alpha: 0.08),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
                                     ),
                                   ],
                                 ),
-                              ],
-                            ],
-                          ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(_badgeIcon(status), color: color, size: 16),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            data['subject'] ?? '',
+                                            style: const TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        if (isAdminTicket) ...[
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: kBlue.withValues(alpha: 0.1),
+                                              borderRadius: BorderRadius.circular(20),
+                                            ),
+                                            child: Text(
+                                              'FROM GIGGRE',
+                                              style: TextStyle(
+                                                color: kBlue,
+                                                fontSize: 8,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: color.withValues(alpha: 0.1),
+                                            borderRadius: BorderRadius.circular(20),
+                                          ),
+                                          child: Text(
+                                            status.replaceAll('_', ' ').toUpperCase(),
+                                            style: TextStyle(
+                                              color: color,
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Html(
+                                      data: data['message'] ?? '',
+                                      style: {
+                                        'body': Style(
+                                          maxLines: 1,
+                                          textOverflow: TextOverflow.ellipsis,
+                                          color: Colors.grey.shade500,
+                                        ),
+                                        'p': Style(
+                                          margin: Margins.zero,
+                                          maxLines: 1,
+                                          textOverflow: TextOverflow.ellipsis,
+                                          color: Colors.grey.shade500,
+                                        ),
+                                        'br': Style(margin: Margins.zero),
+                                      },
+                                      shrinkWrap: true,
+                                    ),
+                                    if (data['createdAt'] != null) ...[
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          Icon(Icons.access_time,
+                                              size: 11, color: Colors.grey.shade400),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            _formatDate(
+                                                (data['createdAt'] as Timestamp).toDate()),
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.grey.shade400),
+                                          ),
+                                          const Spacer(),
+                                          Text(
+                                            'Tap for details',
+                                            style: TextStyle(fontSize: 11, color: kBlue),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
-                );
-              },
-            ),
+                      ),
           ),
         ],
       ),
@@ -729,7 +778,7 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
   }
 }
 
-// ── View Message Button — handles loading state while resolving room ──────────
+// ── View Message Button ───────────────────────────────────────────────────────
 
 class _ViewMessageButton extends StatefulWidget {
   const _ViewMessageButton({
@@ -757,7 +806,7 @@ class _ViewMessageButtonState extends State<_ViewMessageButton> {
           await widget.resolveRoomId(context, widget.ticketId, widget.data);
       if (!mounted) return;
       if (roomId != null) {
-        Navigator.pop(context); // close bottom sheet
+        Navigator.pop(context);
         Navigator.pushNamed(context, '/chat/$roomId');
       }
     } finally {
@@ -816,11 +865,9 @@ class _FilterChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         decoration: BoxDecoration(
-          color:
-              selected ? color : color.withValues(alpha: 0.08),
+          color: selected ? color : color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
@@ -970,8 +1017,7 @@ class _CopyContainer extends StatelessWidget {
           children: [
             Icon(icon, color: kBlue),
             const SizedBox(height: 4),
-            Text(title,
-                style: TextStyle(color: textColor, fontSize: 12)),
+            Text(title, style: TextStyle(color: textColor, fontSize: 12)),
             const SizedBox(height: 4),
             Text(
               value,
@@ -982,8 +1028,7 @@ class _CopyContainer extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            Text('Tap to copy',
-                style: TextStyle(color: kBlue, fontSize: 12)),
+            Text('Tap to copy', style: TextStyle(color: kBlue, fontSize: 12)),
           ],
         ),
       ),
@@ -1048,13 +1093,10 @@ class _FormsState extends State<_Forms> {
 
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      final roomRef =
-          FirebaseFirestore.instance.collection('chat_rooms').doc();
+      final roomRef = FirebaseFirestore.instance.collection('chat_rooms').doc();
 
-      // 1. generate ticket number
       final ticketNumber = await _generateTicketNumber();
 
-      // 2. create the support ticket
       await FirebaseFirestore.instance.collection('support_tickets').add({
         'source': 'user',
         'ticket_number': ticketNumber,
@@ -1072,7 +1114,6 @@ class _FormsState extends State<_Forms> {
         'createdBy': null,
       });
 
-      // 3. create the chat_room document
       await roomRef.set({
         'userId': uid,
         'name': name,
@@ -1087,7 +1128,6 @@ class _FormsState extends State<_Forms> {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      
       final autoReplySnap = await FirebaseFirestore.instance
           .collection('support_settings')
           .doc('qGDefSx1JYdx86VxlznN')
@@ -1098,7 +1138,6 @@ class _FormsState extends State<_Forms> {
       final autoReply = autoReplySnap.data()?['auto_reply_message'] ??
           "Thank you for contacting us! We'll get back to you shortly.";
 
-      // 4. save user's first message
       await roomRef.collection('messages').add({
         'senderId': uid,
         'isSupport': false,
@@ -1110,9 +1149,7 @@ class _FormsState extends State<_Forms> {
         'isAutoReply': false,
       });
 
-      // 5. auto-reply
       await Future.delayed(const Duration(seconds: 2));
-
 
       if (isAutoReplyEnabled) {
         await roomRef.collection('messages').add({
@@ -1159,18 +1196,15 @@ class _FormsState extends State<_Forms> {
     }
   }
 
-  // ── Ticket number generator (mirrors Next.js lib/generateTicketNumber.ts) ──
   Future<String> _generateTicketNumber() async {
     final counterRef = FirebaseFirestore.instance
         .collection('_counters')
         .doc('support_tickets');
     final year = DateTime.now().year;
 
-    final count = await FirebaseFirestore.instance
-        .runTransaction<int>((t) async {
+    final count = await FirebaseFirestore.instance.runTransaction<int>((t) async {
       final snap = await t.get(counterRef);
-      final current =
-          (snap.data()?['count_$year'] as int?) ?? 0;
+      final current = (snap.data()?['count_$year'] as int?) ?? 0;
       final next = current + 1;
       t.set(counterRef, {'count_$year': next}, SetOptions(merge: true));
       return next;
@@ -1201,8 +1235,7 @@ class _FormsState extends State<_Forms> {
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: kBlue, width: 1.5),
       ),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
     );
   }
 

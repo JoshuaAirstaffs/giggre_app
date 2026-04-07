@@ -7,6 +7,41 @@ import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:provider/provider.dart';
 
+// ── Local message model ────────────────────────────────────────────────────────
+class _Msg {
+  final String? id;         // null = optimistic (not yet committed)
+  final String text;
+  final bool isMe;
+  final bool isSupport;
+  final bool isAutoReply;
+  final bool hasSeenBySupport;
+  final DateTime? time;
+  final bool pending;       // true while waiting for server
+
+  const _Msg({
+    this.id,
+    required this.text,
+    required this.isMe,
+    this.isSupport = false,
+    this.isAutoReply = false,
+    this.hasSeenBySupport = false,
+    this.time,
+    this.pending = false,
+  });
+
+  _Msg copyWith({String? id, bool? pending, bool? hasSeenBySupport, DateTime? time}) => _Msg(
+        id: id ?? this.id,
+        text: text,
+        isMe: isMe,
+        isSupport: isSupport,
+        isAutoReply: isAutoReply,
+        hasSeenBySupport: hasSeenBySupport ?? this.hasSeenBySupport,
+        time: time ?? this.time,
+        pending: pending ?? this.pending,
+      );
+}
+
+// ── Chat screen ────────────────────────────────────────────────────────────────
 class Chat extends StatefulWidget {
   final String roomId;
   const Chat({super.key, required this.roomId});
@@ -18,8 +53,25 @@ class Chat extends StatefulWidget {
 class _ChatState extends State<Chat> {
   final _msgController = TextEditingController();
   final _scrollController = ScrollController();
-  bool _isSending = false;
-  StreamSubscription? _seenSub; // ← new
+
+  static const _pageSize = 20;
+
+  final List<_Msg> _msgs = [];
+  bool _isLoadingInitial = true;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+
+  // Firestore cursor for paginating older messages
+  DocumentSnapshot? _oldestDoc;
+
+  // Stream subscription for new incoming messages
+  StreamSubscription? _incomingSub;
+  StreamSubscription? _seenSub;
+
+  // Track the newest timestamp we've fetched, to avoid stream duplicates
+  DateTime? _newestFetchedTime;
+
+  String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
   CollectionReference get _messagesRef => FirebaseFirestore.instance
       .collection('chat_rooms')
@@ -29,20 +81,223 @@ class _ChatState extends State<Chat> {
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
+    _loadInitial();
     _markSupportMessagesAsSeen();
-    _listenAndMarkSeen(); // ← new
+    _listenAndMarkSeen();
   }
 
-  // ── Mark all existing unseen support messages on open ──────────────────────
+  @override
+  void dispose() {
+    _incomingSub?.cancel();
+    _seenSub?.cancel();
+    _msgController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  // ── Scroll up → load older ─────────────────────────────────────────────────
+  void _onScroll() {
+    if (_scrollController.position.pixels <= 100) _loadMore();
+  }
+
+  // ── Initial load ───────────────────────────────────────────────────────────
+  Future<void> _loadInitial() async {
+    try {
+      final snap = await _messagesRef
+          .orderBy('createdAt', descending: true)
+          .limit(_pageSize)
+          .get();
+
+      final docs = snap.docs.reversed.toList();
+      final msgs = docs.map((d) => _docToMsg(d)).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _msgs.clear();
+        _msgs.addAll(msgs);
+        _hasMore = snap.docs.length == _pageSize;
+        _oldestDoc = docs.isNotEmpty ? docs.first : null;
+        _newestFetchedTime = msgs.isNotEmpty ? msgs.last.time : null;
+        _isLoadingInitial = false;
+      });
+
+      _startIncomingStream();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToBottom());
+    } catch (e) {
+      debugPrint('Initial load error: $e');
+      if (mounted) setState(() => _isLoadingInitial = false);
+    }
+  }
+
+  // ── Load older messages ────────────────────────────────────────────────────
+  Future<void> _loadMore() async {
+    if (_isLoadingMore || !_hasMore || _oldestDoc == null) return;
+    setState(() => _isLoadingMore = true);
+
+    try {
+      final snap = await _messagesRef
+          .orderBy('createdAt', descending: true)
+          .startAfterDocument(_oldestDoc!)
+          .limit(_pageSize)
+          .get();
+
+      final docs = snap.docs.reversed.toList();
+      final msgs = docs.map((d) => _docToMsg(d)).toList();
+
+      if (!mounted) return;
+
+      final prevExtent = _scrollController.position.maxScrollExtent;
+
+      setState(() {
+        // Remove any duplicates before inserting
+        final existingIds = _msgs.map((m) => m.id).toSet();
+        final fresh = msgs.where((m) => !existingIds.contains(m.id)).toList();
+        _msgs.insertAll(0, fresh);
+        _hasMore = snap.docs.length == _pageSize;
+        if (docs.isNotEmpty) _oldestDoc = docs.first;
+        _isLoadingMore = false;
+      });
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          final diff = _scrollController.position.maxScrollExtent - prevExtent;
+          _scrollController.jumpTo(_scrollController.offset + diff);
+        }
+      });
+    } catch (e) {
+      debugPrint('Load more error: $e');
+      if (mounted) setState(() => _isLoadingMore = false);
+    }
+  }
+
+  // ── Stream: only listen for messages newer than what we fetched ────────────
+  void _startIncomingStream() {
+    Query q = _messagesRef.orderBy('createdAt', descending: false);
+
+    // Scope stream to only new messages
+    if (_newestFetchedTime != null) {
+      q = q.where('createdAt',
+          isGreaterThan: Timestamp.fromDate(_newestFetchedTime!));
+    }
+
+    _incomingSub = q.snapshots().listen((snap) {
+      if (snap.docs.isEmpty) return;
+
+      bool changed = false;
+      for (final change in snap.docChanges) {
+        final msg = _docToMsg(change.doc);
+
+        if (change.type == DocumentChangeType.added) {
+          // Skip if it's already in list (e.g. our own optimistic message)
+          final existingIdx = _msgs.indexWhere((m) => m.id == msg.id);
+          if (existingIdx != -1) continue;
+
+          // Also skip if it matches a pending optimistic message we sent
+          final optimisticIdx = _msgs.indexWhere(
+            (m) => m.pending && m.isMe && m.text == msg.text,
+          );
+          if (optimisticIdx != -1) {
+            // Replace optimistic with confirmed
+            _msgs[optimisticIdx] = msg;
+            changed = true;
+            continue;
+          }
+
+          // It's a new message from support
+          if (!msg.isMe) {
+            _msgs.add(msg);
+            changed = true;
+          }
+        } else if (change.type == DocumentChangeType.modified) {
+          // e.g. hasSeenByAdmin updated
+          final idx = _msgs.indexWhere((m) => m.id == msg.id);
+          if (idx != -1) {
+            _msgs[idx] = msg;
+            changed = true;
+          }
+        }
+      }
+
+      if (changed && mounted) {
+        setState(() {});
+        // Only scroll to bottom if we're already near the bottom
+        if (_scrollController.hasClients &&
+            _scrollController.position.pixels >=
+                _scrollController.position.maxScrollExtent - 100) {
+          _scrollToBottom();
+        }
+      }
+    });
+  }
+
+  // ── Send: optimistic UI ────────────────────────────────────────────────────
+  Future<void> _sendMessage() async {
+    final text = _msgController.text.trim();
+    if (text.isEmpty) return;
+
+    _msgController.clear();
+    final uid = _uid;
+    final name = context.read<CurrentUserProvider>().currentName ?? '';
+
+    // 1. Add optimistic message immediately — no flicker, no wait
+    final optimistic = _Msg(
+      text: text,
+      isMe: true,
+      time: DateTime.now(),
+      pending: true,
+    );
+    setState(() => _msgs.add(optimistic));
+    _scrollToBottom();
+
+    try {
+      // 2. Write to Firestore
+      final docRef = await _messagesRef.add({
+        'senderId': uid,
+        'isSupport': false,
+        'name': name,
+        'text': text,
+        'hasSeen': false,
+        'hasSeenByAdmin': false,
+        'isAutoReply': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      await FirebaseFirestore.instance
+          .collection('chat_rooms')
+          .doc(widget.roomId)
+          .update({
+        'lastMessage': text,
+        'lastMessageSender': 'You',
+        'lastMessageAt': FieldValue.serverTimestamp(),
+      });
+
+      // 3. Confirm: replace optimistic with real doc id + remove pending flag
+      if (mounted) {
+        setState(() {
+          final idx = _msgs.indexWhere((m) => m.pending && m.text == text && m.isMe);
+          if (idx != -1) {
+            _msgs[idx] = _msgs[idx].copyWith(id: docRef.id, pending: false);
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Send error: $e');
+      // Remove the optimistic message on failure
+      if (mounted) {
+        setState(() => _msgs.removeWhere((m) => m.pending && m.text == text));
+      }
+    }
+  }
+
+  // ── Mark seen ──────────────────────────────────────────────────────────────
   Future<void> _markSupportMessagesAsSeen() async {
     try {
       final snap = await _messagesRef
           .where('isSupport', isEqualTo: true)
           .where('hasSeen', isEqualTo: false)
           .get();
-
       if (snap.docs.isEmpty) return;
-
       final batch = FirebaseFirestore.instance.batch();
       for (final doc in snap.docs) {
         batch.update(doc.reference, {'hasSeen': true});
@@ -53,7 +308,6 @@ class _ChatState extends State<Chat> {
     }
   }
 
-  // ── Live listener: mark any new unseen support messages instantly ──────────
   void _listenAndMarkSeen() {
     _seenSub = _messagesRef
         .where('isSupport', isEqualTo: true)
@@ -69,70 +323,61 @@ class _ChatState extends State<Chat> {
     });
   }
 
-  Future<void> _sendMessage() async {
-    final text = _msgController.text.trim();
-    if (text.isEmpty || _isSending) return;
-
-    setState(() => _isSending = true);
-    _msgController.clear();
-
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    final name = context.read<CurrentUserProvider>().currentName ?? '';
-
-    try {
-      await _messagesRef.add({
-        'senderId': uid,
-        'isSupport': false,
-        'name': name,
-        'text': text,
-        'hasSeen': false,         // for user
-        'hasSeenByAdmin': false,  // for admin
-        'isAutoReply': false,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      await FirebaseFirestore.instance
-          .collection('chat_rooms')
-          .doc(widget.roomId)
-          .update({
-            'lastMessage': text,
-            'lastMessageSender': 'You',
-            'lastMessageAt': FieldValue.serverTimestamp(),
-          });
-
-      _scrollToBottom();
-    } catch (e) {
-      debugPrint('Send error: $e');
-    } finally {
-      if (mounted) setState(() => _isSending = false);
-    }
-  }
+  // ── Helpers ────────────────────────────────────────────────────────────────
+_Msg _docToMsg(DocumentSnapshot doc) {
+  final data = doc.data() as Map<String, dynamic>;
+  final ts = data['createdAt'] as Timestamp?;
+  return _Msg(
+    id: doc.id,
+    text: data['text'] as String? ?? '',
+    isMe: data['senderId'] == _uid,
+    isSupport: data['isSupport'] as bool? ?? false,
+    isAutoReply: data['isAutoReply'] as bool? ?? false,
+    hasSeenBySupport: data['hasSeenByAdmin'] as bool? ?? false,
+    time: ts?.toDate(),
+    pending: false,
+  );
+}
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
+          duration: const Duration(milliseconds: 250),
           curve: Curves.easeOut,
         );
       }
     });
   }
 
-  @override
-  void dispose() {
-    _seenSub?.cancel(); // ← new
-    _msgController.dispose();
-    _scrollController.dispose();
-    super.dispose();
+  void _jumpToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+    }
   }
 
+  String _formatTime(DateTime dt) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final msgDay = DateTime(dt.year, dt.month, dt.day);
+    final diff = today.difference(msgDay).inDays;
+    final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+    final m = dt.minute.toString().padLeft(2, '0');
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    final timeStr = '$h:$m $period';
+    if (diff == 0) return timeStr;
+    if (diff == 1) return 'Yesterday $timeStr';
+    if (diff < 7) return '${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][dt.weekday - 1]} $timeStr';
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return '${mo[dt.month - 1]} ${dt.day} $timeStr';
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -147,31 +392,20 @@ class _ChatState extends State<Chat> {
                 color: const Color(0xFFFBBF24),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(
-                Icons.support_agent,
-                color: Colors.white,
-                size: 20,
-              ),
+              child: const Icon(Icons.support_agent, color: Colors.white, size: 20),
             ),
             const SizedBox(width: 10),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Giggre Support',
-                  style: TextStyle(
-                    color: onSurface,
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  'We\'ll respond within 24–48 hours',
-                  style: TextStyle(
-                    color: onSurface.withValues(alpha: 0.5),
-                    fontSize: 10,
-                  ),
-                ),
+                Text('Giggre Support',
+                    style: TextStyle(
+                        color: onSurface,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold)),
+                Text('We\'ll respond within 24–48 hours',
+                    style: TextStyle(
+                        color: onSurface.withValues(alpha: 0.5), fontSize: 10)),
               ],
             ),
           ],
@@ -179,68 +413,45 @@ class _ChatState extends State<Chat> {
       ),
       body: Column(
         children: [
-          // ── Messages list ──────────────────────────────────────────────
+          // ── Message list ─────────────────────────────────────────────────
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _messagesRef
-                  .orderBy('createdAt', descending: false)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final docs = snapshot.data?.docs ?? [];
-
-                if (docs.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'No messages yet.\nSay hello! 👋',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.grey.shade400,
-                        fontSize: 14,
+            child: _isLoadingInitial
+                ? const Center(child: CircularProgressIndicator())
+                : _msgs.isEmpty
+                    ? Center(
+                        child: Text(
+                          'No messages yet.\nSay hello! 👋',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: Colors.grey.shade400, fontSize: 14),
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                        itemCount: _msgs.length + (_isLoadingMore ? 1 : 0),
+                        itemBuilder: (ctx, i) {
+                          if (_isLoadingMore && i == 0) {
+                            return const Padding(
+                              padding: EdgeInsets.only(bottom: 8),
+                              child: Center(
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2)),
+                            );
+                          }
+                          final msg = _msgs[_isLoadingMore ? i - 1 : i];
+                          return _MessageBubble(
+                            msg: msg,
+                            isDark: isDark,
+                            timeStr: msg.time != null
+                                ? _formatTime(msg.time!)
+                                : '',
+                          );
+                        },
                       ),
-                    ),
-                  );
-                }
-
-                WidgetsBinding.instance.addPostFrameCallback(
-                  (_) => _scrollToBottom(),
-                );
-
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-                  itemCount: docs.length,
-                  itemBuilder: (context, i) {
-                    final data = docs[i].data() as Map<String, dynamic>;
-                    final isMe = data['senderId'] == uid;
-                    final isSupport = data['isSupport'] as bool? ?? false;
-                    final text = data['text'] as String? ?? '';
-                    final ts = data['createdAt'] as Timestamp?;
-                    final isAutoReply = data['isAutoReply'] as bool? ?? false;
-                    final time = ts != null ? _formatTime(ts.toDate()) : '';
-                    final hasSeenByUser = data['hasSeen'] as bool? ?? false;
-                    final hasSeenByAdmin = data['hasSeenByAdmin'] as bool? ?? false;
-
-                    return _MessageBubble(
-                      text: text,
-                      time: time,
-                      isMe: isMe,
-                      isSupport: isSupport,
-                      isDark: isDark,
-                      isAutoReply: isAutoReply,
-                      hasSeenByUser: hasSeenByUser,
-                      hasSeenBySupport: hasSeenByAdmin,
-                    );
-                  },
-                );
-              },
-            ),
           ),
 
-          // ── Input bar ──────────────────────────────────────────────────
+          // ── Input bar ────────────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             decoration: BoxDecoration(
@@ -275,7 +486,8 @@ class _ChatState extends State<Chat> {
                           hintText: 'Type a message...',
                           border: InputBorder.none,
                           isDense: true,
-                          contentPadding: EdgeInsets.symmetric(vertical: 10),
+                          contentPadding:
+                              EdgeInsets.symmetric(vertical: 10),
                         ),
                         onSubmitted: (_) => _sendMessage(),
                       ),
@@ -284,18 +496,14 @@ class _ChatState extends State<Chat> {
                   const SizedBox(width: 8),
                   GestureDetector(
                     onTap: _sendMessage,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
+                    child: Container(
                       padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: _isSending ? Colors.grey : kBlue,
+                      decoration: const BoxDecoration(
+                        color: kBlue,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
-                        Icons.send_rounded,
-                        color: Colors.white,
-                        size: 20,
-                      ),
+                      child: const Icon(Icons.send_rounded,
+                          color: Colors.white, size: 20),
                     ),
                   ),
                 ],
@@ -306,62 +514,21 @@ class _ChatState extends State<Chat> {
       ),
     );
   }
-
-  String _formatTime(DateTime dt) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final msgDay = DateTime(dt.year, dt.month, dt.day);
-    final diff = today.difference(msgDay).inDays;
-
-    final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-    final m = dt.minute.toString().padLeft(2, '0');
-    final period = dt.hour >= 12 ? 'PM' : 'AM';
-    final timeStr = '$h:$m $period';
-
-    if (diff == 0) return timeStr;
-    if (diff == 1) return 'Yesterday $timeStr';
-    if (diff < 7) return '${_weekday(dt.weekday)} $timeStr';
-    return '${_shortDate(dt)} $timeStr';
-  }
-
-  String _weekday(int wd) {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return days[wd - 1];
-  }
-
-  String _shortDate(DateTime dt) {
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    return '${months[dt.month - 1]} ${dt.day}';
-  }
 }
 
 // ── Message Bubble ─────────────────────────────────────────────────────────────
-
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
-    required this.text,
-    required this.time,
-    required this.isMe,
-    required this.isSupport,
+    required this.msg,
     required this.isDark,
-    required this.isAutoReply,
-    required this.hasSeenByUser,
-    required this.hasSeenBySupport,
+    required this.timeStr,
   });
 
-  final String text;
-  final String time;
-  final bool isMe;
-  final bool isSupport;
+  final _Msg msg;
   final bool isDark;
-  final bool isAutoReply;
-  final bool hasSeenByUser;
-  final bool hasSeenBySupport;
+  final String timeStr;
 
-  bool get _isHtml => text.contains('<') && text.contains('>');
+  bool get _isHtml => msg.text.contains('<') && msg.text.contains('>');
 
   @override
   Widget build(BuildContext context) {
@@ -369,110 +536,105 @@ class _MessageBubble extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         mainAxisAlignment:
-            isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+            msg.isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (!isMe) ...[
+          if (!msg.isMe) ...[
             Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
                 color: const Color(0xFFFBBF24),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: const Icon(
-                Icons.support_agent,
-                color: Colors.white,
-                size: 14,
-              ),
+              child: const Icon(Icons.support_agent,
+                  color: Colors.white, size: 14),
             ),
             const SizedBox(width: 6),
           ],
           Flexible(
             child: Column(
-              crossAxisAlignment:
-                  isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              crossAxisAlignment: msg.isMe
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    border: (isMe && !isAutoReply)
-                        ? null
-                        : Border.all(
-                            color: isMe
-                                ? Colors.white.withValues(alpha: 0.3)
-                                : kAmber,
-                            width: 1.5,
-                          ),
-                    color: isMe
-                        ? kBlue
-                        : isDark
-                        ? Colors.grey.shade800
-                        : Colors.grey.shade200,
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(16),
-                      topRight: const Radius.circular(16),
-                      bottomLeft: Radius.circular(isMe ? 16 : 4),
-                      bottomRight: Radius.circular(isMe ? 4 : 16),
+                Opacity(
+                  // Slightly dim pending messages like Messenger does
+                  opacity: msg.pending ? 0.6 : 1.0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      border: (msg.isMe && !msg.isAutoReply)
+                          ? null
+                          : Border.all(
+                              color: msg.isMe
+                                  ? Colors.white.withValues(alpha: 0.3)
+                                  : kAmber,
+                              width: 1.5,
+                            ),
+                      color: msg.isMe
+                          ? kBlue
+                          : isDark
+                              ? Colors.grey.shade800
+                              : Colors.grey.shade200,
+                      borderRadius: BorderRadius.only(
+                        topLeft: const Radius.circular(16),
+                        topRight: const Radius.circular(16),
+                        bottomLeft: Radius.circular(msg.isMe ? 16 : 4),
+                        bottomRight: Radius.circular(msg.isMe ? 4 : 16),
+                      ),
                     ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (isAutoReply) ...[
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.auto_fix_high,
-                              size: 15,
-                              color: isMe ? Colors.white70 : Colors.grey.shade600,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Auto Reply',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isMe
-                                    ? Colors.white70
-                                    : Colors.grey.shade600,
-                                fontWeight: FontWeight.w500,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (msg.isAutoReply) ...[
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.auto_fix_high,
+                                  size: 15,
+                                  color: msg.isMe
+                                      ? Colors.white70
+                                      : Colors.grey.shade600),
+                              const SizedBox(width: 4),
+                              Text('Auto Reply',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: msg.isMe
+                                          ? Colors.white70
+                                          : Colors.grey.shade600,
+                                      fontWeight: FontWeight.w500)),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        _isHtml
+                            ? Html(
+                                data: msg.text,
+                                style: {
+                                  'body': Style(
+                                    fontSize: FontSize(14),
+                                    color: msg.isMe
+                                        ? Colors.white
+                                        : isDark
+                                            ? Colors.white
+                                            : Colors.black87,
+                                    margin: Margins.zero,
+                                    padding: HtmlPaddings.zero,
+                                  ),
+                                  'div': Style(
+                                      margin: Margins.zero,
+                                      padding: HtmlPaddings.zero),
+                                },
+                              )
+                            : Text(
+                                msg.text,
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    color: msg.isMe ? Colors.white : null),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
                       ],
-                      _isHtml
-                          ? Html(
-                              data: text,
-                              style: {
-                                'body': Style(
-                                  fontSize: FontSize(14),
-                                  color: isMe
-                                      ? Colors.white
-                                      : isDark
-                                      ? Colors.white
-                                      : Colors.black87,
-                                  margin: Margins.zero,
-                                  padding: HtmlPaddings.zero,
-                                ),
-                                'div': Style(
-                                  margin: Margins.zero,
-                                  padding: HtmlPaddings.zero,
-                                ),
-                              },
-                            )
-                          : Text(
-                              text,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: isMe ? Colors.white : null,
-                              ),
-                            ),
-                    ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 3),
@@ -480,19 +642,16 @@ class _MessageBubble extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   spacing: 4,
                   children: [
-                    Text(
-                      time,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey.shade400,
-                      ),
-                    ),
-                    if (isMe && hasSeenBySupport)
-                      Icon(
-                        Icons.done_all,
-                        size: 12,
-                        color: Colors.grey.shade400,
-                      ),
+                    if (msg.pending)
+                      Icon(Icons.access_time,
+                          size: 10, color: Colors.grey.shade400)
+                    else
+                      Text(timeStr,
+                          style: TextStyle(
+                              fontSize: 10, color: Colors.grey.shade400)),
+                    if (msg.isMe && msg.hasSeenBySupport)
+                      Icon(Icons.done_all,
+                          size: 12, color: Colors.grey.shade400),
                   ],
                 ),
               ],
