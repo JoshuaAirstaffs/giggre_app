@@ -60,7 +60,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         _trackedWorkerId = wid;
         _startWorkerStream(wid);
       }
-    });
+    }, onError: (e) => debugPrint('[GigDetailSheet] gig stream error: $e'));
   }
 
   void _startWorkerStream(String uid) {
@@ -75,7 +75,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       if (geo != null) {
         setState(() => _workerLocation = LatLng(geo.latitude, geo.longitude));
       }
-    });
+    }, onError: (e) => debugPrint('[GigDetailSheet] worker stream error: $e'));
   }
 
   @override

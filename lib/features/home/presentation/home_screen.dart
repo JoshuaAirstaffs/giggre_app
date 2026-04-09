@@ -107,15 +107,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 .limit(1)
                 .snapshots()
                 .map((s) => s.docs.isNotEmpty)
-                .listen((hasUnread) {
-                  roomUnread[i] = hasUnread;
-                  final anyUnread = roomUnread.values.any((v) => v);
-                  if (mounted) setState(() => _hasUnreadMessages = anyUnread);
-                  debugPrint('[Unread] Badge → $anyUnread');
-                });
+                .listen(
+                  (hasUnread) {
+                    roomUnread[i] = hasUnread;
+                    final anyUnread = roomUnread.values.any((v) => v);
+                    if (mounted) setState(() => _hasUnreadMessages = anyUnread);
+                    debugPrint('[Unread] Badge → $anyUnread');
+                  },
+                  onError: (e) => debugPrint('[HomeScreen] message stream error: $e'),
+                );
             _roomSubs.add(sub);
           }
-        });
+        }, onError: (e) => debugPrint('[HomeScreen] rooms stream error: $e'));
   }
 
   void _showBetaModal() {

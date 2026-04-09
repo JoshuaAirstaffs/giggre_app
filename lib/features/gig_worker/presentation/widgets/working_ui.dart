@@ -109,7 +109,7 @@ class _WorkingUIState extends State<WorkingUI> {
           widget.onComplete();
         }
       }
-    });
+    }, onError: (e) => debugPrint('[WorkingUI] gig stream error: $e'));
   }
 
   // ── Location stream + geofence ────────────────────────────────────────────

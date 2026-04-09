@@ -222,6 +222,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .where('status', isEqualTo: 'in_progress')
         .snapshots()
         .listen((snap) {
+
       if (!mounted) return;
       if (snap.docs.isEmpty) {
         setState(() => _dispatchedGig = null);
@@ -248,7 +249,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         return;
       }
       setState(() => _dispatchedGig = gig);
-    });
+    }, onError: (e) => debugPrint('[GigWorker] dispatch stream error: $e'));
   }
 
   Future<void> _saveLocationToFirestore() async {

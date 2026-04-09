@@ -385,18 +385,20 @@ class _StatsRowState extends State<_StatsRow> {
   void initState() {
     super.initState();
     final db = FirebaseFirestore.instance;
+    void onErr(Object e) => debugPrint('[_StatsRow] stream error: $e');
+
     _quickSub = db.collection('quick_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
       _quick = s.docs.map((d) => d.data() as Map).toList();
       _recompute();
-    });
+    }, onError: onErr);
     _openSub = db.collection('open_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
       _open = s.docs.map((d) => d.data() as Map).toList();
       _recompute();
-    });
+    }, onError: onErr);
     _offeredSub = db.collection('offered_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
       _offered = s.docs.map((d) => d.data() as Map).toList();
       _recompute();
-    });
+    }, onError: onErr);
   }
 
   @override

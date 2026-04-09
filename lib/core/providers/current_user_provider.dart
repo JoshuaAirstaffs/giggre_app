@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class CurrentUserProvider extends ChangeNotifier {
@@ -54,20 +55,32 @@ static Future<void> initNotifications() async {
     if (uid == null) return;
     _ticketSubscription?.cancel();
 
-    _ticketSubscription = FirebaseFirestore.instance
-        .collection('support_tickets')
-        .where('userId', isEqualTo: uid)
-        .snapshots()
-        .listen((snapshot) {
-          for (final change in snapshot.docChanges) {
-            if (change.type == DocumentChangeType.modified) {
-              final data    = change.doc.data()!;
-              final status  = data['status'] as String;
-              final subject = data['subject'] as String;
-              _showNotification(subject, status);
-            }
-          }
-        });
+    // Wait for a valid Firebase Auth token before opening the Firestore stream,
+    // so request.auth is never null when the rules are evaluated.
+    FirebaseAuth.instance.idTokenChanges().first.then((user) {
+      if (user == null || user.uid != uid) return;
+
+      _ticketSubscription = FirebaseFirestore.instance
+          .collection('support_tickets')
+          .where('userId', isEqualTo: uid)
+          .snapshots()
+          .listen(
+            (snapshot) {
+              for (final change in snapshot.docChanges) {
+                if (change.type == DocumentChangeType.modified) {
+                  final data    = change.doc.data()!;
+                  final status  = data['status'] as String;
+                  final subject = data['subject'] as String;
+                  _showNotification(subject, status);
+                }
+              }
+            },
+            onError: (e) {
+              // Swallow permission errors (e.g. during sign-out race).
+              debugPrint('[CurrentUserProvider] ticket stream error: $e');
+            },
+          );
+    });
   }
 
   Future<void> _showNotification(String subject, String status) async {

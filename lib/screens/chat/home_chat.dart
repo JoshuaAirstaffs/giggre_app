@@ -57,11 +57,14 @@ class _HomeChatState extends State<HomeChat>
                 .limit(1)
                 .snapshots()
                 .map((s) => s.docs.isNotEmpty)
-                .listen((hasUnread) {
-                  roomUnread[i] = hasUnread;
-                  final anyUnread = roomUnread.values.any((v) => v);
-                  if (mounted) setState(() => _hasUnread = anyUnread);
-                });
+                .listen(
+                  (hasUnread) {
+                    roomUnread[i] = hasUnread;
+                    final anyUnread = roomUnread.values.any((v) => v);
+                    if (mounted) setState(() => _hasUnread = anyUnread);
+                  },
+                  onError: (e) => debugPrint('[HomeChat] message stream error: $e'),
+                );
             _roomSubs.add(sub);
           }
         });

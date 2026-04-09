@@ -35,6 +35,11 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
     super.initState();
     final db = FirebaseFirestore.instance;
 
+    void onErr(Object e) {
+      debugPrint('[HostGigsScreen] stream error: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+
     _quickSub = db
         .collection('quick_gigs')
         .where('hostId', isEqualTo: widget.uid)
@@ -48,7 +53,7 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
                 return m;
               }).toList();
               _loading = false;
-            }));
+            }), onError: onErr);
 
     _openSub = db
         .collection('open_gigs')
@@ -63,7 +68,7 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
                 return m;
               }).toList();
               _loading = false;
-            }));
+            }), onError: onErr);
 
     _offeredSub = db
         .collection('offered_gigs')
@@ -78,7 +83,7 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
                 return m;
               }).toList();
               _loading = false;
-            }));
+            }), onError: onErr);
   }
 
   @override

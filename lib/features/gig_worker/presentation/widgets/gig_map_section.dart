@@ -138,7 +138,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         return _toMarker(d.id, data, 'quick');
       }).whereType<GigMarkerData>().toList();
       setState(() => _quickGigs = all);
-    });
+    }, onError: (e) => debugPrint('[GigMap] quick stream error: $e'));
   }
 
   void _startOpenSub(FirebaseFirestore db) {
@@ -153,7 +153,7 @@ class _GigMapSectionState extends State<GigMapSection> {
             .whereType<GigMarkerData>()
             .toList();
       });
-    });
+    }, onError: (e) => debugPrint('[GigMap] open stream error: $e'));
   }
 
   void _startOfferedSub(FirebaseFirestore db) {
@@ -169,7 +169,7 @@ class _GigMapSectionState extends State<GigMapSection> {
             .whereType<GigMarkerData>()
             .toList();
       });
-    });
+    }, onError: (e) => debugPrint('[GigMap] offered stream error: $e'));
   }
 
   @override
