@@ -339,16 +339,36 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
     await _markMessagesAsSeen();
   }
 
-  String _formatDate(DateTime dt) {
-    final now = DateTime.now();
-    if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
-      final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-      final m = dt.minute.toString().padLeft(2, '0');
-      final period = dt.hour >= 12 ? 'pm' : 'am';
-      return '$h:$m $period';
-    }
-    return '${dt.month}/${dt.day}/${dt.year}';
-  }
+  
+String _formatTime(DateTime dt) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final msgDay = DateTime(dt.year, dt.month, dt.day);
+  final diff = today.difference(msgDay).inDays;
+
+  final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+  final m = dt.minute.toString().padLeft(2, '0');
+  final period = dt.hour >= 12 ? 'PM' : 'AM';
+  final timeStr = '$h:$m $period';
+
+  if (diff == 0) return timeStr;                          // Today   → 4:30 PM
+  if (diff == 1) return 'Yesterday $timeStr';             // Yesterday → Yesterday 4:30 PM
+  if (diff < 7)  return '${_weekday(dt.weekday)} $timeStr'; // This week → Mon 4:30 PM
+  return '${_shortDate(dt)} $timeStr';                    // Older   → Jan 5 4:30 PM
+}
+
+String _weekday(int wd) {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  return days[wd - 1];
+}
+
+String _shortDate(DateTime dt) {
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  return '${months[dt.month - 1]} ${dt.day}';
+}
 
   Color get _statusColor => switch (widget.status) {
         'resolved' => Colors.green,
@@ -428,7 +448,7 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
                             if (widget.date != null) ...[
                               const SizedBox(width: 6),
                               Text(
-                                _formatDate(widget.date!),
+                                _formatTime(widget.date!),
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: isDarkMode
