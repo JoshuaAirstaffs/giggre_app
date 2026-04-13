@@ -76,9 +76,14 @@ class QuickGigMatchingService {
   }
 
   // ── Find best available worker ──────────────────────────────────────────────
+  // alwaysExclude: host + workers who declined even as fallback (never dispatched)
+  // softExclude:   workers who declined in first pass (skipped normally, eligible as fallback)
+  // fallback:      when true, ONLY considers softExclude workers as last resort
   static Future<Map<String, dynamic>?> _findBestWorker({
     required GeoPoint gigLocation,
-    required List<String> exclusionList,
+    required List<String> alwaysExclude,
+    List<String> softExclude = const [],
+    bool fallback = false,
   }) async {
     final snap = await FirebaseFirestore.instance
         .collection('users')
@@ -92,7 +97,12 @@ class QuickGigMatchingService {
     double bestScore = double.negativeInfinity;
 
     for (final doc in snap.docs) {
-      if (exclusionList.contains(doc.id)) continue;
+      if (alwaysExclude.contains(doc.id)) continue;
+      // Normal pass: skip declined workers
+      // Fallback pass: ONLY consider declined workers
+      if (!fallback && softExclude.contains(doc.id)) continue;
+      if (fallback && !softExclude.contains(doc.id)) continue;
+
       final data = doc.data();
       final geo = data['location'] as GeoPoint?;
       if (geo == null) continue;
@@ -148,6 +158,7 @@ class QuickGigMatchingService {
     await gigRef.update({
       'searchStartedAt': FieldValue.serverTimestamp(),
       'exclusionList': FieldValue.arrayUnion([]),
+      'hardExcludeList': FieldValue.arrayUnion([]),
     });
 
     int dispatchAttempts = 0;
@@ -185,17 +196,38 @@ class QuickGigMatchingService {
           return;
         }
 
-        final exclusionList =
+        final hostId = gigData['hostId'] as String? ?? '';
+        // hardExclude: host + workers who already declined a fallback dispatch
+        final hardExclude = [
+          ...List<String>.from(gigData['hardExcludeList'] ?? []),
+          if (hostId.isNotEmpty) hostId,
+        ];
+        // softExclude: workers who declined once — skipped on first pass,
+        // eligible as last-resort fallback
+        final softExclude =
             List<String>.from(gigData['exclusionList'] ?? []);
 
-        // ── Find best worker ───────────────────────────────
-        final worker = await _findBestWorker(
+        // ── Find best worker (first pass: skip declined workers) ──
+        var worker = await _findBestWorker(
           gigLocation: gigLocation,
-          exclusionList: exclusionList,
+          alwaysExclude: hardExclude,
+          softExclude: softExclude,
         );
 
+        // ── Fallback pass: no fresh workers — try declined ones ───
+        bool isFallbackDispatch = false;
+        if (worker == null && softExclude.isNotEmpty) {
+          worker = await _findBestWorker(
+            gigLocation: gigLocation,
+            alwaysExclude: hardExclude,
+            softExclude: softExclude,
+            fallback: true,
+          );
+          if (worker != null) isFallbackDispatch = true;
+        }
+
         if (worker == null) {
-          // No available workers right now — wait and retry
+          // Truly no available workers right now — wait and retry
           await Future.delayed(_retryInterval);
           continue;
         }
@@ -228,10 +260,25 @@ class QuickGigMatchingService {
           return;
         }
 
-        // Worker declined (they set status back to 'scanning' themselves)
-        if (finalStatus == 'scanning') continue;
+        // Worker declined
+        if (finalStatus == 'scanning') {
+          final declinedWorkerId = worker['id'] as String;
+          if (isFallbackDispatch) {
+            // Declined even as last resort — hard exclude permanently
+            await gigRef.update({
+              'hardExcludeList': FieldValue.arrayUnion([declinedWorkerId]),
+              'exclusionList': FieldValue.arrayRemove([declinedWorkerId]),
+            });
+          } else {
+            // First decline — soft exclude, still eligible as fallback later
+            await gigRef.update({
+              'exclusionList': FieldValue.arrayUnion([declinedWorkerId]),
+            });
+          }
+          continue;
+        }
 
-        // Timed out — exclude worker and try next
+        // Timed out — soft exclude worker and try next
         final timedOutWorkerId = worker['id'] as String;
         await Future.wait([
           gigRef.update({

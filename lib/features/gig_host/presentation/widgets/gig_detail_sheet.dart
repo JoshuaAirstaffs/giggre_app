@@ -129,6 +129,8 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     final db = FirebaseFirestore.instance;
     final workerId = data['workerId'] as String? ??
                      data['assignedWorkerId'] as String?;
+    final workerName = data['assignedWorkerName'] as String? ??
+                       data['workerName'] as String? ?? 'Worker';
     await Future.wait([
       db.collection(_collection).doc(widget.gigId).update({
         'status': 'completed',
@@ -137,6 +139,17 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       if (workerId != null && workerId.isNotEmpty)
         db.collection('users').doc(workerId).update({'slot': 'AVAILABLE'}),
     ]);
+    if (!mounted) return;
+    if (workerId != null && workerId.isNotEmpty) {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _RatingDialog(
+          workerId: workerId,
+          workerName: workerName,
+        ),
+      );
+    }
     if (mounted) Navigator.pop(context);
   }
 
@@ -649,6 +662,167 @@ class _DetailRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Rating Dialog — shown after host confirms gig completed
+// ─────────────────────────────────────────────────────────────────────────────
+class _RatingDialog extends StatefulWidget {
+  final String workerId;
+  final String workerName;
+
+  const _RatingDialog({
+    required this.workerId,
+    required this.workerName,
+  });
+
+  @override
+  State<_RatingDialog> createState() => _RatingDialogState();
+}
+
+class _RatingDialogState extends State<_RatingDialog> {
+  int _selected = 0;
+  bool _submitting = false;
+
+  static const _labels = ['', 'Poor', 'Fair', 'Good', 'Great', 'Excellent'];
+  static const _green = Color(0xFF22C55E);
+  static const _starActive = Color(0xFFFACC15);
+
+  Future<void> _submit() async {
+    if (_selected == 0) return;
+    setState(() => _submitting = true);
+    try {
+      final db = FirebaseFirestore.instance;
+      final snap = await db.collection('users').doc(widget.workerId).get();
+      final data = snap.data() ?? {};
+      final currentRating = (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
+      final currentCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
+      final newCount = currentCount + 1;
+      final newRating =
+          ((currentRating * currentCount) + _selected) / newCount;
+      await db.collection('users').doc(widget.workerId).update({
+        'ratingAsWorker': double.parse(newRating.toStringAsFixed(2)),
+        'ratingCount': newCount,
+      });
+    } catch (_) {}
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final label = _selected > 0 ? _labels[_selected] : 'Tap a star to rate';
+
+    return AlertDialog(
+      backgroundColor: cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _green.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.verified_rounded, color: _green, size: 30),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Rate Your Worker',
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'How was ${widget.workerName}?',
+            style: const TextStyle(color: kSub, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(5, (i) {
+              final starNum = i + 1;
+              return GestureDetector(
+                onTap: () => setState(() => _selected = starNum),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Icon(
+                    starNum <= _selected
+                        ? Icons.star_rounded
+                        : Icons.star_outline_rounded,
+                    color: starNum <= _selected ? _starActive : kSub,
+                    size: 40,
+                  ),
+                ),
+              );
+            }),
+          ),
+          const SizedBox(height: 10),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 150),
+            child: Text(
+              label,
+              key: ValueKey(label),
+              style: TextStyle(
+                color: _selected > 0 ? _starActive : kSub,
+                fontSize: 13,
+                fontWeight: _selected > 0
+                    ? FontWeight.bold
+                    : FontWeight.normal,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed:
+                      _submitting ? null : () => Navigator.pop(context),
+                  child: const Text('Skip',
+                      style: TextStyle(color: kSub, fontSize: 14)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed:
+                      (_selected == 0 || _submitting) ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _green,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: _green.withValues(alpha: 0.4),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2),
+                        )
+                      : const Text('Submit',
+                          style: TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

@@ -323,9 +323,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     try {
       setState(() { isLoading = true; error = ''; });
 
-      final userId = await generateUserId();
       final cred   = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(email: email, password: password);
+      final userId = await generateUserId();
 
       await FirebaseFirestore.instance.collection('users').doc(cred.user!.uid).set({
         'userId'          : userId,

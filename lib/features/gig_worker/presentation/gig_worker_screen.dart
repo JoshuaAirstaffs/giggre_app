@@ -55,6 +55,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   GigMarkerData? _dispatchedGig;
   StreamSubscription? _dispatchSub;
 
+  // Earnings streams
+  final List<StreamSubscription> _earningsSubs = [];
+  final Map<String, List<Map<String, dynamic>>> _gigsByCollection = {};
+
   // Decline suspension
   DateTime? _suspendedUntil;
   Timer? _suspensionTimer;
@@ -71,6 +75,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   void dispose() {
     _dispatchSub?.cancel();
     _suspensionTimer?.cancel();
+    for (final sub in _earningsSubs) {
+      sub.cancel();
+    }
     _setOnlineStatus(false);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -110,32 +117,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .get();
     final data = doc.data() ?? {};
 
-    double total = 0, weekly = 0;
-    int completed = 0;
-    final now = DateTime.now();
-    final weekStart = now.subtract(Duration(days: now.weekday - 1));
-    final weekStartMidnight =
-        DateTime(weekStart.year, weekStart.month, weekStart.day);
-
-    try {
-      for (final col in ['quick_gigs', 'open_gigs', 'offered_gigs']) {
-        final snap = await FirebaseFirestore.instance
-            .collection(col)
-            .where('workerId', isEqualTo: uid)
-            .where('status', isEqualTo: 'completed')
-            .get();
-        for (final d in snap.docs) {
-          final gig = d.data();
-          final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
-          total += budget;
-          completed++;
-          final ts = gig['completedAt'] as Timestamp?;
-          if (ts != null && ts.toDate().isAfter(weekStartMidnight)) {
-            weekly += budget;
-          }
-        }
-      }
-    } catch (_) {}
+    _startEarningsSubs(uid);
 
     final createdAt = data['createdAt'];
     String memberSince = '';
@@ -164,9 +146,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       _autoAccept = data['autoAccept'] as bool? ?? false;
       _seekingQuickGigs = data['seekingQuickGigs'] as bool? ?? false;
       _memberSince = memberSince;
-      _totalEarnings = total;
-      _weeklyEarnings = weekly;
-      _completedGigs = completed;
       _suspendedUntil = suspendedUntil;
       _loading = false;
     });
@@ -178,6 +157,58 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           (_) => _showSuspensionDialog());
     }
     await _checkForActiveGig(uid);
+  }
+
+  void _startEarningsSubs(String uid) {
+    for (final sub in _earningsSubs) {
+      sub.cancel();
+    }
+    _earningsSubs.clear();
+    _gigsByCollection.clear();
+
+    final now = DateTime.now();
+    final weekStartMidnight = DateTime(
+      now.year,
+      now.month,
+      now.day - (now.weekday - 1),
+    );
+
+    void recalculate() {
+      double total = 0, weekly = 0;
+      int completed = 0;
+      for (final gigs in _gigsByCollection.values) {
+        for (final gig in gigs) {
+          final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
+          total += budget;
+          completed++;
+          final ts = gig['completedAt'] as Timestamp?;
+          if (ts != null && ts.toDate().isAfter(weekStartMidnight)) {
+            weekly += budget;
+          }
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _totalEarnings = total;
+          _weeklyEarnings = weekly;
+          _completedGigs = completed;
+        });
+      }
+    }
+
+    for (final col in ['quick_gigs', 'open_gigs', 'offered_gigs']) {
+      final sub = FirebaseFirestore.instance
+          .collection(col)
+          .where('workerId', isEqualTo: uid)
+          .where('status', isEqualTo: 'completed')
+          .snapshots()
+          .listen((snap) {
+        _gigsByCollection[col] =
+            snap.docs.map((d) => d.data()).toList();
+        recalculate();
+      });
+      _earningsSubs.add(sub);
+    }
   }
 
   /// On app resume/init, restore WorkingUI if worker has an ongoing gig.

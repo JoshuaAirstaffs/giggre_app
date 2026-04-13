@@ -1,10 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../core/theme/app_colors.dart';
@@ -101,21 +102,24 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 
       // Geocoding is best-effort
       try {
-        final placemarks =
-            await placemarkFromCoordinates(pos.latitude, pos.longitude);
-        String address = 'Unknown location';
-        if (placemarks.isNotEmpty) {
-          final p = placemarks.first;
-          final parts = [
-            if (p.street != null && p.street!.isNotEmpty) p.street,
-            if (p.subLocality != null && p.subLocality!.isNotEmpty)
-              p.subLocality,
-            if (p.locality != null && p.locality!.isNotEmpty) p.locality,
-            if (p.administrativeArea != null &&
-                p.administrativeArea!.isNotEmpty)
-              p.administrativeArea,
-          ];
-          address = parts.join(', ');
+        final uri = Uri.parse(
+          'https://nominatim.openstreetmap.org/reverse'
+          '?lat=${pos.latitude}&lon=${pos.longitude}&format=json',
+        );
+        final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
+        String address = 'GPS location ready';
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body) as Map<String, dynamic>;
+          final addrObj = data['address'] as Map<String, dynamic>?;
+          if (addrObj != null) {
+            final parts = [
+              addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
+              addrObj['suburb'] ?? addrObj['neighbourhood'],
+              addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
+              addrObj['state'],
+            ].whereType<String>().where((s) => s.isNotEmpty).toList();
+            if (parts.isNotEmpty) address = parts.join(', ');
+          }
         }
         if (mounted) {
           setState(() {
@@ -897,17 +901,21 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       _searchError = null;
     });
     try {
-      final locations = await locationFromAddress(query);
+      final uri = Uri.parse('https://nominatim.openstreetmap.org/search')
+          .replace(queryParameters: {'q': query, 'format': 'json', 'limit': '1'});
+      final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
       if (!mounted) return;
-      if (locations.isEmpty) {
+      final data = jsonDecode(res.body) as List;
+      if (data.isEmpty) {
         setState(() {
           _searchError = 'No results found. Try a different address.';
           _searching = false;
         });
         return;
       }
-      final loc = locations.first;
-      final point = LatLng(loc.latitude, loc.longitude);
+      final lat = double.parse(data[0]['lat'] as String);
+      final lon = double.parse(data[0]['lon'] as String);
+      final point = LatLng(lat, lon);
       setState(() {
         _picked = point;
         _address = '';
@@ -928,22 +936,25 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     if (!mounted) return;
     setState(() => _geocoding = true);
     try {
-      final placemarks =
-          await placemarkFromCoordinates(pos.latitude, pos.longitude);
+      final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse'
+        '?lat=${pos.latitude}&lon=${pos.longitude}&format=json',
+      );
+      final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
       if (!mounted) return;
       String address = 'Selected location';
-      if (placemarks.isNotEmpty) {
-        final p = placemarks.first;
-        final parts = [
-          if (p.street != null && p.street!.isNotEmpty) p.street,
-          if (p.subLocality != null && p.subLocality!.isNotEmpty)
-            p.subLocality,
-          if (p.locality != null && p.locality!.isNotEmpty) p.locality,
-          if (p.administrativeArea != null &&
-              p.administrativeArea!.isNotEmpty)
-            p.administrativeArea,
-        ];
-        address = parts.join(', ');
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final addrObj = data['address'] as Map<String, dynamic>?;
+        if (addrObj != null) {
+          final parts = [
+            addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
+            addrObj['suburb'] ?? addrObj['neighbourhood'],
+            addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
+            addrObj['state'],
+          ].whereType<String>().where((s) => s.isNotEmpty).toList();
+          if (parts.isNotEmpty) address = parts.join(', ');
+        }
       }
       setState(() {
         _address = address;
