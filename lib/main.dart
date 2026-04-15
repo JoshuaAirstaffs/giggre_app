@@ -10,6 +10,7 @@ import 'core/widgets/main_navigation.dart';
 import 'core/theme/theme_provider.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+final GlobalKey<NavigatorState> callNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +18,7 @@ void main() async {
   try {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
     await CurrentUserProvider.initNotifications();
+    CurrentUserProvider.navigatorKey = navigatorKey; 
   } catch (e) {
     firebaseError = e.toString();
   }
@@ -63,7 +65,6 @@ class _FirebaseErrorScreen extends StatelessWidget {
 class GiggreApp extends StatelessWidget {
   final String? firebaseError;
   const GiggreApp({super.key, this.firebaseError});
-
   @override
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
