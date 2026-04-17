@@ -49,6 +49,9 @@ dependencies:
   cached_network_image: ^3.4.1
   flutter_html: ^3.0.0
   flutter_local_notifications: ^18.0.0
+  agora_rtc_engine: 6.5.3
+  permission_handler: ^12.0.1
+  audioplayers: ^6.6.0
 
 dev_dependencies:
   flutter_test:
@@ -75,6 +78,7 @@ flutter:
   # Assets folder — drop your images here and reference them in code.
   assets:
     - assets/images/   # logo.png, splash.png, etc. go here
+    - assets/sounds/incoming_call_sound.mp3
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -1,0 +1,273 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:giggre_app/features/call/video_call_screen.dart';
+
+class IncomingVideoCallScreen extends StatefulWidget {
+  final String callerId;
+  final String callerName;
+  final String callerRole;
+  final String channelName;
+  final String token;
+
+  const IncomingVideoCallScreen({
+    super.key,
+    required this.callerId,
+    required this.callerName,
+    this.callerRole = 'Gig worker',
+    required this.channelName,
+    required this.token,
+  });
+
+  @override
+  State<IncomingVideoCallScreen> createState() =>
+      _IncomingVideoCallScreenState();
+}
+
+class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseAnimation;
+
+  static const _bg = Color(0xFF121212);
+  static const _purple = Color(0xFF7C4DFF);
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.08).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  String get _initials {
+    final parts = widget.callerName.trim().split(' ');
+    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    return parts[0].substring(0, parts[0].length.clamp(0, 2)).toUpperCase();
+  }
+
+Future<void> _acceptCall() async {
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return;
+
+  debugPrint('📞 receiver accepting channelName: "${widget.channelName}" token: "${widget.token}"');
+
+  await FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .update({'incomingCall.status': 'accepted'});
+
+  if (!mounted) return;
+
+  await Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (_) => VideoCallScreen(
+        channelName: widget.channelName,
+        token: widget.token,
+      ),
+    ),
+  );
+
+  await FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .update({'incomingCall': FieldValue.delete()});
+}
+
+  Future<void> _declineCall() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .update({'incomingCall': FieldValue.delete()});
+
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            const SizedBox(height: 48),
+
+            // ── Label ──────────────────────────────────────────
+            Text(
+              'Incoming Video Call',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.white.withValues(alpha: 0.45),
+                letterSpacing: 0.4,
+              ),
+            ),
+
+            const SizedBox(height: 48),
+
+            // ── Avatar ─────────────────────────────────────────
+            AnimatedBuilder(
+              animation: _pulseAnimation,
+              builder: (_, child) => Transform.scale(
+                scale: _pulseAnimation.value,
+                child: child,
+              ),
+              child: Stack(
+                alignment: Alignment.bottomRight,
+                children: [
+                  Container(
+                    width: 110,
+                    height: 110,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _purple.withValues(alpha: 0.15),
+                      border: Border.all(
+                        color: _purple.withValues(alpha: 0.6),
+                        width: 2,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        _initials,
+                        style: const TextStyle(
+                          fontSize: 38,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFFD1C4E9),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Video badge
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _purple,
+                      border: Border.all(color: _bg, width: 2),
+                    ),
+                    child: const Icon(
+                      Icons.videocam_rounded,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            // ── Caller name ────────────────────────────────────
+            Text(
+              widget.callerName,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              widget.callerRole,
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.white.withValues(alpha: 0.4),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              widget.callerId,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF7C4DFF),
+              ),
+            ),
+
+            const Spacer(),
+
+            // ── Buttons ────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 48),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _ActionButton(
+                    icon: Icons.call_end_rounded,
+                    label: 'Decline',
+                    color: const Color(0xFFE53935),
+                    onTap: _declineCall,
+                  ),
+                  _ActionButton(
+                    icon: Icons.videocam_rounded,
+                    label: 'Accept',
+                    color: _purple,
+                    onTap: _acceptCall,
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 52),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+            ),
+            child: Icon(icon, color: Colors.white, size: 28),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

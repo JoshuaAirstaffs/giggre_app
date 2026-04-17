@@ -1,17 +1,14 @@
 plugins {
     id("com.android.application")
-    // START: FlutterFire Configuration
     id("com.google.gms.google-services")
-    // END: FlutterFire Configuration
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "com.example.giggre_app"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "28.2.13676358"  // ← Agora requires this
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
@@ -25,7 +22,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.giggre_app"
-        minSdk = flutter.minSdkVersion
+        minSdk = flutter.minSdkVersion  // ← Agora requires minimum 21
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

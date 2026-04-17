@@ -3,6 +3,18 @@ allprojects {
         google()
         mavenCentral()
     }
+
+    // Force NDK version for all subprojects including agora_rtc_engine
+    plugins.withId("com.android.library") {
+        extensions.configure<com.android.build.gradle.LibraryExtension> {
+            ndkVersion = "28.2.13676358"
+        }
+    }
+    plugins.withId("com.android.application") {
+        extensions.configure<com.android.build.gradle.AppExtension> {
+            ndkVersion = "28.2.13676358"
+        }
+    }
 }
 
 val newBuildDir: Directory =
