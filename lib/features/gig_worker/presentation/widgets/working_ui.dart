@@ -44,12 +44,14 @@ class WorkingUI extends StatefulWidget {
   final GigMarkerData gig;
   final VoidCallback onComplete;
   final VoidCallback onCancel;
+  final String gigCollection;
 
   const WorkingUI({
     super.key,
     required this.gig,
     required this.onComplete,
     required this.onCancel,
+    this.gigCollection = 'quick_gigs',
   });
 
   @override
@@ -66,6 +68,7 @@ class _WorkingUIState extends State<WorkingUI> {
   late final Stopwatch _stopwatch;
   late final Timer _timer;
   Duration _elapsed = Duration.zero;
+  Duration _elapsedOffset = Duration.zero; // pre-loaded on restore
 
   // Worker location tracking
   LatLng? _workerLocation;
@@ -86,17 +89,18 @@ class _WorkingUIState extends State<WorkingUI> {
     _stopwatch = Stopwatch();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _stopwatch.isRunning) {
-        setState(() => _elapsed = _stopwatch.elapsed);
+        setState(() => _elapsed = _elapsedOffset + _stopwatch.elapsed);
       }
     });
     _listenGig();
     _startLocation();
+    _restoreElapsedIfWorking();
   }
 
   // ── Firestore listener ────────────────────────────────────────────────────
   void _listenGig() {
     _gigSub = FirebaseFirestore.instance
-        .collection('quick_gigs')
+        .collection(widget.gigCollection)
         .doc(widget.gig.id)
         .snapshots()
         .listen((snap) {
@@ -149,7 +153,7 @@ class _WorkingUIState extends State<WorkingUI> {
             _fetchRoute(loc, widget.gig.position);
           }
         }
-      });
+      }, onError: (e) => debugPrint('[WorkingUI] location stream error: $e'));
     } catch (_) {}
   }
 
@@ -167,9 +171,96 @@ class _WorkingUIState extends State<WorkingUI> {
 
   Future<void> _updateStatus(String status) async {
     await FirebaseFirestore.instance
-        .collection('quick_gigs')
+        .collection(widget.gigCollection)
         .doc(widget.gig.id)
         .update({'status': status});
+  }
+
+  /// On app restore, if the gig is already in 'working' status, pre-load the
+  /// elapsed time from Firestore so the timer shows the correct running total.
+  Future<void> _restoreElapsedIfWorking() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection(widget.gigCollection)
+          .doc(widget.gig.id)
+          .get();
+      if (!snap.exists || !mounted) return;
+      final data = snap.data()!;
+      if ((data['status'] as String?) != 'working') return;
+      final startTs = data['workStartedAt'] as Timestamp?;
+      if (startTs == null) return;
+      final alreadyElapsed = DateTime.now().difference(startTs.toDate());
+      if (!mounted) return;
+      setState(() => _elapsedOffset = alreadyElapsed);
+      if (!_stopwatch.isRunning) _stopwatch.start();
+    } catch (_) {}
+  }
+
+  /// Save workStartedAt + set status to 'working'.
+  Future<void> _startWork() async {
+    await FirebaseFirestore.instance
+        .collection(widget.gigCollection)
+        .doc(widget.gig.id)
+        .update({
+      'status': 'working',
+      'workStartedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Stop timer, save duration fields + set status to 'task_complete'.
+  Future<void> _completeWork() async {
+    _stopwatch.stop();
+    final total = _elapsedOffset + _stopwatch.elapsed;
+    await FirebaseFirestore.instance
+        .collection(widget.gigCollection)
+        .doc(widget.gig.id)
+        .update({
+      'status': 'task_complete',
+      'durationSeconds': total.inSeconds,
+      'workCompletedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ── Cancel gig — show reason form, save to Firestore, await admin review ──
+  Future<void> _showCancelReasonDialog() async {
+    final controller = TextEditingController();
+    bool submitted = false;
+    try {
+      submitted = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => _CancelReasonDialog(controller: controller),
+          ) ??
+          false;
+      if (!submitted || !mounted) return;
+      final reason = controller.text.trim();
+      if (reason.isEmpty) return;
+      await FirebaseFirestore.instance
+          .collection(widget.gigCollection)
+          .doc(widget.gig.id)
+          .update({
+        'cancellation_reason': FieldValue.arrayUnion([
+          {
+            'reason': reason,
+            'approved': null,
+            'requestedBy': 'worker',
+          }
+        ]),
+        'status': 'cancellation_requested',
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Cancellation request submitted. Pending admin review.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        widget.onCancel();
+      }
+    } finally {
+      controller.dispose();
+    }
   }
 
   // ── Show host rating dialog, then call onComplete ─────────────────────────
@@ -273,7 +364,14 @@ class _WorkingUIState extends State<WorkingUI> {
                         subtitle: 'Tap Start Gig when you\'re ready to begin.',
                       ),
                     if (_step == _GigStep.working)
-                      _TimerBanner(elapsed: _fmt(_elapsed)),
+                      _TimerBanner(
+                        elapsed: _fmt(_elapsed),
+                        gigLabel: widget.gig.gigType == 'open'
+                            ? 'Open Gig'
+                            : widget.gig.gigType == 'offered'
+                                ? 'Offered Gig'
+                                : 'Quick Gig',
+                      ),
                     if (_step == _GigStep.taskComplete)
                       _StatusBanner(
                         icon: Icons.hourglass_top_rounded,
@@ -317,17 +415,14 @@ class _WorkingUIState extends State<WorkingUI> {
                         label: 'Start Gig',
                         icon: Icons.play_arrow_rounded,
                         color: green,
-                        onPressed: () => _updateStatus('working'),
+                        onPressed: _startWork,
                       ),
                     if (_step == _GigStep.working)
                       _PrimaryButton(
                         label: 'Gig Complete',
                         icon: Icons.check_circle_outline_rounded,
                         color: green,
-                        onPressed: () async {
-                          _stopwatch.stop();
-                          await _updateStatus('task_complete');
-                        },
+                        onPressed: _completeWork,
                       ),
 
                     // ── Cancel gig (only while still on the way / working) ─
@@ -340,7 +435,7 @@ class _WorkingUIState extends State<WorkingUI> {
                           width: double.infinity,
                           height: 48,
                           child: OutlinedButton.icon(
-                            onPressed: widget.onCancel,
+                            onPressed: _showCancelReasonDialog,
                             icon: const Icon(Icons.cancel_outlined,
                                 size: 20, color: Colors.redAccent),
                             label: const Text('Cancel Gig',
@@ -653,7 +748,8 @@ class _StatusBanner extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _TimerBanner extends StatelessWidget {
   final String elapsed;
-  const _TimerBanner({required this.elapsed});
+  final String gigLabel;
+  const _TimerBanner({required this.elapsed, this.gigLabel = 'Quick Gig'});
 
   @override
   Widget build(BuildContext context) {
@@ -695,8 +791,8 @@ class _TimerBanner extends StatelessWidget {
                         fontSize: 15,
                         fontWeight: FontWeight.bold)),
                 const SizedBox(height: 2),
-                const Text('Quick Gig — Active',
-                    style: TextStyle(
+                Text('$gigLabel — Active',
+                    style: const TextStyle(
                         color: Color(0xFF22C55E), fontSize: 12)),
               ],
             ),
@@ -766,6 +862,21 @@ class _GigInfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (statusLabel, statusColor) = _statusInfo;
+    final gigColor = gig.gigType == 'open'
+        ? kBlue
+        : gig.gigType == 'offered'
+            ? const Color(0xFF8B5CF6)
+            : kAmber;
+    final gigIcon = gig.gigType == 'open'
+        ? Icons.workspace_premium_outlined
+        : gig.gigType == 'offered'
+            ? Icons.send_rounded
+            : Icons.flash_on_rounded;
+    final gigLabel = gig.gigType == 'open'
+        ? 'Open Gig'
+        : gig.gigType == 'offered'
+            ? 'Offered Gig'
+            : 'Quick Gig';
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -788,11 +899,10 @@ class _GigInfoCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: kAmber.withValues(alpha: 0.12),
+                  color: gigColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.flash_on_rounded,
-                    color: kAmber, size: 22),
+                child: Icon(gigIcon, color: gigColor, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -811,12 +921,12 @@ class _GigInfoCard extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
-                        color: kAmber.withValues(alpha: 0.1),
+                        color: gigColor.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: const Text('Quick Gig',
+                      child: Text(gigLabel,
                           style: TextStyle(
-                              color: kAmber,
+                              color: gigColor,
                               fontSize: 10,
                               fontWeight: FontWeight.bold)),
                     ),
@@ -1082,6 +1192,147 @@ class _HostRatingDialogState extends State<_HostRatingDialog> {
                       : const Text('Submit',
                           style: TextStyle(
                               fontSize: 14, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cancel Reason Dialog — worker states reason; admin decides approval
+// ─────────────────────────────────────────────────────────────────────────────
+class _CancelReasonDialog extends StatefulWidget {
+  final TextEditingController controller;
+  const _CancelReasonDialog({required this.controller});
+
+  @override
+  State<_CancelReasonDialog> createState() => _CancelReasonDialogState();
+}
+
+class _CancelReasonDialogState extends State<_CancelReasonDialog> {
+  bool _hasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onChanged);
+  }
+
+  void _onChanged() {
+    final has = widget.controller.text.trim().isNotEmpty;
+    if (has != _hasText) setState(() => _hasText = has);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return AlertDialog(
+      backgroundColor: cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.redAccent.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.cancel_outlined,
+                color: Colors.redAccent, size: 28),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Request Cancellation',
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Your request will be reviewed by an admin before the gig is cancelled.',
+            style: TextStyle(color: kSub, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: widget.controller,
+            maxLines: 4,
+            minLines: 3,
+            textCapitalization: TextCapitalization.sentences,
+            style: TextStyle(color: onSurface, fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'Describe your reason for cancelling...',
+              hintStyle:
+                  TextStyle(color: kSub.withValues(alpha: 0.6), fontSize: 13),
+              filled: true,
+              fillColor: isDark
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : Colors.black.withValues(alpha: 0.04),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                    color: Colors.redAccent.withValues(alpha: 0.3)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                    color: Colors.redAccent.withValues(alpha: 0.25)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide:
+                    const BorderSide(color: Colors.redAccent, width: 1.5),
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child:
+                      const Text('Go Back', style: TextStyle(color: kSub)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed:
+                      _hasText ? () => Navigator.pop(context, true) : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor:
+                        Colors.redAccent.withValues(alpha: 0.35),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  child: const Text('Submit Request',
+                      style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],

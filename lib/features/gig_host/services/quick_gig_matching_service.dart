@@ -9,12 +9,13 @@ class QuickGigMatchingService {
   static const _defaultReviewWindowSeconds = 30;
   static const _defaultSearchTimeoutMinutes = 5;
   static const _defaultMaxDispatchAttempts = 10;
+  static const _defaultMaxSearchRadiusKm = 10.0;
 
   static const _retryInterval = Duration(seconds: 15);
   static const _pollInterval = Duration(seconds: 3);
 
   // ── Fetch remote config ─────────────────────────────────────────────────────
-  static Future<({Duration reviewWindow, Duration searchTimeout, int maxAttempts})>
+  static Future<({Duration reviewWindow, Duration searchTimeout, int maxAttempts, double maxSearchRadiusKm})>
       _fetchConfig() async {
     try {
       final doc = await FirebaseFirestore.instance
@@ -33,16 +34,21 @@ class QuickGigMatchingService {
       final maxAttempts =
           (data['max_dispatch_attempts'] as num?)?.toInt() ??
               _defaultMaxDispatchAttempts;
+      final maxSearchRadiusKm =
+          (data['max_search_radius_km'] as num?)?.toDouble() ??
+              _defaultMaxSearchRadiusKm;
       return (
         reviewWindow: reviewWindow,
         searchTimeout: searchTimeout,
         maxAttempts: maxAttempts,
+        maxSearchRadiusKm: maxSearchRadiusKm,
       );
     } catch (_) {
       return (
         reviewWindow: const Duration(seconds: _defaultReviewWindowSeconds),
         searchTimeout: const Duration(minutes: _defaultSearchTimeoutMinutes),
         maxAttempts: _defaultMaxDispatchAttempts,
+        maxSearchRadiusKm: _defaultMaxSearchRadiusKm,
       );
     }
   }
@@ -82,6 +88,7 @@ class QuickGigMatchingService {
   static Future<Map<String, dynamic>?> _findBestWorker({
     required GeoPoint gigLocation,
     required List<String> alwaysExclude,
+    required double maxSearchRadiusKm,
     List<String> softExclude = const [],
     bool fallback = false,
   }) async {
@@ -108,6 +115,10 @@ class QuickGigMatchingService {
       if (geo == null) continue;
 
       final dist = _distanceKm(gigLocation, geo);
+
+      // Skip workers outside the configured radius
+      if (dist > maxSearchRadiusKm) continue;
+
       final rate = (data['acceptanceRate'] as num?)?.toDouble() ?? 1.0;
       final rating = (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
       final score = _score(distanceKm: dist, acceptanceRate: rate, rating: rating);
@@ -212,6 +223,7 @@ class QuickGigMatchingService {
           gigLocation: gigLocation,
           alwaysExclude: hardExclude,
           softExclude: softExclude,
+          maxSearchRadiusKm: config.maxSearchRadiusKm,
         );
 
         // ── Fallback pass: no fresh workers — try declined ones ───
@@ -221,6 +233,7 @@ class QuickGigMatchingService {
             gigLocation: gigLocation,
             alwaysExclude: hardExclude,
             softExclude: softExclude,
+            maxSearchRadiusKm: config.maxSearchRadiusKm,
             fallback: true,
           );
           if (worker != null) isFallbackDispatch = true;

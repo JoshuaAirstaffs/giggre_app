@@ -659,7 +659,12 @@ class _GigPreviewListState extends State<_GigPreviewList> {
   }
 
   List<Map<String, dynamic>> get _latest {
-    final all = [..._quick, ..._open, ..._offered];
+    final all = [..._quick, ..._open, ..._offered]
+        .where((d) {
+          final s = d['status'] as String? ?? '';
+          return s != 'cancelled' && s != 'completed';
+        })
+        .toList();
     all.sort((a, b) {
       final aTs = a['createdAt'] as Timestamp?;
       final bTs = b['createdAt'] as Timestamp?;
@@ -717,7 +722,7 @@ class _GigPreviewListState extends State<_GigPreviewList> {
     }
 
     return Column(
-      children: preview.map((d) => GigTile(data: d)).toList(),
+      children: preview.map((d) => GigTile(data: d, showActions: false)).toList(),
     );
   }
 }

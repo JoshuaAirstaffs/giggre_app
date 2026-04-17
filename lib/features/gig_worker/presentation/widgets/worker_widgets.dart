@@ -6,15 +6,21 @@ import '../../../../core/theme/app_colors.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class ToolchestCard extends StatelessWidget {
-  final String bio;
+  final List<String> skills;
   final VoidCallback onTap;
-  const ToolchestCard({super.key, required this.bio, required this.onTap});
+  const ToolchestCard({super.key, required this.skills, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final cardColor = Theme.of(context).cardColor;
     final divider = Theme.of(context).dividerColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    final preview = skills.take(3).join(', ');
+    final extra = skills.length > 3 ? ' +${skills.length - 3} more' : '';
+    final subtitle = skills.isNotEmpty
+        ? '$preview$extra'
+        : 'Add your skills, tools, and certifications';
 
     return GestureDetector(
       onTap: onTap,
@@ -41,16 +47,37 @@ class ToolchestCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('My Toolchest',
-                      style: TextStyle(
-                          color: onSurface,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600)),
+                  Row(
+                    children: [
+                      Text('My Toolchest',
+                          style: TextStyle(
+                              color: onSurface,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600)),
+                      if (skills.isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: kAmber.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${skills.length}',
+                            style: const TextStyle(
+                              color: kAmber,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                   const SizedBox(height: 3),
                   Text(
-                    bio.isNotEmpty
-                        ? bio
-                        : 'Add your skills, tools, and certifications',
+                    subtitle,
                     style: const TextStyle(color: kSub, fontSize: 12),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,

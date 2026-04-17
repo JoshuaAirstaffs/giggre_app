@@ -19,6 +19,8 @@ class GigMarkerData {
   final String address;
   final LatLng position;
   final String? assignedWorkerId;
+  final String experienceLevel;
+  final List<String> requiredSkills;
 
   const GigMarkerData({
     required this.id,
@@ -30,6 +32,8 @@ class GigMarkerData {
     required this.address,
     required this.position,
     this.assignedWorkerId,
+    this.experienceLevel = '',
+    this.requiredSkills = const [],
   });
 }
 
@@ -52,14 +56,18 @@ class _GigCluster {
 // ─────────────────────────────────────────────────────────────────────────────
 class GigMapSection extends StatefulWidget {
   final String uid;
+  final String workerName;
   final bool seekingQuickGigs;
   final ValueChanged<GigMarkerData>? onQuickGigStarted;
+  final ValueChanged<GigMarkerData>? onOpenGigApplied;
 
   const GigMapSection({
     super.key,
     required this.uid,
+    required this.workerName,
     required this.seekingQuickGigs,
     this.onQuickGigStarted,
+    this.onOpenGigApplied,
   });
 
   @override
@@ -172,6 +180,55 @@ class _GigMapSectionState extends State<GigMapSection> {
     }, onError: (e) => debugPrint('[GigMap] offered stream error: $e'));
   }
 
+  Future<void> _applyToOpenGig(GigMarkerData gig) async {
+    try {
+      // Re-check the gig is still open before writing
+      final snap = await FirebaseFirestore.instance
+          .collection('open_gigs')
+          .doc(gig.id)
+          .get();
+      if (!snap.exists) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('This gig no longer exists.'),
+            backgroundColor: Colors.redAccent,
+          ));
+        }
+        return;
+      }
+      final currentStatus = snap.data()?['status'] as String? ?? '';
+      if (currentStatus != 'open') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Gig is no longer available (status: $currentStatus).'),
+            backgroundColor: Colors.orange,
+          ));
+        }
+        return;
+      }
+
+      await FirebaseFirestore.instance
+          .collection('open_gigs')
+          .doc(gig.id)
+          .update({
+        'workerId': widget.uid,
+        'assignedWorkerId': widget.uid,
+        'assignedWorkerName': widget.workerName,
+        'status': 'navigating',
+        'appliedAt': FieldValue.serverTimestamp(),
+      });
+      widget.onOpenGigApplied?.call(gig);
+    } catch (e) {
+      debugPrint('[GigMap] apply to open gig error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed to apply: $e'),
+          backgroundColor: Colors.redAccent,
+        ));
+      }
+    }
+  }
+
   @override
   void dispose() {
     _mapController.dispose();
@@ -195,6 +252,8 @@ class _GigMapSectionState extends State<GigMapSection> {
       address: data['address'] as String? ?? '',
       position: LatLng(geo.latitude, geo.longitude),
       assignedWorkerId: data['assignedWorkerId'] as String?,
+      experienceLevel: data['experienceLevel'] as String? ?? '',
+      requiredSkills: List<String>.from(data['requiredSkills'] ?? []),
     );
   }
 
@@ -260,6 +319,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                     singleGig.assignedWorkerId == widget.uid
                 ? () => widget.onQuickGigStarted?.call(singleGig)
                 : null,
+            onApply: singleGig.gigType == 'open'
+                ? () => _applyToOpenGig(singleGig)
+                : null,
           ),
         );
       }
@@ -271,6 +333,7 @@ class _GigMapSectionState extends State<GigMapSection> {
           count: cluster.count,
           gigs: cluster.gigs,
           onQuickGigStarted: widget.onQuickGigStarted,
+          onOpenGigApplied: _applyToOpenGig,
         ),
       );
     }).toList();
@@ -445,7 +508,8 @@ class _LegendDot extends StatelessWidget {
 class _GigPin extends StatelessWidget {
   final GigMarkerData gig;
   final VoidCallback? onStart;
-  const _GigPin({required this.gig, this.onStart});
+  final VoidCallback? onApply;
+  const _GigPin({required this.gig, this.onStart, this.onApply});
 
   Color get _pinColor {
     switch (gig.gigType) {
@@ -551,6 +615,48 @@ class _GigPin extends StatelessWidget {
                   label: 'Location',
                   value: gig.address,
                 ),
+              if (gig.experienceLevel.isNotEmpty)
+                _GigSheetRow(
+                  icon: Icons.bar_chart_rounded,
+                  label: 'Experience',
+                  value: gig.experienceLevel,
+                ),
+              if (gig.requiredSkills.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.construction_rounded,
+                        color: kSub, size: 16),
+                    const SizedBox(width: 8),
+                    const Text('Skills: ',
+                        style: TextStyle(color: kSub, fontSize: 13)),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: gig.requiredSkills
+                            .map((s) => Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: color.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                        color: color.withValues(alpha: 0.3)),
+                                  ),
+                                  child: Text(s,
+                                      style: TextStyle(
+                                          color: color,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500)),
+                                ))
+                            .toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
@@ -558,7 +664,11 @@ class _GigPin extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: () {
                     Navigator.pop(ctx);
-                    if (gig.gigType == 'quick') onStart?.call();
+                    if (gig.gigType == 'quick') {
+                      onStart?.call();
+                    } else if (gig.gigType == 'open') {
+                      onApply?.call();
+                    }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: color,
@@ -658,10 +768,12 @@ class _GigClusterBadge extends StatelessWidget {
   final int count;
   final List<GigMarkerData> gigs;
   final ValueChanged<GigMarkerData>? onQuickGigStarted;
+  final ValueChanged<GigMarkerData>? onOpenGigApplied;
   const _GigClusterBadge({
     required this.count,
     required this.gigs,
     this.onQuickGigStarted,
+    this.onOpenGigApplied,
   });
 
   void _showGigList(BuildContext context) {
@@ -809,7 +921,11 @@ class _GigClusterBadge extends StatelessWidget {
                       trailing: TextButton(
                         onPressed: () {
                           Navigator.pop(ctx);
-                          if (g.gigType == 'quick') onQuickGigStarted?.call(g);
+                          if (g.gigType == 'quick') {
+                            onQuickGigStarted?.call(g);
+                          } else if (g.gigType == 'open') {
+                            onOpenGigApplied?.call(g);
+                          }
                         },
                         style: TextButton.styleFrom(
                           backgroundColor: typeColor.withValues(alpha: 0.1),

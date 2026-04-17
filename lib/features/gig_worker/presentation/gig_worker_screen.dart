@@ -14,6 +14,8 @@ import 'widgets/toggles_card.dart';
 import 'widgets/worker_header.dart';
 import 'widgets/worker_widgets.dart';
 import 'widgets/working_ui.dart';
+import 'widgets/offered_gig_offer_card.dart';
+import 'widgets/toolchest_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main screen
@@ -32,8 +34,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   // Profile data
   String _name = '';
   String _email = '';
-  String _bio = '';
   String _photoUrl = '';
+  List<String> _skills = [];
   double _ratingAsWorker = 5.0;
   int _ratingCount = 0;
   String _memberSince = '';
@@ -48,12 +50,22 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   double _weeklyEarnings = 0;
   int _completedGigs = 0;
 
-  // Active quick gig (when working)
+  // Active gigs (when working)
   GigMarkerData? _activeQuickGig;
+  GigMarkerData? _activeOpenGig;
+  GigMarkerData? _activeOfferedGig;
 
-  // Incoming dispatch offer
+  // Incoming dispatch offer (quick gig)
   GigMarkerData? _dispatchedGig;
+
+  // Incoming offered gig (direct personal offer from host)
+  GigMarkerData? _pendingOfferedGig;
+  String _pendingOfferedGigDesc = '';
+  String _pendingOfferedGigSkill = '';
+
   StreamSubscription? _dispatchSub;
+  StreamSubscription? _offeredGigSub;
+  StreamSubscription? _profileSub;
 
   // Earnings streams
   final List<StreamSubscription> _earningsSubs = [];
@@ -67,13 +79,15 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadProfile();
+    _listenToProfile();
     _setOnlineStatus(true);
   }
 
   @override
   void dispose() {
+    _profileSub?.cancel();
     _dispatchSub?.cancel();
+    _offeredGigSub?.cancel();
     _suspensionTimer?.cancel();
     for (final sub in _earningsSubs) {
       sub.cancel();
@@ -107,56 +121,69 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     } catch (_) {}
   }
 
-  Future<void> _loadProfile() async {
+  void _listenToProfile() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    final doc = await FirebaseFirestore.instance
+    _profileSub?.cancel();
+    _profileSub = FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
-        .get();
-    final data = doc.data() ?? {};
+        .snapshots()
+        .listen((doc) {
+      final data = doc.data() ?? {};
 
-    _startEarningsSubs(uid);
+      final createdAt = data['createdAt'];
+      String memberSince = '';
+      if (createdAt is Timestamp) {
+        final d = createdAt.toDate();
+        memberSince = '${_monthName(d.month)} ${d.year}';
+      }
 
-    final createdAt = data['createdAt'];
-    String memberSince = '';
-    if (createdAt is Timestamp) {
-      final d = createdAt.toDate();
-      memberSince = '${_monthName(d.month)} ${d.year}';
-    }
+      final suspendedUntilTs = data['suspended_until'] as Timestamp?;
+      DateTime? suspendedUntil;
+      if (suspendedUntilTs != null) {
+        final dt = suspendedUntilTs.toDate();
+        if (dt.isAfter(DateTime.now())) suspendedUntil = dt;
+      }
 
-    final suspendedUntilTs = data['suspended_until'] as Timestamp?;
-    DateTime? suspendedUntil;
-    if (suspendedUntilTs != null) {
-      final dt = suspendedUntilTs.toDate();
-      if (dt.isAfter(DateTime.now())) suspendedUntil = dt;
-    }
+      if (!mounted) return;
 
-    if (!mounted) return;
-    setState(() {
-      _name = data['name'] as String? ?? '';
-      _email = data['email'] as String? ?? '';
-      _bio = data['bio'] as String? ?? '';
-      _photoUrl = data['photoUrl'] as String? ?? '';
-      _ratingAsWorker =
-          (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
-      _ratingCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
-      _availableForGigs = data['availableForGigs'] as bool? ?? false;
-      _autoAccept = data['autoAccept'] as bool? ?? false;
-      _seekingQuickGigs = data['seekingQuickGigs'] as bool? ?? false;
-      _memberSince = memberSince;
-      _suspendedUntil = suspendedUntil;
-      _loading = false;
+      final isFirstLoad = _loading;
+      final wasNotSuspended = _suspendedUntil == null;
+
+      setState(() {
+        _name = data['name'] as String? ?? '';
+        _email = data['email'] as String? ?? '';
+        _photoUrl = data['photoUrl'] as String? ?? '';
+        _skills = List<String>.from(data['skills'] ?? []);
+        _ratingAsWorker =
+            (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
+        _ratingCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
+        _availableForGigs = data['availableForGigs'] as bool? ?? false;
+        _autoAccept = data['autoAccept'] as bool? ?? false;
+        _seekingQuickGigs = data['seekingQuickGigs'] as bool? ?? false;
+        _memberSince = memberSince;
+        _suspendedUntil = suspendedUntil;
+        _loading = false;
+      });
+
+      if (isFirstLoad) {
+        _startEarningsSubs(uid);
+        _saveLocationToFirestore();
+        _startDispatchSub(uid);
+        _startOfferedGigSub(uid);
+        _checkForActiveGig(uid);
+      }
+
+      if (suspendedUntil != null) {
+        _startSuspensionTimer();
+        if (wasNotSuspended) {
+          WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _showSuspensionDialog());
+        }
+      }
     });
-    _saveLocationToFirestore();
-    _startDispatchSub(uid);
-    if (_suspendedUntil != null) {
-      _startSuspensionTimer();
-      WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _showSuspensionDialog());
-    }
-    await _checkForActiveGig(uid);
   }
 
   void _startEarningsSubs(String uid) {
@@ -213,36 +240,167 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
   /// On app resume/init, restore WorkingUI if worker has an ongoing gig.
   Future<void> _checkForActiveGig(String uid) async {
-    // Skip if already showing an active gig
-    if (_activeQuickGig != null) return;
+    if (_activeQuickGig != null ||
+        _activeOpenGig != null ||
+        _activeOfferedGig != null) return;
     const activeStatuses = [
       'navigating', 'arrived', 'working', 'task_complete', 'payment'
     ];
     try {
-      final snap = await FirebaseFirestore.instance
+      // Check quick gigs first
+      final quickSnap = await FirebaseFirestore.instance
           .collection('quick_gigs')
           .where('workerId', isEqualTo: uid)
           .where('status', whereIn: activeStatuses)
           .limit(1)
           .get();
-      if (snap.docs.isEmpty) return;
+      if (quickSnap.docs.isNotEmpty) {
+        final doc = quickSnap.docs.first;
+        final data = doc.data();
+        final geo = data['location'] as GeoPoint?;
+        if (geo != null && mounted) {
+          setState(() => _activeQuickGig = GigMarkerData(
+            id: doc.id,
+            title: data['title'] as String? ?? 'Quick Gig',
+            gigType: 'quick',
+            budget: (data['budget'] as num?)?.toDouble() ?? 0,
+            status: data['status'] as String? ?? 'navigating',
+            hostName: data['hostName'] as String? ?? '',
+            address: data['address'] as String? ?? '',
+            position: LatLng(geo.latitude, geo.longitude),
+            assignedWorkerId: uid,
+          ));
+        }
+        return;
+      }
+      // Check open gigs
+      final openSnap = await FirebaseFirestore.instance
+          .collection('open_gigs')
+          .where('workerId', isEqualTo: uid)
+          .where('status', whereIn: activeStatuses)
+          .limit(1)
+          .get();
+      if (openSnap.docs.isNotEmpty) {
+        final doc = openSnap.docs.first;
+        final data = doc.data();
+        final geo = data['location'] as GeoPoint?;
+        if (geo != null && mounted) {
+          setState(() => _activeOpenGig = GigMarkerData(
+            id: doc.id,
+            title: data['title'] as String? ?? 'Open Gig',
+            gigType: 'open',
+            budget: (data['budget'] as num?)?.toDouble() ?? 0,
+            status: data['status'] as String? ?? 'navigating',
+            hostName: data['hostName'] as String? ?? '',
+            address: data['address'] as String? ?? '',
+            position: LatLng(geo.latitude, geo.longitude),
+            assignedWorkerId: uid,
+          ));
+        }
+        return;
+      }
+      // Check offered gigs
+      final offeredSnap = await FirebaseFirestore.instance
+          .collection('offered_gigs')
+          .where('workerId', isEqualTo: uid)
+          .where('status', whereIn: activeStatuses)
+          .limit(1)
+          .get();
+      if (offeredSnap.docs.isNotEmpty) {
+        final doc = offeredSnap.docs.first;
+        final data = doc.data();
+        final geo = data['location'] as GeoPoint?;
+        if (geo != null && mounted) {
+          setState(() => _activeOfferedGig = GigMarkerData(
+            id: doc.id,
+            title: data['title'] as String? ?? 'Offered Gig',
+            gigType: 'offered',
+            budget: (data['budget'] as num?)?.toDouble() ?? 0,
+            status: data['status'] as String? ?? 'navigating',
+            hostName: data['hostName'] as String? ?? '',
+            address: data['address'] as String? ?? '',
+            position: LatLng(geo.latitude, geo.longitude),
+            assignedWorkerId: uid,
+            experienceLevel: data['experienceLevel'] as String? ?? '',
+            requiredSkills: data['skillRequired'] != null
+                ? [data['skillRequired'] as String]
+                : [],
+          ));
+        }
+      }
+    } catch (_) {}
+  }
+
+  // ── Offered gig stream — listens for pending direct offers ────────────────
+  void _startOfferedGigSub(String uid) {
+    _offeredGigSub?.cancel();
+    _offeredGigSub = FirebaseFirestore.instance
+        .collection('offered_gigs')
+        .where('workerId', isEqualTo: uid)
+        .where('status', isEqualTo: 'offered')
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      if (snap.docs.isEmpty) {
+        setState(() => _pendingOfferedGig = null);
+        return;
+      }
       final doc = snap.docs.first;
       final data = doc.data();
       final geo = data['location'] as GeoPoint?;
       if (geo == null) return;
-      final gig = GigMarkerData(
-        id: doc.id,
-        title: data['title'] as String? ?? 'Quick Gig',
-        gigType: 'quick',
-        budget: (data['budget'] as num?)?.toDouble() ?? 0,
-        status: data['status'] as String? ?? 'navigating',
-        hostName: data['hostName'] as String? ?? '',
-        address: data['address'] as String? ?? '',
-        position: LatLng(geo.latitude, geo.longitude),
-        assignedWorkerId: uid,
-      );
-      if (mounted) setState(() => _activeQuickGig = gig);
-    } catch (_) {}
+      setState(() {
+        _pendingOfferedGig = GigMarkerData(
+          id: doc.id,
+          title: data['title'] as String? ?? 'Offered Gig',
+          gigType: 'offered',
+          budget: (data['budget'] as num?)?.toDouble() ?? 0,
+          status: 'offered',
+          hostName: data['hostName'] as String? ?? '',
+          address: data['address'] as String? ?? '',
+          position: LatLng(geo.latitude, geo.longitude),
+          assignedWorkerId: uid,
+          experienceLevel: data['experienceLevel'] as String? ?? '',
+          requiredSkills: data['skillRequired'] != null
+              ? [data['skillRequired'] as String]
+              : [],
+        );
+        _pendingOfferedGigDesc = data['description'] as String? ?? '';
+        _pendingOfferedGigSkill = data['skillRequired'] as String? ?? '';
+      });
+    }, onError: (e) => debugPrint('[GigWorker] offered gig stream error: $e'));
+  }
+
+  Future<void> _acceptOfferedGig(GigMarkerData gig) async {
+    await FirebaseFirestore.instance
+        .collection('offered_gigs')
+        .doc(gig.id)
+        .update({
+      'status': 'navigating',
+      'acceptedAt': FieldValue.serverTimestamp(),
+    });
+    if (mounted) {
+      setState(() {
+        _pendingOfferedGig = null;
+        _activeOfferedGig = gig;
+      });
+    }
+  }
+
+  Future<void> _declineOfferedGig(GigMarkerData gig) async {
+    await FirebaseFirestore.instance
+        .collection('offered_gigs')
+        .doc(gig.id)
+        .update({'status': 'declined'});
+    if (mounted) setState(() => _pendingOfferedGig = null);
+  }
+
+  Future<void> _finishOfferedGig() async {
+    if (mounted) setState(() => _activeOfferedGig = null);
+  }
+
+  Future<void> _cancelOfferedGig() async {
+    if (mounted) setState(() => _activeOfferedGig = null);
   }
 
   void _startDispatchSub(String uid) {
@@ -337,6 +495,28 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
   void _onQuickGigStarted(GigMarkerData gig) {
     setState(() => _activeQuickGig = gig);
+  }
+
+  void _onOpenGigApplied(GigMarkerData gig) {
+    setState(() => _activeOpenGig = gig);
+  }
+
+  Future<void> _finishOpenGig() async {
+    if (mounted) setState(() => _activeOpenGig = null);
+  }
+
+  Future<void> _cancelOpenGig() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null && _activeOpenGig != null) {
+      await FirebaseFirestore.instance
+          .collection('open_gigs')
+          .doc(_activeOpenGig!.id)
+          .update({
+        'status': 'open',
+        'workerId': FieldValue.delete(),
+      });
+    }
+    if (mounted) setState(() => _activeOpenGig = null);
   }
 
   Future<void> _acceptDispatch(GigMarkerData gig) async {
@@ -655,8 +835,23 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           : _activeQuickGig != null
           ? WorkingUI(
               gig: _activeQuickGig!,
+              gigCollection: 'quick_gigs',
               onComplete: _finishQuickGig,
               onCancel: _cancelQuickGig,
+            )
+          : _activeOpenGig != null
+          ? WorkingUI(
+              gig: _activeOpenGig!,
+              gigCollection: 'open_gigs',
+              onComplete: _finishOpenGig,
+              onCancel: _cancelOpenGig,
+            )
+          : _activeOfferedGig != null
+          ? WorkingUI(
+              gig: _activeOfferedGig!,
+              gigCollection: 'offered_gigs',
+              onComplete: _finishOfferedGig,
+              onCancel: _cancelOfferedGig,
             )
           : Stack(
               children: [
@@ -714,8 +909,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                           // ── Gig Map ───────────────────────────────────
                           GigMapSection(
                             uid: uid,
+                            workerName: _name,
                             seekingQuickGigs: _seekingQuickGigs,
                             onQuickGigStarted: _onQuickGigStarted,
+                            onOpenGigApplied: _onOpenGigApplied,
                           ),
                           const SizedBox(height: 20),
 
@@ -723,8 +920,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                           SectionLabel('My Toolchest'),
                           const SizedBox(height: 8),
                           ToolchestCard(
-                            bio: _bio,
-                            onTap: () => _showComingSoon('Toolchest'),
+                            skills: _skills,
+                            onTap: () => ToolchestSheet.show(context, uid),
                           ),
                           const SizedBox(height: 20),
 
@@ -804,6 +1001,19 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                       gig: _dispatchedGig!,
                       onAccept: () => _acceptDispatch(_dispatchedGig!),
                       onDecline: () => _declineDispatch(_dispatchedGig!),
+                    ),
+                  ),
+                if (_pendingOfferedGig != null && _dispatchedGig == null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: OfferedGigOfferCard(
+                      gig: _pendingOfferedGig!,
+                      description: _pendingOfferedGigDesc,
+                      skillRequired: _pendingOfferedGigSkill,
+                      onAccept: () => _acceptOfferedGig(_pendingOfferedGig!),
+                      onDecline: () => _declineOfferedGig(_pendingOfferedGig!),
                     ),
                   ),
               ],

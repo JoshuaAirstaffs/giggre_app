@@ -110,17 +110,22 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
         all = [..._quick, ..._open, ..._offered];
     }
 
-    if (_statusFilter != 'all') {
-      if (_statusFilter == 'active') {
-        all = all
-            .where((d) =>
-                _activeStatuses.contains(d['status'] as String? ?? ''))
-            .toList();
-      } else {
-        all = all
-            .where((d) => (d['status'] as String? ?? '') == _statusFilter)
-            .toList();
-      }
+    if (_statusFilter == 'all') {
+      all = all
+          .where((d) {
+            final s = d['status'] as String? ?? '';
+            return s != 'cancelled' && s != 'completed';
+          })
+          .toList();
+    } else if (_statusFilter == 'active') {
+      all = all
+          .where((d) =>
+              _activeStatuses.contains(d['status'] as String? ?? ''))
+          .toList();
+    } else {
+      all = all
+          .where((d) => (d['status'] as String? ?? '') == _statusFilter)
+          .toList();
     }
 
     all.sort((a, b) {
@@ -189,8 +194,6 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
                             ('all', 'All Statuses'),
                             ('active', 'Active'),
                             ('scanning', 'Scanning'),
-                            ('completed', 'Completed'),
-                            ('cancelled', 'Cancelled'),
                             ('no_worker', 'No Worker'),
                           ],
                           onChanged: (v) => setState(() {
@@ -380,7 +383,8 @@ class _EmptyGigsPlaceholder extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class GigTile extends StatefulWidget {
   final Map<String, dynamic> data;
-  const GigTile({super.key, required this.data});
+  final bool showActions;
+  const GigTile({super.key, required this.data, this.showActions = true});
 
   @override
   State<GigTile> createState() => _GigTileState();
@@ -415,43 +419,41 @@ class _GigTileState extends State<GigTile> {
     final docId = widget.data['docId'] as String? ?? '';
     if (docId.isEmpty) return;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).cardColor,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Cancel Gig',
-            style:
-                TextStyle(color: Theme.of(ctx).colorScheme.onSurface)),
-        content: const Text(
-            'Mark this gig as cancelled? Workers will no longer see it.',
-            style: TextStyle(color: kSub)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('No', style: TextStyle(color: kSub)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Cancel Gig',
-                style: TextStyle(color: Colors.orange)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
+    final controller = TextEditingController();
+    bool submitted = false;
+    try {
+      submitted = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => _CancelReasonDialog(controller: controller),
+          ) ??
+          false;
+      if (!submitted || !mounted) return;
+      final reason = controller.text.trim();
+      if (reason.isEmpty) return;
 
-    final messenger = ScaffoldMessenger.of(context);
-    await FirebaseFirestore.instance
-        .collection(_collectionFor(gigType))
-        .doc(docId)
-        .update({'status': 'cancelled'});
-    messenger.showSnackBar(const SnackBar(
-      content: Text('Gig cancelled'),
-      backgroundColor: Colors.orange,
-      behavior: SnackBarBehavior.floating,
-    ));
+      final messenger = ScaffoldMessenger.of(context);
+      await FirebaseFirestore.instance
+          .collection(_collectionFor(gigType))
+          .doc(docId)
+          .update({
+        'cancellation_reason': FieldValue.arrayUnion([
+          {
+            'reason': reason,
+            'approved': null,
+            'requestedBy': 'host',
+          }
+        ]),
+        'status': 'cancellation_requested',
+      });
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Cancellation request submitted. Pending admin review.'),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+      ));
+    } finally {
+      controller.dispose();
+    }
   }
 
   Future<void> _confirmDelete() async {
@@ -722,9 +724,13 @@ class _GigTileState extends State<GigTile> {
                       ),
                       const Text(' · ',
                           style: TextStyle(color: kSub, fontSize: 12)),
-                      Text(timeAgo,
-                          style: const TextStyle(
-                              color: kSub, fontSize: 12)),
+                      Flexible(
+                        child: Text(timeAgo,
+                            style: const TextStyle(
+                                color: kSub, fontSize: 12),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ),
                     ],
                   ),
                 ],
@@ -755,73 +761,216 @@ class _GigTileState extends State<GigTile> {
                         letterSpacing: 0.5),
                   ),
                 ),
-                const SizedBox(height: 4),
-                SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: PopupMenuButton<String>(
-                    padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.more_horiz_rounded,
-                        color: kSub, size: 18),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    onSelected: (val) {
-                      if (val == 'dispatch') _dispatchGig();
-                      if (val == 'cancel') _confirmCancel();
-                      if (val == 'delete') _confirmDelete();
-                    },
-                    itemBuilder: (ctx) => [
-                      if (!isClosed &&
-                          gigType == 'quick' &&
-                          (status == 'scanning' ||
-                              status == 'no_worker' ||
-                              status == 'in_progress'))
-                        PopupMenuItem(
-                          value: 'dispatch',
-                          child: Row(
-                            children: [
-                              Icon(Icons.send_rounded,
-                                  color: kAmber, size: 18),
-                              const SizedBox(width: 10),
-                              Text('Dispatch',
-                                  style: TextStyle(color: kAmber)),
-                            ],
+                if (widget.showActions) ...[
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: PopupMenuButton<String>(
+                      padding: EdgeInsets.zero,
+                      icon: const Icon(Icons.more_horiz_rounded,
+                          color: kSub, size: 18),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      onSelected: (val) {
+                        if (val == 'dispatch') _dispatchGig();
+                        if (val == 'cancel') _confirmCancel();
+                        if (val == 'delete') _confirmDelete();
+                      },
+                      itemBuilder: (ctx) => [
+                        if (!isClosed &&
+                            gigType == 'quick' &&
+                            (status == 'scanning' ||
+                                status == 'no_worker' ||
+                                status == 'in_progress'))
+                          PopupMenuItem(
+                            value: 'dispatch',
+                            child: Row(
+                              children: [
+                                Icon(Icons.send_rounded,
+                                    color: kAmber, size: 18),
+                                const SizedBox(width: 10),
+                                Text('Dispatch',
+                                    style: TextStyle(color: kAmber)),
+                              ],
+                            ),
                           ),
-                        ),
-                      if (!isClosed)
+                        if (!isClosed)
+                          const PopupMenuItem(
+                            value: 'cancel',
+                            child: Row(
+                              children: [
+                                Icon(Icons.cancel_outlined,
+                                    color: Colors.orange, size: 18),
+                                SizedBox(width: 10),
+                                Text('Cancel Gig',
+                                    style:
+                                        TextStyle(color: Colors.orange)),
+                              ],
+                            ),
+                          ),
                         const PopupMenuItem(
-                          value: 'cancel',
+                          value: 'delete',
                           child: Row(
                             children: [
-                              Icon(Icons.cancel_outlined,
-                                  color: Colors.orange, size: 18),
+                              Icon(Icons.delete_outline_rounded,
+                                  color: Colors.redAccent, size: 18),
                               SizedBox(width: 10),
-                              Text('Cancel Gig',
-                                  style:
-                                      TextStyle(color: Colors.orange)),
+                              Text('Delete',
+                                  style: TextStyle(
+                                      color: Colors.redAccent)),
                             ],
                           ),
                         ),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete_outline_rounded,
-                                color: Colors.redAccent, size: 18),
-                            SizedBox(width: 10),
-                            Text('Delete',
-                                style: TextStyle(
-                                    color: Colors.redAccent)),
-                          ],
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cancel Reason Dialog — host states reason; admin decides approval
+// ─────────────────────────────────────────────────────────────────────────────
+class _CancelReasonDialog extends StatefulWidget {
+  final TextEditingController controller;
+  const _CancelReasonDialog({required this.controller});
+
+  @override
+  State<_CancelReasonDialog> createState() => _CancelReasonDialogState();
+}
+
+class _CancelReasonDialogState extends State<_CancelReasonDialog> {
+  bool _hasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onChanged);
+  }
+
+  void _onChanged() {
+    final has = widget.controller.text.trim().isNotEmpty;
+    if (has != _hasText) setState(() => _hasText = has);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return AlertDialog(
+      backgroundColor: cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.redAccent.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.cancel_outlined,
+                color: Colors.redAccent, size: 28),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Request Cancellation',
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Your request will be reviewed by an admin before the gig is cancelled.',
+            style: TextStyle(color: kSub, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: widget.controller,
+            maxLines: 4,
+            minLines: 3,
+            textCapitalization: TextCapitalization.sentences,
+            style: TextStyle(color: onSurface, fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'Describe your reason for cancelling...',
+              hintStyle: TextStyle(
+                  color: kSub.withValues(alpha: 0.6), fontSize: 13),
+              filled: true,
+              fillColor: isDark
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : Colors.black.withValues(alpha: 0.04),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                    color: Colors.redAccent.withValues(alpha: 0.3)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                    color: Colors.redAccent.withValues(alpha: 0.25)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide:
+                    const BorderSide(color: Colors.redAccent, width: 1.5),
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Go Back',
+                      style: TextStyle(color: kSub)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed:
+                      _hasText ? () => Navigator.pop(context, true) : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor:
+                        Colors.redAccent.withValues(alpha: 0.35),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  child: const Text('Submit Request',
+                      style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

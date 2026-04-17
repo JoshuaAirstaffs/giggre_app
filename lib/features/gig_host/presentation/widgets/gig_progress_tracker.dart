@@ -1,16 +1,22 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/theme/app_colors.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig Progress Tracker — shown on the host dashboard
-//  Displays all active quick gigs with their live progress step.
+//  Displays all active quick gigs AND open gigs with their live progress step.
 //  When status == 'task_complete', the host gets a "Gig Completed" button.
 // ─────────────────────────────────────────────────────────────────────────────
-class GigProgressTracker extends StatelessWidget {
+class GigProgressTracker extends StatefulWidget {
   final String hostId;
   const GigProgressTracker({super.key, required this.hostId});
 
+  @override
+  State<GigProgressTracker> createState() => _GigProgressTrackerState();
+}
+
+class _GigProgressTrackerState extends State<GigProgressTracker> {
   static const _activeStatuses = [
     'in_progress',
     'navigating',
@@ -20,63 +26,106 @@ class GigProgressTracker extends StatelessWidget {
     'payment',
   ];
 
+  List<({QueryDocumentSnapshot doc, String collection})> _quickDocs = [];
+  List<({QueryDocumentSnapshot doc, String collection})> _openDocs = [];
+  List<({QueryDocumentSnapshot doc, String collection})> _offeredDocs = [];
+  StreamSubscription? _quickSub;
+  StreamSubscription? _openSub;
+  StreamSubscription? _offeredSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _quickSub = FirebaseFirestore.instance
+        .collection('quick_gigs')
+        .where('hostId', isEqualTo: widget.hostId)
+        .where('status', whereIn: _activeStatuses)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      setState(() => _quickDocs =
+          snap.docs.map((d) => (doc: d, collection: 'quick_gigs')).toList());
+    }, onError: (e) => debugPrint('[GigProgressTracker] quick stream: $e'));
+
+    _openSub = FirebaseFirestore.instance
+        .collection('open_gigs')
+        .where('hostId', isEqualTo: widget.hostId)
+        .where('status', whereIn: _activeStatuses)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      setState(() => _openDocs =
+          snap.docs.map((d) => (doc: d, collection: 'open_gigs')).toList());
+    }, onError: (e) => debugPrint('[GigProgressTracker] open stream: $e'));
+
+    _offeredSub = FirebaseFirestore.instance
+        .collection('offered_gigs')
+        .where('hostId', isEqualTo: widget.hostId)
+        .where('status', whereIn: _activeStatuses)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      setState(() => _offeredDocs =
+          snap.docs.map((d) => (doc: d, collection: 'offered_gigs')).toList());
+    }, onError: (e) => debugPrint('[GigProgressTracker] offered stream: $e'));
+  }
+
+  @override
+  void dispose() {
+    _quickSub?.cancel();
+    _openSub?.cancel();
+    _offeredSub?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('quick_gigs')
-          .where('hostId', isEqualTo: hostId)
-          .where('status', whereIn: _activeStatuses)
-          .snapshots(),
-      builder: (context, snap) {
-        if (!snap.hasData || snap.data!.docs.isEmpty) {
-          return const SizedBox.shrink();
-        }
+    final allDocs = [..._quickDocs, ..._openDocs, ..._offeredDocs];
+    if (allDocs.isEmpty) return const SizedBox.shrink();
 
-        final docs = snap.data!.docs;
-        final onSurface = Theme.of(context).colorScheme.onSurface;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Row(
-              children: [
-                const Icon(Icons.track_changes_rounded,
-                    color: kAmber, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  'Active Gig Progress',
-                  style: TextStyle(
-                    color: onSurface,
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: kAmber.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: kAmber.withValues(alpha: 0.4)),
-                  ),
-                  child: Text(
-                    '${docs.length} Active',
-                    style: const TextStyle(
-                      color: kAmber,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
+            const Icon(Icons.track_changes_rounded, color: kAmber, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              'Active Gig Progress',
+              style: TextStyle(
+                color: onSurface,
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-            const SizedBox(height: 12),
-            ...docs.map((doc) => _GigProgressCard(doc: doc)),
+            const Spacer(),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: kAmber.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: kAmber.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                '${allDocs.length} Active',
+                style: const TextStyle(
+                  color: kAmber,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ],
-        );
-      },
+        ),
+        const SizedBox(height: 12),
+        ...allDocs.map((item) => _GigProgressCard(
+              doc: item.doc,
+              gigCollection: item.collection,
+            )),
+      ],
     );
   }
 }
@@ -86,24 +135,37 @@ class GigProgressTracker extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _GigProgressCard extends StatelessWidget {
   final QueryDocumentSnapshot doc;
-  const _GigProgressCard({required this.doc});
+  final String gigCollection; // 'quick_gigs' | 'open_gigs' | 'offered_gigs'
 
-  static const _steps = [
-    'in_progress',
-    'arrived',
-    'working',
-    'task_complete',
-    'payment',
-    'completed',
-  ];
-  static const _stepLabels = [
-    'In Progress',
-    'Arrived',
-    'Working',
-    'Done',
-    'Payment',
-    'Completed',
-  ];
+  const _GigProgressCard({
+    required this.doc,
+    required this.gigCollection,
+  });
+
+  // Steps differ only in the first entry: quick gigs start at 'in_progress',
+  // open/offered gigs start at 'navigating'.
+  List<String> get _steps => gigCollection == 'quick_gigs'
+      ? const [
+          'in_progress',
+          'arrived',
+          'working',
+          'task_complete',
+          'payment',
+          'completed',
+        ]
+      : const [
+          'navigating',
+          'arrived',
+          'working',
+          'task_complete',
+          'payment',
+          'completed',
+        ];
+
+  List<String> get _stepLabels => gigCollection == 'quick_gigs'
+      ? const ['In Progress', 'Arrived', 'Working', 'Done', 'Payment', 'Completed']
+      : const ['On the way', 'Arrived', 'Working', 'Done', 'Payment', 'Completed'];
+
   static const _stepIcons = [
     Icons.directions_rounded,
     Icons.location_on_rounded,
@@ -154,7 +216,7 @@ class _GigProgressCard extends StatelessWidget {
 
     final db = FirebaseFirestore.instance;
     final updates = <Future>[
-      db.collection('quick_gigs').doc(gigId).update({
+      db.collection(gigCollection).doc(gigId).update({
         'status': 'completed',
         'completedAt': FieldValue.serverTimestamp(),
       }),
@@ -171,13 +233,20 @@ class _GigProgressCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = doc.data() as Map<String, dynamic>;
     final gigId = doc.id;
-    final title = data['title'] as String? ?? 'Quick Gig';
+    final title = data['title'] as String? ?? 'Gig';
     final status = data['status'] as String? ?? 'navigating';
-    final workerName = data['assignedWorkerName'] as String? ?? 'Worker';
-    final workerId = data['assignedWorkerId'] as String?;
+    // offered_gigs use 'workerName'/'workerId'; quick/open use 'assignedWorkerName'/'assignedWorkerId'
+    final workerName = data['assignedWorkerName'] as String? ??
+                       data['workerName'] as String? ?? 'Worker';
+    final workerId = data['assignedWorkerId'] as String? ??
+                     data['workerId'] as String?;
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
+    final isOfferedGig = gigCollection == 'offered_gigs';
+    final isOpenGig = gigCollection == 'open_gigs';
 
-    final stepIndex = _steps.indexOf(status).clamp(0, _steps.length - 1);
+    final steps = _steps;
+    final stepLabels = _stepLabels;
+    final stepIndex = steps.indexOf(status).clamp(0, steps.length - 1);
     final isTaskComplete = status == 'task_complete';
 
     final cardColor = Theme.of(context).cardColor;
@@ -193,15 +262,12 @@ class _GigProgressCard extends StatelessWidget {
         color: cardColor,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isTaskComplete
-              ? green.withValues(alpha: 0.5)
-              : divider,
+          color: isTaskComplete ? green.withValues(alpha: 0.5) : divider,
           width: isTaskComplete ? 1.5 : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color:
-                Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -216,11 +282,27 @@ class _GigProgressCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(9),
                 decoration: BoxDecoration(
-                  color: kAmber.withValues(alpha: 0.12),
+                  color: (isOfferedGig
+                          ? const Color(0xFF8B5CF6)
+                          : isOpenGig
+                              ? kBlue
+                              : kAmber)
+                      .withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.flash_on_rounded,
-                    color: kAmber, size: 18),
+                child: Icon(
+                  isOfferedGig
+                      ? Icons.send_rounded
+                      : isOpenGig
+                          ? Icons.workspace_premium_outlined
+                          : Icons.flash_on_rounded,
+                  color: isOfferedGig
+                      ? const Color(0xFF8B5CF6)
+                      : isOpenGig
+                          ? kBlue
+                          : kAmber,
+                  size: 18,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -241,8 +323,8 @@ class _GigProgressCard extends StatelessWidget {
                             color: kSub, size: 12),
                         const SizedBox(width: 4),
                         Text(workerName,
-                            style: const TextStyle(
-                                color: kSub, fontSize: 11)),
+                            style:
+                                const TextStyle(color: kSub, fontSize: 11)),
                         const SizedBox(width: 10),
                         const Icon(Icons.attach_money_rounded,
                             color: kAmber, size: 12),
@@ -281,11 +363,10 @@ class _GigProgressCard extends StatelessWidget {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
-              children: List.generate(_steps.length, (i) {
+              children: List.generate(steps.length, (i) {
                 final isActive = i == stepIndex;
                 final isDone = i < stepIndex;
-                final dotColor =
-                    (isActive || isDone) ? green : kSub;
+                final dotColor = (isActive || isDone) ? green : kSub;
                 final dotBg = isDone
                     ? green
                     : isActive
@@ -322,11 +403,10 @@ class _GigProgressCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _stepLabels[i],
+                          stepLabels[i],
                           style: TextStyle(
                             fontSize: 8,
-                            color:
-                                (isActive || isDone) ? green : kSub,
+                            color: (isActive || isDone) ? green : kSub,
                             fontWeight: isActive
                                 ? FontWeight.bold
                                 : FontWeight.normal,
@@ -334,7 +414,7 @@ class _GigProgressCard extends StatelessWidget {
                         ),
                       ],
                     ),
-                    if (i < _steps.length - 1)
+                    if (i < steps.length - 1)
                       Container(
                         width: 18,
                         height: 1.5,

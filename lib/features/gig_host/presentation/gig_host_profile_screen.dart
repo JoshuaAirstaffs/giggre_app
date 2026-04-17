@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -32,66 +33,160 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   int _completedGigs = 0;
   double _totalSpent = 0;
 
+  StreamSubscription? _profileSub;
+  StreamSubscription? _quickGigsSub;
+  StreamSubscription? _openGigsSub;
+  StreamSubscription? _offeredGigsSub;
+  List<Map<String, dynamic>> _quickGigsDocs = [];
+  List<Map<String, dynamic>> _openGigsDocs = [];
+  List<Map<String, dynamic>> _offeredGigsDocs = [];
+
+  static const _activeStatuses = [
+    'open', 'in_progress', 'navigating', 'arrived', 'working', 'task_complete', 'payment',
+  ];
+
   @override
   void initState() {
     super.initState();
-    _loadProfile();
+    _listenToProfile();
   }
 
-  Future<void> _loadProfile() async {
+  @override
+  void dispose() {
+    _profileSub?.cancel();
+    _quickGigsSub?.cancel();
+    _openGigsSub?.cancel();
+    _offeredGigsSub?.cancel();
+    super.dispose();
+  }
+
+  void _listenToProfile() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-    final data = doc.data() ?? {};
+    _profileSub?.cancel();
+    _profileSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((doc) {
+      final data = doc.data() ?? {};
 
-    int gigsPostedCount = 0;
+      String createdAtStr = '';
+      if (data['createdAt'] != null) {
+        final ts = data['createdAt'] as Timestamp;
+        final dt = ts.toDate();
+        createdAtStr = 'Member since ${_monthName(dt.month)} ${dt.year}';
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _userId = data['userId'] ?? '';
+        _name = data['name'] ?? '';
+        _email = FirebaseAuth.instance.currentUser?.email ?? data['email'] ?? '';
+        _phone = data['phone'] ?? '';
+        _bio = data['bio'] ?? '';
+        _company = data['company'] ?? '';
+        _photoUrl = data['photoUrl'] ?? FirebaseAuth.instance.currentUser?.photoURL ?? '';
+        _createdAt = createdAtStr;
+        _ratingAsHost = (data['ratingAsHost'] as num? ?? 5.0).toDouble();
+        _ratingCount = (data['ratingCount'] as num? ?? 0).toInt();
+        _loading = false;
+      });
+    });
+
+    _quickGigsSub?.cancel();
+    _quickGigsSub = FirebaseFirestore.instance
+        .collection('quick_gigs')
+        .where('hostId', isEqualTo: uid)
+        .snapshots()
+        .listen((snap) {
+      _quickGigsDocs = snap.docs.map((d) {
+        final m = Map<String, dynamic>.from(d.data());
+        m['docId'] = d.id;
+        m['gigType'] = 'quick';
+        return m;
+      }).toList();
+      _recomputeStats();
+    }, onError: (e) => debugPrint('[GigHostProfile] quick_gigs: $e'));
+
+    _openGigsSub?.cancel();
+    _openGigsSub = FirebaseFirestore.instance
+        .collection('open_gigs')
+        .where('hostId', isEqualTo: uid)
+        .snapshots()
+        .listen((snap) {
+      _openGigsDocs = snap.docs.map((d) {
+        final m = Map<String, dynamic>.from(d.data());
+        m['docId'] = d.id;
+        m['gigType'] = 'open';
+        return m;
+      }).toList();
+      _recomputeStats();
+    }, onError: (e) => debugPrint('[GigHostProfile] open_gigs: $e'));
+
+    _offeredGigsSub?.cancel();
+    _offeredGigsSub = FirebaseFirestore.instance
+        .collection('offered_gigs')
+        .where('hostId', isEqualTo: uid)
+        .snapshots()
+        .listen((snap) {
+      _offeredGigsDocs = snap.docs.map((d) {
+        final m = Map<String, dynamic>.from(d.data());
+        m['docId'] = d.id;
+        m['gigType'] = 'offered';
+        return m;
+      }).toList();
+      _recomputeStats();
+    }, onError: (e) => debugPrint('[GigHostProfile] offered_gigs: $e'));
+  }
+
+  void _recomputeStats() {
+    final allDocs = [..._quickGigsDocs, ..._openGigsDocs, ..._offeredGigsDocs];
+    int gigsPostedCount = allDocs.length;
     int activeGigsCount = 0;
     int completedCount = 0;
     double totalSpentAmt = 0;
 
-    try {
-      final gigsSnap = await FirebaseFirestore.instance
-          .collection('gigs')
-          .where('hostId', isEqualTo: uid)
-          .get();
-      gigsPostedCount = gigsSnap.docs.length;
-
-      for (final d in gigsSnap.docs) {
-        final status = d.data()['status'] ?? '';
-        if (status == 'open') activeGigsCount++;
-        if (status == 'completed') {
-          completedCount++;
-          totalSpentAmt += (d.data()['budget'] as num? ?? 0).toDouble();
-        }
+    for (final d in allDocs) {
+      final status = d['status'] as String? ?? '';
+      if (_activeStatuses.contains(status)) activeGigsCount++;
+      if (status == 'completed') {
+        completedCount++;
+        totalSpentAmt += (d['budget'] as num? ?? 0).toDouble();
       }
-    } catch (_) {}
-
-    String createdAtStr = '';
-    if (data['createdAt'] != null) {
-      final ts = data['createdAt'] as Timestamp;
-      final dt = ts.toDate();
-      createdAtStr = 'Member since ${_monthName(dt.month)} ${dt.year}';
     }
 
     if (!mounted) return;
     setState(() {
-      _userId = data['userId'] ?? '';
-      _name = data['name'] ?? '';
-      _email = FirebaseAuth.instance.currentUser?.email ?? data['email'] ?? '';
-      _phone = data['phone'] ?? '';
-      _bio = data['bio'] ?? '';
-      _company = data['company'] ?? '';
-      _photoUrl = data['photoUrl'] ?? FirebaseAuth.instance.currentUser?.photoURL ?? '';
-      _createdAt = createdAtStr;
-      _ratingAsHost = (data['ratingAsHost'] as num? ?? 5.0).toDouble();
-      _ratingCount = (data['ratingCount'] as num? ?? 0).toInt();
       _gigsPosted = gigsPostedCount;
       _activeGigs = activeGigsCount;
       _completedGigs = completedCount;
       _totalSpent = totalSpentAmt;
-      _loading = false;
     });
+  }
+
+  void _showGigHistory() {
+    final completed = [
+      ..._quickGigsDocs,
+      ..._openGigsDocs,
+      ..._offeredGigsDocs,
+    ].where((g) => (g['status'] as String?) == 'completed').toList()
+      ..sort((a, b) {
+        final aTs = a['completedAt'] as Timestamp?;
+        final bTs = b['completedAt'] as Timestamp?;
+        if (aTs == null && bTs == null) return 0;
+        if (aTs == null) return 1;
+        if (bTs == null) return -1;
+        return bTs.compareTo(aTs);
+      });
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _GigHistorySheet(gigs: completed),
+    );
   }
 
   String _monthName(int month) {
@@ -644,7 +739,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             icon: Icons.history_rounded,
                             iconColor: kBlue,
                             label: 'Gig History',
-                            onTap: () => _showComingSoon('Gig History'),
+                            onTap: _showGigHistory,
                           ),
                           _Divider(isDark: isDark),
                           _MenuRow(
@@ -1020,6 +1115,603 @@ class _ModalField extends StatelessWidget {
               const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Gig History — list sheet
+// ─────────────────────────────────────────────────────────────────────────────
+class _GigHistorySheet extends StatelessWidget {
+  final List<Map<String, dynamic>> gigs;
+  const _GigHistorySheet({required this.gigs});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = Theme.of(context).cardColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (ctx, scroll) => Container(
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            // Handle
+            Center(
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: kBlue.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.history_rounded,
+                        color: kBlue, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Gig History',
+                          style: TextStyle(
+                              color: onSurface,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold)),
+                      Text('${gigs.length} completed',
+                          style:
+                              const TextStyle(color: kSub, fontSize: 12)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: kBorder),
+            // Body
+            if (gigs.isEmpty)
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.work_off_outlined,
+                          color: kSub.withValues(alpha: 0.35), size: 52),
+                      const SizedBox(height: 12),
+                      const Text('No completed gigs yet',
+                          style: TextStyle(color: kSub, fontSize: 14)),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Expanded(
+                child: ListView.separated(
+                  controller: scroll,
+                  padding: const EdgeInsets.all(16),
+                  itemCount: gigs.length,
+                  separatorBuilder: (_, i) => const SizedBox(height: 10),
+                  itemBuilder: (ctx, i) => _GigHistoryCard(
+                    gig: gigs[i],
+                    isDark: isDark,
+                    onTap: () => showModalBottomSheet(
+                      context: ctx,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) =>
+                          _GigHistoryDetailSheet(gig: gigs[i]),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Individual completed gig card
+// ─────────────────────────────────────────────────────────────────────────────
+class _GigHistoryCard extends StatelessWidget {
+  final Map<String, dynamic> gig;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _GigHistoryCard({
+    required this.gig,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final gigType = gig['gigType'] as String? ?? 'quick';
+    final title = gig['title'] as String? ?? 'Gig';
+    final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
+    final workerName = gig['assignedWorkerName'] as String? ??
+        gig['workerName'] as String? ?? '';
+    final completedAt = gig['completedAt'] as Timestamp?;
+    final durationSec = (gig['durationSeconds'] as num?)?.toInt();
+
+    final typeColor = gigType == 'quick'
+        ? kAmber
+        : gigType == 'open'
+            ? kBlue
+            : const Color(0xFF8B5CF6);
+    final typeLabel =
+        gigType == 'quick' ? 'Quick' : gigType == 'open' ? 'Open' : 'Offered';
+    final typeIcon = gigType == 'quick'
+        ? Icons.bolt_rounded
+        : gigType == 'open'
+            ? Icons.work_outline_rounded
+            : Icons.handshake_outlined;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.04)
+              : Colors.grey.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: isDark
+                  ? kBorder
+                  : Colors.grey.withValues(alpha: 0.18)),
+        ),
+        child: Row(
+          children: [
+            // Type icon
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: typeColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(typeIcon, color: typeColor, size: 20),
+            ),
+            const SizedBox(width: 12),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                              color: onSurface,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: typeColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(typeLabel,
+                            style: TextStyle(
+                                color: typeColor,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      if (workerName.isNotEmpty) ...[
+                        const Icon(Icons.person_outline_rounded,
+                            size: 12, color: kSub),
+                        const SizedBox(width: 3),
+                        Flexible(
+                          child: Text(workerName,
+                              style:
+                                  const TextStyle(color: kSub, fontSize: 11),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      if (completedAt != null) ...[
+                        const Icon(Icons.calendar_today_outlined,
+                            size: 12, color: kSub),
+                        const SizedBox(width: 3),
+                        Text(_fmtDate(completedAt),
+                            style:
+                                const TextStyle(color: kSub, fontSize: 11)),
+                      ],
+                    ],
+                  ),
+                  if (durationSec != null && durationSec > 0) ...[
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        const Icon(Icons.timer_outlined,
+                            size: 12, color: kSub),
+                        const SizedBox(width: 3),
+                        Text(_fmtDuration(durationSec),
+                            style:
+                                const TextStyle(color: kSub, fontSize: 11)),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Budget + chevron
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('₱${budget.toStringAsFixed(0)}',
+                    style: TextStyle(
+                        color: onSurface,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                const Icon(Icons.chevron_right_rounded,
+                    color: kSub, size: 18),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _fmtDate(Timestamp ts) {
+    const months = [
+      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final dt = ts.toDate().toLocal();
+    return '${months[dt.month]} ${dt.day}, ${dt.year}';
+  }
+
+  static String _fmtDuration(int seconds) {
+    if (seconds < 60) return '$seconds sec';
+    final minutes = seconds ~/ 60;
+    if (minutes < 60) return '$minutes min';
+    final hours = minutes ~/ 60;
+    final mins = minutes % 60;
+    return mins > 0 ? '${hours}h ${mins}m' : '${hours}h';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Gig history detail sheet (read-only)
+// ─────────────────────────────────────────────────────────────────────────────
+class _GigHistoryDetailSheet extends StatelessWidget {
+  final Map<String, dynamic> gig;
+  const _GigHistoryDetailSheet({required this.gig});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = Theme.of(context).cardColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    final gigType = gig['gigType'] as String? ?? 'quick';
+    final title = gig['title'] as String? ?? 'Gig';
+    final description = gig['description'] as String? ?? '';
+    final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
+    final address = gig['address'] as String? ?? '';
+    final workerName = gig['assignedWorkerName'] as String? ??
+        gig['workerName'] as String? ?? '';
+    final completedAt = gig['completedAt'] as Timestamp?;
+    final workStartedAt = gig['workStartedAt'] as Timestamp?;
+    final workCompletedAt = gig['workCompletedAt'] as Timestamp?;
+    final durationSec = (gig['durationSeconds'] as num?)?.toInt();
+
+    final typeColor = gigType == 'quick'
+        ? kAmber
+        : gigType == 'open'
+            ? kBlue
+            : const Color(0xFF8B5CF6);
+    final typeLabel = gigType == 'quick'
+        ? 'Quick Gig'
+        : gigType == 'open'
+            ? 'Open Gig'
+            : 'Offered Gig';
+    final typeIcon = gigType == 'quick'
+        ? Icons.bolt_rounded
+        : gigType == 'open'
+            ? Icons.work_outline_rounded
+            : Icons.handshake_outlined;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.7,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (ctx, scroll) => Container(
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: ListView(
+          controller: scroll,
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+          children: [
+            // Handle
+            Center(
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+
+            // Title + completed badge
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(title,
+                      style: TextStyle(
+                          color: onSurface,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Text('Completed',
+                      style: TextStyle(
+                          color: Color(0xFF10B981),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Type chip
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: typeColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(typeIcon, color: typeColor, size: 12),
+                  const SizedBox(width: 4),
+                  Text(typeLabel,
+                      style: TextStyle(
+                          color: typeColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // ── Gig details card ─────────────────────────────────────
+            _HistoryDetailCard(
+              isDark: isDark,
+              title: 'Gig Details',
+              children: [
+                if (description.isNotEmpty)
+                  _HistoryDetailRow(
+                      icon: Icons.notes_rounded,
+                      label: 'Description',
+                      value: description,
+                      onSurface: onSurface),
+                _HistoryDetailRow(
+                    icon: Icons.attach_money_rounded,
+                    label: 'Budget',
+                    value: '₱${budget.toStringAsFixed(0)}',
+                    valueColor: kAmber,
+                    onSurface: onSurface),
+                if (address.isNotEmpty)
+                  _HistoryDetailRow(
+                      icon: Icons.location_on_outlined,
+                      label: 'Location',
+                      value: address,
+                      onSurface: onSurface),
+                if (workerName.isNotEmpty)
+                  _HistoryDetailRow(
+                      icon: Icons.person_outline_rounded,
+                      label: 'Worker',
+                      value: workerName,
+                      valueColor: kBlue,
+                      onSurface: onSurface),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // ── Timeline card ────────────────────────────────────────
+            _HistoryDetailCard(
+              isDark: isDark,
+              title: 'Timeline',
+              children: [
+                if (workStartedAt != null)
+                  _HistoryDetailRow(
+                      icon: Icons.play_circle_outline_rounded,
+                      label: 'Work Started',
+                      value: _fmtDateTime(workStartedAt),
+                      onSurface: onSurface),
+                if (workCompletedAt != null)
+                  _HistoryDetailRow(
+                      icon: Icons.stop_circle_outlined,
+                      label: 'Work Ended',
+                      value: _fmtDateTime(workCompletedAt),
+                      onSurface: onSurface),
+                _HistoryDetailRow(
+                    icon: Icons.verified_rounded,
+                    label: 'Completed On',
+                    value: completedAt != null
+                        ? _fmtDateTime(completedAt)
+                        : '—',
+                    valueColor: const Color(0xFF10B981),
+                    onSurface: onSurface),
+                if (durationSec != null && durationSec > 0)
+                  _HistoryDetailRow(
+                      icon: Icons.hourglass_bottom_rounded,
+                      label: 'Total Time Spent',
+                      value: _fmtDuration(durationSec),
+                      valueColor: kAmber,
+                      onSurface: onSurface),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _fmtDateTime(Timestamp ts) {
+    const months = [
+      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final dt = ts.toDate().toLocal();
+    final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+    final m = dt.minute.toString().padLeft(2, '0');
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    return '${months[dt.month]} ${dt.day}, ${dt.year}  $h:$m $period';
+  }
+
+  static String _fmtDuration(int seconds) {
+    if (seconds < 60) return '$seconds sec';
+    final minutes = seconds ~/ 60;
+    if (minutes < 60) return '$minutes min';
+    final hours = minutes ~/ 60;
+    final mins = minutes % 60;
+    return mins > 0 ? '${hours}h ${mins}m' : '${hours}h';
+  }
+}
+
+class _HistoryDetailCard extends StatelessWidget {
+  final bool isDark;
+  final String title;
+  final List<Widget> children;
+
+  const _HistoryDetailCard({
+    required this.isDark,
+    required this.title,
+    required this.children,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.04)
+            : Colors.black.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: isDark
+                ? kBorder
+                : Colors.grey.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: TextStyle(
+                  color: onSurface,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          ...children.expand((w) => [w, const SizedBox(height: 12)]).toList()
+            ..removeLast(),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryDetailRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color? valueColor;
+  final Color onSurface;
+
+  const _HistoryDetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onSurface,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: kSub),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style: const TextStyle(
+                      color: kSub, fontSize: 11, fontWeight: FontWeight.w500)),
+              const SizedBox(height: 2),
+              Text(value,
+                  style: TextStyle(
+                      color: valueColor ?? onSurface,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500)),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

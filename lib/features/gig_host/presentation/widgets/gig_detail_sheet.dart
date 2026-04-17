@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../../core/theme/app_colors.dart';
+import '../../services/quick_gig_matching_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig Detail Sheet  –  shown when host taps a gig card
@@ -83,6 +84,122 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     _gigSub?.cancel();
     _workerSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _dispatchGig() async {
+    final data = _data;
+    if (data == null || widget.gigType != 'quick') return;
+    final location = data['location'] as GeoPoint?;
+    if (location == null) return;
+
+    await FirebaseFirestore.instance
+        .collection('quick_gigs')
+        .doc(widget.gigId)
+        .update({
+      'status': 'scanning',
+      'assignedWorkerId': null,
+      'assignedWorkerName': null,
+      'searchStartedAt': FieldValue.serverTimestamp(),
+    });
+
+    QuickGigMatchingService.startAutoSearch(
+      gigId: widget.gigId,
+      gigLocation: location,
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Searching for available workers...'),
+          backgroundColor: kAmber,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteGig() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Delete Gig',
+          style: TextStyle(color: Theme.of(ctx).colorScheme.onSurface),
+        ),
+        content: const Text(
+          'This will permanently remove the gig. This cannot be undone.',
+          style: TextStyle(color: kSub),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep', style: TextStyle(color: kSub)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    await FirebaseFirestore.instance
+        .collection(_collection)
+        .doc(widget.gigId)
+        .delete();
+    if (mounted) Navigator.pop(context);
+    messenger.showSnackBar(const SnackBar(
+      content: Text('Gig deleted'),
+      backgroundColor: Colors.redAccent,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  Future<void> _requestCancellation() async {
+    final controller = TextEditingController();
+    bool submitted = false;
+    try {
+      submitted = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => _CancelReasonDialog(controller: controller),
+          ) ??
+          false;
+      if (!submitted || !mounted) return;
+      final reason = controller.text.trim();
+      if (reason.isEmpty) return;
+      await FirebaseFirestore.instance
+          .collection(_collection)
+          .doc(widget.gigId)
+          .update({
+        'cancellation_reason': FieldValue.arrayUnion([
+          {
+            'reason': reason,
+            'approved': null,
+            'requestedBy': 'host',
+          }
+        ]),
+        'status': 'cancellation_requested',
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Cancellation request submitted. Pending admin review.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        Navigator.pop(context);
+      }
+    } finally {
+      controller.dispose();
+    }
   }
 
   Future<void> _confirmCompleted() async {
@@ -295,8 +412,8 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 const SizedBox(height: 16),
               ],
 
-              // ── Progress stepper (quick gigs with active worker) ───
-              if (widget.gigType == 'quick' && isActive) ...[
+              // ── Progress stepper (quick/open/offered gigs with active worker) ─
+              if ((widget.gigType == 'quick' || widget.gigType == 'open' || widget.gigType == 'offered') && isActive) ...[
                 Text(
                   'Task Progress',
                   style: TextStyle(
@@ -420,6 +537,31 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ),
               ),
 
+              // ── Cancel Gig request (before task_complete / payment) ───
+              if (!['completed', 'cancelled', 'no_worker',
+                    'task_complete', 'payment',
+                    'cancellation_requested'].contains(status)) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    onPressed: _requestCancellation,
+                    icon: const Icon(Icons.cancel_outlined,
+                        size: 20, color: Colors.redAccent),
+                    label: const Text('Cancel Gig',
+                        style: TextStyle(
+                            fontSize: 15, color: Colors.redAccent)),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(
+                          color: Colors.redAccent.withValues(alpha: 0.5)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+              ],
+
               // ── Gig Completed button (host confirms when done) ─────
               if (isTaskComplete) ...[
                 const SizedBox(height: 16),
@@ -444,6 +586,53 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   ),
                 ),
               ],
+
+              // ── Dispatch button (quick gigs not yet accepted) ──────
+              if (widget.gigType == 'quick' &&
+                  (status == 'scanning' ||
+                      status == 'no_worker' ||
+                      status == 'in_progress')) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: _dispatchGig,
+                    icon: const Icon(Icons.send_rounded, size: 18),
+                    label: const Text('Dispatch',
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kAmber,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+              ],
+
+              // ── Delete button ──────────────────────────────────────
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: _deleteGig,
+                  icon: const Icon(Icons.delete_outline_rounded,
+                      size: 18, color: Colors.redAccent),
+                  label: const Text('Delete Gig',
+                      style: TextStyle(
+                          fontSize: 15, color: Colors.redAccent)),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                        color: Colors.redAccent.withValues(alpha: 0.5)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
             ],
           ),
         );
@@ -547,8 +736,9 @@ class _StatusBadge extends StatelessWidget {
       case 'completed':     return const Color(0xFF22C55E);
       case 'open':          return const Color(0xFF22C55E);
       case 'offered':       return const Color(0xFF8B5CF6);
-      case 'cancelled':     return Colors.redAccent;
-      case 'no_worker':     return Colors.redAccent;
+      case 'cancelled':              return Colors.redAccent;
+      case 'no_worker':              return Colors.redAccent;
+      case 'cancellation_requested': return Colors.orange;
       default:              return kSub;
     }
   }
@@ -565,8 +755,9 @@ class _StatusBadge extends StatelessWidget {
       case 'completed':     return 'COMPLETED';
       case 'open':          return 'OPEN';
       case 'offered':       return 'OFFERED';
-      case 'cancelled':     return 'CANCELLED';
-      case 'no_worker':     return 'NO WORKER';
+      case 'cancelled':              return 'CANCELLED';
+      case 'no_worker':              return 'NO WORKER';
+      case 'cancellation_requested': return 'CANCEL PENDING';
       default:              return status.toUpperCase();
     }
   }
@@ -662,6 +853,147 @@ class _DetailRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cancel Reason Dialog — host states reason; admin decides approval
+// ─────────────────────────────────────────────────────────────────────────────
+class _CancelReasonDialog extends StatefulWidget {
+  final TextEditingController controller;
+  const _CancelReasonDialog({required this.controller});
+
+  @override
+  State<_CancelReasonDialog> createState() => _CancelReasonDialogState();
+}
+
+class _CancelReasonDialogState extends State<_CancelReasonDialog> {
+  bool _hasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onChanged);
+  }
+
+  void _onChanged() {
+    final has = widget.controller.text.trim().isNotEmpty;
+    if (has != _hasText) setState(() => _hasText = has);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return AlertDialog(
+      backgroundColor: cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.redAccent.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.cancel_outlined,
+                color: Colors.redAccent, size: 28),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Request Cancellation',
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Your request will be reviewed by an admin before the gig is cancelled.',
+            style: TextStyle(color: kSub, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: widget.controller,
+            maxLines: 4,
+            minLines: 3,
+            textCapitalization: TextCapitalization.sentences,
+            style: TextStyle(color: onSurface, fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'Describe your reason for cancelling...',
+              hintStyle: TextStyle(
+                  color: kSub.withValues(alpha: 0.6), fontSize: 13),
+              filled: true,
+              fillColor: isDark
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : Colors.black.withValues(alpha: 0.04),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                    color: Colors.redAccent.withValues(alpha: 0.3)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                    color: Colors.redAccent.withValues(alpha: 0.25)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide:
+                    const BorderSide(color: Colors.redAccent, width: 1.5),
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Go Back',
+                      style: TextStyle(color: kSub)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed:
+                      _hasText ? () => Navigator.pop(context, true) : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor:
+                        Colors.redAccent.withValues(alpha: 0.35),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  child: const Text('Submit Request',
+                      style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

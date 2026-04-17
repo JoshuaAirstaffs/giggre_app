@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -5,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../core/theme/app_colors.dart';
@@ -1241,9 +1243,12 @@ class _MapPickerScreen extends StatefulWidget {
 
 class _MapPickerScreenState extends State<_MapPickerScreen> {
   final _mapController = MapController();
+  final _searchCtrl = TextEditingController();
   LatLng? _picked;
   String _address = '';
   bool _geocoding = false;
+  bool _searching = false;
+  String? _searchError;
 
   static final _defaultCenter = LatLng(14.5995, 120.9842);
 
@@ -1259,26 +1264,73 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   @override
   void dispose() {
     _mapController.dispose();
+    _searchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _searchAddress() async {
+    final query = _searchCtrl.text.trim();
+    if (query.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _searching = true;
+      _searchError = null;
+    });
+    try {
+      final uri = Uri.parse('https://nominatim.openstreetmap.org/search')
+          .replace(queryParameters: {'q': query, 'format': 'json', 'limit': '1'});
+      final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
+      if (!mounted) return;
+      final data = jsonDecode(res.body) as List;
+      if (data.isEmpty) {
+        setState(() {
+          _searchError = 'No results found. Try a different address.';
+          _searching = false;
+        });
+        return;
+      }
+      final lat = double.parse(data[0]['lat'] as String);
+      final lon = double.parse(data[0]['lon'] as String);
+      final point = LatLng(lat, lon);
+      setState(() {
+        _picked = point;
+        _address = '';
+        _searching = false;
+      });
+      _mapController.move(point, 15.0);
+      _geocodePosition(point);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _searchError = 'Could not find location. Try again.';
+        _searching = false;
+      });
+    }
   }
 
   Future<void> _geocodePosition(LatLng pos) async {
     if (!mounted) return;
     setState(() => _geocoding = true);
     try {
-      final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
+      final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse'
+        '?lat=${pos.latitude}&lon=${pos.longitude}&format=json',
+      );
+      final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
       if (!mounted) return;
       String address = 'Selected location';
-      if (placemarks.isNotEmpty) {
-        final p = placemarks.first;
-        final parts = [
-          if (p.street != null && p.street!.isNotEmpty) p.street,
-          if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality,
-          if (p.locality != null && p.locality!.isNotEmpty) p.locality,
-          if (p.administrativeArea != null && p.administrativeArea!.isNotEmpty)
-            p.administrativeArea,
-        ];
-        address = parts.join(', ');
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final addrObj = data['address'] as Map<String, dynamic>?;
+        if (addrObj != null) {
+          final parts = [
+            addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
+            addrObj['suburb'] ?? addrObj['neighbourhood'],
+            addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
+            addrObj['state'],
+          ].whereType<String>().where((s) => s.isNotEmpty).toList();
+          if (parts.isNotEmpty) address = parts.join(', ');
+        }
       }
       setState(() {
         _address = address;
@@ -1388,9 +1440,82 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                 ),
             ],
           ),
+          // ── Search bar ───────────────────────────────────────
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: cardColor,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: borderColor),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    onSubmitted: (_) => _searchAddress(),
+                    style: TextStyle(color: onSurface, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Search address or place...',
+                      hintStyle: TextStyle(
+                          color: onSurface.withValues(alpha: 0.4),
+                          fontSize: 13),
+                      prefixIcon: const Icon(Icons.search_rounded,
+                          color: kSub, size: 20),
+                      suffixIcon: _searching
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                    color: purple, strokeWidth: 2),
+                              ),
+                            )
+                          : IconButton(
+                              icon: const Icon(Icons.arrow_forward_rounded,
+                                  color: purple, size: 20),
+                              onPressed: _searchAddress,
+                            ),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 14),
+                    ),
+                  ),
+                ),
+                if (_searchError != null)
+                  Container(
+                    margin: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: Colors.redAccent.withValues(alpha: 0.4)),
+                    ),
+                    child: Text(_searchError!,
+                        style: const TextStyle(
+                            color: Colors.redAccent, fontSize: 12)),
+                  ),
+              ],
+            ),
+          ),
+
+          // ── Hint banner (no pin yet) ─────────────────────────
           if (_picked == null)
             Positioned(
-              top: 16,
+              top: 90,
               left: 16,
               right: 16,
               child: Container(
@@ -1423,7 +1548,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Tap anywhere on the map to drop a pin at the gig location',
+                        'Search an address or tap anywhere on the map to drop a pin',
                         style:
                             TextStyle(color: onSurface, fontSize: 13, height: 1.4),
                       ),
