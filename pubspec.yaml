@@ -79,6 +79,7 @@ flutter:
   assets:
     - assets/images/   # logo.png, splash.png, etc. go here
     - assets/sounds/incoming_call_sound.mp3
+    - assets/sounds/waiting_to_answer_sound.mp3
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

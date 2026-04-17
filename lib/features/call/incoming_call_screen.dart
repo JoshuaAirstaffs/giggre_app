@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -29,6 +31,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
   final AudioPlayer _audioPlayer = AudioPlayer();
+  StreamSubscription<DocumentSnapshot>? _callSub;
 
   static const _bg = Color(0xFF121212);
   static const _blue = Color(0xFF4A90D9);
@@ -47,6 +50,26 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     );
 
     _startRingtone();
+    _listenForCancellation();
+  }
+
+  // Dismiss automatically if the caller hangs up before answer
+  void _listenForCancellation() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _callSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) {
+      final incomingCall = snap.data()?['incomingCall'];
+      if (incomingCall == null && mounted) {
+        _callSub?.cancel();
+        _audioPlayer.stop();
+        Navigator.pop(context);
+      }
+    });
   }
 
   Future<void> _startRingtone() async {
@@ -61,6 +84,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
 
   @override
   void dispose() {
+    _callSub?.cancel();
     _pulseController.dispose();
     _audioPlayer.stop();
     _audioPlayer.dispose();
@@ -74,6 +98,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   }
 
   Future<void> _acceptCall() async {
+    _callSub?.cancel();
     await _stopRingtone();
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -103,15 +128,26 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   }
 
   Future<void> _declineCall() async {
+    _callSub?.cancel();
     await _stopRingtone();
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .update({'incomingCall': FieldValue.delete()});
+    final firestore = FirebaseFirestore.instance;
+    final batch = firestore.batch();
+
+    batch.update(
+      firestore.collection('users').doc(uid),
+      {'incomingCall': FieldValue.delete()},
+    );
+
+    batch.update(
+      firestore.collection('users').doc(widget.callerId),
+      {'outgoingCall.status': 'declined'},
+    );
+
+    await batch.commit();
 
     if (mounted) Navigator.pop(context);
   }
@@ -125,7 +161,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
           children: [
             const SizedBox(height: 48),
 
-            // ── Label ──────────────────────────────────────────
             Text(
               'Incoming Voice Call',
               style: TextStyle(
@@ -137,7 +172,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
 
             const SizedBox(height: 48),
 
-            // ── Avatar ─────────────────────────────────────────
             AnimatedBuilder(
               animation: _pulseAnimation,
               builder: (_, child) => Transform.scale(
@@ -170,7 +204,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
 
             const SizedBox(height: 24),
 
-            // ── Caller name ────────────────────────────────────
             Text(
               widget.callerName,
               style: const TextStyle(
@@ -187,18 +220,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
                 color: Colors.white.withValues(alpha: 0.4),
               ),
             ),
-            // const SizedBox(height: 4),
-            // Text(
-            //   widget.callerId,
-            //   style: const TextStyle(
-            //     fontSize: 12,
-            //     color: Color(0xFF4A90D9),
-            //   ),
-            // ),
 
             const Spacer(),
 
-            // ── Buttons ────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 48),
               child: Row(

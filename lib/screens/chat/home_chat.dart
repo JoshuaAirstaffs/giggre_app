@@ -45,33 +45,32 @@ class _HomeChatState extends State<HomeChat>
         .where('isSupport', isEqualTo: true)
         .get()
         .then((roomsSnap) {
-          if (roomsSnap.docs.isEmpty) return;
+      if (roomsSnap.docs.isEmpty) return;
 
-          final Map<int, bool> roomUnread = {};
+      final Map<int, bool> roomUnread = {};
 
-          for (int i = 0; i < roomsSnap.docs.length; i++) {
-            final room = roomsSnap.docs[i];
-            final sub = FirebaseFirestore.instance
-                .collection('chat_rooms')
-                .doc(room.id)
-                .collection('messages')
-                .where('isSupport', isEqualTo: true)
-                .where('hasSeen', isEqualTo: false)
-                .limit(1)
-                .snapshots()
-                .map((s) => s.docs.isNotEmpty)
-                .listen(
-                  (hasUnread) {
-                    roomUnread[i] = hasUnread;
-                    final anyUnread = roomUnread.values.any((v) => v);
-                    if (mounted) setState(() => _hasUnread = anyUnread);
-                  },
-                  onError: (e) =>
-                      debugPrint('[HomeChat] message stream error: $e'),
-                );
-            _roomSubs.add(sub);
-          }
-        });
+      for (int i = 0; i < roomsSnap.docs.length; i++) {
+        final room = roomsSnap.docs[i];
+        final sub = FirebaseFirestore.instance
+            .collection('chat_rooms')
+            .doc(room.id)
+            .collection('messages')
+            .where('isSupport', isEqualTo: true)
+            .where('hasSeen', isEqualTo: false)
+            .limit(1)
+            .snapshots()
+            .map((s) => s.docs.isNotEmpty)
+            .listen(
+              (hasUnread) {
+                roomUnread[i] = hasUnread;
+                final anyUnread = roomUnread.values.any((v) => v);
+                if (mounted) setState(() => _hasUnread = anyUnread);
+              },
+              onError: (e) => debugPrint('[HomeChat] message stream error: $e'),
+            );
+        _roomSubs.add(sub);
+      }
+    });
   }
 
   @override
@@ -155,6 +154,122 @@ class _FriendsTab extends StatelessWidget {
   }
 }
 
+// ── Shared call logic ─────────────────────────────────────────────────────────
+
+/// Writes outgoingCall to caller's own doc, incomingCall to target's doc,
+/// then navigates to [callScreen]. Cleans up both docs in finally.
+Future<void> _initiateCall({
+  required BuildContext context,
+  required String targetUserId,
+  required String channelName,
+  required String token,
+  required bool isVideo,
+  required void Function(bool) setLoading,
+  required Widget Function(String channelName, String token) buildScreen,
+}) async {
+  final me = FirebaseAuth.instance.currentUser;
+  if (me == null) return;
+
+  final myDoc = await FirebaseFirestore.instance
+      .collection('users')
+      .doc(me.uid)
+      .get();
+  final myName = myDoc.data()?['name'] ?? 'Unknown';
+
+  setLoading(true);
+
+  final firestore = FirebaseFirestore.instance;
+  String? targetDocId;
+
+  try {
+    final targetSnap = await firestore
+        .collection('users')
+        .where('userId', isEqualTo: targetUserId)
+        .limit(1)
+        .get();
+
+    if (targetSnap.docs.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User not found')),
+        );
+      }
+      return;
+    }
+
+    targetDocId = targetSnap.docs.first.id;
+
+    final batch = firestore.batch();
+
+    // Write outgoingCall to caller's own doc — VoiceCallScreen listens here
+    // for 'declined' status set by the callee.
+    batch.set(
+      firestore.collection('users').doc(me.uid),
+      {
+        'outgoingCall': {
+          'targetId': targetDocId,
+          'channelName': channelName,
+          'status': 'calling',
+          'createdAt': FieldValue.serverTimestamp(),
+        },
+      },
+      SetOptions(merge: true),
+    );
+
+    // Write incomingCall to callee's doc — triggers IncomingCallScreen.
+    batch.set(
+      firestore.collection('users').doc(targetDocId),
+      {
+        'incomingCall': {
+          'callerId': me.uid,
+          'callerName': myName,
+          'channelName': channelName,
+          'token': token,
+          'status': 'ringing',
+          if (isVideo) 'isVideo': true,
+          'createdAt': FieldValue.serverTimestamp(),
+        },
+      },
+      SetOptions(merge: true),
+    );
+
+    await batch.commit();
+
+    if (!context.mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => buildScreen(channelName, token)),
+    );
+  } catch (e) {
+    debugPrint('Call error: $e');
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to start call: $e')),
+      );
+    }
+  } finally {
+    // Clean up both sides after the call screen pops.
+    final cleanupBatch = firestore.batch();
+
+    cleanupBatch.update(
+      firestore.collection('users').doc(me.uid),
+      {'outgoingCall': FieldValue.delete()},
+    );
+
+    if (targetDocId != null) {
+      cleanupBatch.update(
+        firestore.collection('users').doc(targetDocId),
+        {'incomingCall': FieldValue.delete()},
+      );
+    }
+
+    await cleanupBatch.commit();
+
+    setLoading(false);
+  }
+}
+
 // ── Test Voice Call Card ──────────────────────────────────────────────────────
 
 class _TestCallCard extends StatefulWidget {
@@ -165,115 +280,32 @@ class _TestCallCard extends StatefulWidget {
 }
 
 class _TestCallCardState extends State<_TestCallCard> {
-  static String _generateChannelName() {
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
-    return '${uid}_$timestamp';
-  }
-
   static const _targetUserId = 'GIG000014';
   static const _targetUserName = 'htest';
   static const _token = '';
 
-  final _channelName = _generateChannelName();
   bool _isCalling = false;
+  late String _channelName = _makeChannel();
+
+  static String _makeChannel() {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+    return '${uid}_${DateTime.now().millisecondsSinceEpoch}';
+  }
 
   Future<void> _startCall() async {
-    final me = FirebaseAuth.instance.currentUser;
-    if (me == null) return;
-
-    final myDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(me.uid)
-        .get();
-    final myName = myDoc.data()?['name'] ?? 'Unknown';
-
-    setState(() => _isCalling = true);
-
-    StreamSubscription? callStatusSub;
-
-    try {
-      final targetSnap = await FirebaseFirestore.instance
-          .collection('users')
-          .where('userId', isEqualTo: _targetUserId)
-          .limit(1)
-          .get();
-
-      if (targetSnap.docs.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('User not found')),
-          );
-        }
-        return;
-      }
-
-      final targetDocId = targetSnap.docs.first.id;
-
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(targetDocId)
-          .set({
-        'incomingCall': {
-          'callerId': me.uid,
-          'callerName': myName,
-          'channelName': _channelName,
-          'token': _token,
-          'status': 'ringing',
-          'createdAt': FieldValue.serverTimestamp(),
-        },
-      }, SetOptions(merge: true));
-
-      if (!mounted) return;
-
-      callStatusSub = FirebaseFirestore.instance
-          .collection('users')
-          .doc(targetDocId)
-          .snapshots()
-          .listen((snap) {
-        final incomingCall = snap.data()?['incomingCall'];
-        if (incomingCall == null) {
-          callStatusSub?.cancel();
-          final ctx = navigatorKey?.currentContext;
-          if (ctx != null && Navigator.canPop(ctx)) {
-            Navigator.pop(ctx);
-          }
-        }
-      });
-
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => VoiceCallScreen(
-            channelName: _channelName,
-            token: _token,
-          ),
-        ),
-      );
-    } catch (e) {
-      debugPrint('Call error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to start call: $e')),
-        );
-      }
-    } finally {
-      callStatusSub?.cancel();
-
-      final targetSnap = await FirebaseFirestore.instance
-          .collection('users')
-          .where('userId', isEqualTo: _targetUserId)
-          .limit(1)
-          .get();
-      if (targetSnap.docs.isNotEmpty) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(targetSnap.docs.first.id)
-            .update({'incomingCall': FieldValue.delete()});
-      }
-
-      if (mounted) setState(() => _isCalling = false);
-    }
+    await _initiateCall(
+      context: context,
+      targetUserId: _targetUserId,
+      channelName: _channelName,
+      token: _token,
+      isVideo: false,
+      setLoading: (v) {
+        if (mounted) setState(() => _isCalling = v);
+        // Generate a fresh channel name after the call ends.
+        if (!v && mounted) setState(() => _channelName = _makeChannel());
+      },
+      buildScreen: (ch, tk) => VoiceCallScreen(channelName: ch, token: tk),
+    );
   }
 
   @override
@@ -308,7 +340,6 @@ class _TestCallCardState extends State<_TestCallCard> {
             ],
           ),
           const SizedBox(height: 12),
-
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
@@ -318,34 +349,23 @@ class _TestCallCardState extends State<_TestCallCard> {
             child: Row(
               children: [
                 const CircleAvatar(
-                  radius: 18,
-                  child: Icon(Icons.person, size: 18),
-                ),
+                    radius: 18, child: Icon(Icons.person, size: 18)),
                 const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _targetUserName,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Text(
-                      _targetUserId,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey[500],
-                      ),
-                    ),
+                    Text(_targetUserName,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.bold)),
+                    Text(_targetUserId,
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.grey[500])),
                   ],
                 ),
               ],
             ),
           ),
           const SizedBox(height: 10),
-
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -355,22 +375,16 @@ class _TestCallCardState extends State<_TestCallCard> {
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
+                          strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.call, size: 18),
-              label: Text(
-                _isCalling
-                    ? 'Calling $_targetUserName...'
-                    : 'Call $_targetUserName',
-              ),
+              label: Text(_isCalling
+                  ? 'Calling $_targetUserName...'
+                  : 'Call $_targetUserName'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: kBlue,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                    borderRadius: BorderRadius.circular(8)),
               ),
             ),
           ),
@@ -390,128 +404,31 @@ class _TestVideoCallCard extends StatefulWidget {
 }
 
 class _TestVideoCallCardState extends State<_TestVideoCallCard> {
-  static String _generateChannelName() {
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
-    return '${uid}_$timestamp';
-  }
-
   static const _targetUserId = 'GIG000014';
   static const _targetUserName = 'htest';
   static const _token = '';
 
-  late String _channelName;
   bool _isCalling = false;
+  late String _channelName = _makeChannel();
 
-  @override
-  void initState() {
-    super.initState();
-    _channelName = _generateChannelName();
+  static String _makeChannel() {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+    return '${uid}_${DateTime.now().millisecondsSinceEpoch}';
   }
 
   Future<void> _startCall() async {
-    final me = FirebaseAuth.instance.currentUser;
-    if (me == null) return;
-
-    final myDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(me.uid)
-        .get();
-    final myName = myDoc.data()?['name'] ?? 'Unknown';
-
-    // ✅ only flip the flag, channel name stays fixed for this call
-    setState(() => _isCalling = true);
-
-    StreamSubscription? callStatusSub;
-
-    try {
-      final targetSnap = await FirebaseFirestore.instance
-          .collection('users')
-          .where('userId', isEqualTo: _targetUserId)
-          .limit(1)
-          .get();
-
-      if (targetSnap.docs.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('User not found')),
-          );
-        }
-        return;
-      }
-
-      final targetDocId = targetSnap.docs.first.id;
-
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(targetDocId)
-          .set({
-        'incomingCall': {
-          'callerId': me.uid,
-          'callerName': myName,
-          'channelName': _channelName,
-          'token': _token,
-          'status': 'ringing',
-          'isVideo': true,
-          'createdAt': FieldValue.serverTimestamp(),
-        },
-      }, SetOptions(merge: true));
-
-      if (!mounted) return;
-
-      callStatusSub = FirebaseFirestore.instance
-          .collection('users')
-          .doc(targetDocId)
-          .snapshots()
-          .listen((snap) {
-        final incomingCall = snap.data()?['incomingCall'];
-        if (incomingCall == null) {
-          callStatusSub?.cancel();
-          final ctx = navigatorKey?.currentContext;
-          if (ctx != null && Navigator.canPop(ctx)) {
-            Navigator.pop(ctx);
-          }
-        }
-      });
-
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => VideoCallScreen(
-            channelName: _channelName,
-            token: _token,
-          ),
-        ),
-      );
-    } catch (e) {
-      debugPrint('Video call error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to start call: $e')),
-        );
-      }
-    } finally {
-      callStatusSub?.cancel();
-
-      final targetSnap = await FirebaseFirestore.instance
-          .collection('users')
-          .where('userId', isEqualTo: _targetUserId)
-          .limit(1)
-          .get();
-      if (targetSnap.docs.isNotEmpty) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(targetSnap.docs.first.id)
-            .update({'incomingCall': FieldValue.delete()});
-      }
-
-      if (mounted) {
-        setState(() {
-          _isCalling = false;
-          _channelName = _generateChannelName(); // ✅ fresh for next call
-        });
-      }
-    }
+    await _initiateCall(
+      context: context,
+      targetUserId: _targetUserId,
+      channelName: _channelName,
+      token: _token,
+      isVideo: true,
+      setLoading: (v) {
+        if (mounted) setState(() => _isCalling = v);
+        if (!v && mounted) setState(() => _channelName = _makeChannel());
+      },
+      buildScreen: (ch, tk) => VideoCallScreen(channelName: ch, token: tk),
+    );
   }
 
   @override
@@ -547,7 +464,6 @@ class _TestVideoCallCardState extends State<_TestVideoCallCard> {
             ],
           ),
           const SizedBox(height: 12),
-
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
@@ -557,30 +473,23 @@ class _TestVideoCallCardState extends State<_TestVideoCallCard> {
             child: Row(
               children: [
                 const CircleAvatar(
-                  radius: 18,
-                  child: Icon(Icons.person, size: 18),
-                ),
+                    radius: 18, child: Icon(Icons.person, size: 18)),
                 const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _targetUserName,
-                      style: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      _targetUserId,
-                      style:
-                          TextStyle(fontSize: 11, color: Colors.grey[500]),
-                    ),
+                    Text(_targetUserName,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.bold)),
+                    Text(_targetUserId,
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.grey[500])),
                   ],
                 ),
               ],
             ),
           ),
           const SizedBox(height: 10),
-
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -590,22 +499,16 @@ class _TestVideoCallCardState extends State<_TestVideoCallCard> {
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
+                          strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.videocam_rounded, size: 18),
-              label: Text(
-                _isCalling
-                    ? 'Calling $_targetUserName...'
-                    : 'Video Call $_targetUserName',
-              ),
+              label: Text(_isCalling
+                  ? 'Calling $_targetUserName...'
+                  : 'Video Call $_targetUserName'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.purple,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                    borderRadius: BorderRadius.circular(8)),
               ),
             ),
           ),
