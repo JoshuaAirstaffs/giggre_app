@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:giggre_app/features/call/voice_call_screen.dart';
-import 'package:giggre_app/features/call/video_call_screen.dart';
-import 'package:giggre_app/main.dart' show navigatorKey;
+import 'package:giggre_app/features/call/call_user_action.dart';
 
 class HomeChat extends StatefulWidget {
   const HomeChat({super.key});
@@ -141,378 +139,24 @@ class _FriendsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          children: const [
-            _TestCallCard(),
-            _TestVideoCallCard(),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CallUserAction(
+              targetUserId: 'GIG000014',
+              targetUserName: 'htest',
+              callType: CallType.voice,
+            ),
+            SizedBox(height: 8),
+            CallUserAction(
+              targetUserId: 'GIG000014',
+              targetUserName: 'htest',
+              callType: CallType.video,
+            ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ── Shared call logic ─────────────────────────────────────────────────────────
-
-/// Writes outgoingCall to caller's own doc, incomingCall to target's doc,
-/// then navigates to [callScreen]. Cleans up both docs in finally.
-Future<void> _initiateCall({
-  required BuildContext context,
-  required String targetUserId,
-  required String channelName,
-  required String token,
-  required bool isVideo,
-  required void Function(bool) setLoading,
-  required Widget Function(String channelName, String token) buildScreen,
-}) async {
-  final me = FirebaseAuth.instance.currentUser;
-  if (me == null) return;
-
-  final myDoc = await FirebaseFirestore.instance
-      .collection('users')
-      .doc(me.uid)
-      .get();
-  final myName = myDoc.data()?['name'] ?? 'Unknown';
-
-  setLoading(true);
-
-  final firestore = FirebaseFirestore.instance;
-  String? targetDocId;
-
-  try {
-    final targetSnap = await firestore
-        .collection('users')
-        .where('userId', isEqualTo: targetUserId)
-        .limit(1)
-        .get();
-
-    if (targetSnap.docs.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User not found')),
-        );
-      }
-      return;
-    }
-
-    targetDocId = targetSnap.docs.first.id;
-
-    final batch = firestore.batch();
-
-    // Write outgoingCall to caller's own doc — VoiceCallScreen listens here
-    // for 'declined' status set by the callee.
-    batch.set(
-      firestore.collection('users').doc(me.uid),
-      {
-        'outgoingCall': {
-          'targetId': targetDocId,
-          'channelName': channelName,
-          'status': 'calling',
-          'createdAt': FieldValue.serverTimestamp(),
-        },
-      },
-      SetOptions(merge: true),
-    );
-
-    // Write incomingCall to callee's doc — triggers IncomingCallScreen.
-    batch.set(
-      firestore.collection('users').doc(targetDocId),
-      {
-        'incomingCall': {
-          'callerId': me.uid,
-          'callerName': myName,
-          'channelName': channelName,
-          'token': token,
-          'status': 'ringing',
-          if (isVideo) 'isVideo': true,
-          'createdAt': FieldValue.serverTimestamp(),
-        },
-      },
-      SetOptions(merge: true),
-    );
-
-    await batch.commit();
-
-    if (!context.mounted) return;
-
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => buildScreen(channelName, token)),
-    );
-  } catch (e) {
-    debugPrint('Call error: $e');
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to start call: $e')),
-      );
-    }
-  } finally {
-    // Clean up both sides after the call screen pops.
-    final cleanupBatch = firestore.batch();
-
-    cleanupBatch.update(
-      firestore.collection('users').doc(me.uid),
-      {'outgoingCall': FieldValue.delete()},
-    );
-
-    if (targetDocId != null) {
-      cleanupBatch.update(
-        firestore.collection('users').doc(targetDocId),
-        {'incomingCall': FieldValue.delete()},
-      );
-    }
-
-    await cleanupBatch.commit();
-
-    setLoading(false);
-  }
-}
-
-// ── Test Voice Call Card ──────────────────────────────────────────────────────
-
-class _TestCallCard extends StatefulWidget {
-  const _TestCallCard();
-
-  @override
-  State<_TestCallCard> createState() => _TestCallCardState();
-}
-
-class _TestCallCardState extends State<_TestCallCard> {
-  static const _targetUserId = 'GIG000014';
-  static const _targetUserName = 'htest';
-  static const _token = '';
-
-  bool _isCalling = false;
-  late String _channelName = _makeChannel();
-
-  static String _makeChannel() {
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
-    return '${uid}_${DateTime.now().millisecondsSinceEpoch}';
-  }
-
-  Future<void> _startCall() async {
-    await _initiateCall(
-      context: context,
-      targetUserId: _targetUserId,
-      channelName: _channelName,
-      token: _token,
-      isVideo: false,
-      setLoading: (v) {
-        if (mounted) setState(() => _isCalling = v);
-        // Generate a fresh channel name after the call ends.
-        if (!v && mounted) setState(() => _channelName = _makeChannel());
-      },
-      buildScreen: (ch, tk) => VoiceCallScreen(channelName: ch, token: tk),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDarkMode ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: kBlue.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(Icons.call, color: kBlue, size: 20),
-              ),
-              const SizedBox(width: 10),
-              const Text(
-                'Test Voice Call',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: isDarkMode ? Colors.grey[800] : Colors.grey[100],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                const CircleAvatar(
-                    radius: 18, child: Icon(Icons.person, size: 18)),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_targetUserName,
-                        style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.bold)),
-                    Text(_targetUserId,
-                        style:
-                            TextStyle(fontSize: 11, color: Colors.grey[500])),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _isCalling ? null : _startCall,
-              icon: _isCalling
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.call, size: 18),
-              label: Text(_isCalling
-                  ? 'Calling $_targetUserName...'
-                  : 'Call $_targetUserName'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kBlue,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Test Video Call Card ──────────────────────────────────────────────────────
-
-class _TestVideoCallCard extends StatefulWidget {
-  const _TestVideoCallCard();
-
-  @override
-  State<_TestVideoCallCard> createState() => _TestVideoCallCardState();
-}
-
-class _TestVideoCallCardState extends State<_TestVideoCallCard> {
-  static const _targetUserId = 'GIG000014';
-  static const _targetUserName = 'htest';
-  static const _token = '';
-
-  bool _isCalling = false;
-  late String _channelName = _makeChannel();
-
-  static String _makeChannel() {
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
-    return '${uid}_${DateTime.now().millisecondsSinceEpoch}';
-  }
-
-  Future<void> _startCall() async {
-    await _initiateCall(
-      context: context,
-      targetUserId: _targetUserId,
-      channelName: _channelName,
-      token: _token,
-      isVideo: true,
-      setLoading: (v) {
-        if (mounted) setState(() => _isCalling = v);
-        if (!v && mounted) setState(() => _channelName = _makeChannel());
-      },
-      buildScreen: (ch, tk) => VideoCallScreen(channelName: ch, token: tk),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDarkMode ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.purple.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.videocam_rounded,
-                    color: Colors.purple, size: 20),
-              ),
-              const SizedBox(width: 10),
-              const Text(
-                'Test Video Call',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: isDarkMode ? Colors.grey[800] : Colors.grey[100],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                const CircleAvatar(
-                    radius: 18, child: Icon(Icons.person, size: 18)),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_targetUserName,
-                        style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.bold)),
-                    Text(_targetUserId,
-                        style:
-                            TextStyle(fontSize: 11, color: Colors.grey[500])),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _isCalling ? null : _startCall,
-              icon: _isCalling
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.videocam_rounded, size: 18),
-              label: Text(_isCalling
-                  ? 'Calling $_targetUserName...'
-                  : 'Video Call $_targetUserName'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.purple,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -581,8 +225,8 @@ class _SupportTabState extends State<_SupportTab> {
 
       if (snapshot.docs.isNotEmpty) {
         _lastDoc = snapshot.docs.last;
-        _rooms
-            .addAll(snapshot.docs.map((d) => {...d.data(), 'roomId': d.id}));
+        _rooms.addAll(
+            snapshot.docs.map((d) => {...d.data(), 'roomId': d.id}));
       }
 
       if (snapshot.docs.length < _limit) _hasMore = false;
@@ -770,8 +414,7 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
                       color: _statusColor,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child:
-                        const Icon(Icons.support_agent, color: Colors.white),
+                    child: const Icon(Icons.support_agent, color: Colors.white),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
