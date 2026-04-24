@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +31,8 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  StreamSubscription<DocumentSnapshot>? _callSub;
 
   static const _bg = Color(0xFF121212);
   static const _purple = Color(0xFF7C4DFF);
@@ -35,6 +40,7 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
   @override
   void initState() {
     super.initState();
+
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -43,11 +49,46 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.08).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
+
+    _startRingtone();
+    _listenForCancellation();
+  }
+
+  // Dismiss automatically if the caller hangs up before answer
+  void _listenForCancellation() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _callSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) {
+      final incomingCall = snap.data()?['incomingCall'];
+      if (incomingCall == null && mounted) {
+        _callSub?.cancel();
+        _audioPlayer.stop();
+        Navigator.pop(context);
+      }
+    });
+  }
+
+  Future<void> _startRingtone() async {
+    await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+    await _audioPlayer.play(AssetSource('sounds/incoming_call_sound.mp3'));
+  }
+
+  Future<void> _stopRingtone() async {
+    await _audioPlayer.stop();
+    await _audioPlayer.dispose();
   }
 
   @override
   void dispose() {
+    _callSub?.cancel();
     _pulseController.dispose();
+    _audioPlayer.stop();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -57,43 +98,57 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
     return parts[0].substring(0, parts[0].length.clamp(0, 2)).toUpperCase();
   }
 
-Future<void> _acceptCall() async {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  if (uid == null) return;
+  Future<void> _acceptCall() async {
+    _callSub?.cancel();
+    await _stopRingtone();
 
-  debugPrint('📞 receiver accepting channelName: "${widget.channelName}" token: "${widget.token}"');
-
-  await FirebaseFirestore.instance
-      .collection('users')
-      .doc(uid)
-      .update({'incomingCall.status': 'accepted'});
-
-  if (!mounted) return;
-
-  await Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (_) => VideoCallScreen(
-        channelName: widget.channelName,
-        token: widget.token,
-      ),
-    ),
-  );
-
-  await FirebaseFirestore.instance
-      .collection('users')
-      .doc(uid)
-      .update({'incomingCall': FieldValue.delete()});
-}
-
-  Future<void> _declineCall() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
     await FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
+        .update({'incomingCall.status': 'accepted'});
+
+    if (!mounted) return;
+
+    await Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VideoCallScreen(
+          channelName: widget.channelName,
+          token: widget.token,
+        ),
+      ),
+    );
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
         .update({'incomingCall': FieldValue.delete()});
+  }
+
+  Future<void> _declineCall() async {
+    _callSub?.cancel();
+    await _stopRingtone();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final firestore = FirebaseFirestore.instance;
+    final batch = firestore.batch();
+
+    batch.update(
+      firestore.collection('users').doc(uid),
+      {'incomingCall': FieldValue.delete()},
+    );
+
+    batch.update(
+      firestore.collection('users').doc(widget.callerId),
+      {'outgoingCall.status': 'declined'},
+    );
+
+    await batch.commit();
 
     if (mounted) Navigator.pop(context);
   }
@@ -107,7 +162,6 @@ Future<void> _acceptCall() async {
           children: [
             const SizedBox(height: 48),
 
-            // ── Label ──────────────────────────────────────────
             Text(
               'Incoming Video Call',
               style: TextStyle(
@@ -119,7 +173,6 @@ Future<void> _acceptCall() async {
 
             const SizedBox(height: 48),
 
-            // ── Avatar ─────────────────────────────────────────
             AnimatedBuilder(
               animation: _pulseAnimation,
               builder: (_, child) => Transform.scale(
@@ -151,7 +204,6 @@ Future<void> _acceptCall() async {
                       ),
                     ),
                   ),
-                  // Video badge
                   Container(
                     width: 28,
                     height: 28,
@@ -172,7 +224,6 @@ Future<void> _acceptCall() async {
 
             const SizedBox(height: 24),
 
-            // ── Caller name ────────────────────────────────────
             Text(
               widget.callerName,
               style: const TextStyle(
@@ -189,18 +240,9 @@ Future<void> _acceptCall() async {
                 color: Colors.white.withValues(alpha: 0.4),
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              widget.callerId,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF7C4DFF),
-              ),
-            ),
 
             const Spacer(),
 
-            // ── Buttons ────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 48),
               child: Row(

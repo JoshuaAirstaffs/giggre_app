@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -21,16 +24,20 @@ class _VideoCallScreenState extends State<VideoCallScreen>
     with SingleTickerProviderStateMixin {
   RtcEngine? _engine;
 
+  final AudioPlayer _ringbackPlayer = AudioPlayer();
+
   bool _isMuted = false;
   bool _isCameraOff = false;
   bool _isFrontCamera = true;
   bool _remoteUserJoined = false;
   bool _remoteCameraOff = false;
   bool _isConnecting = true;
+  bool _isEnding = false;
 
   int? _remoteUid;
   int _callSeconds = 0;
   Timer? _callTimer;
+  StreamSubscription<DocumentSnapshot>? _outgoingCallSub;
 
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
@@ -52,6 +59,34 @@ class _VideoCallScreenState extends State<VideoCallScreen>
     );
 
     _initAgora();
+    _listenForDecline();
+  }
+
+  // ── Listen for callee declining ────────────────────────────────────────────
+  void _listenForDecline() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _outgoingCallSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) {
+      final status = snap.data()?['outgoingCall']?['status'];
+      if (status == 'declined' && mounted) {
+        _endCall();
+      }
+    });
+  }
+
+  Future<void> _startRingback() async {
+    await _ringbackPlayer.setReleaseMode(ReleaseMode.loop);
+    await _ringbackPlayer
+        .play(AssetSource('sounds/waiting_to_answer_sound.mp3'));
+  }
+
+  Future<void> _stopRingback() async {
+    await _ringbackPlayer.stop();
   }
 
   Future<void> _initAgora() async {
@@ -62,10 +97,14 @@ class _VideoCallScreenState extends State<VideoCallScreen>
 
     _engine!.registerEventHandler(RtcEngineEventHandler(
       onJoinChannelSuccess: (connection, elapsed) {
-        if (mounted) setState(() => _isConnecting = false);
+        if (mounted) {
+          setState(() => _isConnecting = false);
+          _startRingback();
+        }
       },
       onUserJoined: (connection, remoteUid, elapsed) {
         if (mounted) {
+          _stopRingback();
           setState(() {
             _remoteUid = remoteUid;
             _remoteUserJoined = true;
@@ -83,16 +122,17 @@ class _VideoCallScreenState extends State<VideoCallScreen>
         }
         _endCall();
       },
-      onRemoteVideoStateChanged: (connection, remoteUid, state, reason, elapsed) {
+      onRemoteVideoStateChanged:
+          (connection, remoteUid, state, reason, elapsed) {
         if (mounted) {
           setState(() {
             _remoteCameraOff =
                 state == RemoteVideoState.remoteVideoStateStopped ||
-                state == RemoteVideoState.remoteVideoStateFrozen;
+                    state == RemoteVideoState.remoteVideoStateFrozen;
           });
         }
       },
-      onError: (err, msg) => debugPrint('❌ VIDEO Agora error: $err - $msg'),
+      onError: (err, msg) => debugPrint('Agora error: $err - $msg'),
     ));
 
     await _engine!.enableVideo();
@@ -144,16 +184,51 @@ class _VideoCallScreenState extends State<VideoCallScreen>
   }
 
   Future<void> _endCall() async {
+    if (_isEnding) return;
+    _isEnding = true;
+
     _callTimer?.cancel();
+    _outgoingCallSub?.cancel();
+    await _stopRingback();
+    await _ringbackPlayer.dispose();
     await _engine?.leaveChannel();
     await _engine?.release();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final firestore = FirebaseFirestore.instance;
+
+      // Read targetId before wiping outgoingCall
+      final mySnap = await firestore.collection('users').doc(uid).get();
+      final targetId =
+          mySnap.data()?['outgoingCall']?['targetId'] as String?;
+
+      final batch = firestore.batch();
+
+      batch.update(
+        firestore.collection('users').doc(uid),
+        {'outgoingCall': FieldValue.delete()},
+      );
+
+      if (targetId != null) {
+        batch.update(
+          firestore.collection('users').doc(targetId),
+          {'incomingCall': FieldValue.delete()},
+        );
+      }
+
+      await batch.commit();
+    }
+
     if (mounted) Navigator.pop(context);
   }
 
   @override
   void dispose() {
     _callTimer?.cancel();
+    _outgoingCallSub?.cancel();
     _pulseController.dispose();
+    _ringbackPlayer.dispose();
     _engine?.leaveChannel();
     _engine?.release();
     super.dispose();
@@ -222,43 +297,80 @@ class _VideoCallScreenState extends State<VideoCallScreen>
 
   @override
   Widget build(BuildContext context) {
-    // final showRemoteVideo =
-    //     _remoteUserJoined && _remoteUid != null && _engine != null && !_remoteCameraOff;
+    final showRemoteVideo = _remoteUserJoined &&
+        _remoteUid != null &&
+        _engine != null &&
+        !_remoteCameraOff;
 
     return Scaffold(
       backgroundColor: _bg,
       body: Stack(
         children: [
+          // ── Remote video (fullscreen) ──────────────────────
           Positioned.fill(
-  child: _buildRemotePlaceholder(
-    cameraOff: _remoteUserJoined,
-  ),
-),
-          // ── Remote video / fallback ────────────────────────
-          // Positioned.fill(
-          //   child: showRemoteVideo
-          //       ? AgoraVideoView(
-          //           controller: VideoViewController.remote(
-          //             rtcEngine: _engine!,
-          //             canvas: VideoCanvas(uid: _remoteUid),
-          //             connection:
-          //                 RtcConnection(channelId: widget.channelName),
-          //           ),
-          //         )
-          //       : _buildRemotePlaceholder(
-          //           cameraOff: _remoteUserJoined && _remoteCameraOff,
-          //         ),
-          // ),
+            child: showRemoteVideo
+                ? AgoraVideoView(
+                    controller: VideoViewController.remote(
+                      rtcEngine: _engine!,
+                      canvas: VideoCanvas(uid: _remoteUid),
+                      connection:
+                          RtcConnection(channelId: widget.channelName),
+                    ),
+                  )
+                : _buildRemotePlaceholder(
+                    cameraOff: _remoteUserJoined && _remoteCameraOff,
+                  ),
+          ),
+
+          // ── Top gradient ───────────────────────────────────
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            height: 140,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.65),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ── Bottom gradient ────────────────────────────────
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 200,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.85),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
 
           // ── Local video (picture-in-picture) ───────────────
           Positioned(
-            top: 60,
+            top: 100,
             right: 16,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: SizedBox(
-                width: 110,
-                height: 160,
+                width: 90,
+                height: 130,
                 child: _isCameraOff || _engine == null
                     ? Container(
                         color: Colors.grey[850],
@@ -323,12 +435,12 @@ class _VideoCallScreenState extends State<VideoCallScreen>
                       const Spacer(),
                       Column(
                         children: [
-                          Text(
-                            widget.channelName,
+                          const Text(
+                            'Video Call',
                             style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.7),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -399,11 +511,11 @@ class _VideoCallScreenState extends State<VideoCallScreen>
                 // ── Controls ─────────────────────────────────
                 Container(
                   margin: const EdgeInsets.only(
-                      left: 24, right: 24, bottom: 48),
+                      left: 24, right: 24, bottom: 40),
                   padding: const EdgeInsets.symmetric(
                       horizontal: 24, vertical: 16),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.5),
+                    color: Colors.black.withValues(alpha: 0.45),
                     borderRadius: BorderRadius.circular(24),
                   ),
                   child: Row(

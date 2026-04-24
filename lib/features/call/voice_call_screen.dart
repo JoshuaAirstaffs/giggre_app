@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -23,13 +26,17 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
 
+  final AudioPlayer _ringbackPlayer = AudioPlayer();
+
   bool _isMuted = false;
   bool _isSpeakerOn = false;
   bool _remoteUserJoined = false;
   bool _isConnecting = true;
+  bool _isEnding = false; // guard against double-end
 
   int _callSeconds = 0;
   Timer? _callTimer;
+  StreamSubscription<DocumentSnapshot>? _outgoingCallSub;
 
   static const _appId = '75426b0c60784c2ebd9ab32cfcc5288f';
   static const _bg = Color(0xFF121212);
@@ -48,6 +55,34 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     );
 
     _initAgora();
+    _listenForDecline();
+  }
+
+  // ── Listen for callee declining ────────────────────────────────────────────
+  void _listenForDecline() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _outgoingCallSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) {
+      final status = snap.data()?['outgoingCall']?['status'];
+      if (status == 'declined' && mounted) {
+        _endCall();
+      }
+    });
+  }
+
+  Future<void> _startRingback() async {
+    await _ringbackPlayer.setReleaseMode(ReleaseMode.loop);
+    await _ringbackPlayer
+        .play(AssetSource('sounds/waiting_to_answer_sound.mp3'));
+  }
+
+  Future<void> _stopRingback() async {
+    await _ringbackPlayer.stop();
   }
 
   Future<void> _initAgora() async {
@@ -58,10 +93,14 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
     _engine.registerEventHandler(RtcEngineEventHandler(
       onJoinChannelSuccess: (connection, elapsed) {
-        if (mounted) setState(() => _isConnecting = false);
+        if (mounted) {
+          setState(() => _isConnecting = false);
+          _startRingback();
+        }
       },
       onUserJoined: (connection, remoteUid, elapsed) {
         if (mounted) {
+          _stopRingback();
           setState(() => _remoteUserJoined = true);
           _startTimer();
         }
@@ -112,16 +151,52 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
   }
 
   Future<void> _endCall() async {
+    if (_isEnding) return;
+    _isEnding = true;
+
     _callTimer?.cancel();
+    _outgoingCallSub?.cancel();
+    await _stopRingback();
+    await _ringbackPlayer.dispose();
     await _engine.leaveChannel();
     await _engine.release();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final firestore = FirebaseFirestore.instance;
+
+      // Always read targetId before wiping outgoingCall
+      final mySnap = await firestore.collection('users').doc(uid).get();
+      final targetId = mySnap.data()?['outgoingCall']?['targetId'] as String?;
+
+      final batch = firestore.batch();
+
+      // Always clean up caller's outgoingCall
+      batch.update(
+        firestore.collection('users').doc(uid),
+        {'outgoingCall': FieldValue.delete()},
+      );
+
+      // If callee still has our incomingCall, delete it so their screen closes
+      if (targetId != null) {
+        batch.update(
+          firestore.collection('users').doc(targetId),
+          {'incomingCall': FieldValue.delete()},
+        );
+      }
+
+      await batch.commit();
+    }
+
     if (mounted) Navigator.pop(context);
   }
 
   @override
   void dispose() {
     _callTimer?.cancel();
+    _outgoingCallSub?.cancel();
     _pulseController.dispose();
+    _ringbackPlayer.dispose();
     _engine.leaveChannel();
     _engine.release();
     super.dispose();
@@ -148,8 +223,8 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
           children: [
             // ── Top bar ──────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 12),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
                   IconButton(
@@ -161,11 +236,12 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
                     ),
                   ),
                   const Spacer(),
-                  Text(
-                    widget.channelName,
+                  const Text(
+                    'Voice Call',
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.45),
-                      fontSize: 13,
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   const Spacer(),
@@ -206,10 +282,10 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
             const SizedBox(height: 20),
 
-            // ── Channel name ─────────────────────────────────
-            Text(
-              widget.channelName,
-              style: const TextStyle(
+            // ── Title ────────────────────────────────────────
+            const Text(
+              'Voice Call',
+              style: TextStyle(
                 color: Colors.white,
                 fontSize: 22,
                 fontWeight: FontWeight.w600,
