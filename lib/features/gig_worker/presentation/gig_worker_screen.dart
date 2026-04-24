@@ -16,6 +16,8 @@ import 'widgets/worker_widgets.dart';
 import 'widgets/working_ui.dart';
 import 'widgets/offered_gig_offer_card.dart';
 import 'widgets/toolchest_sheet.dart';
+import 'gig_history_screen.dart';
+import 'worker_ratings_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main screen
@@ -32,6 +34,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   bool _loading = true;
 
   // Profile data
+  String _userId = '';
   String _name = '';
   String _email = '';
   String _photoUrl = '';
@@ -153,6 +156,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       final wasNotSuspended = _suspendedUntil == null;
 
       setState(() {
+        _userId = data['userId'] as String? ?? '';
         _name = data['name'] as String? ?? '';
         _email = data['email'] as String? ?? '';
         _photoUrl = data['photoUrl'] as String? ?? '';
@@ -183,7 +187,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               (_) => _showSuspensionDialog());
         }
       }
-    });
+    }, onError: (e) => debugPrint('[GigWorker] profile stream error: $e'));
   }
 
   void _startEarningsSubs(String uid) {
@@ -233,7 +237,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         _gigsByCollection[col] =
             snap.docs.map((d) => d.data()).toList();
         recalculate();
-      });
+      }, onError: (e) => debugPrint('[GigWorker] earnings stream error: $e'));
       _earningsSubs.add(sub);
     }
   }
@@ -798,12 +802,18 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await FirebaseAuth.instance.signOut();
+              _profileSub?.cancel();
+              _dispatchSub?.cancel();
+              _offeredGigSub?.cancel();
+              for (final sub in _earningsSubs) { sub.cancel(); }
+              _earningsSubs.clear();
               if (!mounted) return;
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const LoginScreen()),
                 (_) => false,
               );
+              await WidgetsBinding.instance.endOfFrame;
+              await FirebaseAuth.instance.signOut();
             },
             child: const Text('Log out',
                 style: TextStyle(color: Colors.redAccent)),
@@ -859,6 +869,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   slivers: [
                     SliverToBoxAdapter(
                       child: WorkerHeader(
+                        userId: _userId,
                         name: _name,
                         email: _email,
                         photoUrl: _photoUrl,
@@ -933,15 +944,24 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                               icon: Icons.history_rounded,
                               iconColor: kBlue,
                               label: 'Gig History',
-                              onTap: () => _showComingSoon('Gig History'),
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const GigHistoryScreen(),
+                                ),
+                              ),
                             ),
                             const WorkerDivider(),
                             MenuRow(
                               icon: Icons.star_rounded,
                               iconColor: kAmber,
                               label: 'Ratings & Reviews',
-                              onTap: () =>
-                                  _showComingSoon('Ratings & Reviews'),
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const WorkerRatingsScreen(),
+                                ),
+                              ),
                             ),
                             const WorkerDivider(),
                             MenuRow(

@@ -13,6 +13,7 @@ import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
 import 'gig_host_profile_screen.dart';
 import '../services/quick_gig_matching_service.dart';
+import '../models/gig_template_model.dart';
 import 'widgets/gig_detail_sheet.dart';
 import 'host_gigs_screen.dart';
 
@@ -49,62 +50,12 @@ class _GigHostScreenState extends State<GigHostScreen> {
   }
 
   void _showTemplates() {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    final cardColor = Theme.of(context).cardColor;
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: kBlue.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.bookmark_add_outlined, color: kBlue, size: 32),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Saved Templates',
-              style: TextStyle(color: onSurface, fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Save your gig posts as templates\nfor faster reposting.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: kSub, fontSize: 13, height: 1.5),
-            ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: kBlue.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: kBlue.withValues(alpha: 0.3)),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.construction_rounded, color: kBlue, size: 16),
-                  SizedBox(width: 8),
-                  Text('Templates coming soon', style: TextStyle(color: kBlue, fontSize: 13)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+      builder: (_) => _TemplatesSheet(hostId: uid, hostName: _userName),
     );
   }
 
@@ -133,13 +84,14 @@ class _GigHostScreenState extends State<GigHostScreen> {
       ),
     );
     if (confirm == true) {
-      await FirebaseAuth.instance.signOut();
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),
           (route) => false,
         );
       }
+      await WidgetsBinding.instance.endOfFrame;
+      await FirebaseAuth.instance.signOut();
     }
   }
 
@@ -363,7 +315,7 @@ class _StatsRow extends StatefulWidget {
 class _StatsRowState extends State<_StatsRow> {
   int _total = 0, _active = 0, _done = 0;
   List<Map> _quick = [], _open = [], _offered = [];
-  late StreamSubscription _quickSub, _openSub, _offeredSub;
+  StreamSubscription? _quickSub, _openSub, _offeredSub;
 
   static bool _isActive(Map d) {
     final s = d['status'] as String? ?? '';
@@ -384,6 +336,7 @@ class _StatsRowState extends State<_StatsRow> {
   @override
   void initState() {
     super.initState();
+    if (widget.uid.isEmpty) return;
     final db = FirebaseFirestore.instance;
     void onErr(Object e) => debugPrint('[_StatsRow] stream error: $e');
 
@@ -403,9 +356,9 @@ class _StatsRowState extends State<_StatsRow> {
 
   @override
   void dispose() {
-    _quickSub.cancel();
-    _openSub.cancel();
-    _offeredSub.cancel();
+    _quickSub?.cancel();
+    _openSub?.cancel();
+    _offeredSub?.cancel();
     super.dispose();
   }
 
@@ -597,12 +550,14 @@ class _GigPreviewList extends StatefulWidget {
 class _GigPreviewListState extends State<_GigPreviewList> {
   List<Map<String, dynamic>> _quick = [], _open = [], _offered = [];
   bool _loading = true;
-  late StreamSubscription _quickSub, _openSub, _offeredSub;
+  StreamSubscription? _quickSub, _openSub, _offeredSub;
 
   @override
   void initState() {
     super.initState();
+    if (widget.uid.isEmpty) return;
     final db = FirebaseFirestore.instance;
+    void onErr(Object e) => debugPrint('[_GigPreviewList] stream error: $e');
 
     _quickSub = db
         .collection('quick_gigs')
@@ -617,7 +572,7 @@ class _GigPreviewListState extends State<_GigPreviewList> {
                 return m;
               }).toList();
               _loading = false;
-            }));
+            }), onError: onErr);
 
     _openSub = db
         .collection('open_gigs')
@@ -632,7 +587,7 @@ class _GigPreviewListState extends State<_GigPreviewList> {
                 return m;
               }).toList();
               _loading = false;
-            }));
+            }), onError: onErr);
 
     _offeredSub = db
         .collection('offered_gigs')
@@ -647,14 +602,14 @@ class _GigPreviewListState extends State<_GigPreviewList> {
                 return m;
               }).toList();
               _loading = false;
-            }));
+            }), onError: onErr);
   }
 
   @override
   void dispose() {
-    _quickSub.cancel();
-    _openSub.cancel();
-    _offeredSub.cancel();
+    _quickSub?.cancel();
+    _openSub?.cancel();
+    _offeredSub?.cancel();
     super.dispose();
   }
 
@@ -810,6 +765,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   }
 
   void _startWorkersSub() {
+    if (FirebaseAuth.instance.currentUser == null) return;
     _workerSub = FirebaseFirestore.instance
         .collection('users')
         .where('isOnline', isEqualTo: true)
@@ -828,7 +784,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         );
       }).whereType<_WorkerData>().toList();
       if (mounted) setState(() => _workers = workers);
-    });
+    }, onError: (e) => debugPrint('[_WorkerMapSection] stream error: $e'));
   }
 
   // Grid cell size shrinks as zoom increases — smaller = less grouping
@@ -1358,4 +1314,306 @@ class _TrianglePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_TrianglePainter old) => old.color != color;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Saved Templates Sheet
+// ─────────────────────────────────────────────────────────────────────────────
+class _TemplatesSheet extends StatelessWidget {
+  final String hostId;
+  final String hostName;
+  const _TemplatesSheet({required this.hostId, required this.hostName});
+
+  static const _purple = Color(0xFF8B5CF6);
+
+  Future<void> _deleteTemplate(BuildContext context, String id) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Delete Template',
+            style: TextStyle(
+                color: Theme.of(ctx).colorScheme.onSurface,
+                fontWeight: FontWeight.bold)),
+        content: const Text('Remove this template?',
+            style: TextStyle(color: kSub, fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep', style: TextStyle(color: kSub)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await FirebaseFirestore.instance
+        .collection('gig_templates')
+        .doc(id)
+        .delete();
+  }
+
+  void _useTemplate(BuildContext context, GigTemplateModel t) {
+    Navigator.pop(context);
+    switch (t.gigType) {
+      case 'open':
+        Navigator.push(context, MaterialPageRoute(
+          builder: (_) =>
+              PostOpenGigScreen(hostName: hostName, template: t),
+        ));
+        break;
+      case 'offered':
+        Navigator.push(context, MaterialPageRoute(
+          builder: (_) =>
+              PostOfferedGigScreen(hostName: hostName, template: t),
+        ));
+        break;
+      default:
+        Navigator.push(context, MaterialPageRoute(
+          builder: (_) =>
+              PostQuickGigScreen(hostName: hostName, template: t),
+        ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      minChildSize: 0.4,
+      maxChildSize: 0.92,
+      expand: false,
+      builder: (ctx, scroll) => Container(
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('gig_templates')
+              .where('hostId', isEqualTo: hostId)
+              .snapshots(),
+          builder: (ctx, snapshot) {
+            final docs = snapshot.data?.docs ?? [];
+            final templates = docs
+                .map((d) => GigTemplateModel.fromDoc(d))
+                .toList()
+              ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+            return ListView(
+              controller: scroll,
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+              children: [
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 12),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white24 : Colors.black12,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: kAmber.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.bookmark_rounded,
+                          color: kAmber, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Saved Templates',
+                              style: TextStyle(
+                                  color: onSurface,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold)),
+                          Text(
+                            '${templates.length} template${templates.length != 1 ? 's' : ''}',
+                            style:
+                                const TextStyle(color: kSub, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                if (snapshot.connectionState == ConnectionState.waiting)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32),
+                      child: CircularProgressIndicator(
+                          color: kAmber, strokeWidth: 2),
+                    ),
+                  )
+                else if (templates.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 40),
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: kAmber.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.bookmark_add_outlined,
+                              color: kAmber, size: 34),
+                        ),
+                        const SizedBox(height: 16),
+                        Text('No templates yet',
+                            style: TextStyle(
+                                color: onSurface,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Fill in a gig form and tap\n"Save as Template" to reuse it later.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: kSub, fontSize: 13, height: 1.5),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  ...templates.map((t) => _buildCard(context, t, isDark)),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCard(
+      BuildContext context, GigTemplateModel t, bool isDark) {
+    final Color accent;
+    final IconData typeIcon;
+    final String typeLabel;
+    switch (t.gigType) {
+      case 'open':
+        accent = kBlue;
+        typeIcon = Icons.workspace_premium_outlined;
+        typeLabel = 'Open Gig';
+        break;
+      case 'offered':
+        accent = _purple;
+        typeIcon = Icons.send_rounded;
+        typeLabel = 'Offered Gig';
+        break;
+      default:
+        accent = kAmber;
+        typeIcon = Icons.flash_on_rounded;
+        typeLabel = 'Quick Gig';
+    }
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Theme.of(context).dividerColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+        onTap: () => _useTemplate(context, t),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(typeIcon, color: accent, size: 20),
+        ),
+        title: Text(t.name,
+            style: TextStyle(
+                color: onSurface,
+                fontSize: 14,
+                fontWeight: FontWeight.bold),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(typeLabel,
+                      style: TextStyle(
+                          color: accent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(width: 6),
+                Text('₱${t.budget.toStringAsFixed(0)}',
+                    style: const TextStyle(
+                        color: kAmber,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600)),
+                if (t.skillRequired.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text('• ${t.skillRequired}',
+                        style:
+                            const TextStyle(color: kSub, fontSize: 11),
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ],
+            ),
+            if (t.title.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              Text(t.title,
+                  style: const TextStyle(color: kSub, fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ],
+          ],
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.delete_outline_rounded,
+              color: Colors.redAccent, size: 20),
+          onPressed: () => _deleteTemplate(context, t.id!),
+        ),
+      ),
+    );
+  }
 }

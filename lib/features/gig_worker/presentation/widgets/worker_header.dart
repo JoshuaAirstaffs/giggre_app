@@ -6,6 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 //  Worker Header — gradient banner with profile info and star rating
 // ─────────────────────────────────────────────────────────────────────────────
 class WorkerHeader extends StatelessWidget {
+  final String userId;
   final String name;
   final String email;
   final String photoUrl;
@@ -16,6 +17,7 @@ class WorkerHeader extends StatelessWidget {
 
   const WorkerHeader({
     super.key,
+    required this.userId,
     required this.name,
     required this.email,
     required this.photoUrl,
@@ -90,6 +92,16 @@ class WorkerHeader extends StatelessWidget {
                             style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.75),
                                 fontSize: 13)),
+                        const SizedBox(height: 2),
+                        if (userId.isNotEmpty)
+                          Text(
+                            'ID: $userId',
+                            style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.5),
+                                fontSize: 10,
+                                letterSpacing: 0.3),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         const SizedBox(height: 8),
                         Row(
                           children: [

@@ -57,7 +57,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    if (data?['userId'] == null) {
+    if (needsNewUserId(data?['userId'] as String?)) {
       final newId = await generateUserId();
       await userRef.update({'userId': newId});
     }
@@ -87,7 +87,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
       final doc     = await userRef.get();
 
-      if (doc.exists && doc.data()?['userId'] == null) {
+      if (doc.exists && needsNewUserId(doc.data()?['userId'] as String?)) {
         final newId = await generateUserId();
         await userRef.update({'userId': newId});
       }

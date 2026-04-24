@@ -264,6 +264,8 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         builder: (_) => _RatingDialog(
           workerId: workerId,
           workerName: workerName,
+          gigId: widget.gigId,
+          gigCollection: _collection,
         ),
       );
     }
@@ -1004,10 +1006,14 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
 class _RatingDialog extends StatefulWidget {
   final String workerId;
   final String workerName;
+  final String gigId;
+  final String gigCollection;
 
   const _RatingDialog({
     required this.workerId,
     required this.workerName,
+    required this.gigId,
+    required this.gigCollection,
   });
 
   @override
@@ -1034,10 +1040,16 @@ class _RatingDialogState extends State<_RatingDialog> {
       final newCount = currentCount + 1;
       final newRating =
           ((currentRating * currentCount) + _selected) / newCount;
-      await db.collection('users').doc(widget.workerId).update({
-        'ratingAsWorker': double.parse(newRating.toStringAsFixed(2)),
-        'ratingCount': newCount,
-      });
+      await Future.wait([
+        db.collection('users').doc(widget.workerId).update({
+          'ratingAsWorker': double.parse(newRating.toStringAsFixed(2)),
+          'ratingCount': newCount,
+        }),
+        db.collection(widget.gigCollection).doc(widget.gigId).update({
+          'hostRating': _selected,
+          'hostRatedAt': FieldValue.serverTimestamp(),
+        }),
+      ]);
     } catch (_) {}
     if (mounted) Navigator.pop(context);
   }

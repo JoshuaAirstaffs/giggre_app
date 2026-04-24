@@ -279,17 +279,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (confirm == true) {
-      await FirebaseAuth.instance.signOut();
+      _roomsStreamSub?.cancel();
+      for (final sub in _roomSubs) {
+        sub.cancel();
+      }
+      _roomSubs.clear();
       if (mounted) {
-
-        //clear stored data when logging out
         context.read<CurrentUserProvider>().clearUser();
-
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),
           (route) => false,
         );
       }
+      await FirebaseAuth.instance.signOut();
     }
   }
 

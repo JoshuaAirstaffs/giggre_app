@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 /// Smart dispatch engine for quick gigs.
 /// Runs entirely client-side (no Cloud Functions).
@@ -165,16 +166,16 @@ class QuickGigMatchingService {
 
     final config = await _fetchConfig();
 
-    // Initialise search metadata on the gig doc
-    await gigRef.update({
-      'searchStartedAt': FieldValue.serverTimestamp(),
-      'exclusionList': FieldValue.arrayUnion([]),
-      'hardExcludeList': FieldValue.arrayUnion([]),
-    });
-
     int dispatchAttempts = 0;
 
     try {
+      // Initialise search metadata on the gig doc
+      await gigRef.update({
+        'searchStartedAt': FieldValue.serverTimestamp(),
+        'exclusionList': FieldValue.arrayUnion([]),
+        'hardExcludeList': FieldValue.arrayUnion([]),
+      });
+
       while (true) {
         // ── Global timeout ─────────────────────────────────
         if (DateTime.now().difference(searchStart) >= config.searchTimeout) {
@@ -306,6 +307,15 @@ class QuickGigMatchingService {
           }),
         ]);
       }
+    } catch (e) {
+      debugPrint('[QuickGigMatching] auto-search error for $gigId: $e');
+      try {
+        await gigRef.update({
+          'status': 'no_worker',
+          'assignedWorkerId': null,
+          'assignedWorkerName': null,
+        });
+      } catch (_) {}
     } finally {
       _activeSearches.remove(gigId);
     }

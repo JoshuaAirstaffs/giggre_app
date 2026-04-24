@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,7 +12,9 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
+import '../models/gig_template_model.dart';
 import '../models/offered_gig_model.dart';
+import 'widgets/template_name_dialog.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Experience level options
@@ -28,10 +31,16 @@ const _kPurple = Color(0xFF8B5CF6);
 //  Worker data model for picker
 // ─────────────────────────────────────────────────────────────────────────────
 class _WorkerEntry {
-  final String uid;
+  final String uid;       // Firebase Auth UID (Firestore doc ID)
+  final String userId;    // Custom human-readable ID e.g. "YSJ135610"
   final String name;
   final String email;
-  const _WorkerEntry({required this.uid, required this.name, required this.email});
+  const _WorkerEntry({
+    required this.uid,
+    required this.userId,
+    required this.name,
+    required this.email,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,7 +48,8 @@ class _WorkerEntry {
 // ─────────────────────────────────────────────────────────────────────────────
 class PostOfferedGigScreen extends StatefulWidget {
   final String hostName;
-  const PostOfferedGigScreen({super.key, required this.hostName});
+  final GigTemplateModel? template;
+  const PostOfferedGigScreen({super.key, required this.hostName, this.template});
 
   @override
   State<PostOfferedGigScreen> createState() => _PostOfferedGigScreenState();
@@ -81,6 +91,14 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     super.initState();
     _fetchGpsLocation();
     _fetchSkills();
+    final t = widget.template;
+    if (t != null) {
+      _titleCtrl.text = t.title;
+      _descCtrl.text = t.description;
+      if (t.budget > 0) _budgetCtrl.text = t.budget.toStringAsFixed(0);
+      if (t.skillRequired.isNotEmpty) _selectedSkill = t.skillRequired;
+      if (t.experienceLevel.isNotEmpty) _experienceLevel = t.experienceLevel;
+    }
   }
 
   @override
@@ -218,13 +236,13 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
   // ── Worker picker ─────────────────────────────────────────────────────────────
   Future<void> _openWorkerPicker() async {
+    final hostId = FirebaseAuth.instance.currentUser?.uid;
+    if (hostId == null) return;
     final result = await showModalBottomSheet<_WorkerEntry>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _WorkerPickerSheet(
-        excludeUid: FirebaseAuth.instance.currentUser?.uid,
-      ),
+      builder: (_) => _WorkerPickerSheet(hostId: hostId),
     );
     if (result != null) {
       setState(() => _selectedWorker = result);
@@ -321,6 +339,44 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         },
       ),
     );
+  }
+
+  Future<void> _saveAsTemplate() async {
+    final title = _titleCtrl.text.trim();
+    if (title.isEmpty) {
+      _showSnack('Enter a title before saving as template.');
+      return;
+    }
+    final budgetVal = double.tryParse(_budgetCtrl.text.trim()) ?? 0;
+    if (budgetVal <= 0) {
+      _showSnack('Enter a valid amount before saving as template.');
+      return;
+    }
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => TemplateNameDialog(initialName: title),
+    );
+    if (name == null || !mounted) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await FirebaseFirestore.instance.collection('gig_templates').add(
+        GigTemplateModel(
+          hostId: uid,
+          gigType: 'offered',
+          name: name.isNotEmpty ? name : title,
+          title: title,
+          description: _descCtrl.text.trim(),
+          budget: budgetVal,
+          skillRequired: _selectedSkill ?? '',
+          experienceLevel: _experienceLevel,
+          createdAt: DateTime.now(),
+        ).toMap(),
+      );
+      if (mounted) _showSnack('Template saved!');
+    } catch (_) {
+      if (mounted) _showSnack('Failed to save template.');
+    }
   }
 
   // ── Build ────────────────────────────────────────────────────────────────────
@@ -496,6 +552,25 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 12),
+                // ── Save as Template ──────────────────────────────
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    onPressed: _posting ? null : _saveAsTemplate,
+                    icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                    label: const Text('Save as Template',
+                        style: TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _kPurple,
+                      side: BorderSide(color: _kPurple.withValues(alpha: 0.6)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30)),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 28),
               ],
             ),
@@ -556,9 +631,29 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                               fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          _selectedWorker!.email,
-                          style: const TextStyle(color: kSub, fontSize: 12),
+                        Row(
+                          children: [
+                            if (_selectedWorker!.userId.isNotEmpty) ...[
+                              Text(
+                                _selectedWorker!.userId,
+                                style: const TextStyle(
+                                    color: _kPurple,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.5),
+                              ),
+                              const SizedBox(width: 6),
+                              const Text('·', style: TextStyle(color: kSub, fontSize: 11)),
+                              const SizedBox(width: 6),
+                            ],
+                            Flexible(
+                              child: Text(
+                                _selectedWorker!.email,
+                                style: const TextStyle(color: kSub, fontSize: 11),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     )
@@ -963,10 +1058,12 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Worker Picker Bottom Sheet
+//  Shows only the host's favorite workers. Allows direct UID lookup for
+//  workers not in the favorites list. Host cannot select themselves.
 // ─────────────────────────────────────────────────────────────────────────────
 class _WorkerPickerSheet extends StatefulWidget {
-  final String? excludeUid;
-  const _WorkerPickerSheet({this.excludeUid});
+  final String hostId;
+  const _WorkerPickerSheet({required this.hostId});
 
   @override
   State<_WorkerPickerSheet> createState() => _WorkerPickerSheetState();
@@ -974,56 +1071,154 @@ class _WorkerPickerSheet extends StatefulWidget {
 
 class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
   final _searchCtrl = TextEditingController();
-  List<_WorkerEntry> _allWorkers = [];
+  List<_WorkerEntry> _favorites = [];
   List<_WorkerEntry> _filtered = [];
+  _WorkerEntry? _uidResult;
   bool _loading = true;
+  bool _uidSearching = false;
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
-    _loadWorkers();
-    _searchCtrl.addListener(_filter);
+    _loadFavorites();
+    _searchCtrl.addListener(_onSearchChanged);
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _loadWorkers() async {
+  Future<void> _loadFavorites() async {
     try {
-      final snap = await FirebaseFirestore.instance.collection('users').get();
-      final workers = snap.docs
-          .where((d) => d.id != widget.excludeUid)
-          .map((d) => _WorkerEntry(
-                uid: d.id,
-                name: d.data()['name'] ?? 'Unknown',
-                email: d.data()['email'] ?? '',
-              ))
+      final db = FirebaseFirestore.instance;
+      final hostDoc = await db.collection('users').doc(widget.hostId).get();
+      final ids = (hostDoc.data()?['favoriteWorkerIds'] as List?)
+              ?.map((e) => e.toString())
+              .where((id) => id != widget.hostId)
+              .toList() ??
+          [];
+
+      if (ids.isEmpty) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+
+      final docs = await Future.wait(
+        ids.map((id) => db.collection('users').doc(id).get()),
+      );
+
+      final workers = docs
+          .where((d) => d.exists)
+          .map((d) {
+            final data = d.data() as Map<String, dynamic>;
+            return _WorkerEntry(
+              uid: d.id,
+              userId: data['userId'] ?? '',
+              name: data['name'] ?? 'Unknown',
+              email: data['email'] ?? '',
+            );
+          })
           .toList();
+
       if (!mounted) return;
       setState(() {
-        _allWorkers = workers;
+        _favorites = workers;
         _filtered = workers;
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _filter() {
-    final q = _searchCtrl.text.toLowerCase();
+  void _onSearchChanged() {
+    _debounce?.cancel();
+    final q = _searchCtrl.text.trim();
+
+    if (q.isEmpty) {
+      setState(() {
+        _filtered = _favorites;
+        _uidResult = null;
+        _uidSearching = false;
+      });
+      return;
+    }
+
+    final lower = q.toLowerCase();
+    final matched = _favorites
+        .where((w) =>
+            w.name.toLowerCase().contains(lower) ||
+            w.email.toLowerCase().contains(lower) ||
+            w.userId.toLowerCase().contains(lower))
+        .toList();
+
     setState(() {
-      _filtered = _allWorkers
-          .where((w) =>
-              w.name.toLowerCase().contains(q) ||
-              w.email.toLowerCase().contains(q) ||
-              w.uid.toLowerCase().contains(q))
-          .toList();
+      _filtered = matched;
+      if (matched.isNotEmpty) {
+        _uidResult = null;
+        _uidSearching = false;
+      }
     });
+
+    // When no favorites match, try a direct UID lookup after a short delay
+    if (matched.isEmpty) {
+      setState(() => _uidSearching = true);
+      _debounce = Timer(
+        const Duration(milliseconds: 600),
+        () => _lookupByUserId(q),
+      );
+    }
+  }
+
+  // Queries the users collection by the custom `userId` field (e.g. "YSJ135610").
+  // Only fires when the query matches the expected format [A-Z]{3}[0-9]{6}.
+  Future<void> _lookupByUserId(String query) async {
+    if (!mounted) {
+      setState(() => _uidSearching = false);
+      return;
+    }
+
+    final normalised = query.trim().toUpperCase();
+    final validFormat = RegExp(r'^[A-Z]{3}[0-9]{6}$').hasMatch(normalised);
+    if (!validFormat) {
+      setState(() { _uidResult = null; _uidSearching = false; });
+      return;
+    }
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .where('userId', isEqualTo: normalised)
+          .limit(1)
+          .get();
+      if (!mounted) return;
+      if (snap.docs.isEmpty) {
+        setState(() { _uidResult = null; _uidSearching = false; });
+        return;
+      }
+      final doc = snap.docs.first;
+      // Block self-selection
+      if (doc.id == widget.hostId) {
+        setState(() { _uidResult = null; _uidSearching = false; });
+        return;
+      }
+      final data = doc.data();
+      setState(() {
+        _uidResult = _WorkerEntry(
+          uid: doc.id,
+          userId: data['userId'] ?? normalised,
+          name: data['name'] ?? 'Unknown',
+          email: data['email'] ?? '',
+        );
+        _uidSearching = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() { _uidResult = null; _uidSearching = false; });
+    }
   }
 
   @override
@@ -1032,6 +1227,9 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final borderColor = Theme.of(context).dividerColor;
     const purple = _kPurple;
+
+    final hasQuery = _searchCtrl.text.trim().isNotEmpty;
+    final showEmpty = !_loading && _filtered.isEmpty && _uidResult == null && !_uidSearching;
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.75,
@@ -1054,18 +1252,52 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
             ),
           ),
           const SizedBox(height: 16),
-          Text('Select Gig Worker',
-              style: TextStyle(
-                  color: onSurface, fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          const Text('Search by name, email, or worker ID',
-              style: TextStyle(color: kSub, fontSize: 12)),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Select Gig Worker',
+                        style: TextStyle(
+                            color: onSurface,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'From your favorites · or search by worker ID',
+                      style: TextStyle(color: kSub, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: purple.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.favorite_rounded, color: purple, size: 12),
+                    const SizedBox(width: 4),
+                    Text(
+                      _loading ? '...' : '${_favorites.length}',
+                      style: const TextStyle(
+                          color: purple, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 14),
           TextField(
             controller: _searchCtrl,
             style: TextStyle(color: onSurface, fontSize: 14),
             decoration: InputDecoration(
-              hintText: 'Search workers...',
+              hintText: 'Search by worker ID...',
               hintStyle: TextStyle(
                   color: onSurface.withValues(alpha: 0.35), fontSize: 14),
               filled: true,
@@ -1074,6 +1306,12 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               prefixIcon:
                   const Icon(Icons.search_rounded, color: kSub, size: 20),
+              suffixIcon: hasQuery
+                  ? IconButton(
+                      icon: const Icon(Icons.close_rounded, color: kSub, size: 18),
+                      onPressed: () => _searchCtrl.clear(),
+                    )
+                  : null,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(color: borderColor),
@@ -1091,58 +1329,184 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
           const SizedBox(height: 12),
           Expanded(
             child: _loading
-                ? const Center(
-                    child: CircularProgressIndicator(color: purple),
-                  )
-                : _filtered.isEmpty
+                ? const Center(child: CircularProgressIndicator(color: purple))
+                : showEmpty
                     ? Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.person_off_outlined,
-                                color: kSub.withValues(alpha: 0.5), size: 40),
+                            Icon(
+                              hasQuery
+                                  ? Icons.person_off_outlined
+                                  : Icons.favorite_border_rounded,
+                              color: kSub.withValues(alpha: 0.5),
+                              size: 40,
+                            ),
                             const SizedBox(height: 10),
-                            const Text('No workers found',
-                                style: TextStyle(color: kSub, fontSize: 14)),
+                            Text(
+                              hasQuery
+                                  ? 'No worker found'
+                                  : 'No favorite workers yet',
+                              style: const TextStyle(
+                                  color: kSub,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              hasQuery
+                                  ? 'Check the worker ID and try again'
+                                  : 'Add workers to favorites from your gig history',
+                              style: const TextStyle(color: kSub, fontSize: 12),
+                              textAlign: TextAlign.center,
+                            ),
                           ],
                         ),
                       )
-                    : ListView.separated(
-                        itemCount: _filtered.length,
-                        separatorBuilder: (_, _) =>
-                            Divider(color: borderColor, height: 1),
-                        itemBuilder: (_, i) {
-                          final w = _filtered[i];
-                          return ListTile(
-                            onTap: () => Navigator.pop(context, w),
-                            contentPadding:
-                                const EdgeInsets.symmetric(vertical: 4),
-                            leading: Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: purple.withValues(alpha: 0.12),
-                                shape: BoxShape.circle,
+                    : ListView(
+                        children: [
+                          if (_filtered.isNotEmpty) ...[
+                            if (!hasQuery)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text(
+                                  'Favorite Workers',
+                                  style: TextStyle(
+                                      color: onSurface,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600),
+                                ),
                               ),
-                              child: const Icon(Icons.person_rounded,
-                                  color: purple, size: 20),
+                            ..._filtered.map((w) => _WorkerTile(
+                                  worker: w,
+                                  onTap: () => Navigator.pop(context, w),
+                                  borderColor: borderColor,
+                                  isFavorite: true,
+                                )),
+                          ],
+                          if (_uidSearching)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          color: purple, strokeWidth: 2),
+                                    ),
+                                    SizedBox(width: 10),
+                                    Text('Looking up worker ID...',
+                                        style: TextStyle(
+                                            color: kSub, fontSize: 13)),
+                                  ],
+                                ),
+                              ),
                             ),
-                            title: Text(w.name,
-                                style: TextStyle(
-                                    color: onSurface,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500)),
-                            subtitle: Text(w.email,
-                                style: const TextStyle(
-                                    color: kSub, fontSize: 12)),
-                            trailing: const Icon(Icons.chevron_right_rounded,
-                                color: kSub, size: 18),
-                          );
-                        },
+                          if (_uidResult != null) ...[
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8, top: 4),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.search_rounded,
+                                      color: kSub, size: 14),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Found by worker ID',
+                                    style: TextStyle(
+                                        color: onSurface,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            _WorkerTile(
+                              worker: _uidResult!,
+                              onTap: () => Navigator.pop(context, _uidResult),
+                              borderColor: borderColor,
+                              isFavorite: false,
+                            ),
+                          ],
+                        ],
                       ),
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Reusable worker list tile
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkerTile extends StatelessWidget {
+  final _WorkerEntry worker;
+  final VoidCallback onTap;
+  final Color borderColor;
+  final bool isFavorite;
+
+  const _WorkerTile({
+    required this.worker,
+    required this.onTap,
+    required this.borderColor,
+    required this.isFavorite,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    const purple = _kPurple;
+
+    return Column(
+      children: [
+        ListTile(
+          onTap: onTap,
+          contentPadding: const EdgeInsets.symmetric(vertical: 4),
+          leading: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: purple.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.person_rounded, color: purple, size: 20),
+          ),
+          title: Text(worker.name,
+              style: TextStyle(
+                  color: onSurface,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (worker.userId.isNotEmpty)
+                Text(worker.userId,
+                    style: const TextStyle(
+                        color: _kPurple,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5)),
+              if (worker.email.isNotEmpty)
+                Text(worker.email,
+                    style: const TextStyle(color: kSub, fontSize: 11)),
+            ],
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isFavorite)
+                const Icon(Icons.favorite_rounded,
+                    color: Color(0xFFEC4899), size: 14),
+              const SizedBox(width: 4),
+              const Icon(Icons.chevron_right_rounded, color: kSub, size: 18),
+            ],
+          ),
+        ),
+        Divider(color: borderColor, height: 1),
+      ],
     );
   }
 }

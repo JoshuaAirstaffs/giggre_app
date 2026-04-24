@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Matches Philippine (+63 / 09xx) and U.S. (+1 / 10-digit) numbers.
@@ -27,15 +28,33 @@ String formatPhone(String raw) {
   return raw.trim();
 }
 
-/// Generates a short unique user ID using Firestore (collision-resistant).
+/// Returns true when a userId is missing or uses the old GIGxxxxxx format.
+/// Used to trigger regeneration for existing accounts on next login.
+bool needsNewUserId(String? userId) {
+  if (userId == null || userId.isEmpty) return true;
+  return RegExp(r'^GIG\d{6}$').hasMatch(userId);
+}
+
+/// Generates a unique user ID: 3 random uppercase letters + 6 random digits
+/// (e.g. "XKP482931"). Retries automatically on the rare collision.
 Future<String> generateUserId() async {
-  final ref = FirebaseFirestore.instance.collection('_counters').doc('userId');
-  // Use a transaction to get an auto-incrementing integer.
-  final result = await FirebaseFirestore.instance.runTransaction((tx) async {
-    final snap = await tx.get(ref);
-    final next = (snap.exists ? (snap.data()?['value'] as int? ?? 0) : 0) + 1;
-    tx.set(ref, {'value': next});
-    return next;
-  });
-  return 'GIG${result.toString().padLeft(6, '0')}';
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const digits  = '0123456789';
+  final rng = Random.secure();
+  final db  = FirebaseFirestore.instance;
+
+  while (true) {
+    final part1 = List.generate(3, (_) => letters[rng.nextInt(26)]).join();
+    final part2 = List.generate(6, (_) => digits[rng.nextInt(10)]).join();
+    final candidate = '$part1$part2';
+
+    final existing = await db
+        .collection('users')
+        .where('userId', isEqualTo: candidate)
+        .limit(1)
+        .get();
+
+    if (existing.docs.isEmpty) return candidate;
+    // Collision — retry (probability ≈ 1 in 17 million per attempt)
+  }
 }

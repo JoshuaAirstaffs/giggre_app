@@ -10,15 +10,18 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
+import '../models/gig_template_model.dart';
 import '../models/quick_gig_model.dart';
 import '../services/quick_gig_matching_service.dart';
+import 'widgets/template_name_dialog.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Post Quick Gig Screen
 // ─────────────────────────────────────────────────────────────────────────────
 class PostQuickGigScreen extends StatefulWidget {
   final String hostName;
-  const PostQuickGigScreen({super.key, required this.hostName});
+  final GigTemplateModel? template;
+  const PostQuickGigScreen({super.key, required this.hostName, this.template});
 
   @override
   State<PostQuickGigScreen> createState() => _PostQuickGigScreenState();
@@ -49,6 +52,12 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   void initState() {
     super.initState();
     _fetchGpsLocation();
+    final t = widget.template;
+    if (t != null) {
+      _titleCtrl.text = t.title;
+      _descCtrl.text = t.description;
+      if (t.budget > 0) _budgetCtrl.text = t.budget.toStringAsFixed(0);
+    }
   }
 
   @override
@@ -280,6 +289,42 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     );
   }
 
+  Future<void> _saveAsTemplate() async {
+    final title = _titleCtrl.text.trim();
+    if (title.isEmpty) {
+      _showSnack('Enter a title before saving as template.');
+      return;
+    }
+    final budgetVal = double.tryParse(_budgetCtrl.text.trim()) ?? 0;
+    if (budgetVal <= 0) {
+      _showSnack('Enter a valid amount before saving as template.');
+      return;
+    }
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => TemplateNameDialog(initialName: title),
+    );
+    if (name == null || !mounted) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await FirebaseFirestore.instance.collection('gig_templates').add(
+        GigTemplateModel(
+          hostId: uid,
+          gigType: 'quick',
+          name: name.isNotEmpty ? name : title,
+          title: title,
+          description: _descCtrl.text.trim(),
+          budget: budgetVal,
+          createdAt: DateTime.now(),
+        ).toMap(),
+      );
+      if (mounted) _showSnack('Template saved!');
+    } catch (_) {
+      if (mounted) _showSnack('Failed to save template.');
+    }
+  }
+
   void _showScanningSheet() {
     showModalBottomSheet(
       context: context,
@@ -448,6 +493,25 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                       foregroundColor: Colors.black,
                       disabledBackgroundColor: kAmber.withValues(alpha: 0.4),
                       elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // ── Save as Template ──────────────────────────────
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    onPressed: _posting ? null : _saveAsTemplate,
+                    icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                    label: const Text('Save as Template',
+                        style: TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: kAmber,
+                      side: BorderSide(color: kAmber.withValues(alpha: 0.6)),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(30)),
                     ),

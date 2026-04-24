@@ -1,0 +1,202 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helpers ───────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    function adminData() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuth() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        adminData().isActive == true &&
+        adminData().isPending == false;
+    }
+
+    function isSuperAdmin() {
+      return isAdmin() && adminData().role == 'super_admin';
+    }
+
+    // ─── Users ─────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read, write: if isAuth();
+    }
+
+    // ─── Admins ────────────────────────────────────────────────
+    match /admins/{uid} {
+      allow read: if isAdmin();
+      allow create, update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
+    // ─── Skills ────────────────────────────────────────────────
+    match /skills/{skillId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ─── Chat Rooms ────────────────────────────────────────────
+    match /chat_rooms/{roomId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow create: if isAuth() &&
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read, write: if isAuth() && (
+          get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.userId == request.auth.uid
+          || isAdmin()
+        );
+      }
+    }
+
+    // ─── Support Tickets ───────────────────────────────────────
+    match /support_tickets/{ticketId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.recipientType == 'all' ||
+        (resource.data.recipientType == 'specific' &&
+          request.auth.uid in resource.data.recipients) ||
+        isAdmin()
+      );
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ─── Support Settings ──────────────────────────────────────
+    match /support_settings/{docId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ─── User Requests ─────────────────────────────────────────
+    match /user_requests/{requestId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow create: if isAuth();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─── Notifications ─────────────────────────────────────────
+    match /notifications/{notifId} {
+      allow read: if isAuth() &&
+        resource.data.userId == request.auth.uid;
+      allow create: if isAdmin();
+      allow update: if isAuth() &&
+        resource.data.userId == request.auth.uid;
+      allow delete: if isAuth() &&
+        resource.data.userId == request.auth.uid;
+    }
+
+    // ─── App Content (public read) ─────────────────────────────
+    match /app_content/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /app_content/{docId}/items/{itemId} {
+      allow read: if true;
+    }
+
+    // ─── Activity Logs ─────────────────────────────────────────
+    match /activityLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // ─── Counters ──────────────────────────────────────────────
+    match /_counters/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // ─── Quick Gigs ────────────────────────────────────────────
+    match /quick_gigs/{gigId} {
+      allow read: if isAuth();
+      allow create: if isAuth() &&
+        request.resource.data.hostId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.hostId == request.auth.uid ||
+        resource.data.workerId == request.auth.uid ||
+        (resource.data.assignedWorkerId == request.auth.uid &&
+         resource.data.hostId != request.auth.uid) ||
+        isAdmin()
+      );
+      allow delete: if isAuth() && (
+        resource.data.hostId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // ─── Open Gigs ─────────────────────────────────────────────
+    match /open_gigs/{gigId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.hostId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.hostId == request.auth.uid ||
+        resource.data.workerId == request.auth.uid ||
+        resource.data.assignedWorkerId == request.auth.uid ||
+        resource.data.status == 'open' ||
+        isAdmin()
+      );
+      allow delete: if isAuth() && (
+        resource.data.hostId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // ─── Offered Gigs ──────────────────────────────────────────
+    match /offered_gigs/{gigId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.hostId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.hostId == request.auth.uid ||
+        resource.data.workerId == request.auth.uid ||
+        resource.data.assignedWorkerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow delete: if isAuth() && (
+        resource.data.hostId == request.auth.uid || isAdmin()
+      );
+    }
+
+    // ─── Quick Gig Config ──────────────────────────────────────
+    match /quick_gig_config/{docId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ─── Gig Templates ─────────────────────────────────────────
+    match /gig_templates/{templateId} {
+      allow read: if isAuth() && resource.data.hostId == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.hostId == request.auth.uid;
+      allow update: if isAuth() && resource.data.hostId == request.auth.uid;
+      allow delete: if isAuth() && resource.data.hostId == request.auth.uid;
+    }
+
+    // ─── General Config ────────────────────────────────────────
+    match /general_config/{docId} {
+      allow read: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+  }
+}

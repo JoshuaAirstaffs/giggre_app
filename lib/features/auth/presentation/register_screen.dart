@@ -250,7 +250,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    if (data?['userId'] == null) {
+    if (needsNewUserId(data?['userId'] as String?)) {
       final newId = await generateUserId();
       await userRef.update({'userId': newId});
     }

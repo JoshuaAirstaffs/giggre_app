@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../core/theme/app_colors.dart';
+import 'widgets/favorite_workers_sheet.dart';
+import 'widgets/ratings_given_sheet.dart';
 
 class GigHostProfileScreen extends StatefulWidget {
   const GigHostProfileScreen({super.key});
@@ -90,10 +92,10 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
         _photoUrl = data['photoUrl'] ?? FirebaseAuth.instance.currentUser?.photoURL ?? '';
         _createdAt = createdAtStr;
         _ratingAsHost = (data['ratingAsHost'] as num? ?? 5.0).toDouble();
-        _ratingCount = (data['ratingCount'] as num? ?? 0).toInt();
+        _ratingCount = (data['ratingAsHostCount'] as num? ?? 0).toInt();
         _loading = false;
       });
-    });
+    }, onError: (e) => debugPrint('[GigHostProfile] profile: $e'));
 
     _quickGigsSub?.cancel();
     _quickGigsSub = FirebaseFirestore.instance
@@ -393,6 +395,26 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
           );
         },
       ),
+    );
+  }
+
+  void _showRatingsGiven() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const RatingsGivenSheet(),
+    );
+  }
+
+  void _showFavoriteWorkers() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => FavoriteWorkersSheet(hostId: uid),
     );
   }
 
@@ -746,14 +768,14 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             icon: Icons.favorite_outline_rounded,
                             iconColor: const Color(0xFFEC4899),
                             label: 'Favorite Workers',
-                            onTap: () => _showComingSoon('Favorite Workers'),
+                            onTap: _showFavoriteWorkers,
                           ),
                           _Divider(isDark: isDark),
                           _MenuRow(
                             icon: Icons.star_outline_rounded,
                             iconColor: kAmber,
                             label: 'Ratings Given',
-                            onTap: () => _showComingSoon('Ratings Given'),
+                            onTap: _showRatingsGiven,
                           ),
                           _Divider(isDark: isDark),
                           _MenuRow(
@@ -1122,9 +1144,55 @@ class _ModalField extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig History — list sheet
 // ─────────────────────────────────────────────────────────────────────────────
-class _GigHistorySheet extends StatelessWidget {
+class _GigHistorySheet extends StatefulWidget {
   final List<Map<String, dynamic>> gigs;
   const _GigHistorySheet({required this.gigs});
+
+  @override
+  State<_GigHistorySheet> createState() => _GigHistorySheetState();
+}
+
+class _GigHistorySheetState extends State<_GigHistorySheet> {
+  final _db = FirebaseFirestore.instance;
+  final _hostId = FirebaseAuth.instance.currentUser?.uid ?? '';
+  Set<String> _favoriteWorkerIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    if (_hostId.isEmpty) return;
+    final doc = await _db.collection('users').doc(_hostId).get();
+    if (!mounted) return;
+    final list = (doc.data()?['favoriteWorkerIds'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        [];
+    setState(() => _favoriteWorkerIds = list.toSet());
+  }
+
+  Future<void> _toggleFavorite(String workerId) async {
+    if (_hostId.isEmpty || workerId.isEmpty) return;
+    final isFav = _favoriteWorkerIds.contains(workerId);
+    setState(() {
+      if (isFav) {
+        _favoriteWorkerIds.remove(workerId);
+      } else {
+        _favoriteWorkerIds.add(workerId);
+      }
+    });
+    await _db.collection('users').doc(_hostId).set(
+      {
+        'favoriteWorkerIds': isFav
+            ? FieldValue.arrayRemove([workerId])
+            : FieldValue.arrayUnion([workerId]),
+      },
+      SetOptions(merge: true),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1180,7 +1248,7 @@ class _GigHistorySheet extends StatelessWidget {
                               color: onSurface,
                               fontSize: 16,
                               fontWeight: FontWeight.bold)),
-                      Text('${gigs.length} completed',
+                      Text('${widget.gigs.length} completed',
                           style:
                               const TextStyle(color: kSub, fontSize: 12)),
                     ],
@@ -1190,7 +1258,7 @@ class _GigHistorySheet extends StatelessWidget {
             ),
             const Divider(height: 1, color: kBorder),
             // Body
-            if (gigs.isEmpty)
+            if (widget.gigs.isEmpty)
               Expanded(
                 child: Center(
                   child: Column(
@@ -1210,19 +1278,26 @@ class _GigHistorySheet extends StatelessWidget {
                 child: ListView.separated(
                   controller: scroll,
                   padding: const EdgeInsets.all(16),
-                  itemCount: gigs.length,
+                  itemCount: widget.gigs.length,
                   separatorBuilder: (_, i) => const SizedBox(height: 10),
-                  itemBuilder: (ctx, i) => _GigHistoryCard(
-                    gig: gigs[i],
-                    isDark: isDark,
-                    onTap: () => showModalBottomSheet(
-                      context: ctx,
-                      isScrollControlled: true,
-                      backgroundColor: Colors.transparent,
-                      builder: (_) =>
-                          _GigHistoryDetailSheet(gig: gigs[i]),
-                    ),
-                  ),
+                  itemBuilder: (ctx, i) {
+                    final gig = widget.gigs[i];
+                    final workerId = gig['assignedWorkerId'] as String? ??
+                        gig['workerId'] as String? ?? '';
+                    return _GigHistoryCard(
+                      gig: gig,
+                      isDark: isDark,
+                      isFavorite: _favoriteWorkerIds.contains(workerId),
+                      onFavoriteToggle: () => _toggleFavorite(workerId),
+                      onTap: () => showModalBottomSheet(
+                        context: ctx,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) =>
+                            _GigHistoryDetailSheet(gig: gig),
+                      ),
+                    );
+                  },
                 ),
               ),
           ],
@@ -1238,12 +1313,16 @@ class _GigHistorySheet extends StatelessWidget {
 class _GigHistoryCard extends StatelessWidget {
   final Map<String, dynamic> gig;
   final bool isDark;
+  final bool isFavorite;
   final VoidCallback onTap;
+  final VoidCallback onFavoriteToggle;
 
   const _GigHistoryCard({
     required this.gig,
     required this.isDark,
+    required this.isFavorite,
     required this.onTap,
+    required this.onFavoriteToggle,
   });
 
   @override
@@ -1345,7 +1424,20 @@ class _GigHistoryCard extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 2),
+                        GestureDetector(
+                          onTap: onFavoriteToggle,
+                          child: Icon(
+                            isFavorite
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            size: 14,
+                            color: isFavorite
+                                ? Colors.redAccent
+                                : kSub.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
                       ],
                       if (completedAt != null) ...[
                         const Icon(Icons.calendar_today_outlined,
