@@ -21,6 +21,7 @@ class GigMarkerData {
   final String? assignedWorkerId;
   final String experienceLevel;
   final List<String> requiredSkills;
+  final String hostId;
 
   const GigMarkerData({
     required this.id,
@@ -34,6 +35,7 @@ class GigMarkerData {
     this.assignedWorkerId,
     this.experienceLevel = '',
     this.requiredSkills = const [],
+    required this.hostId,
   });
 }
 
@@ -187,6 +189,9 @@ class _GigMapSectionState extends State<GigMapSection> {
           .collection('open_gigs')
           .doc(gig.id)
           .get();
+
+      debugPrint('Gig Data ${snap.data()} GIG ID${gig.id}');
+
       if (!snap.exists) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -254,6 +259,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       assignedWorkerId: data['assignedWorkerId'] as String?,
       experienceLevel: data['experienceLevel'] as String? ?? '',
       requiredSkills: List<String>.from(data['requiredSkills'] ?? []),
+      hostId: data['hostId'] as String? ?? '',
     );
   }
 

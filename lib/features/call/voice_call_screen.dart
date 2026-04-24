@@ -9,11 +9,13 @@ import 'package:permission_handler/permission_handler.dart';
 class VoiceCallScreen extends StatefulWidget {
   final String channelName;
   final String token;
+  final int timeoutSeconds;
 
   const VoiceCallScreen({
     super.key,
     required this.channelName,
     required this.token,
+    this.timeoutSeconds = 30,
   });
 
   @override
@@ -32,10 +34,15 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
   bool _isSpeakerOn = false;
   bool _remoteUserJoined = false;
   bool _isConnecting = true;
-  bool _isEnding = false; // guard against double-end
+  bool _isEnding = false;
 
   int _callSeconds = 0;
   Timer? _callTimer;
+
+  // Timeout — auto-end if no one answers
+  Timer? _timeoutTimer;
+  int _timeoutSecondsLeft = 30;
+
   StreamSubscription<DocumentSnapshot>? _outgoingCallSub;
 
   static const _appId = '75426b0c60784c2ebd9ab32cfcc5288f';
@@ -45,6 +52,8 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
   @override
   void initState() {
     super.initState();
+    _timeoutSecondsLeft = widget.timeoutSeconds;
+
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -58,7 +67,23 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     _listenForDecline();
   }
 
-  // ── Listen for callee declining ────────────────────────────────────────────
+  void _startNoAnswerTimeout() {
+    debugPrint('[Timeout] ✅ No-answer timeout started — ${widget.timeoutSeconds}s');
+    _timeoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      debugPrint('[Timeout] ⏱ tick ${timer.tick} | left: $_timeoutSecondsLeft | mounted: $mounted | _isEnding: $_isEnding');
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _timeoutSecondsLeft--);
+      if (_timeoutSecondsLeft <= 0) {
+        debugPrint('[Timeout] 🔴 No answer — ending call');
+        timer.cancel();
+        _endCall();
+      }
+    });
+  }
+
   void _listenForDecline() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -77,8 +102,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
   Future<void> _startRingback() async {
     await _ringbackPlayer.setReleaseMode(ReleaseMode.loop);
-    await _ringbackPlayer
-        .play(AssetSource('sounds/waiting_to_answer_sound.mp3'));
+    await _ringbackPlayer.play(AssetSource('sounds/waiting_to_answer_sound.mp3'));
   }
 
   Future<void> _stopRingback() async {
@@ -96,10 +120,14 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
         if (mounted) {
           setState(() => _isConnecting = false);
           _startRingback();
+          _startNoAnswerTimeout(); // start countdown once we're in the channel
         }
       },
       onUserJoined: (connection, remoteUid, elapsed) {
         if (mounted) {
+          // Someone answered — cancel timeout
+          _timeoutTimer?.cancel();
+          _timeoutTimer = null;
           _stopRingback();
           setState(() => _remoteUserJoined = true);
           _startTimer();
@@ -155,6 +183,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     _isEnding = true;
 
     _callTimer?.cancel();
+    _timeoutTimer?.cancel();
     _outgoingCallSub?.cancel();
     await _stopRingback();
     await _ringbackPlayer.dispose();
@@ -165,19 +194,16 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     if (uid != null) {
       final firestore = FirebaseFirestore.instance;
 
-      // Always read targetId before wiping outgoingCall
       final mySnap = await firestore.collection('users').doc(uid).get();
       final targetId = mySnap.data()?['outgoingCall']?['targetId'] as String?;
 
       final batch = firestore.batch();
 
-      // Always clean up caller's outgoingCall
       batch.update(
         firestore.collection('users').doc(uid),
         {'outgoingCall': FieldValue.delete()},
       );
 
-      // If callee still has our incomingCall, delete it so their screen closes
       if (targetId != null) {
         batch.update(
           firestore.collection('users').doc(targetId),
@@ -194,6 +220,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
   @override
   void dispose() {
     _callTimer?.cancel();
+    _timeoutTimer?.cancel();
     _outgoingCallSub?.cancel();
     _pulseController.dispose();
     _ringbackPlayer.dispose();
@@ -214,8 +241,18 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     return const Color(0xFFFFA726);
   }
 
+  Color get _timeoutColor {
+    if (_timeoutSecondsLeft > 15) return Colors.white54;
+    if (_timeoutSecondsLeft > 8) return Colors.orange;
+    return Colors.redAccent;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final showTimeout = !_remoteUserJoined &&
+        !_isConnecting &&
+        _timeoutTimer != null;
+
     return Scaffold(
       backgroundColor: _bg,
       body: SafeArea(
@@ -223,8 +260,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
           children: [
             // ── Top bar ──────────────────────────────────────
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
                   IconButton(
@@ -282,7 +318,6 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
             const SizedBox(height: 20),
 
-            // ── Title ────────────────────────────────────────
             const Text(
               'Voice Call',
               style: TextStyle(
@@ -346,6 +381,22 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
                     ),
             ),
 
+            // ── No-answer timeout indicator ──────────────────
+            if (showTimeout && _timeoutSecondsLeft <= 5) ...[
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.timer_off_outlined, size: 13, color: _timeoutColor),
+                  const SizedBox(width: 4),
+                  Text(
+                    'No response — hanging up in $_timeoutSecondsLeft s',
+                    style: TextStyle(fontSize: 12, color: _timeoutColor),
+                  ),
+                ],
+              ),
+            ],
+
             const Spacer(),
 
             // ── Controls ─────────────────────────────────────
@@ -355,9 +406,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   _ControlButton(
-                    icon: _isMuted
-                        ? Icons.mic_off_rounded
-                        : Icons.mic_rounded,
+                    icon: _isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
                     label: _isMuted ? 'Unmute' : 'Mute',
                     active: _isMuted,
                     onTap: _toggleMute,

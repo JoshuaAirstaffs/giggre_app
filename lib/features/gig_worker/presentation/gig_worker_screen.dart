@@ -273,6 +273,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             address: data['address'] as String? ?? '',
             position: LatLng(geo.latitude, geo.longitude),
             assignedWorkerId: uid,
+            hostId: data['hostId'] as String? ?? '',
           ));
         }
         return;
@@ -287,6 +288,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       if (openSnap.docs.isNotEmpty) {
         final doc = openSnap.docs.first;
         final data = doc.data();
+        debugPrint('Open Data $data');
         final geo = data['location'] as GeoPoint?;
         if (geo != null && mounted) {
           setState(() => _activeOpenGig = GigMarkerData(
@@ -299,6 +301,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             address: data['address'] as String? ?? '',
             position: LatLng(geo.latitude, geo.longitude),
             assignedWorkerId: uid,
+            hostId: data['hostId'] as String? ?? '',
           ));
         }
         return;
@@ -329,6 +332,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             requiredSkills: data['skillRequired'] != null
                 ? [data['skillRequired'] as String]
                 : [],
+            hostId: data['hostId'] as String? ?? '',
           ));
         }
       }
@@ -368,6 +372,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           requiredSkills: data['skillRequired'] != null
               ? [data['skillRequired'] as String]
               : [],
+          hostId: data['hostId'] as String? ?? '',
         );
         _pendingOfferedGigDesc = data['description'] as String? ?? '';
         _pendingOfferedGigSkill = data['skillRequired'] as String? ?? '';
@@ -435,6 +440,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         address: data['address'] as String? ?? '',
         position: LatLng(geo.latitude, geo.longitude),
         assignedWorkerId: uid,
+        hostId: data['hostId'] as String? ?? '',
       );
       // Auto-accept: skip review window and accept immediately
       if (_autoAccept) {

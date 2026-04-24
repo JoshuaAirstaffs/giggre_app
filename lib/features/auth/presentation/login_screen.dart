@@ -98,6 +98,7 @@ class _LoginScreenState extends State<LoginScreen> {
         cred.user?.email,
         doc.data()?['name'],
         uid,
+        doc.data()?['userId'],
       );
       _navigateByRole(doc.data()?['role']);
 

@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../../core/theme/app_colors.dart';
@@ -45,6 +46,8 @@ class WorkingUI extends StatefulWidget {
   final VoidCallback onComplete;
   final VoidCallback onCancel;
   final String gigCollection;
+
+
 
   const WorkingUI({
     super.key,
@@ -824,6 +827,12 @@ class _TimerBanner extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig info card
 // ─────────────────────────────────────────────────────────────────────────────
+// ─── _GigInfoCard ────────────────────────────────────────────────────────────
+
+// ─── _GigInfoCard ────────────────────────────────────────────────────────────
+
+// ─── _GigInfoCard ────────────────────────────────────────────────────────────
+
 class _GigInfoCard extends StatelessWidget {
   final GigMarkerData gig;
   final _GigStep step;
@@ -841,52 +850,75 @@ class _GigInfoCard extends StatelessWidget {
     required this.onSurface,
   });
 
-  (String, Color) get _statusInfo {
+  (String, Color, Color) get _statusInfo {
     const green = Color(0xFF22C55E);
+    const greenBg = Color(0xFFDCFCE7);
+    const blueBg = Color(0xFFDBEAFE);
+    const amberBg = Color(0xFFFEF3C7);
     switch (step) {
       case _GigStep.navigating:
-        return ('Navigating', kBlue);
+        return ('Navigating', kBlue, blueBg);
       case _GigStep.arrived:
-        return ('Arrived at Location', green);
+        return ('Arrived', green, greenBg);
       case _GigStep.working:
-        return ('In Progress', green);
+        return ('In Progress', green, greenBg);
       case _GigStep.taskComplete:
-        return ('Task Complete', kAmber);
+        return ('Task Complete', kAmber, amberBg);
       case _GigStep.payment:
-        return ('Payment Pending', kBlue);
+        return ('Payment Pending', kBlue, blueBg);
       case _GigStep.completed:
-        return ('Completed', green);
+        return ('Completed', green, greenBg);
     }
+  }
+
+  (Color, Color, IconData, String) get _gigTypeInfo {
+    switch (gig.gigType) {
+      case 'offered':
+        return (
+          const Color(0xFF8B5CF6),
+          const Color(0xFFEDE9FE),
+          Icons.send_rounded,
+          'Offered gig',
+        );
+      case 'quick':
+        return (
+          kAmber,
+          const Color(0xFFFEF3C7),
+          Icons.flash_on_rounded,
+          'Quick gig',
+        );
+      default:
+        return (
+          kBlue,
+          const Color(0xFFDBEAFE),
+          Icons.workspace_premium_outlined,
+          'Open gig',
+        );
+    }
+  }
+
+  String get _initials {
+    final parts = gig.hostName.trim().split(' ');
+    if (parts.length >= 2) {
+      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
+    return gig.hostName.isNotEmpty ? gig.hostName[0].toUpperCase() : '?';
   }
 
   @override
   Widget build(BuildContext context) {
-    final (statusLabel, statusColor) = _statusInfo;
-    final gigColor = gig.gigType == 'open'
-        ? kBlue
-        : gig.gigType == 'offered'
-            ? const Color(0xFF8B5CF6)
-            : kAmber;
-    final gigIcon = gig.gigType == 'open'
-        ? Icons.workspace_premium_outlined
-        : gig.gigType == 'offered'
-            ? Icons.send_rounded
-            : Icons.flash_on_rounded;
-    final gigLabel = gig.gigType == 'open'
-        ? 'Open Gig'
-        : gig.gigType == 'offered'
-            ? 'Offered Gig'
-            : 'Quick Gig';
+    final (statusLabel, statusColor, statusBg) = _statusInfo;
+    final (gigColor, gigBg, gigIcon, gigLabel) = _gigTypeInfo;
+
     return Container(
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: divider),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
-            blurRadius: 12,
+            color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.06),
+            blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
@@ -894,89 +926,155 @@ class _GigInfoCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: gigColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
+          // ── Header ────────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: gigBg,
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(gigIcon, color: gigColor, size: 20),
                 ),
-                child: Icon(gigIcon, color: gigColor, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      gig.title,
-                      style: TextStyle(
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        gig.title,
+                        style: TextStyle(
                           color: onSurface,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 3),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: gigColor.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(6),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          height: 1.3,
+                        ),
                       ),
-                      child: Text(gigLabel,
-                          style: TextStyle(
-                              color: gigColor,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold)),
-                    ),
-                  ],
+                      const SizedBox(height: 5),
+                      _Pill(label: gigLabel, color: gigColor, bg: gigBg),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Divider(color: divider),
-          const SizedBox(height: 6),
-          _InfoRow(
-            icon: Icons.person_outline_rounded,
-            label: 'Host',
-            value: gig.hostName.isNotEmpty ? gig.hostName : '—',
-          ),
-          _InfoRow(
-            icon: Icons.attach_money_rounded,
-            label: 'Budget',
-            value: '₱${gig.budget.toStringAsFixed(0)}',
-            valueColor: kAmber,
-          ),
-          if (gig.address.isNotEmpty)
-            _InfoRow(
-              icon: Icons.location_on_outlined,
-              label: 'Location',
-              value: gig.address,
+              ],
             ),
-          _InfoRow(
-            icon: Icons.circle,
-            label: 'Status',
-            value: statusLabel,
-            valueColor: statusColor,
           ),
+
+          Divider(height: 0, thickness: 0.5, color: divider),
+
+          // ── Info rows ─────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+            child: Column(
+              children: [
+                _InfoRow(
+                  icon: Icons.attach_money_rounded,
+                  label: 'Budget',
+                  value: '₱${gig.budget.toStringAsFixed(0)}',
+                  valueColor: kAmber,
+                ),
+                if (gig.address.isNotEmpty)
+                  _InfoRow(
+                    icon: Icons.location_on_outlined,
+                    label: 'Location',
+                    value: gig.address,
+                  ),
+                _InfoRow(
+                  icon: Icons.circle,
+                  label: 'Status',
+                  value: statusLabel,
+                  valueColor: statusColor,
+                  valueBg: statusBg,
+                ),
+              ],
+            ),
+          ),
+
+          Divider(height: 0, thickness: 0.5, color: divider),
+
+          // ── Host + call icons ─────────────────────────────────────────────
+          if (gig.hostId.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 8, 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: gigBg,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      _initials,
+                      style: TextStyle(
+                        color: gigColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          gig.hostName.isNotEmpty ? gig.hostName : '—',
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          'Host',
+                          style: TextStyle(color: kSub, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                  CallUserAction(
+                    targetUserId: gig.hostId,
+                    targetUserName: gig.hostName,
+                    callType: CallType.voice,
+                  ),
+                  const SizedBox(width: 4),
+                  CallUserAction(
+                    targetUserId: gig.hostId,
+                    targetUserName: gig.hostName,
+                    callType: CallType.video,
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
+// ─── _InfoRow ─────────────────────────────────────────────────────────────────
+
 class _InfoRow extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
   final Color? valueColor;
+  final Color? valueBg;
+
   const _InfoRow({
     required this.icon,
     required this.label,
     required this.value,
     this.valueColor,
+    this.valueBg,
   });
 
   @override
@@ -984,27 +1082,94 @@ class _InfoRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
           children: [
-            Icon(icon, color: kSub, size: 17),
+            Icon(icon, color: kSub, size: 15),
             const SizedBox(width: 10),
-            Text('$label  ',
-                style: const TextStyle(color: kSub, fontSize: 13)),
-            Expanded(
+            SizedBox(
+              width: 54,
               child: Text(
-                value,
-                style: TextStyle(
-                  color: valueColor ??
-                      Theme.of(context).colorScheme.onSurface,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-                overflow: TextOverflow.ellipsis,
+                label,
+                style: const TextStyle(color: kSub, fontSize: 12),
               ),
             ),
+            // If valueBg is provided, wrap value in a pill
+            valueBg != null
+                ? Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: valueBg,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: valueColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          value,
+                          style: TextStyle(
+                            color: valueColor,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : Expanded(
+                    child: Text(
+                      value,
+                      style: TextStyle(
+                        color: valueColor ??
+                            Theme.of(context).colorScheme.onSurface,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
           ],
         ),
       );
 }
 
+// ─── _Pill ────────────────────────────────────────────────────────────────────
+
+class _Pill extends StatelessWidget {
+  final String label;
+  final Color color;
+  final Color bg;
+
+  const _Pill({
+    required this.label,
+    required this.color,
+    required this.bg,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
+}
 // ─────────────────────────────────────────────────────────────────────────────
 //  Primary action button
 // ─────────────────────────────────────────────────────────────────────────────
