@@ -3,28 +3,32 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../../../core/theme/app_colors.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Worker Header — gradient banner with profile info and star rating
+//  Worker Header — gradient banner with profile info, info rows, and edit CTA
 // ─────────────────────────────────────────────────────────────────────────────
 class WorkerHeader extends StatelessWidget {
   final String userId;
   final String name;
   final String email;
+  final String phone;
   final String photoUrl;
   final double rating;
   final int ratingCount;
   final String memberSince;
   final bool isDark;
+  final VoidCallback onEdit;
 
   const WorkerHeader({
     super.key,
     required this.userId,
     required this.name,
     required this.email,
+    required this.phone,
     required this.photoUrl,
     required this.rating,
     required this.ratingCount,
     required this.memberSince,
     required this.isDark,
+    required this.onEdit,
   });
 
   @override
@@ -45,7 +49,9 @@ class WorkerHeader extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Navigation row ───────────────────────────────────────────
               Row(
                 children: [
                   GestureDetector(
@@ -63,14 +69,44 @@ class WorkerHeader extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Text('Gig Worker',
+                  const Text('My Profile',
                       style: TextStyle(
                           color: Colors.white,
                           fontSize: 17,
                           fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  // ── Edit button ──────────────────────────────────────────
+                  GestureDetector(
+                    onTap: onEdit,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: kAmber.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                            color: kAmber.withValues(alpha: 0.4)),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.edit_outlined,
+                              color: kAmber, size: 13),
+                          SizedBox(width: 5),
+                          Text('Edit',
+                              style: TextStyle(
+                                  color: kAmber,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 24),
+
+              // ── Avatar + identity ────────────────────────────────────────
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -87,22 +123,7 @@ class WorkerHeader extends StatelessWidget {
                               fontSize: 20,
                               fontWeight: FontWeight.bold),
                         ),
-                        const SizedBox(height: 2),
-                        Text(email,
-                            style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.75),
-                                fontSize: 13)),
-                        const SizedBox(height: 2),
-                        if (userId.isNotEmpty)
-                          Text(
-                            'ID: $userId',
-                            style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.5),
-                                fontSize: 10,
-                                letterSpacing: 0.3),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                         Row(
                           children: [
                             ...List.generate(5, (i) {
@@ -123,7 +144,9 @@ class WorkerHeader extends StatelessWidget {
                             const SizedBox(width: 6),
                             Flexible(
                               child: Text(
-                                '${rating.toStringAsFixed(1)}  ($ratingCount reviews)',
+                                '${rating.toStringAsFixed(1)}  '
+                                '($ratingCount '
+                                '${ratingCount == 1 ? 'rating' : 'ratings'})',
                                 style: TextStyle(
                                     color:
                                         Colors.white.withValues(alpha: 0.8),
@@ -146,6 +169,40 @@ class WorkerHeader extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 20),
+
+              // ── Info panel ───────────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12)),
+                ),
+                child: Column(
+                  children: [
+                    _HeaderInfoRow(
+                        icon: Icons.email_outlined, value: email),
+                    if (phone.isNotEmpty) ...[
+                      Divider(
+                          color: Colors.white.withValues(alpha: 0.1),
+                          height: 16),
+                      _HeaderInfoRow(
+                          icon: Icons.phone_outlined, value: phone),
+                    ],
+                    if (userId.isNotEmpty) ...[
+                      Divider(
+                          color: Colors.white.withValues(alpha: 0.1),
+                          height: 16),
+                      _HeaderInfoRow(
+                          icon: Icons.badge_outlined,
+                          value: 'ID: $userId'),
+                    ],
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -155,7 +212,35 @@ class WorkerHeader extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Avatar helpers (internal to this file)
+//  Info row inside the header panel
+// ─────────────────────────────────────────────────────────────────────────────
+class _HeaderInfoRow extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  const _HeaderInfoRow({required this.icon, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon,
+            color: Colors.white.withValues(alpha: 0.55), size: 14),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Avatar helpers
 // ─────────────────────────────────────────────────────────────────────────────
 class _WorkerAvatar extends StatelessWidget {
   final String photoUrl;

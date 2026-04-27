@@ -37,6 +37,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   String _userId = '';
   String _name = '';
   String _email = '';
+  String _phone = '';
+  String _bio = '';
   String _photoUrl = '';
   List<String> _skills = [];
   double _ratingAsWorker = 5.0;
@@ -159,6 +161,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         _userId = data['userId'] as String? ?? '';
         _name = data['name'] as String? ?? '';
         _email = data['email'] as String? ?? '';
+        _phone = data['phone'] as String? ?? '';
+        _bio = data['bio'] as String? ?? '';
         _photoUrl = data['photoUrl'] as String? ?? '';
         _skills = List<String>.from(data['skills'] ?? []);
         _ratingAsWorker =
@@ -782,6 +786,132 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     );
   }
 
+  void _showEditPersonalInfo() {
+    final nameCtrl = TextEditingController(text: _name);
+    final phoneCtrl = TextEditingController(text: _phone);
+    final bioCtrl = TextEditingController(text: _bio);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          final isDark = Theme.of(ctx).brightness == Brightness.dark;
+          final cardColor =
+              isDark ? const Color(0xFF1E2533) : Colors.white;
+          final onSurface = Theme.of(ctx).colorScheme.onSurface;
+          bool saving = false;
+
+          return Padding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            child: Container(
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Theme.of(ctx).dividerColor),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text('Edit Profile',
+                          style: TextStyle(
+                              color: onSurface,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: () => Navigator.pop(ctx),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : Colors.grey.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.close_rounded,
+                              color: onSurface, size: 16),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  _EditField(
+                      label: 'Name',
+                      controller: nameCtrl,
+                      isDark: isDark),
+                  const SizedBox(height: 12),
+                  _EditField(
+                      label: 'Phone',
+                      controller: phoneCtrl,
+                      isDark: isDark,
+                      keyboardType: TextInputType.phone),
+                  const SizedBox(height: 12),
+                  _EditField(
+                      label: 'Bio',
+                      controller: bioCtrl,
+                      isDark: isDark,
+                      maxLines: 3),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: StatefulBuilder(
+                      builder: (_, setSave) => ElevatedButton(
+                        onPressed: saving
+                            ? null
+                            : () async {
+                                setSave(() => saving = true);
+                                final uid = FirebaseAuth
+                                    .instance.currentUser?.uid;
+                                if (uid != null) {
+                                  await FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(uid)
+                                      .update({
+                                    'name': nameCtrl.text.trim(),
+                                    'phone': phoneCtrl.text.trim(),
+                                    'bio': bioCtrl.text.trim(),
+                                  });
+                                }
+                                if (ctx.mounted) Navigator.pop(ctx);
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kBlue,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        child: saving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2))
+                            : const Text('Save Changes',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _confirmLogout() {
     showDialog(
       context: context,
@@ -872,11 +1002,13 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                         userId: _userId,
                         name: _name,
                         email: _email,
+                        phone: _phone,
                         photoUrl: _photoUrl,
                         rating: _ratingAsWorker,
                         ratingCount: _ratingCount,
                         memberSince: _memberSince,
                         isDark: isDark,
+                        onEdit: _showEditPersonalInfo,
                       ),
                     ),
                     SliverPadding(
@@ -1038,6 +1170,75 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   ),
               ],
             ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Reusable labeled text field for the edit profile sheet
+// ─────────────────────────────────────────────────────────────────────────────
+class _EditField extends StatelessWidget {
+  final String label;
+  final TextEditingController controller;
+  final bool isDark;
+  final TextInputType keyboardType;
+  final int maxLines;
+
+  const _EditField({
+    required this.label,
+    required this.controller,
+    required this.isDark,
+    this.keyboardType = TextInputType.text,
+    this.maxLines = 1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(
+                color: kSub,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.4)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          keyboardType: keyboardType,
+          maxLines: maxLines,
+          style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
+              fontSize: 14),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.grey.withValues(alpha: 0.07),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : Colors.grey.withValues(alpha: 0.2)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : Colors.grey.withValues(alpha: 0.2)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: kBlue),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

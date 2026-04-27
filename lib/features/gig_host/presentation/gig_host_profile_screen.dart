@@ -644,13 +644,13 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                 label: 'Phone',
                                 value: _phone),
                           ],
-                          if (_userId.isNotEmpty) ...[
-                            const SizedBox(height: 10),
-                            _InfoRow(
-                                icon: Icons.badge_outlined,
-                                label: 'User ID',
-                                value: _userId),
-                          ],
+                          // if (_userId.isNotEmpty) ...[
+                          //   const SizedBox(height: 10),
+                          //   _InfoRow(
+                          //       icon: Icons.badge_outlined,
+                          //       label: 'User ID',
+                          //       value: _userId),
+                          // ],
                           if (_createdAt.isNotEmpty) ...[
                             const SizedBox(height: 10),
                             _InfoRow(
