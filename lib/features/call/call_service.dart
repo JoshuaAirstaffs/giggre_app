@@ -23,16 +23,15 @@ Future<void> initiateCall({
   setLoading(true);
 
   final firestore = FirebaseFirestore.instance;
-  String? targetDocId;
+  final targetDocId = targetUserId;
 
   try {
     final targetSnap = await firestore
         .collection('users')
-        .where('userId', isEqualTo: targetUserId)
-        .limit(1)
+        .doc(targetDocId)
         .get();
 
-    if (targetSnap.docs.isEmpty) {
+    if (!targetSnap.exists) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('User not found')),
@@ -40,8 +39,6 @@ Future<void> initiateCall({
       }
       return;
     }
-
-    targetDocId = targetSnap.docs.first.id;
 
     final batch = firestore.batch();
 
@@ -97,12 +94,10 @@ Future<void> initiateCall({
       {'outgoingCall': FieldValue.delete()},
     );
 
-    if (targetDocId != null) {
-      cleanupBatch.update(
-        firestore.collection('users').doc(targetDocId),
-        {'incomingCall': FieldValue.delete()},
-      );
-    }
+    cleanupBatch.update(
+      firestore.collection('users').doc(targetDocId),
+      {'incomingCall': FieldValue.delete()},
+    );
 
     await cleanupBatch.commit();
     setLoading(false);

@@ -12,6 +12,7 @@ class IncomingCallScreen extends StatefulWidget {
   final String callerRole;
   final String channelName;
   final String token;
+  final int timeoutSeconds;
 
   const IncomingCallScreen({
     super.key,
@@ -20,6 +21,7 @@ class IncomingCallScreen extends StatefulWidget {
     this.callerRole = 'Gig worker',
     required this.channelName,
     required this.token,
+    this.timeoutSeconds = 30,
   });
 
   @override
@@ -32,6 +34,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   late final Animation<double> _pulseAnimation;
   final AudioPlayer _audioPlayer = AudioPlayer();
   StreamSubscription<DocumentSnapshot>? _callSub;
+  Timer? _timeoutTimer;
+  int _secondsLeft = 30;
+  bool _isHandled = false;
 
   static const _bg = Color(0xFF121212);
   static const _blue = Color(0xFF4A90D9);
@@ -39,6 +44,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   @override
   void initState() {
     super.initState();
+    _secondsLeft = widget.timeoutSeconds;
 
     _pulseController = AnimationController(
       vsync: this,
@@ -49,11 +55,30 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    _startRingtone();
+    _startTimeout();
     _listenForCancellation();
+    _startRingtone();
   }
 
-  // Dismiss automatically if the caller hangs up before answer
+  void _startTimeout() {
+    debugPrint('[Timeout] ✅ Timer started — ${widget.timeoutSeconds}s');
+    _timeoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      debugPrint('[Timeout] ⏱ tick ${timer.tick} | _secondsLeft: $_secondsLeft | mounted: $mounted | _isHandled: $_isHandled');
+      if (!mounted) {
+        debugPrint('[Timeout] ❌ Not mounted — cancelling timer');
+        timer.cancel();
+        return;
+      }
+      setState(() => _secondsLeft--);
+      if (_secondsLeft <= 0) {
+        debugPrint('[Timeout] 🔴 Zero reached — calling _declineCall()');
+        timer.cancel();
+        _declineCall();
+      }
+    });
+    debugPrint('[Timeout] Timer object: $_timeoutTimer');
+  }
+
   void _listenForCancellation() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -64,8 +89,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
         .snapshots()
         .listen((snap) {
       final incomingCall = snap.data()?['incomingCall'];
-      if (incomingCall == null && mounted) {
-        _callSub?.cancel();
+      if (incomingCall == null && mounted && !_isHandled) {
+        _isHandled = true;
+        _timeoutTimer?.cancel();
         _audioPlayer.stop();
         Navigator.pop(context);
       }
@@ -79,11 +105,11 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
 
   Future<void> _stopRingtone() async {
     await _audioPlayer.stop();
-    await _audioPlayer.dispose();
   }
 
   @override
   void dispose() {
+    _timeoutTimer?.cancel();
     _callSub?.cancel();
     _pulseController.dispose();
     _audioPlayer.stop();
@@ -98,6 +124,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   }
 
   Future<void> _acceptCall() async {
+    if (_isHandled) return;
+    _isHandled = true;
+    _timeoutTimer?.cancel();
     _callSub?.cancel();
     await _stopRingtone();
 
@@ -128,11 +157,17 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   }
 
   Future<void> _declineCall() async {
+    if (_isHandled) return;
+    _isHandled = true;
+    _timeoutTimer?.cancel();
     _callSub?.cancel();
     await _stopRingtone();
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+    if (uid == null) {
+      if (mounted) Navigator.pop(context);
+      return;
+    }
 
     final firestore = FirebaseFirestore.instance;
     final batch = firestore.batch();
@@ -141,7 +176,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
       firestore.collection('users').doc(uid),
       {'incomingCall': FieldValue.delete()},
     );
-
     batch.update(
       firestore.collection('users').doc(widget.callerId),
       {'outgoingCall.status': 'declined'},
@@ -170,7 +204,24 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
               ),
             ),
 
-            const SizedBox(height: 48),
+            const SizedBox(height: 8),
+
+            if (_secondsLeft <= 5)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.timer_off_outlined,
+                      size: 13, color: Colors.redAccent),
+                  const SizedBox(width: 4),
+                  Text(
+                    'No response — declining in $_secondsLeft s',
+                    style: const TextStyle(
+                        fontSize: 12, color: Colors.redAccent),
+                  ),
+                ],
+              ),
+
+            const SizedBox(height: 32),
 
             AnimatedBuilder(
               animation: _pulseAnimation,
