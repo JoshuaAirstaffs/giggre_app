@@ -31,19 +31,20 @@ class _CallUserActionState extends State<CallUserAction>
     with SingleTickerProviderStateMixin {
   bool _isCalling = false;
   late String _channelName = _makeChannel();
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseAnimation;
 
-  late final AnimationController _pulseController = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  )..repeat(reverse: true);
-
-  late final Animation<double> _pulseAnimation = Tween<double>(
-    begin: 0.5,
-    end: 1.0,
-  ).animate(CurvedAnimation(
-    parent: _pulseController,
-    curve: Curves.easeInOut,
-  ));
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _pulseAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
 
   Stream<bool> _targetOnCallStream() {
     return FirebaseFirestore.instance

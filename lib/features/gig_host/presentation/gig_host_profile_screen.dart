@@ -6,6 +6,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../../core/theme/app_colors.dart';
 import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
+import 'widgets/payment_history_sheet.dart';
+import 'widgets/notifications_sheet.dart';
 
 class GigHostProfileScreen extends StatefulWidget {
   const GigHostProfileScreen({super.key});
@@ -407,6 +409,19 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
     );
   }
 
+  void _showPaymentHistory() {
+    final completed = [
+      ..._quickGigsDocs,
+      ..._openGigsDocs,
+      ..._offeredGigsDocs,
+    ].where((g) => (g['status'] as String?) == 'completed').toList();
+
+    PaymentHistorySheet.show(
+      context: context,
+      completedGigs: completed,
+    );
+  }
+
   void _showFavoriteWorkers() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -782,7 +797,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             icon: Icons.receipt_long_outlined,
                             iconColor: const Color(0xFF10B981),
                             label: 'Payment History',
-                            onTap: () => _showComingSoon('Payment History'),
+                            onTap: _showPaymentHistory,
                           ),
                         ],
                       ),
@@ -810,7 +825,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             icon: Icons.notifications_outlined,
                             iconColor: kAmber,
                             label: 'Notifications',
-                            onTap: () => _showComingSoon('Notifications'),
+                            onTap: () => NotificationsSheet.show(context),
                           ),
                           _Divider(isDark: isDark),
                           _MenuRow(

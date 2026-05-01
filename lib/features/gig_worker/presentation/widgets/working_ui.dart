@@ -64,8 +64,16 @@ class WorkingUI extends StatefulWidget {
 class _WorkingUIState extends State<WorkingUI> {
   _GigStep _step = _GigStep.navigating;
 
+  _GigStep _lastActiveStep = _GigStep.navigating;
+  String _lastStatusString = 'navigating';
+  bool _cancelPending = false;
+  
   // Guard: show host rating dialog only once
   bool _ratingShown = false;
+  // Guard: handle admin-approved cancellation only once
+  bool _cancelledHandled = false;
+  // Show arrival confirmation prompt when geofence triggers
+  bool _arrivedPromptVisible = false;
 
   // Stopwatch (working step)
   late final Stopwatch _stopwatch;
@@ -108,21 +116,43 @@ class _WorkingUIState extends State<WorkingUI> {
         .snapshots()
         .listen((snap) {
       if (!mounted || !snap.exists) return;
+
       final status = snap.data()?['status'] as String? ?? 'navigating';
-      final newStep = _stepFromStatus(status);
-      if (newStep != _step) {
-        setState(() => _step = newStep);
-        if (newStep == _GigStep.working && !_stopwatch.isRunning) {
-          _stopwatch.start();
-        }
-        if (newStep == _GigStep.completed && !_ratingShown) {
-          _ratingShown = true;
-          _showHostRatingAndComplete(snap.data()!);
-        }
+
+      if (status == 'cancelled' && !_cancelledHandled) {
+        _cancelledHandled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _onAdminCancelled());
+        return;
+      }
+
+      final isCancelPending = status == 'cancellation_requested';
+
+      final newStep = isCancelPending
+          ? _lastActiveStep
+          : _stepFromStatus(status);
+
+      if (!isCancelPending) {
+        _lastActiveStep = newStep;
+        _lastStatusString = status;
+      }
+
+      if (newStep != _step || isCancelPending != _cancelPending) {
+        setState(() {
+          _step = newStep;
+          _cancelPending = isCancelPending;
+        });
+      }
+
+      if (newStep == _GigStep.working && !_stopwatch.isRunning) {
+        _stopwatch.start();
+      }
+
+      if (newStep == _GigStep.completed && !_ratingShown) {
+        _ratingShown = true;
+        _showHostRatingAndComplete(snap.data()!);
       }
     }, onError: (e) => debugPrint('[WorkingUI] gig stream error: $e'));
   }
-
   // ── Location stream + geofence ────────────────────────────────────────────
   Future<void> _startLocation() async {
     try {
@@ -168,8 +198,13 @@ class _WorkingUIState extends State<WorkingUI> {
     );
     if (dist <= _arrivedThresholdMeters) {
       _geofenceTriggered = true;
-      _updateStatus('arrived');
+      setState(() => _arrivedPromptVisible = true);
     }
+  }
+
+  Future<void> _confirmArrival() async {
+    setState(() => _arrivedPromptVisible = false);
+    await _updateStatus('arrived');
   }
 
   Future<void> _updateStatus(String status) async {
@@ -249,6 +284,7 @@ class _WorkingUIState extends State<WorkingUI> {
             'requestedBy': 'worker',
           }
         ]),
+        'lastProgressStatus': _lastStatusString,
         'status': 'cancellation_requested',
       });
       if (mounted) {
@@ -259,11 +295,24 @@ class _WorkingUIState extends State<WorkingUI> {
             backgroundColor: Colors.orange,
           ),
         );
-        widget.onCancel();
+        // widget.onCancel();
       }
     } finally {
       controller.dispose();
     }
+  }
+
+  // ── Admin approved cancellation — notify and exit ─────────────────────────
+  void _onAdminCancelled() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Your cancellation request has been approved.'),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    widget.onCancel();
   }
 
   // ── Show host rating dialog, then call onComplete ─────────────────────────
@@ -352,13 +401,28 @@ class _WorkingUIState extends State<WorkingUI> {
                     const SizedBox(height: 4),
 
                     // ── Step-specific section ──────────────────────────
-                    if (_step == _GigStep.navigating)
+                    if (_step == _GigStep.navigating && !_arrivedPromptVisible)
                       _NavigatingSection(
                         gig: widget.gig,
                         workerLocation: _workerLocation,
                         routePoints: _routePoints,
                         divider: divider,
                       ),
+                    if (_step == _GigStep.navigating && _arrivedPromptVisible) ...[
+                      _StatusBanner(
+                        icon: Icons.location_on_rounded,
+                        color: green,
+                        title: "You're at the Location!",
+                        subtitle: 'Tap the button below to confirm your arrival.',
+                      ),
+                      const SizedBox(height: 16),
+                      _PrimaryButton(
+                        label: 'Confirm Arrival',
+                        icon: Icons.location_on_rounded,
+                        color: green,
+                        onPressed: _confirmArrival,
+                      ),
+                    ],
                     if (_step == _GigStep.arrived)
                       _StatusBanner(
                         icon: Icons.location_on_rounded,
@@ -400,6 +464,16 @@ class _WorkingUIState extends State<WorkingUI> {
 
                     const SizedBox(height: 16),
 
+                    if (_cancelPending) ...[
+                      _StatusBanner(
+                        icon: Icons.hourglass_top_rounded,
+                        color: Colors.orange,
+                        title: 'Cancellation Pending',
+                        subtitle: 'Admin is reviewing your cancellation request.',
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
                     // ── Gig info card ──────────────────────────────────
                     _GigInfoCard(
                       gig: widget.gig,
@@ -429,9 +503,10 @@ class _WorkingUIState extends State<WorkingUI> {
                       ),
 
                     // ── Cancel gig (only while still on the way / working) ─
-                    if (_step == _GigStep.navigating ||
-                        _step == _GigStep.arrived ||
-                        _step == _GigStep.working)
+                    if (!_cancelPending &&
+                      (_step == _GigStep.navigating ||
+                      _step == _GigStep.arrived ||
+                      _step == _GigStep.working))
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
                         child: SizedBox(

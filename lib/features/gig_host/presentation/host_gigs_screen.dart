@@ -588,6 +588,11 @@ class _GigTileState extends State<GigTile> {
     final statusColor = _statusColor(status);
     final titleColor = Theme.of(context).colorScheme.onSurface;
     final isClosed = status == 'cancelled' || status == 'completed';
+    const activeGigStatuses = {
+      'in_progress', 'navigating', 'arrived', 'working',
+      'task_complete', 'payment', 'cancellation_requested',
+    };
+    final isActiveGig = activeGigStatuses.contains(status);
 
     final IconData typeIcon;
     final Color typeColor;
@@ -809,19 +814,20 @@ class _GigTileState extends State<GigTile> {
                               ],
                             ),
                           ),
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: Row(
-                            children: [
-                              Icon(Icons.delete_outline_rounded,
-                                  color: Colors.redAccent, size: 18),
-                              SizedBox(width: 10),
-                              Text('Delete',
-                                  style: TextStyle(
-                                      color: Colors.redAccent)),
-                            ],
+                        if (!isActiveGig)
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(Icons.delete_outline_rounded,
+                                    color: Colors.redAccent, size: 18),
+                                SizedBox(width: 10),
+                                Text('Delete',
+                                    style: TextStyle(
+                                        color: Colors.redAccent)),
+                              ],
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),

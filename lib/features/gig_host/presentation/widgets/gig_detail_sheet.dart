@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../../core/theme/app_colors.dart';
 import '../../services/quick_gig_matching_service.dart';
+import 'payment_selection_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig Detail Sheet  –  shown when host taps a gig card
@@ -30,6 +31,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
   StreamSubscription? _gigSub;
   StreamSubscription? _workerSub;
   String? _trackedWorkerId;
+  bool _cancelledHandled = false;
 
   String get _collection {
     switch (widget.gigType) {
@@ -40,7 +42,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
   }
 
   static const _activeStatuses = [
-    'in_progress', 'navigating', 'arrived', 'working', 'task_complete', 'payment',
+    'in_progress', 'navigating', 'arrived', 'working', 'task_complete', 'payment', 'cancellation_requested',
   ];
 
   @override
@@ -54,6 +56,22 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       if (!mounted || !snap.exists) return;
       final data = snap.data()!;
       setState(() => _data = data);
+
+      if (data['status'] == 'cancelled' && !_cancelledHandled) {
+        _cancelledHandled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Gig cancellation has been approved by admin.'),
+              backgroundColor: Colors.redAccent,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          Navigator.pop(context);
+        });
+        return;
+      }
       // Watch worker location when a worker is assigned
       final wid = data['workerId'] as String? ??
                   data['assignedWorkerId'] as String?;
@@ -185,6 +203,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             'requestedBy': 'host',
           }
         ]),
+        'lastProgressStatus': _data?['status'] as String? ?? 'working',
         'status': 'cancellation_requested',
       });
       if (mounted) {
@@ -203,44 +222,6 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
   }
 
   Future<void> _confirmCompleted() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).cardColor,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Confirm Gig Completed',
-          style: TextStyle(
-            color: Theme.of(ctx).colorScheme.onSurface,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: const Text(
-          'Confirm that the gig worker has completed the task?\nThis will release their payment.',
-          style: TextStyle(color: kSub, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: kSub)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF22C55E),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-            ),
-            child: const Text('Confirm'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
     final data = _data;
     if (data == null) return;
     final db = FirebaseFirestore.instance;
@@ -248,15 +229,28 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                      data['assignedWorkerId'] as String?;
     final workerName = data['assignedWorkerName'] as String? ??
                        data['workerName'] as String? ?? 'Worker';
-    await Future.wait([
-      db.collection(_collection).doc(widget.gigId).update({
-        'status': 'completed',
-        'completedAt': FieldValue.serverTimestamp(),
-      }),
-      if (workerId != null && workerId.isNotEmpty)
-        db.collection('users').doc(workerId).update({'slot': 'AVAILABLE'}),
-    ]);
-    if (!mounted) return;
+    final title = data['title'] as String? ?? 'Gig';
+    final budget = (data['budget'] as num?)?.toDouble() ?? 0;
+
+    bool confirmed = false;
+    await PaymentSelectionSheet.show(
+      context: context,
+      gigTitle: title,
+      budget: budget,
+      onConfirm: (paymentMethod) async {
+        await Future.wait([
+          db.collection(_collection).doc(widget.gigId).update({
+            'status': 'completed',
+            'completedAt': FieldValue.serverTimestamp(),
+            'paymentMethod': paymentMethod,
+          }),
+          if (workerId != null && workerId.isNotEmpty)
+            db.collection('users').doc(workerId).update({'slot': 'AVAILABLE'}),
+        ]);
+        confirmed = true;
+      },
+    );
+    if (!mounted || !confirmed) return;
     if (workerId != null && workerId.isNotEmpty) {
       await showDialog(
         context: context,
@@ -327,8 +321,12 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           Icons.payment_rounded,
           Icons.verified_rounded,
         ];
+        final progressStatus = status == 'cancellation_requested'
+            ? (data['lastProgressStatus'] as String? ?? 'working')
+            : status;
+
         final stepIndex =
-            stepStatuses.indexOf(status).clamp(0, stepStatuses.length - 1);
+            stepStatuses.indexOf(progressStatus).clamp(0, stepStatuses.length - 1);
 
         return Container(
           decoration: BoxDecoration(
@@ -495,6 +493,58 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 const SizedBox(height: 16),
               ],
 
+              // ── Arrived notification ──────────────────────────────
+              if (status == 'arrived') ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF22C55E).withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                        color:
+                            const Color(0xFF22C55E).withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF22C55E)
+                              .withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.location_on_rounded,
+                            color: Color(0xFF22C55E), size: 18),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Worker has Arrived!',
+                              style: TextStyle(
+                                color: Color(0xFF22C55E),
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'The worker is at the gig location and ready to begin.',
+                              style: TextStyle(color: kSub, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
               // ── Task details ───────────────────────────────────────
               Container(
                 padding: const EdgeInsets.all(16),
@@ -615,26 +665,28 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ),
               ],
 
-              // ── Delete button ──────────────────────────────────────
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: OutlinedButton.icon(
-                  onPressed: _deleteGig,
-                  icon: const Icon(Icons.delete_outline_rounded,
-                      size: 18, color: Colors.redAccent),
-                  label: const Text('Delete Gig',
-                      style: TextStyle(
-                          fontSize: 15, color: Colors.redAccent)),
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(
-                        color: Colors.redAccent.withValues(alpha: 0.5)),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+              // ── Delete button (only when gig is not active) ────────
+              if (!isActive) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    onPressed: _deleteGig,
+                    icon: const Icon(Icons.delete_outline_rounded,
+                        size: 18, color: Colors.redAccent),
+                    label: const Text('Delete Gig',
+                        style: TextStyle(
+                            fontSize: 15, color: Colors.redAccent)),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(
+                          color: Colors.redAccent.withValues(alpha: 0.5)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         );

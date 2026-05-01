@@ -18,6 +18,7 @@ import 'widgets/offered_gig_offer_card.dart';
 import 'widgets/toolchest_sheet.dart';
 import 'gig_history_screen.dart';
 import 'worker_ratings_screen.dart';
+import 'widgets/worker_notifications_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main screen
@@ -252,7 +253,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         _activeOpenGig != null ||
         _activeOfferedGig != null) return;
     const activeStatuses = [
-      'navigating', 'arrived', 'working', 'task_complete', 'payment'
+      'navigating', 'arrived', 'working', 'task_complete', 'payment', 'cancellation_requested', 
     ];
     try {
       // Check quick gigs first
@@ -1107,7 +1108,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                               iconColor: const Color(0xFF8B5CF6),
                               label: 'Notifications',
                               onTap: () =>
-                                  _showComingSoon('Notifications'),
+                                  WorkerNotificationsSheet.show(context),
                             ),
                           ]),
                           const SizedBox(height: 12),
