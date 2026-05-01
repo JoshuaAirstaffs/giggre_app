@@ -62,6 +62,7 @@ class GigMapSection extends StatefulWidget {
   final bool seekingQuickGigs;
   final ValueChanged<GigMarkerData>? onQuickGigStarted;
   final ValueChanged<GigMarkerData>? onOpenGigApplied;
+  final String isVerified; // ✅ FIXED (bool now)
 
   const GigMapSection({
     super.key,
@@ -70,6 +71,7 @@ class GigMapSection extends StatefulWidget {
     required this.seekingQuickGigs,
     this.onQuickGigStarted,
     this.onOpenGigApplied,
+    required this.isVerified,
   });
 
   @override
@@ -312,38 +314,40 @@ class _GigMapSectionState extends State<GigMapSection> {
   }
 
   List<Marker> _buildMarkers() {
-    return _buildClusters().map((cluster) {
-      if (cluster.count == 1 && cluster.singleGig != null) {
-        final singleGig = cluster.singleGig!;
-        return Marker(
-          point: cluster.center,
-          width: 40,
-          height: 48,
-          child: _GigPin(
-            gig: singleGig,
-            onStart: singleGig.gigType == 'quick' &&
-                    singleGig.assignedWorkerId == widget.uid
-                ? () => widget.onQuickGigStarted?.call(singleGig)
-                : null,
-            onApply: singleGig.gigType == 'open'
-                ? () => _applyToOpenGig(singleGig)
-                : null,
-          ),
-        );
-      }
+  return _buildClusters().map((cluster) {
+    if (cluster.count == 1 && cluster.singleGig != null) {
+      final singleGig = cluster.singleGig!;
       return Marker(
         point: cluster.center,
-        width: 60,
-        height: 60,
-        child: _GigClusterBadge(
-          count: cluster.count,
-          gigs: cluster.gigs,
-          onQuickGigStarted: widget.onQuickGigStarted,
-          onOpenGigApplied: _applyToOpenGig,
+        width: 40,
+        height: 48,
+        child: _GigPin(
+          gig: singleGig,
+          isVerified: widget.isVerified, // ✅ FIX
+          onStart: singleGig.gigType == 'quick' &&
+                  singleGig.assignedWorkerId == widget.uid
+              ? () => widget.onQuickGigStarted?.call(singleGig)
+              : null,
+          onApply: singleGig.gigType == 'open'
+              ? () => _applyToOpenGig(singleGig)
+              : null,
         ),
       );
-    }).toList();
-  }
+    }
+
+    return Marker(
+      point: cluster.center,
+      width: 60,
+      height: 60,
+      child: _GigClusterBadge(
+        count: cluster.count,
+        gigs: cluster.gigs,
+        onQuickGigStarted: widget.onQuickGigStarted,
+        onOpenGigApplied: _applyToOpenGig,
+      ),
+    );
+  }).toList();
+}
 
   @override
   Widget build(BuildContext context) {
@@ -513,9 +517,10 @@ class _LegendDot extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _GigPin extends StatelessWidget {
   final GigMarkerData gig;
+  final String isVerified;
   final VoidCallback? onStart;
   final VoidCallback? onApply;
-  const _GigPin({required this.gig, this.onStart, this.onApply});
+  const _GigPin({required this.gig, required this.isVerified, this.onStart, this.onApply});
 
   Color get _pinColor {
     switch (gig.gigType) {
@@ -538,6 +543,7 @@ class _GigPin extends StatelessWidget {
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
+
         final cardColor = Theme.of(ctx).cardColor;
         final onSurface = Theme.of(ctx).colorScheme.onSurface;
         final color = _pinColor;
@@ -669,6 +675,10 @@ class _GigPin extends StatelessWidget {
                 height: 46,
                 child: ElevatedButton(
                   onPressed: () {
+                    if(isVerified != 'verified') {
+                      _showModal(context);
+                      return;
+                    }
                     Navigator.pop(ctx);
                     if (gig.gigType == 'quick') {
                       onStart?.call();
@@ -1022,4 +1032,60 @@ class _TrianglePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_TrianglePainter old) => old.color != color;
+}
+
+void _showModal(
+  BuildContext context, 
+) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: const EdgeInsets.all(24),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: ( Colors.red).withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.error_outline,
+              color: Colors.red,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Account not Verified',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your account needs to be verified before you can continue. Please request verification from the admin.',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor:  Colors.red,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

@@ -9,13 +9,14 @@ class TogglesCard extends StatelessWidget {
   final bool autoAccept;
   final ValueChanged<bool> onAvailableChanged;
   final ValueChanged<bool> onAutoAcceptChanged;
-
+  final String isVerified;
   const TogglesCard({
     super.key,
     required this.availableForGigs,
     required this.autoAccept,
     required this.onAvailableChanged,
     required this.onAutoAcceptChanged,
+    required this.isVerified,
   });
 
   @override
@@ -41,6 +42,7 @@ class TogglesCard extends StatelessWidget {
             value: availableForGigs,
             activeColor: const Color(0xFF22C55E),
             onChanged: onAvailableChanged,
+            isVerified: isVerified,
           ),
           Divider(height: 1, color: divider, indent: 56),
           _ToggleRow(
@@ -53,6 +55,7 @@ class TogglesCard extends StatelessWidget {
             value: autoAccept,
             activeColor: kAmber,
             onChanged: onAutoAcceptChanged,
+            isVerified: isVerified,
           ),
         ],
       ),
@@ -68,6 +71,7 @@ class _ToggleRow extends StatelessWidget {
   final bool value;
   final Color activeColor;
   final ValueChanged<bool> onChanged;
+  final String isVerified;
 
   const _ToggleRow({
     required this.icon,
@@ -77,6 +81,7 @@ class _ToggleRow extends StatelessWidget {
     required this.value,
     required this.activeColor,
     required this.onChanged,
+    required this.isVerified,
   });
 
   @override
@@ -113,7 +118,7 @@ class _ToggleRow extends StatelessWidget {
           ),
           Switch(
             value: value,
-            onChanged: onChanged,
+            onChanged: isVerified == 'verified' ? onChanged : (value) => _showModal(context),
             activeThumbColor: activeColor,
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
@@ -121,4 +126,60 @@ class _ToggleRow extends StatelessWidget {
       ),
     );
   }
+}
+
+void _showModal(
+  BuildContext context, 
+) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: const EdgeInsets.all(24),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: ( Colors.red).withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.error_outline,
+              color: Colors.red,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Account not Verified',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your account needs to be verified before you can continue. Please request verification from the admin.',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor:  Colors.red,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

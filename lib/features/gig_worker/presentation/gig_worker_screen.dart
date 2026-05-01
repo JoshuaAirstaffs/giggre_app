@@ -33,6 +33,7 @@ class GigWorkerScreen extends StatefulWidget {
 class _GigWorkerScreenState extends State<GigWorkerScreen>
     with WidgetsBindingObserver {
   bool _loading = true;
+  String _isVerified = '';
 
   // Profile data
   String _userId = '';
@@ -175,6 +176,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         _memberSince = memberSince;
         _suspendedUntil = suspendedUntil;
         _loading = false;
+        _isVerified = data['isVerified'] as String? ?? '';
       });
 
       if (isFirstLoad) {
@@ -1028,6 +1030,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                           QuickGigPowerButton(
                             active: _seekingQuickGigs,
                             onChanged: _toggleQuickGigs,
+                            isVerified: _isVerified,
                           ),
                           const SizedBox(height: 16),
 
@@ -1053,6 +1056,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                               setState(() => _autoAccept = v);
                               _setToggle('autoAccept', v);
                             },
+                            isVerified: _isVerified,
                           ),
                           const SizedBox(height: 20),
 
@@ -1063,6 +1067,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                             seekingQuickGigs: _seekingQuickGigs,
                             onQuickGigStarted: _onQuickGigStarted,
                             onOpenGigApplied: _onOpenGigApplied,
+                            isVerified: _isVerified,
                           ),
                           const SizedBox(height: 20),
 

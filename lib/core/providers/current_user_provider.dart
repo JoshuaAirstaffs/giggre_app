@@ -12,6 +12,7 @@ class CurrentUserProvider extends ChangeNotifier {
   String? _currentName;
   String? _uid;
   String? _userId;
+  String? _isVerified;
   StreamSubscription? _ticketSubscription;
   StreamSubscription? _callSubscription;
 
@@ -26,6 +27,7 @@ class CurrentUserProvider extends ChangeNotifier {
   String? get currentName => _currentName;
   String? get uid => _uid;
   String? get userId => _userId;
+  String? get isVerified => _isVerified;
   bool get isLoggedIn => _uid != null;
 
   static Future<void> initNotifications() async {
@@ -44,11 +46,12 @@ class CurrentUserProvider extends ChangeNotifier {
     _notificationsInitialized = true;
   }
 
-  void setCurrentUserInfo(String? email, String? name, String? uid, String? userId) {
+  void setCurrentUserInfo(String? email, String? name, String? uid, String? userId, String? isVerified) {
     _currentEmail = email;
     _currentName = name;
     _uid = uid;
     _userId = userId;
+    _isVerified = isVerified;
     notifyListeners();
     _listenToTicketUpdates(uid);
     _listenToIncomingCall(uid);
