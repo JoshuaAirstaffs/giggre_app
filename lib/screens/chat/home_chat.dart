@@ -144,17 +144,7 @@ class _FriendsTab extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CallUserAction(
-              targetUserId: 'GIG000014',
-              targetUserName: 'htest',
-              callType: CallType.voice,
-            ),
-            SizedBox(height: 8),
-            CallUserAction(
-              targetUserId: 'GIG000014',
-              targetUserName: 'htest',
-              callType: CallType.video,
-            ),
+           
           ],
         ),
       ),

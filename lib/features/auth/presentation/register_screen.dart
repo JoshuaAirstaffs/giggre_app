@@ -70,6 +70,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         'ratingAsWorker'  : 5.0,
         'ratingAsHost'    : 5.0,
         'ratingCount'     : 0,
+        'isVerified'      : 'unverified',
       });
 
       if (mounted) {
@@ -342,6 +343,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'ratingCount'     : 0,
         'slot'           : 'AVAILABLE',
         'acceptanceRate' : 1.0,
+        'isVerified'     : 'unverified',
       });
 
       if (mounted) {

@@ -99,6 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
         doc.data()?['name'],
         uid,
         doc.data()?['userId'],
+        doc.data()?['isVerified'],
       );
       _navigateByRole(doc.data()?['role']);
 

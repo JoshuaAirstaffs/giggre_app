@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import '../../../core/theme/app_colors.dart';
 import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
@@ -803,7 +804,12 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             label: 'Verification',
                             badge: 'Unverified',
                             badgeColor: Colors.orangeAccent,
-                            onTap: () => _showComingSoon('Verification'),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const VerificationScreen(),
+                              ),
+                            ),
                           ),
                           _Divider(isDark: isDark),
                           _MenuRow(

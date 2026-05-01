@@ -26,7 +26,7 @@ class GigHostScreen extends StatefulWidget {
 
 class _GigHostScreenState extends State<GigHostScreen> {
   String _userName = '';
-
+  String? _isVerified;
   @override
   void initState() {
     super.initState();
@@ -40,6 +40,7 @@ class _GigHostScreenState extends State<GigHostScreen> {
         await FirebaseFirestore.instance.collection('users').doc(uid).get();
     if (!mounted) return;
     setState(() => _userName = doc.data()?['name'] ?? '');
+    setState(() => _isVerified = doc.data()?['isVerified'] ?? '');
   }
 
   void _showProfile() {
@@ -222,13 +223,18 @@ class _GigHostScreenState extends State<GigHostScreen> {
                 accentColor: kAmber,
                 badge: 'AVAILABLE',
                 badgeColor: kAmber,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        PostQuickGigScreen(hostName: _userName),
-                  ),
-                ),
+                onTap: () {
+                  if (_isVerified == 'verified') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PostQuickGigScreen(hostName: _userName),
+                      ),
+                    );
+                  } else {
+                    _showModal(context);
+                  }
+                },
               ),
               const SizedBox(height: 10),
               _GigTypeCard(
@@ -239,13 +245,18 @@ class _GigHostScreenState extends State<GigHostScreen> {
                 accentColor: kBlue,
                 badge: 'AVAILABLE',
                 badgeColor: kBlue,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        PostOpenGigScreen(hostName: _userName),
-                  ),
-                ),
+                onTap: () {
+                  if (_isVerified == 'verified') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PostOpenGigScreen(hostName: _userName),
+                      ),
+                    );
+                  } else {
+                    _showModal(context);
+                  }
+                },
               ),
               const SizedBox(height: 10),
               _GigTypeCard(
@@ -256,13 +267,18 @@ class _GigHostScreenState extends State<GigHostScreen> {
                 accentColor: const Color(0xFF8B5CF6),
                 badge: 'AVAILABLE',
                 badgeColor: const Color(0xFF8B5CF6),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        PostOfferedGigScreen(hostName: _userName),
-                  ),
-                ),
+                onTap: () {
+                  if (_isVerified == 'verified') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PostOfferedGigScreen(hostName: _userName),
+                      ),
+                    );
+                  } else {
+                    _showModal(context);
+                  }
+                },
               ),
               const SizedBox(height: 28),
 
@@ -1616,4 +1632,60 @@ class _TemplatesSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+void _showModal(
+  BuildContext context, 
+) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: const EdgeInsets.all(24),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: ( Colors.red).withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.error_outline,
+              color: Colors.red,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Account not Verified',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your account needs to be verified before you can continue. Please request verification from the admin.',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor:  Colors.red,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

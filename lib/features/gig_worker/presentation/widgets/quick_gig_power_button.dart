@@ -7,7 +7,8 @@ import '../../../../core/theme/app_colors.dart';
 class QuickGigPowerButton extends StatelessWidget {
   final bool active;
   final ValueChanged<bool> onChanged;
-  const QuickGigPowerButton({super.key, required this.active, required this.onChanged});
+  final String isVerified;
+  const QuickGigPowerButton({super.key, required this.active, required this.onChanged, required this.isVerified});
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +19,13 @@ class QuickGigPowerButton extends StatelessWidget {
     final activeColor = active ? green : kSub;
 
     return GestureDetector(
-      onTap: () => onChanged(!active),
+      onTap: () {
+        if (isVerified == 'verified') {
+          onChanged(!active);
+        } else {
+          _showModal(context);
+        }
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         padding: const EdgeInsets.all(18),
@@ -109,4 +116,60 @@ class QuickGigPowerButton extends StatelessWidget {
       ),
     );
   }
+}
+
+void _showModal(
+  BuildContext context, 
+) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: const EdgeInsets.all(24),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: ( Colors.red).withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.error_outline,
+              color: Colors.red,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Account not Verified',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your account needs to be verified before you can continue. Please request verification from the admin.',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor:  Colors.red,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
