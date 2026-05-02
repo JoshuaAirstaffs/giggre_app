@@ -17,6 +17,20 @@ class GigHostProfileScreen extends StatefulWidget {
   State<GigHostProfileScreen> createState() => _GigHostProfileScreenState();
 }
 
+  const _kBadgeLabels = {
+  'unverified': 'Unverified',
+  'verified': 'Verified',
+  'pending': 'Pending',
+  'rejected': 'Rejected',
+};
+
+const _kBadgeColors = {
+  'unverified': Colors.blue,
+  'verified': Colors.green,
+  'pending': Colors.orangeAccent,
+  'rejected': Colors.red,
+};
+
 class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   bool _loading = true;
 
@@ -31,6 +45,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   String _createdAt = '';
   double _ratingAsHost = 5.0;
   int _ratingCount = 0;
+  String _isVerified = '';
 
   // Stats
   int _gigsPosted = 0;
@@ -97,6 +112,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
         _ratingAsHost = (data['ratingAsHost'] as num? ?? 5.0).toDouble();
         _ratingCount = (data['ratingAsHostCount'] as num? ?? 0).toInt();
         _loading = false;
+        _isVerified = data['isVerified'] ?? false;
       });
     }, onError: (e) => debugPrint('[GigHostProfile] profile: $e'));
 
@@ -590,12 +606,19 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      _name.isNotEmpty ? _name : 'Gig Host',
-                                      style: TextStyle(
-                                          color: onSurface,
-                                          fontSize: 17,
-                                          fontWeight: FontWeight.bold),
+                                    Row(
+                                      children: [
+                                        Text(
+                                          _name.isNotEmpty ? _name : 'Gig Host',
+                                          style: TextStyle(
+                                              color: onSurface,
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.bold),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        if( _isVerified == 'verified')
+                                        Icon(Icons.verified, color: kBlue, size: 16),
+                                      ],
                                     ),
                                     if (_company.isNotEmpty) ...[
                                       const SizedBox(height: 2),
@@ -817,8 +840,8 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             icon: Icons.verified_outlined,
                             iconColor: kBlue,
                             label: 'Verification',
-                            badge: 'Unverified',
-                            badgeColor: Colors.orangeAccent,
+                            badge: _kBadgeLabels[_isVerified],
+                            badgeColor: _kBadgeColors[_isVerified],
                             onTap: () => Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -1828,3 +1851,4 @@ class _HistoryDetailRow extends StatelessWidget {
     );
   }
 }
+

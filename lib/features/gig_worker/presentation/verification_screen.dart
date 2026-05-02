@@ -87,6 +87,15 @@ class _VerificationScreenState extends State<VerificationScreen> {
                         style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                       ),
                     ),
+                  ] else if (_isVerified == 'pending') ...[
+                    _cancelButton(),
+                    const SizedBox(height: 8),
+                    Center(
+                      child: Text(
+                        'Review typically takes 24–48 hours',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                      ),
+                    ),
                   ],
                   const SizedBox(height: 16),
                 ],
@@ -118,7 +127,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
           subtitle: 'Your verification request has been rejected. Please resubmit.',
           color: Colors.red,
         );
-      default: // 'unverified'
+      default:
         return StatusBanner(
           icon: Icons.verified_user_outlined,
           title: 'Not Verified',
@@ -251,6 +260,31 @@ class _VerificationScreenState extends State<VerificationScreen> {
     );
   }
 
+  Widget _cancelButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton(
+        onPressed: _isSubmitting ? null : _handleCancel,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.red,
+          side: const BorderSide(color: Colors.red),
+          padding: const EdgeInsets.symmetric(vertical: 15),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        child: _isSubmitting
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(color: Colors.red, strokeWidth: 2),
+              )
+            : const Text(
+                'Cancel Verification Request',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+      ),
+    );
+  }
+
   void _handleSubmit() async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
@@ -261,22 +295,20 @@ class _VerificationScreenState extends State<VerificationScreen> {
       final userDoc = await _firestore.collection('users').doc(uid).get();
       final userData = userDoc.data() ?? {};
 
-      // Create verification_requests doc (use uid so there's only ever one per user)
       await _firestore.collection('verification_requests').doc(uid).set({
         'userId'       : uid,
         'name'         : userData['name'] ?? '',
         'email'        : userData['email'] ?? '',
         'phone'        : userData['phone'] ?? '',
         'photoUrl'     : userData['photoUrl'] ?? '',
-        'status'       : 'pending',            // pending | verified | rejected
+        'status'       : 'pending',
         'submittedAt'  : FieldValue.serverTimestamp(),
         'reviewedAt'   : null,
-        'reviewedBy'   : null,                 // admin uid who acted on it
-        'rejectReason' : null,                 // filled if rejected
+        'reviewedBy'   : null,
+        'rejectReason' : null,
         'attemptCount' : FieldValue.increment(1),
       }, SetOptions(merge: true));
 
-      // Update user's isVerified to pending
       await _firestore.collection('users').doc(uid).update({
         'isVerified': 'pending',
       });
@@ -302,6 +334,54 @@ class _VerificationScreenState extends State<VerificationScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Failed to submit request. Please try again.'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  void _handleCancel() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      await _firestore.collection('verification_requests').doc(uid).update({
+        'status'      : 'cancelled',
+        'cancelledAt' : FieldValue.serverTimestamp(),
+      });
+
+      await _firestore.collection('users').doc(uid).update({
+        'isVerified': 'unverified',
+      });
+
+      if (mounted) {
+        setState(() => _isVerified = 'unverified');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(children: [
+              Icon(Icons.cancel_outlined, color: Colors.white),
+              SizedBox(width: 10),
+              Expanded(child: Text('Verification request cancelled.')),
+            ]),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Failed to cancel request. Please try again.'),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
