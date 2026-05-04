@@ -4,13 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-<<<<<<< Updated upstream
-import 'package:giggre_app/features/call/call_user_action.dart';
-=======
 import 'package:giggre_app/features/call/voice_call_screen.dart';
 import 'package:giggre_app/features/call/video_call_screen.dart';
 import 'package:giggre_app/main.dart' show navigatorKey;
->>>>>>> Stashed changes
 
 class HomeChat extends StatefulWidget {
   const HomeChat({super.key});
@@ -53,30 +49,6 @@ class _HomeChatState extends State<HomeChat>
 
       final Map<int, bool> roomUnread = {};
 
-<<<<<<< Updated upstream
-      for (int i = 0; i < roomsSnap.docs.length; i++) {
-        final room = roomsSnap.docs[i];
-        final sub = FirebaseFirestore.instance
-            .collection('chat_rooms')
-            .doc(room.id)
-            .collection('messages')
-            .where('isSupport', isEqualTo: true)
-            .where('hasSeen', isEqualTo: false)
-            .limit(1)
-            .snapshots()
-            .map((s) => s.docs.isNotEmpty)
-            .listen(
-              (hasUnread) {
-                roomUnread[i] = hasUnread;
-                final anyUnread = roomUnread.values.any((v) => v);
-                if (mounted) setState(() => _hasUnread = anyUnread);
-              },
-              onError: (e) => debugPrint('[HomeChat] message stream error: $e'),
-            );
-        _roomSubs.add(sub);
-      }
-    });
-=======
           for (int i = 0; i < roomsSnap.docs.length; i++) {
             final room = roomsSnap.docs[i];
             final sub = FirebaseFirestore.instance
@@ -100,7 +72,6 @@ class _HomeChatState extends State<HomeChat>
             _roomSubs.add(sub);
           }
         });
->>>>>>> Stashed changes
   }
 
   @override
@@ -174,15 +145,9 @@ class _FriendsTab extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-<<<<<<< Updated upstream
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-           
-=======
           children: const [
             _TestCallCard(),
             _TestVideoCallCard(),
->>>>>>> Stashed changes
           ],
         ),
       ),
@@ -713,13 +678,8 @@ class _SupportTabState extends State<_SupportTab> {
 
       if (snapshot.docs.isNotEmpty) {
         _lastDoc = snapshot.docs.last;
-<<<<<<< Updated upstream
         _rooms.addAll(
             snapshot.docs.map((d) => {...d.data(), 'roomId': d.id}));
-=======
-        _rooms
-            .addAll(snapshot.docs.map((d) => {...d.data(), 'roomId': d.id}));
->>>>>>> Stashed changes
       }
 
       if (snapshot.docs.length < _limit) _hasMore = false;
