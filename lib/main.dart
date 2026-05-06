@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
@@ -18,6 +19,7 @@ void main() async {
   try {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
     await CurrentUserProvider.initNotifications();
+     FilePicker.platform; 
     CurrentUserProvider.navigatorKey = navigatorKey; 
   } catch (e) {
     firebaseError = e.toString();

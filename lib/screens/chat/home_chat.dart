@@ -146,8 +146,7 @@ class _FriendsTab extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: const [
-            _TestCallCard(),
-            _TestVideoCallCard(),
+
           ],
         ),
       ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 
 class VerificationScreen extends StatefulWidget {
   const VerificationScreen({super.key});
@@ -13,6 +14,7 @@ class VerificationScreen extends StatefulWidget {
 class _VerificationScreenState extends State<VerificationScreen> {
   bool _isSubmitting = false;
   String _isVerified = 'unverified';
+  bool _canSubmitVerification = false;
   bool _loadingStatus = true;
 
   final _auth = FirebaseAuth.instance;
@@ -22,6 +24,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   void initState() {
     super.initState();
     _fetchVerificationStatus();
+    _checkUploadedDocuments();
   }
 
   Future<void> _fetchVerificationStatus() async {
@@ -285,6 +288,37 @@ class _VerificationScreenState extends State<VerificationScreen> {
     );
   }
 
+ Future<void> _checkUploadedDocuments() async {
+  try {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('documents')
+        .get();
+
+    final categories = snapshot.docs
+        .map((doc) => doc.data()['category'] as String? ?? '')
+        .toList();
+
+    final hasWorkerDoc = categories.any((c) => c.startsWith('worker_'));
+    final hasHostDoc = categories.any((c) => c.startsWith('host_'));
+
+    // Then check based on user's role
+    final canSubmit = hasHostDoc && hasWorkerDoc;
+
+    setState(() {
+      _canSubmitVerification = canSubmit;
+    });
+
+    debugPrint('hasWorkerDoc: $hasWorkerDoc, hasHostDoc: $hasHostDoc, canSubmit: $canSubmit');
+  } catch (e) {
+    debugPrint(e.toString());
+  }
+}
+
   void _handleSubmit() async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
@@ -292,8 +326,16 @@ class _VerificationScreenState extends State<VerificationScreen> {
     setState(() => _isSubmitting = true);
 
     try {
+
+      if(!_canSubmitVerification) {
+        _showErrorModal(context);
+        return;
+      }
       final userDoc = await _firestore.collection('users').doc(uid).get();
       final userData = userDoc.data() ?? {};
+
+      //get users documents
+      final userDocuments = await _firestore.collection('users').doc(uid).collection('documents').get();
 
       await _firestore.collection('verification_requests').doc(uid).set({
         'userId'       : uid,
@@ -307,6 +349,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
         'reviewedBy'   : null,
         'rejectReason' : null,
         'attemptCount' : FieldValue.increment(1),
+        'documents'    : userDocuments.docs.map((doc) => doc.data()).toList(),
       }, SetOptions(merge: true));
 
       await _firestore.collection('users').doc(uid).update({
@@ -544,4 +587,68 @@ class PerkCard extends StatelessWidget {
       ),
     );
   }
+}
+
+void _showErrorModal(
+  BuildContext context, 
+) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: const EdgeInsets.all(24),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: ( Colors.orange).withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.error_outline,
+              color: Colors.orange,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Unable to Submit',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Upload at least 1 document for each role (Gig Worker & Gig Host) in My Documents to continue.',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor:  Colors.orange,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => MyDocumentsScreen(userId: FirebaseAuth.instance.currentUser!.uid),
+                  ),
+                );
+              },
+              child: const Text('Go to My Documents', style: TextStyle(color: Colors.white)),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

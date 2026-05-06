@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
+import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
@@ -57,9 +60,12 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   StreamSubscription? _quickGigsSub;
   StreamSubscription? _openGigsSub;
   StreamSubscription? _offeredGigsSub;
+  StreamSubscription? _notifSub;
   List<Map<String, dynamic>> _quickGigsDocs = [];
   List<Map<String, dynamic>> _openGigsDocs = [];
   List<Map<String, dynamic>> _offeredGigsDocs = [];
+
+  int _unreadNotifCount = 0;
 
   static const _activeStatuses = [
     'open', 'in_progress', 'navigating', 'arrived', 'working', 'task_complete', 'payment',
@@ -69,6 +75,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   void initState() {
     super.initState();
     _listenToProfile();
+    _listenForUnread();
   }
 
   @override
@@ -77,6 +84,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
     _quickGigsSub?.cancel();
     _openGigsSub?.cancel();
     _offeredGigsSub?.cancel();
+      _notifSub?.cancel();
     super.dispose();
   }
 
@@ -161,6 +169,21 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
       _recomputeStats();
     }, onError: (e) => debugPrint('[GigHostProfile] offered_gigs: $e'));
   }
+
+  void _listenForUnread() {
+  final userId = context.read<CurrentUserProvider>().uid;
+  _notifSub = FirebaseFirestore.instance
+      .collection('notifications')
+      .where('userId', isEqualTo: userId)
+      .where('read', isEqualTo: false)
+      .snapshots()
+      .listen((snapshot) {
+        setState(() {
+          _unreadNotifCount = snapshot.docs.length;
+        });
+      });
+}
+
 
   void _recomputeStats() {
     final allDocs = [..._quickGigsDocs, ..._openGigsDocs, ..._offeredGigsDocs];
@@ -796,6 +819,20 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                       cardColor: cardColor,
                       child: Column(
                         children: [
+                             _MenuRow(
+                            icon: Icons.description_rounded,
+                            iconColor: const Color.fromARGB(255, 152, 4, 210),
+                            label: 'My Documents',
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => MyDocumentsScreen(userId: FirebaseAuth.instance.currentUser!.uid),
+                                ),
+                              );
+                            },
+                          ),
+                            _Divider(isDark: isDark),
                           _MenuRow(
                             icon: Icons.history_rounded,
                             iconColor: kBlue,
