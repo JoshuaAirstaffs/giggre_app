@@ -52,6 +52,10 @@ dependencies:
   agora_rtc_engine: 6.5.3
   permission_handler: ^12.0.1
   audioplayers: ^6.6.0
+  qr_flutter: ^4.1.0
+  image_picker: ^1.1.2
+  firebase_storage: ^12.3.3
+  # mobile_scanner: ^6.0.10  # disabled: MLKit has no arm64-simulator slice for iOS 26 yet
 
 dev_dependencies:
   flutter_test:

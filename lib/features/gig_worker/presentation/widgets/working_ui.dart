@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../../core/theme/app_colors.dart';
 import 'gig_map_section.dart';
+import 'worker_payment_confirm_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig progress steps
@@ -74,6 +75,8 @@ class _WorkingUIState extends State<WorkingUI> {
   bool _cancelledHandled = false;
   // Show arrival confirmation prompt when geofence triggers
   bool _arrivedPromptVisible = false;
+  // Guard: show worker payment confirmation only once
+  bool _paymentConfirmShown = false;
 
   // Stopwatch (working step)
   late final Stopwatch _stopwatch;
@@ -147,9 +150,22 @@ class _WorkingUIState extends State<WorkingUI> {
         _stopwatch.start();
       }
 
+      if (newStep == _GigStep.payment && !_paymentConfirmShown) {
+        _paymentConfirmShown = true;
+        WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _showWorkerPaymentConfirm());
+      }
+
       if (newStep == _GigStep.completed && !_ratingShown) {
-        _ratingShown = true;
-        _showHostRatingAndComplete(snap.data()!);
+        // Only trigger from the stream when the payment sheet was never opened
+        // this session (app-restore path). The normal path goes through
+        // _onPaymentConfirmed which already handles pop + rating.
+        if (!_paymentConfirmShown) {
+          _ratingShown = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _showHostRatingAndComplete(snap.data()!);
+          });
+        }
       }
     }, onError: (e) => debugPrint('[WorkingUI] gig stream error: $e'));
   }
@@ -285,6 +301,7 @@ class _WorkingUIState extends State<WorkingUI> {
           }
         ]),
         'lastProgressStatus': _lastStatusString,
+        'cancellationRequestedAt': FieldValue.serverTimestamp(),
         'status': 'cancellation_requested',
       });
       if (mounted) {
@@ -313,6 +330,33 @@ class _WorkingUIState extends State<WorkingUI> {
       ),
     );
     widget.onCancel();
+  }
+
+  // ── Payment step — show confirmation sheet for worker to verify code ───────
+  void _showWorkerPaymentConfirm() {
+    if (!mounted) return;
+    WorkerPaymentConfirmSheet.show(
+      context: context,
+      gigId: widget.gig.id,
+      gigCollection: widget.gigCollection,
+      budget: widget.gig.budget,
+      hostName: widget.gig.hostName,
+      onConfirmed: _onPaymentConfirmed,
+    );
+  }
+
+  // Called by WorkerPaymentConfirmSheet after Firestore update succeeds.
+  // WorkingUI owns the pop so it always closes the right route, then shows
+  // the rating dialog without any race against the Firestore stream.
+  void _onPaymentConfirmed() {
+    if (!mounted || _ratingShown) return;
+    _ratingShown = true;
+    // Pop the payment sheet — this context owns the navigator that holds it.
+    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+    _showHostRatingAndComplete({
+      'hostId': widget.gig.hostId,
+      'hostName': widget.gig.hostName,
+    });
   }
 
   // ── Show host rating dialog, then call onComplete ─────────────────────────

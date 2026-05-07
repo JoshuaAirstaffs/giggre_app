@@ -178,6 +178,48 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
         'Worker Assigned',
         '$workerName accepted "$gigTitle"',
       );
+
+      // Cancellation requested — show who initiated it
+      if (gig['status'] == 'cancellation_requested') {
+        final reasons = gig['cancellation_reason'] as List?;
+        final lastReason = reasons != null && reasons.isNotEmpty
+            ? reasons.last as Map<String, dynamic>?
+            : null;
+        final requestedBy = lastReason?['requestedBy'] as String? ?? 'host';
+        tryAdd(
+          'cancellationRequestedAt',
+          _ActivityType.cancellationRequested,
+          requestedBy == 'worker'
+              ? 'Worker Requested Cancellation'
+              : 'Cancellation Pending Review',
+          requestedBy == 'worker'
+              ? '$workerName wants to cancel "$gigTitle" — pending admin'
+              : 'Your request for "$gigTitle" awaits admin review',
+        );
+      }
+
+      // Cancelled — admin approved
+      if (gig['status'] == 'cancelled') {
+        final reasons = gig['cancellation_reason'] as List?;
+        final lastReason = reasons != null && reasons.isNotEmpty
+            ? reasons.last as Map<String, dynamic>?
+            : null;
+        final requestedBy = lastReason?['requestedBy'] as String? ?? 'host';
+        final cancelledTs = gig['cancelledAt'] as Timestamp? ??
+            gig['cancellationRequestedAt'] as Timestamp?;
+        if (cancelledTs != null) {
+          final dt = cancelledTs.toDate().toLocal();
+          if (now.difference(dt) <= _kWindow) {
+            items.add(_ActivityItem(
+              type: _ActivityType.cancelled,
+              title: 'Gig Cancelled',
+              body: 'Admin approved · Requested by ${requestedBy == 'worker' ? workerName : 'you'}',
+              timestamp: dt,
+              gigType: gigType,
+            ));
+          }
+        }
+      }
     }
 
     items.sort((a, b) => b.timestamp.compareTo(a.timestamp));
@@ -325,7 +367,7 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data model
 // ─────────────────────────────────────────────────────────────────────────────
-enum _ActivityType { completed, taskComplete, working, arrived, assigned }
+enum _ActivityType { completed, taskComplete, working, arrived, assigned, cancellationRequested, cancelled }
 
 class _ActivityItem {
   final _ActivityType type;
@@ -367,6 +409,10 @@ class _ActivityTile extends StatelessWidget {
         return (icon: Icons.where_to_vote_rounded, color: kBlue);
       case _ActivityType.assigned:
         return (icon: Icons.person_add_alt_1_rounded, color: kAmber);
+      case _ActivityType.cancellationRequested:
+        return (icon: Icons.hourglass_top_rounded, color: Colors.orange);
+      case _ActivityType.cancelled:
+        return (icon: Icons.cancel_outlined, color: Colors.redAccent);
     }
   }
 

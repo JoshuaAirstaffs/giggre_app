@@ -1,11 +1,18 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../../core/theme/app_colors.dart';
 import '../../services/quick_gig_matching_service.dart';
+import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
+
+String _generatePaymentCode() {
+  final r = Random();
+  return List.generate(6, (_) => r.nextInt(10)).join();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig Detail Sheet  –  shown when host taps a gig card
@@ -204,6 +211,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           }
         ]),
         'lastProgressStatus': _data?['status'] as String? ?? 'working',
+        'cancellationRequestedAt': FieldValue.serverTimestamp(),
         'status': 'cancellation_requested',
       });
       if (mounted) {
@@ -232,25 +240,37 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     final title = data['title'] as String? ?? 'Gig';
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
 
-    bool confirmed = false;
+    String? paymentCode;
     await PaymentSelectionSheet.show(
       context: context,
       gigTitle: title,
       budget: budget,
       onConfirm: (paymentMethod) async {
+        paymentCode = _generatePaymentCode();
         await Future.wait([
           db.collection(_collection).doc(widget.gigId).update({
-            'status': 'completed',
-            'completedAt': FieldValue.serverTimestamp(),
+            'status': 'payment',
             'paymentMethod': paymentMethod,
+            'paymentCode': paymentCode,
+            'paymentInitiatedAt': FieldValue.serverTimestamp(),
           }),
           if (workerId != null && workerId.isNotEmpty)
             db.collection('users').doc(workerId).update({'slot': 'AVAILABLE'}),
         ]);
-        confirmed = true;
       },
     );
-    if (!mounted || !confirmed) return;
+    if (!mounted || paymentCode == null) return;
+
+    final workerConfirmed = await HostPaymentCodeSheet.show(
+      context: context,
+      gigId: widget.gigId,
+      gigCollection: _collection,
+      paymentCode: paymentCode!,
+      budget: budget,
+      workerName: workerName,
+    );
+    if (!mounted || !workerConfirmed) return;
+
     if (workerId != null && workerId.isNotEmpty) {
       await showDialog(
         context: context,

@@ -1,5 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
@@ -19,6 +23,7 @@ import 'widgets/toolchest_sheet.dart';
 import 'gig_history_screen.dart';
 import 'worker_ratings_screen.dart';
 import 'widgets/worker_notifications_sheet.dart';
+import 'worker_settings_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main screen
@@ -795,10 +800,45 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     );
   }
 
+  Future<void> _pickAvatar(void Function(void Function()) setModal,
+      void Function(XFile) onPicked) async {
+    final source = await showDialog<ImageSource>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Change Profile Photo',
+            style: TextStyle(
+                color: Theme.of(ctx).colorScheme.onSurface, fontSize: 15)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded, color: kBlue),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded, color: kBlue),
+              title: const Text('Choose from Library'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final picked = await ImagePicker()
+        .pickImage(source: source, imageQuality: 80, maxWidth: 512);
+    if (picked != null) setModal(() => onPicked(picked));
+  }
+
   void _showEditPersonalInfo() {
     final nameCtrl = TextEditingController(text: _name);
     final phoneCtrl = TextEditingController(text: _phone);
     final bioCtrl = TextEditingController(text: _bio);
+    bool saving = false;
+    XFile? pickedImage;
 
     showModalBottomSheet(
       context: context,
@@ -810,7 +850,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           final cardColor =
               isDark ? const Color(0xFF1E2533) : Colors.white;
           final onSurface = Theme.of(ctx).colorScheme.onSurface;
-          bool saving = false;
 
           return Padding(
             padding: EdgeInsets.only(
@@ -852,6 +891,62 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                     ],
                   ),
                   const SizedBox(height: 20),
+
+                  // ── Avatar picker ───────────────────────────────────────
+                  Center(
+                    child: GestureDetector(
+                      onTap: saving
+                          ? null
+                          : () => _pickAvatar(
+                                setModal,
+                                (img) => pickedImage = img,
+                              ),
+                      child: Stack(
+                        children: [
+                          Container(
+                            width: 80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                  color: kBlue.withValues(alpha: 0.5),
+                                  width: 2),
+                            ),
+                            child: ClipOval(
+                              child: pickedImage != null
+                                  ? Image.file(File(pickedImage!.path),
+                                      fit: BoxFit.cover)
+                                  : _photoUrl.isNotEmpty
+                                      ? CachedNetworkImage(
+                                          imageUrl: _photoUrl,
+                                          fit: BoxFit.cover,
+                                          placeholder: (c, u) => _workerDefaultAvatar(),
+                                          errorWidget: (c, u, e) => _workerDefaultAvatar(),
+                                        )
+                                      : _workerDefaultAvatar(),
+                            ),
+                          ),
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: kBlue,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: cardColor, width: 2),
+                              ),
+                              child: const Icon(Icons.camera_alt_rounded,
+                                  color: Colors.white, size: 14),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
                   _EditField(
                       label: 'Name',
                       controller: nameCtrl,
@@ -871,45 +966,60 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,
-                    child: StatefulBuilder(
-                      builder: (_, setSave) => ElevatedButton(
-                        onPressed: saving
-                            ? null
-                            : () async {
-                                setSave(() => saving = true);
-                                final uid = FirebaseAuth
-                                    .instance.currentUser?.uid;
-                                if (uid != null) {
-                                  await FirebaseFirestore.instance
-                                      .collection('users')
-                                      .doc(uid)
-                                      .update({
-                                    'name': nameCtrl.text.trim(),
-                                    'phone': phoneCtrl.text.trim(),
-                                    'bio': bioCtrl.text.trim(),
-                                  });
+                    child: ElevatedButton(
+                      onPressed: saving
+                          ? null
+                          : () async {
+                              setModal(() => saving = true);
+                              final uid =
+                                  FirebaseAuth.instance.currentUser?.uid;
+                              if (uid == null) return;
+                              try {
+                                String? newPhotoUrl;
+                                if (pickedImage != null) {
+                                  final ref = FirebaseStorage.instance
+                                      .ref()
+                                      .child('profile_images/$uid.jpg');
+                                  await ref.putFile(
+                                      File(pickedImage!.path));
+                                  newPhotoUrl =
+                                      await ref.getDownloadURL();
                                 }
+                                final updates = <String, dynamic>{
+                                  'name': nameCtrl.text.trim(),
+                                  'phone': phoneCtrl.text.trim(),
+                                  'bio': bioCtrl.text.trim(),
+                                };
+                                if (newPhotoUrl != null) {
+                                  updates['photoUrl'] = newPhotoUrl;
+                                }
+                                await FirebaseFirestore.instance
+                                    .collection('users')
+                                    .doc(uid)
+                                    .update(updates);
                                 if (ctx.mounted) Navigator.pop(ctx);
-                              },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: kBlue,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        child: saving
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2))
-                            : const Text('Save Changes',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.w600)),
+                              } catch (e) {
+                                setModal(() => saving = false);
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kBlue,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 14),
                       ),
+                      child: saving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2))
+                          : const Text('Save Changes',
+                              style:
+                                  TextStyle(fontWeight: FontWeight.w600)),
                     ),
                   ),
                 ],
@@ -918,6 +1028,14 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           );
         },
       ),
+    );
+  }
+
+  Widget _workerDefaultAvatar() {
+    return Container(
+      color: kBlue.withValues(alpha: 0.12),
+      child: const Icon(Icons.account_circle_rounded,
+          color: kBlue, size: 48),
     );
   }
 
@@ -1126,7 +1244,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                               icon: Icons.settings_outlined,
                               iconColor: kSub,
                               label: 'Settings',
-                              onTap: () => _showComingSoon('Settings'),
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const WorkerSettingsScreen(),
+                                ),
+                              ),
                             ),
                             const WorkerDivider(),
                             MenuRow(

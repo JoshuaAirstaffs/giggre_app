@@ -1,8 +1,15 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/theme/app_colors.dart';
+import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
+
+String _generatePaymentCode() {
+  final r = Random();
+  return List.generate(6, (_) => r.nextInt(10)).join();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig Progress Tracker — shown on the host dashboard
@@ -200,18 +207,20 @@ class _GigProgressCard extends StatelessWidget {
     String title,
     double budget,
   ) async {
-    bool confirmed = false;
+    String? paymentCode;
     await PaymentSelectionSheet.show(
       context: context,
       gigTitle: title,
       budget: budget,
       onConfirm: (paymentMethod) async {
+        paymentCode = _generatePaymentCode();
         final db = FirebaseFirestore.instance;
         final updates = <Future>[
           db.collection(gigCollection).doc(gigId).update({
-            'status': 'completed',
-            'completedAt': FieldValue.serverTimestamp(),
+            'status': 'payment',
             'paymentMethod': paymentMethod,
+            'paymentCode': paymentCode,
+            'paymentInitiatedAt': FieldValue.serverTimestamp(),
           }),
         ];
         if (workerId != null && workerId.isNotEmpty) {
@@ -220,10 +229,20 @@ class _GigProgressCard extends StatelessWidget {
           );
         }
         await Future.wait(updates);
-        confirmed = true;
       },
     );
-    if (confirmed && workerId != null && workerId.isNotEmpty) {
+    if (paymentCode == null || !context.mounted) return;
+
+    final workerConfirmed = await HostPaymentCodeSheet.show(
+      context: context,
+      gigId: gigId,
+      gigCollection: gigCollection,
+      paymentCode: paymentCode!,
+      budget: budget,
+      workerName: workerName,
+    );
+
+    if (workerConfirmed && workerId != null && workerId.isNotEmpty) {
       await onPaymentConfirmed?.call(workerId, workerName);
     }
   }

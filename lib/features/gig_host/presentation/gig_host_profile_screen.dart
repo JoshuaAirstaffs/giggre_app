@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import '../../../core/theme/app_colors.dart';
@@ -9,6 +12,7 @@ import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
 import 'widgets/payment_history_sheet.dart';
 import 'widgets/notifications_sheet.dart';
+import 'host_privacy_security_screen.dart';
 
 class GigHostProfileScreen extends StatefulWidget {
   const GigHostProfileScreen({super.key});
@@ -202,12 +206,46 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
     return months[month];
   }
 
+  Future<void> _pickAvatar(void Function(void Function()) setModal,
+      void Function(XFile) onPicked) async {
+    final source = await showDialog<ImageSource>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Change Profile Photo',
+            style: TextStyle(
+                color: Theme.of(ctx).colorScheme.onSurface, fontSize: 15)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded, color: kAmber),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded, color: kAmber),
+              title: const Text('Choose from Library'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final picked = await ImagePicker()
+        .pickImage(source: source, imageQuality: 80, maxWidth: 512);
+    if (picked != null) setModal(() => onPicked(picked));
+  }
+
   void _showEditPersonalInfo() {
     final nameCtrl = TextEditingController(text: _name);
     final companyCtrl = TextEditingController(text: _company);
     final bioCtrl = TextEditingController(text: _bio);
     final phoneCtrl = TextEditingController(text: _phone);
     bool saving = false;
+    XFile? pickedImage;
     final formKey = GlobalKey<FormState>();
 
     showModalBottomSheet(
@@ -260,6 +298,64 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             fontSize: 17,
                             fontWeight: FontWeight.bold)),
                     const SizedBox(height: 20),
+
+                    // ── Avatar picker ─────────────────────────────────────
+                    Center(
+                      child: GestureDetector(
+                        onTap: saving
+                            ? null
+                            : () => _pickAvatar(
+                                  setModal,
+                                  (img) => pickedImage = img,
+                                ),
+                        child: Stack(
+                          children: [
+                            Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: kAmber.withValues(alpha: 0.5),
+                                    width: 2),
+                              ),
+                              child: ClipOval(
+                                child: pickedImage != null
+                                    ? Image.file(File(pickedImage!.path),
+                                        fit: BoxFit.cover)
+                                    : _photoUrl.isNotEmpty
+                                        ? CachedNetworkImage(
+                                            imageUrl: _photoUrl,
+                                            fit: BoxFit.cover,
+                                            placeholder: (c, u) =>
+                                                const _DefaultAvatar(size: 80),
+                                            errorWidget: (c, u, e) =>
+                                                const _DefaultAvatar(size: 80),
+                                          )
+                                        : const _DefaultAvatar(size: 80),
+                              ),
+                            ),
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: kAmber,
+                                  shape: BoxShape.circle,
+                                  border:
+                                      Border.all(color: cardColor, width: 2),
+                                ),
+                                child: const Icon(Icons.camera_alt_rounded,
+                                    color: Colors.black, size: 14),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
                     _ModalField(
                       controller: nameCtrl,
                       label: 'Full Name',
@@ -330,27 +426,41 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                 final uid =
                                     FirebaseAuth.instance.currentUser?.uid;
                                 if (uid == null) return;
-                                // Capture before async gap
                                 final messenger =
                                     ScaffoldMessenger.of(context);
                                 try {
-                                  await FirebaseFirestore.instance
-                                      .collection('users')
-                                      .doc(uid)
-                                      .update({
+                                  String? newPhotoUrl;
+                                  if (pickedImage != null) {
+                                    final ref = FirebaseStorage.instance
+                                        .ref()
+                                        .child('profile_images/$uid.jpg');
+                                    await ref.putFile(File(pickedImage!.path));
+                                    newPhotoUrl = await ref.getDownloadURL();
+                                  }
+                                  final updates = <String, dynamic>{
                                     'name': nameCtrl.text.trim(),
                                     'company': companyCtrl.text.trim(),
                                     'phone': phoneCtrl.text.trim(),
                                     'bio': bioCtrl.text.trim(),
-                                  });
+                                  };
+                                  if (newPhotoUrl != null) {
+                                    updates['photoUrl'] = newPhotoUrl;
+                                  }
+                                  await FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(uid)
+                                      .update(updates);
                                   if (!mounted) return;
                                   setState(() {
                                     _name = nameCtrl.text.trim();
                                     _company = companyCtrl.text.trim();
                                     _phone = phoneCtrl.text.trim();
                                     _bio = bioCtrl.text.trim();
+                                    if (newPhotoUrl != null) {
+                                      _photoUrl = newPhotoUrl;
+                                    }
                                   });
-                                  Navigator.pop(ctx);
+                                  if (ctx.mounted) Navigator.pop(ctx);
                                   messenger.showSnackBar(
                                     SnackBar(
                                       content: const Row(children: [
@@ -431,48 +541,6 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => FavoriteWorkersSheet(hostId: uid),
-    );
-  }
-
-  void _showComingSoon(String title) {
-    final cardColor = Theme.of(context).cardColor;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: kAmber.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.construction_rounded,
-                  color: kAmber, size: 26),
-            ),
-            const SizedBox(height: 14),
-            Text(title,
-                style: TextStyle(
-                    color: onSurface,
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            const Text('This feature is coming soon.',
-                style: TextStyle(color: kSub, fontSize: 13)),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
     );
   }
 
@@ -838,7 +906,13 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             icon: Icons.lock_outline_rounded,
                             iconColor: const Color(0xFF94A3B8),
                             label: 'Privacy & Security',
-                            onTap: () => _showComingSoon('Privacy & Security'),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const HostPrivacySecurityScreen(),
+                              ),
+                            ),
                           ),
                         ],
                       ),

@@ -138,30 +138,41 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         return;
       }
 
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      Position? pos = await Geolocator.getLastKnownPosition();
+      pos ??= await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 15),
+        ),
       );
 
-      final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
-      String address = 'Unknown location';
-      if (placemarks.isNotEmpty) {
-        final p = placemarks.first;
-        final parts = [
-          if (p.street != null && p.street!.isNotEmpty) p.street,
-          if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality,
-          if (p.locality != null && p.locality!.isNotEmpty) p.locality,
-          if (p.administrativeArea != null && p.administrativeArea!.isNotEmpty)
-            p.administrativeArea,
-        ];
-        address = parts.join(', ');
-      }
-
+      // Save GPS position immediately — geocoding failure won't block submission
       if (!mounted) return;
       setState(() {
         _gpsPosition = pos;
+        _loadingLocation = false;
+      });
+
+      String address = 'GPS location ready';
+      try {
+        final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
+        if (placemarks.isNotEmpty) {
+          final p = placemarks.first;
+          final parts = [
+            if (p.street != null && p.street!.isNotEmpty) p.street,
+            if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality,
+            if (p.locality != null && p.locality!.isNotEmpty) p.locality,
+            if (p.administrativeArea != null && p.administrativeArea!.isNotEmpty)
+              p.administrativeArea,
+          ];
+          if (parts.isNotEmpty) address = parts.join(', ');
+        }
+      } catch (_) {}
+
+      if (!mounted) return;
+      setState(() {
         _gpsAddress = address;
         if (!_useMapLocation) _address = address;
-        _loadingLocation = false;
       });
     } catch (e) {
       if (!mounted) return;

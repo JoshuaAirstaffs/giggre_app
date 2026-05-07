@@ -168,6 +168,48 @@ class _WorkerNotificationsSheetState
           '$hostName assigned you to "$gigTitle"',
         );
       }
+
+      // Cancellation requested — show who initiated it
+      if (status == 'cancellation_requested') {
+        final reasons = gig['cancellation_reason'] as List?;
+        final lastReason = reasons != null && reasons.isNotEmpty
+            ? reasons.last as Map<String, dynamic>?
+            : null;
+        final requestedBy = lastReason?['requestedBy'] as String? ?? 'worker';
+        tryAdd(
+          'cancellationRequestedAt',
+          _ActivityType.cancellationRequested,
+          requestedBy == 'host'
+              ? 'Host Requested Cancellation'
+              : 'Cancellation Pending Review',
+          requestedBy == 'host'
+              ? '$hostName wants to cancel "$gigTitle" — pending admin'
+              : 'Your request for "$gigTitle" awaits admin review',
+        );
+      }
+
+      // Cancelled — admin approved
+      if (status == 'cancelled') {
+        final reasons = gig['cancellation_reason'] as List?;
+        final lastReason = reasons != null && reasons.isNotEmpty
+            ? reasons.last as Map<String, dynamic>?
+            : null;
+        final requestedBy = lastReason?['requestedBy'] as String? ?? 'worker';
+        final cancelledTs = gig['cancelledAt'] as Timestamp? ??
+            gig['cancellationRequestedAt'] as Timestamp?;
+        if (cancelledTs != null) {
+          final dt = cancelledTs.toDate().toLocal();
+          if (now.difference(dt) <= _kWindow) {
+            items.add(_ActivityItem(
+              type: _ActivityType.cancelled,
+              title: 'Gig Cancelled',
+              body: 'Admin approved · Requested by ${requestedBy == 'host' ? hostName : 'you'}',
+              timestamp: dt,
+              gigType: gigType,
+            ));
+          }
+        }
+      }
     }
 
     items.sort((a, b) => b.timestamp.compareTo(a.timestamp));
@@ -323,6 +365,8 @@ enum _ActivityType {
   gigCompleted,
   newOffer,
   assigned,
+  cancellationRequested,
+  cancelled,
 }
 
 class _ActivityItem {
@@ -371,6 +415,16 @@ class _ActivityTile extends StatelessWidget {
         return (
           icon: Icons.assignment_ind_outlined,
           color: kBlue,
+        );
+      case _ActivityType.cancellationRequested:
+        return (
+          icon: Icons.hourglass_top_rounded,
+          color: Colors.orange,
+        );
+      case _ActivityType.cancelled:
+        return (
+          icon: Icons.cancel_outlined,
+          color: Colors.redAccent,
         );
     }
   }
