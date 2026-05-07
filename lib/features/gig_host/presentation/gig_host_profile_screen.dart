@@ -6,7 +6,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
+import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
@@ -20,6 +23,20 @@ class GigHostProfileScreen extends StatefulWidget {
   @override
   State<GigHostProfileScreen> createState() => _GigHostProfileScreenState();
 }
+
+  const _kBadgeLabels = {
+  'unverified': 'Unverified',
+  'verified': 'Verified',
+  'pending': 'Pending',
+  'rejected': 'Rejected',
+};
+
+const _kBadgeColors = {
+  'unverified': Colors.blue,
+  'verified': Colors.green,
+  'pending': Colors.orangeAccent,
+  'rejected': Colors.red,
+};
 
 class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   bool _loading = true;
@@ -35,6 +52,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   String _createdAt = '';
   double _ratingAsHost = 5.0;
   int _ratingCount = 0;
+  String _isVerified = '';
 
   // Stats
   int _gigsPosted = 0;
@@ -46,9 +64,12 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   StreamSubscription? _quickGigsSub;
   StreamSubscription? _openGigsSub;
   StreamSubscription? _offeredGigsSub;
+  StreamSubscription? _notifSub;
   List<Map<String, dynamic>> _quickGigsDocs = [];
   List<Map<String, dynamic>> _openGigsDocs = [];
   List<Map<String, dynamic>> _offeredGigsDocs = [];
+
+  int _unreadNotifCount = 0;
 
   static const _activeStatuses = [
     'open', 'in_progress', 'navigating', 'arrived', 'working', 'task_complete', 'payment',
@@ -58,6 +79,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   void initState() {
     super.initState();
     _listenToProfile();
+    _listenForUnread();
   }
 
   @override
@@ -66,6 +88,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
     _quickGigsSub?.cancel();
     _openGigsSub?.cancel();
     _offeredGigsSub?.cancel();
+      _notifSub?.cancel();
     super.dispose();
   }
 
@@ -101,6 +124,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
         _ratingAsHost = (data['ratingAsHost'] as num? ?? 5.0).toDouble();
         _ratingCount = (data['ratingAsHostCount'] as num? ?? 0).toInt();
         _loading = false;
+        _isVerified = data['isVerified'] ?? false;
       });
     }, onError: (e) => debugPrint('[GigHostProfile] profile: $e'));
 
@@ -149,6 +173,21 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
       _recomputeStats();
     }, onError: (e) => debugPrint('[GigHostProfile] offered_gigs: $e'));
   }
+
+  void _listenForUnread() {
+  final userId = context.read<CurrentUserProvider>().uid;
+  _notifSub = FirebaseFirestore.instance
+      .collection('notifications')
+      .where('userId', isEqualTo: userId)
+      .where('read', isEqualTo: false)
+      .snapshots()
+      .listen((snapshot) {
+        setState(() {
+          _unreadNotifCount = snapshot.docs.length;
+        });
+      });
+}
+
 
   void _recomputeStats() {
     final allDocs = [..._quickGigsDocs, ..._openGigsDocs, ..._offeredGigsDocs];
@@ -658,12 +697,19 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      _name.isNotEmpty ? _name : 'Gig Host',
-                                      style: TextStyle(
-                                          color: onSurface,
-                                          fontSize: 17,
-                                          fontWeight: FontWeight.bold),
+                                    Row(
+                                      children: [
+                                        Text(
+                                          _name.isNotEmpty ? _name : 'Gig Host',
+                                          style: TextStyle(
+                                              color: onSurface,
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.bold),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        if( _isVerified == 'verified')
+                                        Icon(Icons.verified, color: kBlue, size: 16),
+                                      ],
                                     ),
                                     if (_company.isNotEmpty) ...[
                                       const SizedBox(height: 2),
@@ -841,6 +887,20 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                       cardColor: cardColor,
                       child: Column(
                         children: [
+                             _MenuRow(
+                            icon: Icons.description_rounded,
+                            iconColor: const Color.fromARGB(255, 152, 4, 210),
+                            label: 'My Documents',
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => MyDocumentsScreen(userId: FirebaseAuth.instance.currentUser!.uid),
+                                ),
+                              );
+                            },
+                          ),
+                            _Divider(isDark: isDark),
                           _MenuRow(
                             icon: Icons.history_rounded,
                             iconColor: kBlue,
@@ -885,8 +945,8 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             icon: Icons.verified_outlined,
                             iconColor: kBlue,
                             label: 'Verification',
-                            badge: 'Unverified',
-                            badgeColor: Colors.orangeAccent,
+                            badge: _kBadgeLabels[_isVerified],
+                            badgeColor: _kBadgeColors[_isVerified],
                             onTap: () => Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -1902,3 +1962,4 @@ class _HistoryDetailRow extends StatelessWidget {
     );
   }
 }
+
