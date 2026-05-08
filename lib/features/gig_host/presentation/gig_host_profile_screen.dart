@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
+import 'package:giggre_app/features/gig_host/presentation/privacy_security_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
@@ -898,7 +899,12 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             icon: Icons.lock_outline_rounded,
                             iconColor: const Color(0xFF94A3B8),
                             label: 'Privacy & Security',
-                            onTap: () => _showComingSoon('Privacy & Security'),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const PrivacySecurityScreen(),
+                              ),
+                            ),
                           ),
                         ],
                       ),
