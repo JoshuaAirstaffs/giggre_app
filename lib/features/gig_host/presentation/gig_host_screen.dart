@@ -15,6 +15,7 @@ import 'gig_host_profile_screen.dart';
 import '../services/quick_gig_matching_service.dart';
 import '../models/gig_template_model.dart';
 import 'widgets/gig_detail_sheet.dart';
+import 'widgets/admin_gig_config_sheet.dart';
 import 'host_gigs_screen.dart';
 
 class GigHostScreen extends StatefulWidget {
@@ -131,18 +132,22 @@ class _GigHostScreenState extends State<GigHostScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Gig Host',
-                    style: TextStyle(
-                        color: onSurface,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14)),
-                const Text('Dashboard',
-                    style: TextStyle(color: kSub, fontSize: 10)),
-              ],
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Gig Host',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: onSurface,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14)),
+                  const Text('Dashboard',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: kSub, fontSize: 10)),
+                ],
+              ),
             ),
           ],
         ),
@@ -152,10 +157,36 @@ class _GigHostScreenState extends State<GigHostScreen> {
             icon: const Icon(Icons.account_circle_outlined, color: kSub),
             onPressed: _showProfile,
           ),
-          IconButton(
-            tooltip: 'Saved Templates',
-            icon: const Icon(Icons.bookmark_add_outlined, color: kSub),
-            onPressed: _showTemplates,
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            icon: const Icon(Icons.more_vert_rounded, color: kSub),
+            color: Theme.of(context).cardColor,
+            onSelected: (val) {
+              if (val == 'templates') _showTemplates();
+              if (val == 'config') AdminGigConfigSheet.show(context);
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'templates',
+                child: Row(
+                  children: [
+                    Icon(Icons.bookmark_add_outlined, size: 16, color: kSub),
+                    SizedBox(width: 10),
+                    Text('Saved Templates', style: TextStyle(fontSize: 13)),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'config',
+                child: Row(
+                  children: [
+                    Icon(Icons.tune_rounded, size: 16, color: kSub),
+                    SizedBox(width: 10),
+                    Text('Gig Config', style: TextStyle(fontSize: 13)),
+                  ],
+                ),
+              ),
+            ],
           ),
           const ThemeToggleButton(),
           IconButton(

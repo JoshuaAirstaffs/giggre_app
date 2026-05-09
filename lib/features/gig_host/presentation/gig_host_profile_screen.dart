@@ -6,10 +6,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
-import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
@@ -175,18 +173,20 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   }
 
   void _listenForUnread() {
-  final userId = context.read<CurrentUserProvider>().uid;
-  _notifSub = FirebaseFirestore.instance
-      .collection('notifications')
-      .where('userId', isEqualTo: userId)
-      .where('read', isEqualTo: false)
-      .snapshots()
-      .listen((snapshot) {
-        setState(() {
-          _unreadNotifCount = snapshot.docs.length;
-        });
-      });
-}
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+    _notifSub = FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: userId)
+        .where('read', isEqualTo: false)
+        .snapshots()
+        .listen((snapshot) {
+          if (!mounted) return;
+          setState(() {
+            _unreadNotifCount = snapshot.docs.length;
+          });
+        }, onError: (e) => debugPrint('[GigHostProfile] notif: $e'));
+  }
 
 
   void _recomputeStats() {

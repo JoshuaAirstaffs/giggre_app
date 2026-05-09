@@ -34,9 +34,10 @@ class _WorkerNotificationsSheetState
   List<Map<String, dynamic>> _quickGigs = [];
   List<Map<String, dynamic>> _openGigs = [];
   List<Map<String, dynamic>> _offeredGigs = [];
+  Map<String, dynamic>? _verifData;
   bool _loading = true;
 
-  StreamSubscription? _quickSub, _openSub, _offeredSub;
+  StreamSubscription? _quickSub, _openSub, _offeredSub, _verifSub;
   Timer? _ticker;
 
   @override
@@ -53,6 +54,7 @@ class _WorkerNotificationsSheetState
     _quickSub?.cancel();
     _openSub?.cancel();
     _offeredSub?.cancel();
+    _verifSub?.cancel();
     _ticker?.cancel();
     super.dispose();
   }
@@ -95,6 +97,17 @@ class _WorkerNotificationsSheetState
         return m;
       }).toList();
       if (mounted) setState(() {});
+    });
+
+    _verifSub = _db
+        .collection('verification_requests')
+        .doc(_uid)
+        .snapshots()
+        .listen((snap) {
+      _verifData = snap.exists ? snap.data() : null;
+      if (mounted) setState(() {});
+    }, onError: (_) {
+      // permission denied — verification notifications silently skipped
     });
   }
 
@@ -206,6 +219,52 @@ class _WorkerNotificationsSheetState
               body: 'Admin approved · Requested by ${requestedBy == 'host' ? hostName : 'you'}',
               timestamp: dt,
               gigType: gigType,
+            ));
+          }
+        }
+      }
+    }
+
+    // Verification notifications
+    if (_verifData != null) {
+      final verifStatus = _verifData!['status'] as String? ?? '';
+      final rejectReason = _verifData!['rejectReason'] as String? ?? '';
+
+      final submittedTs = _verifData!['submittedAt'] as Timestamp?;
+      if (submittedTs != null) {
+        final dt = submittedTs.toDate().toLocal();
+        if (now.difference(dt) <= _kWindow) {
+          items.add(_ActivityItem(
+            type: _ActivityType.verificationSubmitted,
+            title: 'Verification Submitted',
+            body: 'Your request is under review — we\'ll notify you once processed',
+            timestamp: dt,
+            gigType: 'verification',
+          ));
+        }
+      }
+
+      final reviewedTs = _verifData!['reviewedAt'] as Timestamp?;
+      if (reviewedTs != null) {
+        final dt = reviewedTs.toDate().toLocal();
+        if (now.difference(dt) <= _kWindow) {
+          if (verifStatus == 'verified') {
+            items.add(_ActivityItem(
+              type: _ActivityType.verificationApproved,
+              title: 'Verification Approved',
+              body: 'Your account is now verified — enjoy all verified perks!',
+              timestamp: dt,
+              gigType: 'verification',
+            ));
+          } else if (verifStatus == 'rejected') {
+            items.add(_ActivityItem(
+              type: _ActivityType.verificationRejected,
+              title: 'Verification Rejected',
+              body: rejectReason.isNotEmpty
+                  ? 'Reason: $rejectReason'
+                  : 'Please resubmit with valid documents',
+              timestamp: dt,
+              gigType: 'verification',
             ));
           }
         }
@@ -367,6 +426,9 @@ enum _ActivityType {
   assigned,
   cancellationRequested,
   cancelled,
+  verificationSubmitted,
+  verificationApproved,
+  verificationRejected,
 }
 
 class _ActivityItem {
@@ -426,12 +488,19 @@ class _ActivityTile extends StatelessWidget {
           icon: Icons.cancel_outlined,
           color: Colors.redAccent,
         );
+      case _ActivityType.verificationSubmitted:
+        return (icon: Icons.hourglass_top_rounded, color: Colors.orange);
+      case _ActivityType.verificationApproved:
+        return (icon: Icons.verified_rounded, color: const Color(0xFF10B981));
+      case _ActivityType.verificationRejected:
+        return (icon: Icons.cancel_outlined, color: Colors.redAccent);
     }
   }
 
   static Color _typeColor(String gigType) {
     if (gigType == 'open') return kBlue;
     if (gigType == 'offered') return const Color(0xFF8B5CF6);
+    if (gigType == 'verification') return const Color(0xFF8B5CF6);
     return kAmber;
   }
 
@@ -447,11 +516,13 @@ class _ActivityTile extends StatelessWidget {
     final s = _style(item.type);
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final typeColor = _typeColor(item.gigType);
-    final typeLabel = item.gigType == 'quick'
-        ? 'Quick'
-        : item.gigType == 'open'
-            ? 'Open'
-            : 'Offered';
+    final typeLabel = item.gigType == 'verification'
+        ? 'Account'
+        : item.gigType == 'quick'
+            ? 'Quick'
+            : item.gigType == 'open'
+                ? 'Open'
+                : 'Offered';
 
     return Container(
       padding: const EdgeInsets.all(13),
