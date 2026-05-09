@@ -7,6 +7,7 @@ import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_host/presentation/privacy_security_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
+import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import 'widgets/favorite_workers_sheet.dart';
@@ -860,6 +861,20 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             iconColor: const Color(0xFF10B981),
                             label: 'Payment History',
                             onTap: _showPaymentHistory,
+                          ),
+                           _Divider(isDark: isDark),
+                          _MenuRow(
+                            icon: Icons.card_giftcard,
+                            iconColor: const Color(0xFF8B5CF6),
+                            label: 'My Referrals',
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => MyReferralScreen(),
+                                ),
+                              );
+                            }
                           ),
                         ],
                       ),
