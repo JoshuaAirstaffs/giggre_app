@@ -7,7 +7,10 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
+import 'package:giggre_app/features/gig_host/presentation/privacy_security_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
+import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
+import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
@@ -928,6 +931,20 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             label: 'Payment History',
                             onTap: _showPaymentHistory,
                           ),
+                           _Divider(isDark: isDark),
+                          _MenuRow(
+                            icon: Icons.card_giftcard,
+                            iconColor: const Color(0xFF8B5CF6),
+                            label: 'My Referrals',
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => MyReferralScreen(),
+                                ),
+                              );
+                            }
+                          ),
                         ],
                       ),
                     ),
@@ -969,8 +986,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             onTap: () => Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) =>
-                                    const HostPrivacySecurityScreen(),
+                                builder: (context) => const PrivacySecurityScreen(),
                               ),
                             ),
                           ),
