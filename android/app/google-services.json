@@ -50,6 +50,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "770115931871-5eltbigi1sgrmfktgifn3beag90b1lau.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.giggre_app",
+            "certificate_hash": "8ebb35c6c49b28dd4a8d7483673c2d9fc47707ab"
+          }
+        },
+        {
           "client_id": "770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com",
           "client_type": 3
         }

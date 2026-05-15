@@ -1,8 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-// import 'package:qr_flutter/qr_flutter.dart';
-// import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 class MyReferralScreen extends StatefulWidget {
   const MyReferralScreen({super.key});
@@ -104,213 +104,15 @@ class _MyReferralScreenState extends State<MyReferralScreen>
   }
 }
 
-// ── Tab 1: Referral Code (Wireframe/Skeleton) ─────────────────────────────────
+// ── Tab 1: Referral Code ──────────────────────────────────────────────────────
 
-class _ReferralCodeTab extends StatelessWidget {
+class _ReferralCodeTab extends StatefulWidget {
   const _ReferralCodeTab({required this.referralMap});
   final List<Map<String, dynamic>> referralMap;
 
   @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor =
-        isDark ? const Color(0xFF90CAF9) : const Color(0xFF2164F3);
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    final shimmer =
-        isDark ? const Color(0xFF2C2C2C) : const Color(0xFFEEEEEE);
-    final shimmerDark =
-        isDark ? const Color(0xFF3A3A3A) : const Color(0xFFE0E0E0);
-
-    Widget skeletonBox(double width, double height, {double radius = 8}) =>
-        Container(
-          width: width,
-          height: height,
-          decoration: BoxDecoration(
-            color: shimmer,
-            borderRadius: BorderRadius.circular(radius),
-          ),
-        );
-
-    Widget card(Widget child) => Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: child,
-        );
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 8),
-
-          // ── Progress Card skeleton ──
-          card(Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  skeletonBox(120, 14),
-                  skeletonBox(60, 22, radius: 20),
-                ],
-              ),
-              const SizedBox(height: 14),
-              skeletonBox(80, 36),
-              const SizedBox(height: 10),
-              skeletonBox(double.infinity, 10),
-              const SizedBox(height: 8),
-              skeletonBox(160, 12),
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      skeletonBox(50, 11),
-                      const SizedBox(height: 4),
-                      skeletonBox(100, 13),
-                    ],
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      skeletonBox(30, 11),
-                      const SizedBox(height: 4),
-                      skeletonBox(100, 13),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          )),
-
-          const SizedBox(height: 20),
-
-          // ── Referral Code Card skeleton ──
-          card(Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              skeletonBox(140, 14),
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: shimmerDark,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: shimmer, width: 1.5),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: primaryColor.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.copy_rounded,
-                          size: 16, color: primaryColor.withOpacity(0.4)),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Copy Code',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: primaryColor.withOpacity(0.4),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          )),
-
-          const SizedBox(height: 20),
-
-          // ── QR Code Card skeleton ──
-          card(Column(
-            children: [
-              skeletonBox(140, 14),
-              const SizedBox(height: 16),
-              Container(
-                width: 204,
-                height: 204,
-                decoration: BoxDecoration(
-                  color: shimmerDark,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.qr_code_2_rounded,
-                    size: 80,
-                    color: onSurface.withOpacity(0.1),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              skeletonBox(80, 13),
-            ],
-          )),
-
-          const SizedBox(height: 20),
-
-          // ── Coming Soon banner ──
-          Container(
-            width: double.infinity,
-            padding:
-                const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-            decoration: BoxDecoration(
-              color: primaryColor.withOpacity(0.07),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: primaryColor.withOpacity(0.2)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.construction_rounded,
-                    size: 16, color: primaryColor.withOpacity(0.6)),
-                const SizedBox(width: 8),
-                Text(
-                  'Referral Code feature coming soon',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: primaryColor.withOpacity(0.6),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
+  State<_ReferralCodeTab> createState() => _ReferralCodeTabState();
 }
-
-/*
-── COMMENTED OUT: _ReferralCodeTabState (restore when feature is ready) ──
 
 class _ReferralCodeTabState extends State<_ReferralCodeTab> {
   final _auth = FirebaseAuth.instance;
@@ -318,6 +120,7 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
   String _referralCode = '';
   int _referralsCount = 0;
   int _referralLevel = 0;
+  bool _justCopied = false;
 
   @override
   void initState() {
@@ -337,8 +140,10 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
         final data = doc.data();
         setState(() {
           _referralCode = data?['referrals']?['referral_code'] ?? '';
-          _referralsCount = (data?['referrals']?['referrals_count'] ?? 0) as int;
-          _referralLevel = (data?['referrals']?['referral_level'] ?? 0) as int;
+          _referralsCount =
+              (data?['referrals']?['referrals_count'] ?? 0) as int;
+          _referralLevel =
+              (data?['referrals']?['referral_level'] ?? 0) as int;
         });
       }
     } catch (e) {
@@ -393,46 +198,985 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
     return widget.referralMap.last['label'] as String;
   }
 
-  void _copyCode() {
-    Clipboard.setData(ClipboardData(text: _referralCode));
+  Future<void> _copyCode() async {
+    await Clipboard.setData(ClipboardData(text: _referralCode));
+    setState(() => _justCopied = true);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Referral code copied!'),
-        duration: Duration(seconds: 2),
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+            SizedBox(width: 8),
+            Text('Referral code copied!',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          ],
+        ),
+        backgroundColor: const Color(0xFF2E7D32),
+        duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) setState(() => _justCopied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryColor =
+        isDark ? const Color(0xFF90CAF9) : const Color(0xFF2164F3);
+    final greenColor =
+        isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32);
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final surfaceVariant =
+        isDark ? const Color(0xFF2C2C2C) : const Color(0xFFF5F5F5);
+    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final isMaxed = _referralsCount >= _milestones.last;
+    final activeColor = isMaxed ? greenColor : primaryColor;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Progress Card ──
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [activeColor, activeColor.withOpacity(0.75)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: activeColor.withOpacity(0.35),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isMaxed ? '🐐 Legendary GOAT' : _currentLabel,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '$_referralsCount referral${_referralsCount == 1 ? '' : 's'} total',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.white.withOpacity(0.8),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withOpacity(0.2),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.4),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          'L$_referralLevel',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                if (!isMaxed) ...[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Progress to next level',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.white.withOpacity(0.75),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        '${(_progress * 100).toInt()}%',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: LinearProgressIndicator(
+                      value: _progress,
+                      minHeight: 8,
+                      backgroundColor: Colors.white.withOpacity(0.2),
+                      valueColor:
+                          const AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '${_nextMilestone - _referralsCount} more referrals to unlock $_nextLabel',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white.withOpacity(0.85),
+                    ),
+                  ),
+                ] else
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      '🎉 You\'ve unlocked all milestones!',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── Referral Code Card ──
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(isDark ? 0.3 : 0.07),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: activeColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.vpn_key_rounded,
+                          size: 18, color: activeColor),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Your Referral Code',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 16),
+                        decoration: BoxDecoration(
+                          color: surfaceVariant,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: activeColor.withOpacity(0.2),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Text(
+                          _referralCode.isEmpty ? '—' : _referralCode,
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 4,
+                            color: onSurface,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: _referralCode.isEmpty ? null : _copyCode,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: _justCopied ? greenColor : activeColor,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                              color: (_justCopied ? greenColor : activeColor)
+                                  .withOpacity(0.35),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 200),
+                          child: _justCopied
+                              ? const Icon(Icons.check_rounded,
+                                  key: ValueKey('check'),
+                                  color: Colors.white,
+                                  size: 22)
+                              : const Icon(Icons.copy_rounded,
+                                  key: ValueKey('copy'),
+                                  color: Colors.white,
+                                  size: 22),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Share this code with friends to earn referral rewards.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: onSurface.withOpacity(0.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── QR Code Card ──
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(isDark ? 0.3 : 0.07),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: activeColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.qr_code_rounded,
+                          size: 18, color: activeColor),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Scan to Share',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                if (_referralCode.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: activeColor.withOpacity(0.15),
+                          blurRadius: 20,
+                        ),
+                      ],
+                    ),
+                    child: QrImageView(
+                      data: _referralCode,
+                      version: QrVersions.auto,
+                      size: 180,
+                      backgroundColor: Colors.white,
+                      eyeStyle: QrEyeStyle(
+                        eyeShape: QrEyeShape.square,
+                        color: primaryColor,
+                      ),
+                      dataModuleStyle: QrDataModuleStyle(
+                        dataModuleShape: QrDataModuleShape.square,
+                        color: primaryColor,
+                      ),
+                    ),
+                  )
+                else
+                  SizedBox(
+                    height: 180,
+                    child: Center(
+                      child: Text(
+                        'No referral code available',
+                        style:
+                            TextStyle(color: onSurface.withOpacity(0.4)),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                Text(
+                  'Ask friends to scan this to use your referral code.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: onSurface.withOpacity(0.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Tab 2: People Referred ────────────────────────────────────────────────────
+
+class _PeopleReferredTab extends StatefulWidget {
+  const _PeopleReferredTab();
+
+  @override
+  State<_PeopleReferredTab> createState() => _PeopleReferredTabState();
+}
+
+class _PeopleReferredTabState extends State<_PeopleReferredTab> {
+  final _auth = FirebaseAuth.instance;
+  final List<Map<String, dynamic>> _referrals = [];
+  bool _isLoading = true;
+  bool _isFetchingMore = false;
+  bool _hasMore = true;
+  DocumentSnapshot? _lastDoc;
+
+  static const _pageSize = 15;
+  final _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMore();
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels >=
+              _scrollController.position.maxScrollExtent - 200 &&
+          !_isFetchingMore &&
+          _hasMore) {
+        _loadMore();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadMore() async {
+    if (_isFetchingMore || !_hasMore) return;
+    setState(() => _isFetchingMore = true);
+
+    try {
+      final uid = _auth.currentUser?.uid;
+      if (uid == null) return;
+
+      Query query = FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('referrals_list')
+          .orderBy('joined_at', descending: true)
+          .limit(_pageSize);
+
+      if (_lastDoc != null) {
+        query = query.startAfterDocument(_lastDoc!);
+      }
+
+      final snapshot = await query.get();
+
+      if (snapshot.docs.isEmpty) {
+        setState(() => _hasMore = false);
+        return;
+      }
+
+      _lastDoc = snapshot.docs.last;
+
+      final newItems = await Future.wait(snapshot.docs.map((doc) async {
+        final data = doc.data() as Map<String, dynamic>;
+
+        String isVerified = 'unverified';
+        try {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(doc.id)
+              .get();
+          isVerified = userDoc.data()?['isVerified'] ?? 'unverified';
+        } catch (_) {}
+
+        return {
+          'name'      : data['name'] ?? 'Unknown',
+          'email'     : data['email'] ?? '',
+          'joined_at' : data['joined_at'],
+          'isVerified': isVerified,
+        };
+      }));
+
+      setState(() {
+        _referrals.addAll(newItems);
+        if (snapshot.docs.length < _pageSize) _hasMore = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading referrals: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isFetchingMore = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _referrals.clear();
+      _lastDoc = null;
+      _hasMore = true;
+      _isLoading = true;
+    });
+    await _loadMore();
+  }
+
+  String _formatDate(dynamic timestamp) {
+    if (timestamp == null) return '';
+    final dt = (timestamp as Timestamp).toDate();
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
+  }
+
+  String _initials(String name) {
+    final parts = name.trim().split(' ');
+    if (parts.length >= 2) {
+      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
+    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+  }
+
+  Color _avatarColor(String name) {
+    const colors = [
+      Color(0xFF2164F3),
+      Color(0xFF7C3AED),
+      Color(0xFF0891B2),
+      Color(0xFF059669),
+      Color(0xFFD97706),
+      Color(0xFFDC2626),
+    ];
+    return colors[name.codeUnits.first % colors.length];
+  }
+
+  // ── Verification chip ────────────────────────────────────────
+  Widget _verificationChip(String status) {
+    late IconData icon;
+    late Color color;
+    late String label;
+
+    switch (status) {
+      case 'verified':
+        icon  = Icons.verified_rounded;
+        color = const Color(0xFF2164F3);
+        label = 'Verified';
+        break;
+      case 'pending':
+        icon  = Icons.hourglass_top_rounded;
+        color = const Color(0xFFD97706);
+        label = 'Pending';
+        break;
+      default:
+        icon  = Icons.remove_circle_outline_rounded;
+        color = const Color(0xFF9E9E9E);
+        label = 'Unverified';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Center(child: CircularProgressIndicator());
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor = isDark ? const Color(0xFF90CAF9) : const Color(0xFF2164F3);
-    final greenColor = isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32);
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    final surfaceVariant = isDark ? const Color(0xFF2C2C2C) : const Color(0xFFF5F5F5);
-    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    final isMaxed = _referralsCount >= _milestones.last;
-    // ... full build with Progress Card, Referral Code Card, QR Code Card
-  }
-}
-*/
+    final isDark      = Theme.of(context).brightness == Brightness.dark;
+    final primaryColor =
+        isDark ? const Color(0xFF90CAF9) : const Color(0xFF2164F3);
+    final onSurface   = Theme.of(context).colorScheme.onSurface;
+    final cardColor   = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final bgColor     = Theme.of(context).scaffoldBackgroundColor;
 
-// ── Tab 2: People Referred ────────────────────────────────────────────────────
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
-class _PeopleReferredTab extends StatelessWidget {
-  const _PeopleReferredTab();
+    if (_referrals.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  color: primaryColor.withOpacity(0.08),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.group_add_rounded,
+                  size: 40,
+                  color: primaryColor.withOpacity(0.6),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'No referrals yet',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Share your referral code with friends\nand they\'ll appear here once they join.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: onSurface.withOpacity(0.45),
+                  height: 1.6,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Center(child: Text('My Referrals')),
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      color: primaryColor,
+      child: CustomScrollView(
+        controller: _scrollController,
+        slivers: [
+          // ── Summary header ──────────────────────────────────
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: cardColor,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black
+                                .withOpacity(isDark ? 0.25 : 0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: primaryColor.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(Icons.people_rounded,
+                                size: 18, color: primaryColor),
+                          ),
+                          const SizedBox(width: 10),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${_referrals.length}${_hasMore ? '+' : ''}',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: primaryColor,
+                                ),
+                              ),
+                              Text(
+                                'Total Referred',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: onSurface.withOpacity(0.5),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: cardColor,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black
+                                .withOpacity(isDark ? 0.25 : 0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2164F3).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.verified_rounded,
+                                size: 18, color: Color(0xFF2164F3)),
+                          ),
+                          const SizedBox(width: 10),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${_referrals.where((r) => r['isVerified'] == 'verified').length}',
+                                style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF2164F3),
+                                ),
+                              ),
+                              Text(
+                                'Verified',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: onSurface.withOpacity(0.5),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Section label ────────────────────────────────────
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: Text(
+                'RECENTLY JOINED',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                  color: onSurface.withOpacity(0.4),
+                ),
+              ),
+            ),
+          ),
+
+          // ── List ─────────────────────────────────────────────
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  // Loading spinner at bottom
+                  if (index == _referrals.length) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  final item       = _referrals[index];
+                  final name       = item['name'] as String;
+                  final email      = item['email'] as String;
+                  final date       = _formatDate(item['joined_at']);
+                  final isVerified = item['isVerified'] as String;
+                  final color      = _avatarColor(name);
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black
+                              .withOpacity(isDark ? 0.2 : 0.04),
+                          blurRadius: 12,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          // ── Avatar ──
+                          Stack(
+                            children: [
+                              Container(
+                                width: 48,
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      color,
+                                      color.withOpacity(0.7),
+                                    ],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    _initials(name),
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              // verified dot indicator
+                              if (isVerified == 'verified')
+                                Positioned(
+                                  bottom: 0,
+                                  right: 0,
+                                  child: Container(
+                                    width: 14,
+                                    height: 14,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF2164F3),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: cardColor,
+                                        width: 2,
+                                      ),
+                                    ),
+                                    child: const Icon(
+                                      Icons.check,
+                                      size: 8,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+
+                          const SizedBox(width: 12),
+
+                          // ── Name + email + chips ──
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  name,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: onSurface,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                // const SizedBox(height: 2),
+                                // Text(
+                                //   email,
+                                //   style: TextStyle(
+                                //     fontSize: 12,
+                                //     color: onSurface.withOpacity(0.45),
+                                //   ),
+                                //   overflow: TextOverflow.ellipsis,
+                                // ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    _verificationChip(isVerified),
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF2E7D32)
+                                            .withOpacity(0.1),
+                                        borderRadius:
+                                            BorderRadius.circular(30),
+                                        border: Border.all(
+                                          color: const Color(0xFF2E7D32)
+                                              .withOpacity(0.25),
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.person_add_rounded,
+                                            size: 10,
+                                            color: Color(0xFF2E7D32),
+                                          ),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Joined',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w600,
+                                              color: Color(0xFF2E7D32),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(width: 8),
+
+                          // ── Date ──
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Icon(
+                                Icons.calendar_today_rounded,
+                                size: 12,
+                                color: onSurface.withOpacity(0.3),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                date,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: onSurface.withOpacity(0.4),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+                childCount: _referrals.length + (_hasMore ? 1 : 0),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
-
 // ── Tab 3: Referral Roadmap ───────────────────────────────────────────────────
 
 class _ReferralRoadmapTab extends StatefulWidget {
@@ -466,8 +1210,10 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
       if (response.exists) {
         final data = response.data();
         setState(() {
-          _totalReferrals = (data?['referrals']?['referrals_count'] ?? 0) as int;
-          _currentLevel = (data?['referrals']?['referral_level'] ?? 0) as int;
+          _totalReferrals =
+              (data?['referrals']?['referrals_count'] ?? 0) as int;
+          _currentLevel =
+              (data?['referrals']?['referral_level'] ?? 0) as int;
         });
       }
     } catch (e) {
@@ -522,11 +1268,15 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor = isDark ? const Color(0xFF90CAF9) : const Color(0xFF2164F3);
-    final greenColor = isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32);
+    final primaryColor =
+        isDark ? const Color(0xFF90CAF9) : const Color(0xFF2164F3);
+    final greenColor =
+        isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32);
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final surfaceVariant = isDark ? const Color(0xFF2C2C2C) : const Color(0xFFF5F5F5);
-    final outlineColor = isDark ? const Color(0xFF444444) : const Color(0xFFE0E0E0);
+    final surfaceVariant =
+        isDark ? const Color(0xFF2C2C2C) : const Color(0xFFF5F5F5);
+    final outlineColor =
+        isDark ? const Color(0xFF444444) : const Color(0xFFE0E0E0);
     final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final totalLevels = widget.referralMap.length;
     final unlockedCount = widget.referralMap
@@ -561,7 +1311,9 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _isMaxed ? '🐐 Legendary GOAT' : _currentMilestoneLabel,
+                          _isMaxed
+                              ? '🐐 Legendary GOAT'
+                              : _currentMilestoneLabel,
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -604,8 +1356,6 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                   ],
                 ),
                 const SizedBox(height: 16),
-
-                // Progress bar
                 if (!_isMaxed) ...[
                   ClipRRect(
                     borderRadius: BorderRadius.circular(6),
@@ -613,8 +1363,8 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                       value: _levelProgress,
                       minHeight: 8,
                       backgroundColor: Colors.white.withOpacity(0.25),
-                      valueColor:
-                          const AlwaysStoppedAnimation<Color>(Colors.white),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                          Colors.white),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -790,7 +1540,7 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                                           .withOpacity(0.25),
                                       blurRadius: 8,
                                       offset: const Offset(0, 2),
-                                    )
+                                    ),
                                   ]
                                 : null,
                           ),
@@ -814,7 +1564,8 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                           Expanded(
                             child: Container(
                               width: 2,
-                              margin: const EdgeInsets.symmetric(vertical: 3),
+                              margin:
+                                  const EdgeInsets.symmetric(vertical: 3),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(2),
                                 color: isReached
@@ -863,7 +1614,8 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                           children: [
                             Expanded(
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     label,
