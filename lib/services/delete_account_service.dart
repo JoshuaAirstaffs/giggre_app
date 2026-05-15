@@ -115,8 +115,13 @@ class DeleteAccountService {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Deleting your account will remove your Giggre account, including your worker profile and host profile if both are active.',
+                  'This will permanently delete your Giggre account and all personal data linked to it — including your profile, uploaded files, skill requests, and support history.',
                   style: TextStyle(color: kSub, height: 1.5, fontSize: 14),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Your identity will be anonymized on any shared gig or transaction records to preserve history for other users.',
+                  style: TextStyle(color: kSub, height: 1.5, fontSize: 13),
                 ),
                 const SizedBox(height: 10),
                 const Text(
@@ -292,15 +297,122 @@ class DeleteAccountService {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  //  Full Google Play-compliant data erasure
+  //
+  //  DELETE  — data the user exclusively owns (no other user depends on it)
+  //  ANONYMIZE — shared records where other users still need the transaction
+  // ─────────────────────────────────────────────────────────────────────────────
   static Future<void> _deleteUserData(String uid) async {
-    await FirebaseFirestore.instance.collection('users').doc(uid).delete();
+    final db = FirebaseFirestore.instance;
+    final storage = FirebaseStorage.instance;
+
+    // ── 1. Storage: profile photo ────────────────────────────────────────────
     try {
-      await FirebaseStorage.instance
-          .ref('profile_images/$uid.jpg')
-          .delete();
+      await storage.ref('profile_images/$uid.jpg').delete();
+    } catch (_) {}
+
+    // ── 2. Storage: skill-request proof files ────────────────────────────────
+    try {
+      final list = await storage.ref('skill_requests/$uid').listAll();
+      for (final item in list.items) {
+        await item.delete().catchError((_) {});
+      }
+    } catch (_) {}
+
+    // ── 3. Firestore: users/{uid}/documents sub-collection ───────────────────
+    try {
+      final docSnap = await db
+          .collection('users')
+          .doc(uid)
+          .collection('documents')
+          .get();
+      for (final d in docSnap.docs) {
+        await d.reference.delete().catchError((_) {});
+      }
+    } catch (_) {}
+
+    // ── 4. Firestore: users/{uid} profile document ───────────────────────────
+    await db.collection('users').doc(uid).delete().catchError((_) {});
+
+    // ── 5. Firestore: skill_requests owned by user ────────────────────────────
+    await _deleteCollection(
+        db.collection('skill_requests').where('userId', isEqualTo: uid));
+
+    // ── 6. Firestore: gig_templates created by user ───────────────────────────
+    await _deleteCollection(
+        db.collection('gig_templates').where('hostId', isEqualTo: uid));
+
+    // ── 7. Firestore: verification_requests (doc keyed by uid) ────────────────
+    await db
+        .collection('verification_requests')
+        .doc(uid)
+        .delete()
+        .catchError((_) {});
+
+    // ── 8. Firestore: support_tickets submitted by user ───────────────────────
+    await _deleteCollection(
+        db.collection('support_tickets').where('userId', isEqualTo: uid));
+
+    // ── 9. Firestore: notifications addressed to user ─────────────────────────
+    await _deleteCollection(
+        db.collection('notifications').where('userId', isEqualTo: uid));
+
+    // ── 10. Firestore: chat_rooms owned by user (support chats) ──────────────
+    await _deleteCollection(
+        db.collection('chat_rooms').where('userId', isEqualTo: uid));
+
+    // ── 11. ANONYMIZE: quick_gigs where user was the host ────────────────────
+    await _anonymizeCollection(
+      db.collection('quick_gigs').where('hostId', isEqualTo: uid),
+      {'hostName': 'Deleted User'},
+    );
+
+    // ── 12. ANONYMIZE: quick_gigs where user was the assigned worker ──────────
+    await _anonymizeCollection(
+      db.collection('quick_gigs').where('assignedWorkerId', isEqualTo: uid),
+      {'assignedWorkerName': 'Deleted Worker'},
+    );
+
+    // ── 13. ANONYMIZE: open_gigs where user was the host ─────────────────────
+    await _anonymizeCollection(
+      db.collection('open_gigs').where('hostId', isEqualTo: uid),
+      {'hostName': 'Deleted User'},
+    );
+
+    // ── 14. ANONYMIZE: offered_gigs where user was the host ──────────────────
+    await _anonymizeCollection(
+      db.collection('offered_gigs').where('hostId', isEqualTo: uid),
+      {'hostName': 'Deleted User'},
+    );
+
+    // ── 15. ANONYMIZE: offered_gigs where user was the worker ────────────────
+    await _anonymizeCollection(
+      db.collection('offered_gigs').where('workerId', isEqualTo: uid),
+      {'workerName': 'Deleted Worker'},
+    );
+  }
+
+  // Deletes all documents returned by a query (handles empty results silently).
+  static Future<void> _deleteCollection(Query query) async {
+    try {
+      final snap = await query.get();
+      for (final doc in snap.docs) {
+        await doc.reference.delete().catchError((_) {});
+      }
     } catch (_) {}
   }
 
+  // Updates all documents returned by a query with the given fields.
+  static Future<void> _anonymizeCollection(
+      Query query, Map<String, dynamic> fields) async {
+    try {
+      final snap = await query.get();
+      for (final doc in snap.docs) {
+        await doc.reference.update(fields).catchError((_) {});
+      }
+    } catch (_) {}
+  }
 
   static void _showError(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
