@@ -58,8 +58,9 @@ class _MyReferralScreenState extends State<MyReferralScreen>
   Widget build(BuildContext context) {
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor =
-        isDark ? const Color(0xFF90CAF9) : const Color(0xFF2164F3);
+    final primaryColor = isDark
+        ? const Color(0xFF90CAF9)
+        : const Color(0xFF2164F3);
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(
@@ -79,10 +80,14 @@ class _MyReferralScreenState extends State<MyReferralScreen>
           unselectedLabelColor: Colors.grey,
           indicatorColor: primaryColor,
           indicatorWeight: 2.5,
-          labelStyle:
-              const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          unselectedLabelStyle:
-              const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          labelStyle: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
           tabs: const [
             Tab(text: 'Referral Code'),
             Tab(text: 'My Referrals'),
@@ -142,8 +147,7 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
           _referralCode = data?['referrals']?['referral_code'] ?? '';
           _referralsCount =
               (data?['referrals']?['referrals_count'] ?? 0) as int;
-          _referralLevel =
-              (data?['referrals']?['referral_level'] ?? 0) as int;
+          _referralLevel = (data?['referrals']?['referral_level'] ?? 0) as int;
         });
       }
     } catch (e) {
@@ -207,15 +211,16 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
           children: [
             Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
             SizedBox(width: 8),
-            Text('Referral code copied!',
-                style: TextStyle(fontWeight: FontWeight.w600)),
+            Text(
+              'Referral code copied!',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
           ],
         ),
         backgroundColor: const Color(0xFF2E7D32),
         duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(16),
       ),
     );
@@ -228,13 +233,16 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
     if (_isLoading) return const Center(child: CircularProgressIndicator());
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor =
-        isDark ? const Color(0xFF90CAF9) : const Color(0xFF2164F3);
-    final greenColor =
-        isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32);
+    final primaryColor = isDark
+        ? const Color(0xFF90CAF9)
+        : const Color(0xFF2164F3);
+    final greenColor = isDark
+        ? const Color(0xFF81C784)
+        : const Color(0xFF2E7D32);
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final surfaceVariant =
-        isDark ? const Color(0xFF2C2C2C) : const Color(0xFFF5F5F5);
+    final surfaceVariant = isDark
+        ? const Color(0xFF2C2C2C)
+        : const Color(0xFFF5F5F5);
     final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final isMaxed = _referralsCount >= _milestones.last;
     final activeColor = isMaxed ? greenColor : primaryColor;
@@ -345,8 +353,9 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
                       value: _progress,
                       minHeight: 8,
                       backgroundColor: Colors.white.withOpacity(0.2),
-                      valueColor:
-                          const AlwaysStoppedAnimation<Color>(Colors.white),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Colors.white,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -360,7 +369,9 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
                 ] else
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(20),
@@ -406,8 +417,11 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
                         color: activeColor.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Icon(Icons.vpn_key_rounded,
-                          size: 18, color: activeColor),
+                      child: Icon(
+                        Icons.vpn_key_rounded,
+                        size: 18,
+                        color: activeColor,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Text(
@@ -426,7 +440,9 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
                     Expanded(
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 16),
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
                         decoration: BoxDecoration(
                           color: surfaceVariant,
                           borderRadius: BorderRadius.circular(14),
@@ -467,14 +483,18 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
                         child: AnimatedSwitcher(
                           duration: const Duration(milliseconds: 200),
                           child: _justCopied
-                              ? const Icon(Icons.check_rounded,
+                              ? const Icon(
+                                  Icons.check_rounded,
                                   key: ValueKey('check'),
                                   color: Colors.white,
-                                  size: 22)
-                              : const Icon(Icons.copy_rounded,
+                                  size: 22,
+                                )
+                              : const Icon(
+                                  Icons.copy_rounded,
                                   key: ValueKey('copy'),
                                   color: Colors.white,
-                                  size: 22),
+                                  size: 22,
+                                ),
                         ),
                       ),
                     ),
@@ -519,8 +539,11 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
                         color: activeColor.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Icon(Icons.qr_code_rounded,
-                          size: 18, color: activeColor),
+                      child: Icon(
+                        Icons.qr_code_rounded,
+                        size: 18,
+                        color: activeColor,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Text(
@@ -568,8 +591,7 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
                     child: Center(
                       child: Text(
                         'No referral code available',
-                        style:
-                            TextStyle(color: onSurface.withOpacity(0.4)),
+                        style: TextStyle(color: onSurface.withOpacity(0.4)),
                       ),
                     ),
                   ),
@@ -659,25 +681,27 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
 
       _lastDoc = snapshot.docs.last;
 
-      final newItems = await Future.wait(snapshot.docs.map((doc) async {
-        final data = doc.data() as Map<String, dynamic>;
+      final newItems = await Future.wait(
+        snapshot.docs.map((doc) async {
+          final data = doc.data() as Map<String, dynamic>;
 
-        String isVerified = 'unverified';
-        try {
-          final userDoc = await FirebaseFirestore.instance
-              .collection('users')
-              .doc(doc.id)
-              .get();
-          isVerified = userDoc.data()?['isVerified'] ?? 'unverified';
-        } catch (_) {}
+          String isVerified = 'unverified';
+          try {
+            final userDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(doc.id)
+                .get();
+            isVerified = userDoc.data()?['isVerified'] ?? 'unverified';
+          } catch (_) {}
 
-        return {
-          'name'      : data['name'] ?? 'Unknown',
-          'email'     : data['email'] ?? '',
-          'joined_at' : data['joined_at'],
-          'isVerified': isVerified,
-        };
-      }));
+          return {
+            'name': data['name'] ?? 'Unknown',
+            'email': data['email'] ?? '',
+            'joined_at': data['joined_at'],
+            'isVerified': isVerified,
+          };
+        }),
+      );
 
       setState(() {
         _referrals.addAll(newItems);
@@ -709,8 +733,18 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
     if (timestamp == null) return '';
     final dt = (timestamp as Timestamp).toDate();
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
   }
@@ -743,17 +777,17 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
 
     switch (status) {
       case 'verified':
-        icon  = Icons.verified_rounded;
+        icon = Icons.verified_rounded;
         color = const Color(0xFF2164F3);
         label = 'Verified';
         break;
       case 'pending':
-        icon  = Icons.hourglass_top_rounded;
+        icon = Icons.hourglass_top_rounded;
         color = const Color(0xFFD97706);
         label = 'Pending';
         break;
       default:
-        icon  = Icons.remove_circle_outline_rounded;
+        icon = Icons.remove_circle_outline_rounded;
         color = const Color(0xFF9E9E9E);
         label = 'Unverified';
     }
@@ -785,12 +819,13 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark      = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor =
-        isDark ? const Color(0xFF90CAF9) : const Color(0xFF2164F3);
-    final onSurface   = Theme.of(context).colorScheme.onSurface;
-    final cardColor   = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    final bgColor     = Theme.of(context).scaffoldBackgroundColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryColor = isDark
+        ? const Color(0xFF90CAF9)
+        : const Color(0xFF2164F3);
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
 
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -856,14 +891,17 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 14),
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                       decoration: BoxDecoration(
                         color: cardColor,
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black
-                                .withOpacity(isDark ? 0.25 : 0.05),
+                            color: Colors.black.withOpacity(
+                              isDark ? 0.25 : 0.05,
+                            ),
                             blurRadius: 10,
                             offset: const Offset(0, 2),
                           ),
@@ -877,8 +915,11 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
                               color: primaryColor.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: Icon(Icons.people_rounded,
-                                size: 18, color: primaryColor),
+                            child: Icon(
+                              Icons.people_rounded,
+                              size: 18,
+                              color: primaryColor,
+                            ),
                           ),
                           const SizedBox(width: 10),
                           Column(
@@ -909,14 +950,17 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 14),
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                       decoration: BoxDecoration(
                         color: cardColor,
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black
-                                .withOpacity(isDark ? 0.25 : 0.05),
+                            color: Colors.black.withOpacity(
+                              isDark ? 0.25 : 0.05,
+                            ),
                             blurRadius: 10,
                             offset: const Offset(0, 2),
                           ),
@@ -930,8 +974,11 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
                               color: const Color(0xFF2164F3).withOpacity(0.1),
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: const Icon(Icons.verified_rounded,
-                                size: 18, color: Color(0xFF2164F3)),
+                            child: const Icon(
+                              Icons.verified_rounded,
+                              size: 18,
+                              color: Color(0xFF2164F3),
+                            ),
                           ),
                           const SizedBox(width: 10),
                           Column(
@@ -983,193 +1030,181 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
             sliver: SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  // Loading spinner at bottom
-                  if (index == _referrals.length) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Center(child: CircularProgressIndicator()),
-                    );
-                  }
+              delegate: SliverChildBuilderDelegate((context, index) {
+                // Loading spinner at bottom
+                if (index == _referrals.length) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
 
-                  final item       = _referrals[index];
-                  final name       = item['name'] as String;
-                  final email      = item['email'] as String;
-                  final date       = _formatDate(item['joined_at']);
-                  final isVerified = item['isVerified'] as String;
-                  final color      = _avatarColor(name);
+                final item = _referrals[index];
+                final name = item['name'] as String;
+                final email = item['email'] as String;
+                final date = _formatDate(item['joined_at']);
+                final isVerified = item['isVerified'] as String;
+                final color = _avatarColor(name);
 
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    decoration: BoxDecoration(
-                      color: cardColor,
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black
-                              .withOpacity(isDark ? 0.2 : 0.04),
-                          blurRadius: 12,
-                          offset: const Offset(0, 2),
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: cardColor,
+                    borderRadius: BorderRadius.circular(18),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+                        blurRadius: 12,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        // ── Avatar ──
+                        Stack(
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [color, color.withOpacity(0.7)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  _initials(name),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // verified dot indicator
+                            if (isVerified == 'verified')
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  width: 14,
+                                  height: 14,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF2164F3),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: cardColor,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: const Icon(
+                                    Icons.check,
+                                    size: 8,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+
+                        const SizedBox(width: 12),
+
+                        // ── Name + email + chips ──
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name.trim().split(' ').first,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: onSurface,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  _verificationChip(isVerified),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(
+                                        0xFF2E7D32,
+                                      ).withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(30),
+                                      border: Border.all(
+                                        color: const Color(
+                                          0xFF2E7D32,
+                                        ).withOpacity(0.25),
+                                      ),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.person_add_rounded,
+                                          size: 10,
+                                          color: Color(0xFF2E7D32),
+                                        ),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'Joined',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFF2E7D32),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(width: 8),
+
+                        // ── Date ──
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Icon(
+                              Icons.calendar_today_rounded,
+                              size: 12,
+                              color: onSurface.withOpacity(0.3),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              date,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: onSurface.withOpacity(0.4),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          // ── Avatar ──
-                          Stack(
-                            children: [
-                              Container(
-                                width: 48,
-                                height: 48,
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      color,
-                                      color.withOpacity(0.7),
-                                    ],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    _initials(name),
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // verified dot indicator
-                              if (isVerified == 'verified')
-                                Positioned(
-                                  bottom: 0,
-                                  right: 0,
-                                  child: Container(
-                                    width: 14,
-                                    height: 14,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF2164F3),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: cardColor,
-                                        width: 2,
-                                      ),
-                                    ),
-                                    child: const Icon(
-                                      Icons.check,
-                                      size: 8,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-
-                          const SizedBox(width: 12),
-
-                          // ── Name + email + chips ──
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  name,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                    color: onSurface,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                // const SizedBox(height: 2),
-                                // Text(
-                                //   email,
-                                //   style: TextStyle(
-                                //     fontSize: 12,
-                                //     color: onSurface.withOpacity(0.45),
-                                //   ),
-                                //   overflow: TextOverflow.ellipsis,
-                                // ),
-                                const SizedBox(height: 6),
-                                Row(
-                                  children: [
-                                    _verificationChip(isVerified),
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF2E7D32)
-                                            .withOpacity(0.1),
-                                        borderRadius:
-                                            BorderRadius.circular(30),
-                                        border: Border.all(
-                                          color: const Color(0xFF2E7D32)
-                                              .withOpacity(0.25),
-                                        ),
-                                      ),
-                                      child: const Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.person_add_rounded,
-                                            size: 10,
-                                            color: Color(0xFF2E7D32),
-                                          ),
-                                          SizedBox(width: 4),
-                                          Text(
-                                            'Joined',
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.w600,
-                                              color: Color(0xFF2E7D32),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-
-                          const SizedBox(width: 8),
-
-                          // ── Date ──
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Icon(
-                                Icons.calendar_today_rounded,
-                                size: 12,
-                                color: onSurface.withOpacity(0.3),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                date,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: onSurface.withOpacity(0.4),
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-                childCount: _referrals.length + (_hasMore ? 1 : 0),
-              ),
+                  ),
+                );
+              }, childCount: _referrals.length + (_hasMore ? 1 : 0)),
             ),
           ),
         ],
@@ -1212,8 +1247,7 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
         setState(() {
           _totalReferrals =
               (data?['referrals']?['referrals_count'] ?? 0) as int;
-          _currentLevel =
-              (data?['referrals']?['referral_level'] ?? 0) as int;
+          _currentLevel = (data?['referrals']?['referral_level'] ?? 0) as int;
         });
       }
     } catch (e) {
@@ -1268,15 +1302,19 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor =
-        isDark ? const Color(0xFF90CAF9) : const Color(0xFF2164F3);
-    final greenColor =
-        isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32);
+    final primaryColor = isDark
+        ? const Color(0xFF90CAF9)
+        : const Color(0xFF2164F3);
+    final greenColor = isDark
+        ? const Color(0xFF81C784)
+        : const Color(0xFF2E7D32);
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final surfaceVariant =
-        isDark ? const Color(0xFF2C2C2C) : const Color(0xFFF5F5F5);
-    final outlineColor =
-        isDark ? const Color(0xFF444444) : const Color(0xFFE0E0E0);
+    final surfaceVariant = isDark
+        ? const Color(0xFF2C2C2C)
+        : const Color(0xFFF5F5F5);
+    final outlineColor = isDark
+        ? const Color(0xFF444444)
+        : const Color(0xFFE0E0E0);
     final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final totalLevels = widget.referralMap.length;
     final unlockedCount = widget.referralMap
@@ -1332,15 +1370,20 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 8),
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.people_rounded,
-                              size: 16, color: Colors.white),
+                          const Icon(
+                            Icons.people_rounded,
+                            size: 16,
+                            color: Colors.white,
+                          ),
                           const SizedBox(width: 6),
                           Text(
                             '$_totalReferrals',
@@ -1364,7 +1407,8 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                       minHeight: 8,
                       backgroundColor: Colors.white.withOpacity(0.25),
                       valueColor: const AlwaysStoppedAnimation<Color>(
-                          Colors.white),
+                        Colors.white,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -1396,7 +1440,9 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
               Expanded(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      vertical: 14, horizontal: 16),
+                    vertical: 14,
+                    horizontal: 16,
+                  ),
                   decoration: BoxDecoration(
                     color: cardColor,
                     borderRadius: BorderRadius.circular(14),
@@ -1435,7 +1481,9 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
               Expanded(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      vertical: 14, horizontal: 16),
+                    vertical: 14,
+                    horizontal: 16,
+                  ),
                   decoration: BoxDecoration(
                     color: cardColor,
                     borderRadius: BorderRadius.circular(14),
@@ -1498,7 +1546,8 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
             final label = milestone['label'] as String;
             final level = milestone['level'] as int;
             final isReached = _currentLevel >= level;
-            final isNext = !isReached &&
+            final isNext =
+                !isReached &&
                 (index == 0 ||
                     _currentLevel >=
                         (widget.referralMap[index - 1]['level'] as int));
@@ -1521,23 +1570,24 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                             color: isReached
                                 ? greenColor
                                 : isNext
-                                    ? primaryColor.withOpacity(0.12)
-                                    : surfaceVariant,
+                                ? primaryColor.withOpacity(0.12)
+                                : surfaceVariant,
                             border: Border.all(
                               color: isReached
                                   ? greenColor
                                   : isNext
-                                      ? primaryColor
-                                      : outlineColor,
+                                  ? primaryColor
+                                  : outlineColor,
                               width: isNext ? 2 : 1.5,
                             ),
                             boxShadow: isReached || isNext
                                 ? [
                                     BoxShadow(
-                                      color: (isReached
-                                              ? greenColor
-                                              : primaryColor)
-                                          .withOpacity(0.25),
+                                      color:
+                                          (isReached
+                                                  ? greenColor
+                                                  : primaryColor)
+                                              .withOpacity(0.25),
                                       blurRadius: 8,
                                       offset: const Offset(0, 2),
                                     ),
@@ -1546,8 +1596,11 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                           ),
                           child: Center(
                             child: isReached
-                                ? const Icon(Icons.check_rounded,
-                                    size: 18, color: Colors.white)
+                                ? const Icon(
+                                    Icons.check_rounded,
+                                    size: 18,
+                                    color: Colors.white,
+                                  )
                                 : Text(
                                     '$level',
                                     style: TextStyle(
@@ -1564,8 +1617,7 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                           Expanded(
                             child: Container(
                               width: 2,
-                              margin:
-                                  const EdgeInsets.symmetric(vertical: 3),
+                              margin: const EdgeInsets.symmetric(vertical: 3),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(2),
                                 color: isReached
@@ -1586,20 +1638,22 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
                         decoration: BoxDecoration(
                           color: isReached
                               ? greenColor.withOpacity(0.07)
                               : isNext
-                                  ? primaryColor.withOpacity(0.05)
-                                  : cardColor,
+                              ? primaryColor.withOpacity(0.05)
+                              : cardColor,
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(
                             color: isReached
                                 ? greenColor.withOpacity(0.35)
                                 : isNext
-                                    ? primaryColor.withOpacity(0.35)
-                                    : outlineColor.withOpacity(0.4),
+                                ? primaryColor.withOpacity(0.35)
+                                : outlineColor.withOpacity(0.4),
                             width: isNext ? 1.5 : 1,
                           ),
                           boxShadow: [
@@ -1614,8 +1668,7 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                           children: [
                             Expanded(
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     label,
@@ -1625,8 +1678,8 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                                       color: isReached
                                           ? greenColor
                                           : isNext
-                                              ? onSurface
-                                              : onSurface.withOpacity(0.35),
+                                          ? onSurface
+                                          : onSurface.withOpacity(0.35),
                                     ),
                                   ),
                                   const SizedBox(height: 3),
@@ -1657,7 +1710,9 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                             if (isReached)
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 5),
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
                                 decoration: BoxDecoration(
                                   color: greenColor,
                                   borderRadius: BorderRadius.circular(20),
@@ -1674,7 +1729,9 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
                             else if (isNext)
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 5),
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
                                 decoration: BoxDecoration(
                                   color: primaryColor.withOpacity(0.12),
                                   borderRadius: BorderRadius.circular(20),
