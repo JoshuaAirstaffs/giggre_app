@@ -749,13 +749,10 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
   }
 
-  String _initials(String name) {
-    final parts = name.trim().split(' ');
-    if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
-  }
+ String _initials(String name) {
+  final trimmed = name.trim();
+  return trimmed.isNotEmpty ? trimmed[0].toUpperCase() : '?';
+}
 
   Color _avatarColor(String name) {
     const colors = [
