@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:giggre_app/services/delete_account_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
@@ -25,7 +26,7 @@ class GigHostProfileScreen extends StatefulWidget {
   State<GigHostProfileScreen> createState() => _GigHostProfileScreenState();
 }
 
-  const _kBadgeLabels = {
+const _kBadgeLabels = {
   'unverified': 'Unverified',
   'verified': 'Verified',
   'pending': 'Pending',
@@ -61,6 +62,8 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   int _completedGigs = 0;
   double _totalSpent = 0;
 
+  double _completionRate = 0;
+
   StreamSubscription? _profileSub;
   StreamSubscription? _quickGigsSub;
   StreamSubscription? _openGigsSub;
@@ -73,7 +76,13 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   int _unreadNotifCount = 0;
 
   static const _activeStatuses = [
-    'open', 'in_progress', 'navigating', 'arrived', 'working', 'task_complete', 'payment',
+    'open',
+    'in_progress',
+    'navigating',
+    'arrived',
+    'working',
+    'task_complete',
+    'payment',
   ];
 
   @override
@@ -89,7 +98,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
     _quickGigsSub?.cancel();
     _openGigsSub?.cancel();
     _offeredGigsSub?.cancel();
-      _notifSub?.cancel();
+    _notifSub?.cancel();
     super.dispose();
   }
 
@@ -103,31 +112,35 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
         .doc(uid)
         .snapshots()
         .listen((doc) {
-      final data = doc.data() ?? {};
+          final data = doc.data() ?? {};
 
-      String createdAtStr = '';
-      if (data['createdAt'] != null) {
-        final ts = data['createdAt'] as Timestamp;
-        final dt = ts.toDate();
-        createdAtStr = 'Member since ${_monthName(dt.month)} ${dt.year}';
-      }
+          String createdAtStr = '';
+          if (data['createdAt'] != null) {
+            final ts = data['createdAt'] as Timestamp;
+            final dt = ts.toDate();
+            createdAtStr = 'Member since ${_monthName(dt.month)} ${dt.year}';
+          }
 
-      if (!mounted) return;
-      setState(() {
-        _userId = data['userId'] ?? '';
-        _name = data['name'] ?? '';
-        _email = FirebaseAuth.instance.currentUser?.email ?? data['email'] ?? '';
-        _phone = data['phone'] ?? '';
-        _bio = data['bio'] ?? '';
-        _company = data['company'] ?? '';
-        _photoUrl = data['photoUrl'] ?? FirebaseAuth.instance.currentUser?.photoURL ?? '';
-        _createdAt = createdAtStr;
-        _ratingAsHost = (data['ratingAsHost'] as num? ?? 5.0).toDouble();
-        _ratingCount = (data['ratingAsHostCount'] as num? ?? 0).toInt();
-        _loading = false;
-        _isVerified = data['isVerified'] ?? false;
-      });
-    }, onError: (e) => debugPrint('[GigHostProfile] profile: $e'));
+          if (!mounted) return;
+          setState(() {
+            _userId = data['userId'] ?? '';
+            _name = data['name'] ?? '';
+            _email =
+                FirebaseAuth.instance.currentUser?.email ?? data['email'] ?? '';
+            _phone = data['phone'] ?? '';
+            _bio = data['bio'] ?? '';
+            _company = data['company'] ?? '';
+            _photoUrl =
+                data['photoUrl'] ??
+                FirebaseAuth.instance.currentUser?.photoURL ??
+                '';
+            _createdAt = createdAtStr;
+            _ratingAsHost = (data['ratingAsHost'] as num? ?? 5.0).toDouble();
+            _ratingCount = (data['ratingAsHostCount'] as num? ?? 0).toInt();
+            _loading = false;
+            _isVerified = data['isVerified'] ?? false;
+          });
+        }, onError: (e) => debugPrint('[GigHostProfile] profile: $e'));
 
     _quickGigsSub?.cancel();
     _quickGigsSub = FirebaseFirestore.instance
@@ -135,14 +148,14 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
         .where('hostId', isEqualTo: uid)
         .snapshots()
         .listen((snap) {
-      _quickGigsDocs = snap.docs.map((d) {
-        final m = Map<String, dynamic>.from(d.data());
-        m['docId'] = d.id;
-        m['gigType'] = 'quick';
-        return m;
-      }).toList();
-      _recomputeStats();
-    }, onError: (e) => debugPrint('[GigHostProfile] quick_gigs: $e'));
+          _quickGigsDocs = snap.docs.map((d) {
+            final m = Map<String, dynamic>.from(d.data());
+            m['docId'] = d.id;
+            m['gigType'] = 'quick';
+            return m;
+          }).toList();
+          _recomputeStats();
+        }, onError: (e) => debugPrint('[GigHostProfile] quick_gigs: $e'));
 
     _openGigsSub?.cancel();
     _openGigsSub = FirebaseFirestore.instance
@@ -150,14 +163,14 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
         .where('hostId', isEqualTo: uid)
         .snapshots()
         .listen((snap) {
-      _openGigsDocs = snap.docs.map((d) {
-        final m = Map<String, dynamic>.from(d.data());
-        m['docId'] = d.id;
-        m['gigType'] = 'open';
-        return m;
-      }).toList();
-      _recomputeStats();
-    }, onError: (e) => debugPrint('[GigHostProfile] open_gigs: $e'));
+          _openGigsDocs = snap.docs.map((d) {
+            final m = Map<String, dynamic>.from(d.data());
+            m['docId'] = d.id;
+            m['gigType'] = 'open';
+            return m;
+          }).toList();
+          _recomputeStats();
+        }, onError: (e) => debugPrint('[GigHostProfile] open_gigs: $e'));
 
     _offeredGigsSub?.cancel();
     _offeredGigsSub = FirebaseFirestore.instance
@@ -165,14 +178,14 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
         .where('hostId', isEqualTo: uid)
         .snapshots()
         .listen((snap) {
-      _offeredGigsDocs = snap.docs.map((d) {
-        final m = Map<String, dynamic>.from(d.data());
-        m['docId'] = d.id;
-        m['gigType'] = 'offered';
-        return m;
-      }).toList();
-      _recomputeStats();
-    }, onError: (e) => debugPrint('[GigHostProfile] offered_gigs: $e'));
+          _offeredGigsDocs = snap.docs.map((d) {
+            final m = Map<String, dynamic>.from(d.data());
+            m['docId'] = d.id;
+            m['gigType'] = 'offered';
+            return m;
+          }).toList();
+          _recomputeStats();
+        }, onError: (e) => debugPrint('[GigHostProfile] offered_gigs: $e'));
   }
 
   void _listenForUnread() {
@@ -190,7 +203,6 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
           });
         }, onError: (e) => debugPrint('[GigHostProfile] notif: $e'));
   }
-
 
   void _recomputeStats() {
     final allDocs = [..._quickGigsDocs, ..._openGigsDocs, ..._offeredGigsDocs];
@@ -214,23 +226,25 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
       _activeGigs = activeGigsCount;
       _completedGigs = completedCount;
       _totalSpent = totalSpentAmt;
+      _completionRate = (completedCount / gigsPostedCount) * 100;
     });
   }
 
   void _showGigHistory() {
-    final completed = [
-      ..._quickGigsDocs,
-      ..._openGigsDocs,
-      ..._offeredGigsDocs,
-    ].where((g) => (g['status'] as String?) == 'completed').toList()
-      ..sort((a, b) {
-        final aTs = a['completedAt'] as Timestamp?;
-        final bTs = b['completedAt'] as Timestamp?;
-        if (aTs == null && bTs == null) return 0;
-        if (aTs == null) return 1;
-        if (bTs == null) return -1;
-        return bTs.compareTo(aTs);
-      });
+    final completed =
+        [
+            ..._quickGigsDocs,
+            ..._openGigsDocs,
+            ..._offeredGigsDocs,
+          ].where((g) => (g['status'] as String?) == 'completed').toList()
+          ..sort((a, b) {
+            final aTs = a['completedAt'] as Timestamp?;
+            final bTs = b['completedAt'] as Timestamp?;
+            if (aTs == null && bTs == null) return 0;
+            if (aTs == null) return 1;
+            if (bTs == null) return -1;
+            return bTs.compareTo(aTs);
+          });
 
     showModalBottomSheet(
       context: context,
@@ -242,22 +256,39 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
 
   String _monthName(int month) {
     const months = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return months[month];
   }
 
-  Future<void> _pickAvatar(void Function(void Function()) setModal,
-      void Function(XFile) onPicked) async {
+  Future<void> _pickAvatar(
+    void Function(void Function()) setModal,
+    void Function(XFile) onPicked,
+  ) async {
     final source = await showDialog<ImageSource>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Theme.of(ctx).cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Change Profile Photo',
-            style: TextStyle(
-                color: Theme.of(ctx).colorScheme.onSurface, fontSize: 15)),
+        title: Text(
+          'Change Profile Photo',
+          style: TextStyle(
+            color: Theme.of(ctx).colorScheme.onSurface,
+            fontSize: 15,
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -276,8 +307,11 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
       ),
     );
     if (source == null) return;
-    final picked = await ImagePicker()
-        .pickImage(source: source, imageQuality: 80, maxWidth: 512);
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: 80,
+      maxWidth: 512,
+    );
     if (picked != null) setModal(() => onPicked(picked));
   }
 
@@ -301,7 +335,9 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
           final isDark = Theme.of(ctx).brightness == Brightness.dark;
 
           return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom,
+            ),
             child: Container(
               margin: const EdgeInsets.all(16),
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
@@ -313,7 +349,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                     color: Colors.black.withValues(alpha: 0.3),
                     blurRadius: 24,
                     offset: const Offset(0, -4),
-                  )
+                  ),
                 ],
               ),
               child: Form(
@@ -334,11 +370,14 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    Text('Edit Personal Info',
-                        style: TextStyle(
-                            color: onSurface,
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold)),
+                    Text(
+                      'Edit Personal Info',
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 20),
 
                     // ── Avatar picker ─────────────────────────────────────
@@ -347,9 +386,9 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                         onTap: saving
                             ? null
                             : () => _pickAvatar(
-                                  setModal,
-                                  (img) => pickedImage = img,
-                                ),
+                                setModal,
+                                (img) => pickedImage = img,
+                              ),
                         child: Stack(
                           children: [
                             Container(
@@ -358,23 +397,26 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                    color: kAmber.withValues(alpha: 0.5),
-                                    width: 2),
+                                  color: kAmber.withValues(alpha: 0.5),
+                                  width: 2,
+                                ),
                               ),
                               child: ClipOval(
                                 child: pickedImage != null
-                                    ? Image.file(File(pickedImage!.path),
-                                        fit: BoxFit.cover)
+                                    ? Image.file(
+                                        File(pickedImage!.path),
+                                        fit: BoxFit.cover,
+                                      )
                                     : _photoUrl.isNotEmpty
-                                        ? CachedNetworkImage(
-                                            imageUrl: _photoUrl,
-                                            fit: BoxFit.cover,
-                                            placeholder: (c, u) =>
-                                                const _DefaultAvatar(size: 80),
-                                            errorWidget: (c, u, e) =>
-                                                const _DefaultAvatar(size: 80),
-                                          )
-                                        : const _DefaultAvatar(size: 80),
+                                    ? CachedNetworkImage(
+                                        imageUrl: _photoUrl,
+                                        fit: BoxFit.cover,
+                                        placeholder: (c, u) =>
+                                            const _DefaultAvatar(size: 80),
+                                        errorWidget: (c, u, e) =>
+                                            const _DefaultAvatar(size: 80),
+                                      )
+                                    : const _DefaultAvatar(size: 80),
                               ),
                             ),
                             Positioned(
@@ -385,11 +427,16 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                 decoration: BoxDecoration(
                                   color: kAmber,
                                   shape: BoxShape.circle,
-                                  border:
-                                      Border.all(color: cardColor, width: 2),
+                                  border: Border.all(
+                                    color: cardColor,
+                                    width: 2,
+                                  ),
                                 ),
-                                child: const Icon(Icons.camera_alt_rounded,
-                                    color: Colors.black, size: 14),
+                                child: const Icon(
+                                  Icons.camera_alt_rounded,
+                                  color: Colors.black,
+                                  size: 14,
+                                ),
                               ),
                             ),
                           ],
@@ -433,9 +480,10 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             : Colors.grey.withValues(alpha: 0.06),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                            color: isDark
-                                ? kBorder
-                                : Colors.grey.withValues(alpha: 0.2)),
+                          color: isDark
+                              ? kBorder
+                              : Colors.grey.withValues(alpha: 0.2),
+                        ),
                       ),
                       child: TextFormField(
                         controller: bioCtrl,
@@ -444,15 +492,27 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                         style: TextStyle(color: onSurface, fontSize: 14),
                         decoration: InputDecoration(
                           labelText: 'About / Bio',
-                          labelStyle: const TextStyle(color: kSub, fontSize: 13),
+                          labelStyle: const TextStyle(
+                            color: kSub,
+                            fontSize: 13,
+                          ),
                           prefixIcon: const Padding(
                             padding: EdgeInsets.only(bottom: 40),
-                            child: Icon(Icons.notes_rounded, color: kSub, size: 20),
+                            child: Icon(
+                              Icons.notes_rounded,
+                              color: kSub,
+                              size: 20,
+                            ),
                           ),
                           border: InputBorder.none,
                           contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          counterStyle: const TextStyle(color: kSub, fontSize: 11),
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          counterStyle: const TextStyle(
+                            color: kSub,
+                            fontSize: 11,
+                          ),
                         ),
                       ),
                     ),
@@ -468,8 +528,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                 final uid =
                                     FirebaseAuth.instance.currentUser?.uid;
                                 if (uid == null) return;
-                                final messenger =
-                                    ScaffoldMessenger.of(context);
+                                final messenger = ScaffoldMessenger.of(context);
                                 try {
                                   String? newPhotoUrl;
                                   if (pickedImage != null) {
@@ -505,17 +564,22 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                   if (ctx.mounted) Navigator.pop(ctx);
                                   messenger.showSnackBar(
                                     SnackBar(
-                                      content: const Row(children: [
-                                        Icon(Icons.check_circle_outline,
-                                            color: Colors.white, size: 18),
-                                        SizedBox(width: 10),
-                                        Text('Profile updated'),
-                                      ]),
+                                      content: const Row(
+                                        children: [
+                                          Icon(
+                                            Icons.check_circle_outline,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
+                                          SizedBox(width: 10),
+                                          Text('Profile updated'),
+                                        ],
+                                      ),
                                       backgroundColor: kBlue,
                                       behavior: SnackBarBehavior.floating,
                                       shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(12)),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
                                       margin: const EdgeInsets.all(16),
                                     ),
                                   );
@@ -528,7 +592,8 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                           foregroundColor: Colors.black,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14)),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                           elevation: 0,
                         ),
                         child: saving
@@ -536,11 +601,17 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                 height: 20,
                                 width: 20,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.black54),
+                                  strokeWidth: 2,
+                                  color: Colors.black54,
+                                ),
                               )
-                            : const Text('Save Changes',
+                            : const Text(
+                                'Save Changes',
                                 style: TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 15)),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
                       ),
                     ),
                   ],
@@ -569,10 +640,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
       ..._offeredGigsDocs,
     ].where((g) => (g['status'] as String?) == 'completed').toList();
 
-    PaymentHistorySheet.show(
-      context: context,
-      completedGigs: completed,
-    );
+    PaymentHistorySheet.show(context: context, completedGigs: completed);
   }
 
   void _showFavoriteWorkers() {
@@ -600,8 +668,11 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
         elevation: 0,
         titleSpacing: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: kSub, size: 20),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: kSub,
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -615,8 +686,11 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                 shape: BoxShape.circle,
               ),
               child: const Center(
-                child: Icon(Icons.account_circle_outlined,
-                    color: kAmber, size: 16),
+                child: Icon(
+                  Icons.account_circle_outlined,
+                  color: kAmber,
+                  size: 16,
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -624,13 +698,18 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('My Profile',
-                    style: TextStyle(
-                        color: onSurface,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14)),
-                const Text('Gig Host',
-                    style: TextStyle(color: kSub, fontSize: 10)),
+                Text(
+                  'My Profile',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                const Text(
+                  'Gig Host',
+                  style: TextStyle(color: kSub, fontSize: 10),
+                ),
               ],
             ),
           ],
@@ -641,7 +720,9 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
           : SafeArea(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 16),
+                  horizontal: 20,
+                  vertical: 16,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -654,34 +735,46 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                         children: [
                           Row(
                             children: [
-                              Text('Personal Info',
-                                  style: TextStyle(
-                                      color: onSurface,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold)),
+                              Text(
+                                'Personal Info',
+                                style: TextStyle(
+                                  color: onSurface,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               const Spacer(),
                               GestureDetector(
                                 onTap: _showEditPersonalInfo,
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 6),
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: kAmber.withValues(alpha: 0.12),
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
-                                        color: kAmber.withValues(alpha: 0.3)),
+                                      color: kAmber.withValues(alpha: 0.3),
+                                    ),
                                   ),
                                   child: const Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(Icons.edit_outlined,
-                                          color: kAmber, size: 13),
+                                      Icon(
+                                        Icons.edit_outlined,
+                                        color: kAmber,
+                                        size: 13,
+                                      ),
                                       SizedBox(width: 5),
-                                      Text('Edit',
-                                          style: TextStyle(
-                                              color: kAmber,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600)),
+                                      Text(
+                                        'Edit',
+                                        style: TextStyle(
+                                          color: kAmber,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -705,36 +798,47 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                         Text(
                                           _name.isNotEmpty ? _name : 'Gig Host',
                                           style: TextStyle(
-                                              color: onSurface,
-                                              fontSize: 17,
-                                              fontWeight: FontWeight.bold),
+                                            color: onSurface,
+                                            fontSize: 17,
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
                                         const SizedBox(width: 8),
-                                        if( _isVerified == 'verified')
-                                        Icon(Icons.verified, color: kBlue, size: 16),
+                                        if (_isVerified == 'verified')
+                                          Icon(
+                                            Icons.verified,
+                                            color: kBlue,
+                                            size: 16,
+                                          ),
                                       ],
                                     ),
                                     if (_company.isNotEmpty) ...[
                                       const SizedBox(height: 2),
-                                      Text(_company,
-                                          style: const TextStyle(
-                                              color: kSub, fontSize: 13)),
+                                      Text(
+                                        _company,
+                                        style: const TextStyle(
+                                          color: kSub,
+                                          fontSize: 13,
+                                        ),
+                                      ),
                                     ],
                                     const SizedBox(height: 6),
                                     // Star rating
                                     Row(
                                       children: [
                                         ...List.generate(5, (i) {
-                                          final full = i < _ratingAsHost.floor();
-                                          final half = !full &&
+                                          final full =
+                                              i < _ratingAsHost.floor();
+                                          final half =
+                                              !full &&
                                               i < _ratingAsHost &&
                                               _ratingAsHost - i >= 0.5;
                                           return Icon(
                                             full
                                                 ? Icons.star_rounded
                                                 : half
-                                                    ? Icons.star_half_rounded
-                                                    : Icons.star_outline_rounded,
+                                                ? Icons.star_half_rounded
+                                                : Icons.star_outline_rounded,
                                             color: kAmber,
                                             size: 16,
                                           );
@@ -743,15 +847,18 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                         Text(
                                           _ratingAsHost.toStringAsFixed(1),
                                           style: TextStyle(
-                                              color: onSurface,
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w600),
+                                            color: onSurface,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                         ),
                                         const SizedBox(width: 4),
                                         Text(
                                           '($_ratingCount ${_ratingCount == 1 ? 'rating' : 'ratings'})',
                                           style: const TextStyle(
-                                              color: kSub, fontSize: 11),
+                                            color: kSub,
+                                            fontSize: 11,
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -767,15 +874,17 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
 
                           // Info rows
                           _InfoRow(
-                              icon: Icons.email_outlined,
-                              label: 'Email',
-                              value: _email),
+                            icon: Icons.email_outlined,
+                            label: 'Email',
+                            value: _email,
+                          ),
                           if (_phone.isNotEmpty) ...[
                             const SizedBox(height: 10),
                             _InfoRow(
-                                icon: Icons.phone_outlined,
-                                label: 'Phone',
-                                value: _phone),
+                              icon: Icons.phone_outlined,
+                              label: 'Phone',
+                              value: _phone,
+                            ),
                           ],
                           // if (_userId.isNotEmpty) ...[
                           //   const SizedBox(height: 10),
@@ -787,10 +896,13 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                           if (_createdAt.isNotEmpty) ...[
                             const SizedBox(height: 10),
                             _InfoRow(
-                                icon: Icons.calendar_today_outlined,
-                                label: 'Joined',
-                                value: _createdAt.replaceFirst(
-                                    'Member since ', '')),
+                              icon: Icons.calendar_today_outlined,
+                              label: 'Joined',
+                              value: _createdAt.replaceFirst(
+                                'Member since ',
+                                '',
+                              ),
+                            ),
                           ],
 
                           // Bio
@@ -805,25 +917,32 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                     : Colors.grey.withValues(alpha: 0.06),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                    color: isDark
-                                        ? kBorder
-                                        : Colors.grey.withValues(alpha: 0.15)),
+                                  color: isDark
+                                      ? kBorder
+                                      : Colors.grey.withValues(alpha: 0.15),
+                                ),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('About',
-                                      style: TextStyle(
-                                          color: kSub,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          letterSpacing: 0.5)),
+                                  const Text(
+                                    'About',
+                                    style: TextStyle(
+                                      color: kSub,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
                                   const SizedBox(height: 6),
-                                  Text(_bio,
-                                      style: TextStyle(
-                                          color: onSurface,
-                                          fontSize: 13,
-                                          height: 1.5)),
+                                  Text(
+                                    _bio,
+                                    style: TextStyle(
+                                      color: onSurface,
+                                      fontSize: 13,
+                                      height: 1.5,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -881,7 +1000,109 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                       ],
                     ),
                     const SizedBox(height: 20),
-
+                    Container(
+                      padding: const EdgeInsets.all(18),
+                      // height: 62,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        spacing: 12,
+                        children: [
+                          Text(
+                            'Reputation',
+                            style: TextStyle(
+                              color: kBlue,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.star,
+                                    color: Colors.amber,
+                                    size: 20,
+                                  ),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    '$_ratingAsHost ($_ratingCount)',
+                                    style: TextStyle(
+                                      color: onSurface,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Avg Rating',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.check_circle,
+                                    color: Color(0xFF10B981),
+                                    size: 20,
+                                  ),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    '$_completedGigs/$_gigsPosted',
+                                    style: TextStyle(
+                                      color: onSurface,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Gigs Completed',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.percent, color: kBlue, size: 20),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    '$_completionRate%',
+                                    style: TextStyle(
+                                      color: onSurface,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Completion Rate',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
                     // ── Account ────────────────────────────────────────
                     _SectionLabel(label: 'Account', onSurface: onSurface),
                     const SizedBox(height: 12),
@@ -890,7 +1111,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                       cardColor: cardColor,
                       child: Column(
                         children: [
-                             _MenuRow(
+                          _MenuRow(
                             icon: Icons.description_rounded,
                             iconColor: const Color.fromARGB(255, 152, 4, 210),
                             label: 'My Documents',
@@ -898,12 +1119,15 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => MyDocumentsScreen(userId: FirebaseAuth.instance.currentUser!.uid),
+                                  builder: (context) => MyDocumentsScreen(
+                                    userId:
+                                        FirebaseAuth.instance.currentUser!.uid,
+                                  ),
                                 ),
                               );
                             },
                           ),
-                            _Divider(isDark: isDark),
+                          _Divider(isDark: isDark),
                           _MenuRow(
                             icon: Icons.history_rounded,
                             iconColor: kBlue,
@@ -931,7 +1155,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             label: 'Payment History',
                             onTap: _showPaymentHistory,
                           ),
-                           _Divider(isDark: isDark),
+                          _Divider(isDark: isDark),
                           _MenuRow(
                             icon: Icons.card_giftcard,
                             iconColor: const Color(0xFF8B5CF6),
@@ -943,7 +1167,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                   builder: (context) => MyReferralScreen(),
                                 ),
                               );
-                            }
+                            },
                           ),
                         ],
                       ),
@@ -967,7 +1191,8 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             onTap: () => Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => const VerificationScreen(),
+                                builder: (context) =>
+                                    const VerificationScreen(),
                               ),
                             ),
                           ),
@@ -978,21 +1203,54 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             label: 'Notifications',
                             onTap: () => NotificationsSheet.show(context),
                           ),
-                          _Divider(isDark: isDark),
-                          _MenuRow(
-                            icon: Icons.lock_outline_rounded,
-                            iconColor: const Color(0xFF94A3B8),
-                            label: 'Privacy & Security',
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const PrivacySecurityScreen(),
-                              ),
-                            ),
-                          ),
+
                         ],
                       ),
                     ),
+                    const SizedBox(height: 32),
+                 Container(
+  padding: const EdgeInsets.all(16),
+  width: double.infinity,
+  decoration: BoxDecoration(
+    color: Colors.red[50],
+    borderRadius: BorderRadius.circular(8),
+    border: Border.all(color: Colors.red),
+  ),
+  child: Row(
+    crossAxisAlignment: CrossAxisAlignment.center,
+    children: [
+      // trash icon
+      Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: Colors.red.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(
+          Icons.delete,
+          color: Colors.red,
+          size: 18,
+        ),
+      ),
+      const SizedBox(width: 12),
+     Expanded(
+  child: GestureDetector(
+    onTap: () => DeleteAccountService.deleteAccount(context),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Delete Account', style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
+        Text('Permanently delete your account and data', style: TextStyle(color: Colors.grey[800], fontSize: 12)),
+      ],
+    ),
+  ),
+),
+      const SizedBox(width: 8),
+      Icon(Icons.chevron_right_rounded, color: Colors.grey),
+    ],
+  ),
+),
                     const SizedBox(height: 32),
                   ],
                 ),
@@ -1041,8 +1299,11 @@ class _DefaultAvatar extends StatelessWidget {
         shape: BoxShape.circle,
         border: Border.all(color: kAmber.withValues(alpha: 0.4), width: 2),
       ),
-      child: Icon(Icons.account_circle_rounded,
-          color: kAmber, size: size * 0.6),
+      child: Icon(
+        Icons.account_circle_rounded,
+        color: kAmber,
+        size: size * 0.6,
+      ),
     );
   }
 }
@@ -1065,12 +1326,15 @@ class _SectionLabel extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        Text(label,
-            style: TextStyle(
-                color: onSurface,
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.3)),
+        Text(
+          label,
+          style: TextStyle(
+            color: onSurface,
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.3,
+          ),
+        ),
       ],
     );
   }
@@ -1080,8 +1344,11 @@ class _SectionCard extends StatelessWidget {
   final Widget child;
   final Color cardColor;
   final bool isDark;
-  const _SectionCard(
-      {required this.child, required this.cardColor, required this.isDark});
+  const _SectionCard({
+    required this.child,
+    required this.cardColor,
+    required this.isDark,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1092,7 +1359,8 @@ class _SectionCard extends StatelessWidget {
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-            color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.15)),
+          color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.15),
+        ),
       ),
       child: child,
     );
@@ -1103,8 +1371,11 @@ class _InfoRow extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
-  const _InfoRow(
-      {required this.icon, required this.label, required this.value});
+  const _InfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1112,14 +1383,16 @@ class _InfoRow extends StatelessWidget {
       children: [
         Icon(icon, color: kSub, size: 16),
         const SizedBox(width: 10),
-        Text('$label: ',
-            style: const TextStyle(color: kSub, fontSize: 12)),
+        Text('$label: ', style: const TextStyle(color: kSub, fontSize: 12)),
         Expanded(
-          child: Text(value,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontSize: 13)),
+          child: Text(
+            value,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
+              fontSize: 13,
+            ),
+          ),
         ),
       ],
     );
@@ -1152,7 +1425,8 @@ class _StatCard2 extends StatelessWidget {
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-            color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.15)),
+          color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.15),
+        ),
       ),
       child: Row(
         children: [
@@ -1170,13 +1444,15 @@ class _StatCard2 extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(value,
-                  style: TextStyle(
-                      color: onSurface,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold)),
-              Text(label,
-                  style: const TextStyle(color: kSub, fontSize: 11)),
+              Text(
+                value,
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(label, style: const TextStyle(color: kSub, fontSize: 11)),
             ],
           ),
         ],
@@ -1223,22 +1499,26 @@ class _MenuRow extends StatelessWidget {
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(label,
-                  style: TextStyle(color: onSurface, fontSize: 14)),
+              child: Text(
+                label,
+                style: TextStyle(color: onSurface, fontSize: 14),
+              ),
             ),
             if (badge != null) ...[
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: (badgeColor ?? kAmber).withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Text(badge!,
-                    style: TextStyle(
-                        color: badgeColor ?? kAmber,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600)),
+                child: Text(
+                  badge!,
+                  style: TextStyle(
+                    color: badgeColor ?? kAmber,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
               const SizedBox(width: 8),
             ],
@@ -1258,7 +1538,9 @@ class _Divider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Divider(
       height: 1,
-      color: isDark ? kBorder.withValues(alpha: 0.5) : Colors.grey.withValues(alpha: 0.12),
+      color: isDark
+          ? kBorder.withValues(alpha: 0.5)
+          : Colors.grey.withValues(alpha: 0.12),
     );
   }
 }
@@ -1292,7 +1574,8 @@ class _ModalField extends StatelessWidget {
             : Colors.grey.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-            color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.2)),
+          color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.2),
+        ),
       ),
       child: TextFormField(
         controller: controller,
@@ -1304,8 +1587,10 @@ class _ModalField extends StatelessWidget {
           labelStyle: const TextStyle(color: kSub, fontSize: 13),
           prefixIcon: Icon(icon, color: kSub, size: 20),
           border: InputBorder.none,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
+          ),
         ),
       ),
     );
@@ -1338,7 +1623,8 @@ class _GigHistorySheetState extends State<_GigHistorySheet> {
     if (_hostId.isEmpty) return;
     final doc = await _db.collection('users').doc(_hostId).get();
     if (!mounted) return;
-    final list = (doc.data()?['favoriteWorkerIds'] as List?)
+    final list =
+        (doc.data()?['favoriteWorkerIds'] as List?)
             ?.map((e) => e.toString())
             .toList() ??
         [];
@@ -1355,14 +1641,11 @@ class _GigHistorySheetState extends State<_GigHistorySheet> {
         _favoriteWorkerIds.add(workerId);
       }
     });
-    await _db.collection('users').doc(_hostId).set(
-      {
-        'favoriteWorkerIds': isFav
-            ? FieldValue.arrayRemove([workerId])
-            : FieldValue.arrayUnion([workerId]),
-      },
-      SetOptions(merge: true),
-    );
+    await _db.collection('users').doc(_hostId).set({
+      'favoriteWorkerIds': isFav
+          ? FieldValue.arrayRemove([workerId])
+          : FieldValue.arrayUnion([workerId]),
+    }, SetOptions(merge: true));
   }
 
   @override
@@ -1407,21 +1690,28 @@ class _GigHistorySheetState extends State<_GigHistorySheet> {
                       color: kBlue.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.history_rounded,
-                        color: kBlue, size: 18),
+                    child: const Icon(
+                      Icons.history_rounded,
+                      color: kBlue,
+                      size: 18,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Gig History',
-                          style: TextStyle(
-                              color: onSurface,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold)),
-                      Text('${widget.gigs.length} completed',
-                          style:
-                              const TextStyle(color: kSub, fontSize: 12)),
+                      Text(
+                        'Gig History',
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        '${widget.gigs.length} completed',
+                        style: const TextStyle(color: kSub, fontSize: 12),
+                      ),
                     ],
                   ),
                 ],
@@ -1435,11 +1725,16 @@ class _GigHistorySheetState extends State<_GigHistorySheet> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.work_off_outlined,
-                          color: kSub.withValues(alpha: 0.35), size: 52),
+                      Icon(
+                        Icons.work_off_outlined,
+                        color: kSub.withValues(alpha: 0.35),
+                        size: 52,
+                      ),
                       const SizedBox(height: 12),
-                      const Text('No completed gigs yet',
-                          style: TextStyle(color: kSub, fontSize: 14)),
+                      const Text(
+                        'No completed gigs yet',
+                        style: TextStyle(color: kSub, fontSize: 14),
+                      ),
                     ],
                   ),
                 ),
@@ -1453,8 +1748,10 @@ class _GigHistorySheetState extends State<_GigHistorySheet> {
                   separatorBuilder: (_, i) => const SizedBox(height: 10),
                   itemBuilder: (ctx, i) {
                     final gig = widget.gigs[i];
-                    final workerId = gig['assignedWorkerId'] as String? ??
-                        gig['workerId'] as String? ?? '';
+                    final workerId =
+                        gig['assignedWorkerId'] as String? ??
+                        gig['workerId'] as String? ??
+                        '';
                     return _GigHistoryCard(
                       gig: gig,
                       isDark: isDark,
@@ -1464,8 +1761,7 @@ class _GigHistorySheetState extends State<_GigHistorySheet> {
                         context: ctx,
                         isScrollControlled: true,
                         backgroundColor: Colors.transparent,
-                        builder: (_) =>
-                            _GigHistoryDetailSheet(gig: gig),
+                        builder: (_) => _GigHistoryDetailSheet(gig: gig),
                       ),
                     );
                   },
@@ -1502,23 +1798,28 @@ class _GigHistoryCard extends StatelessWidget {
     final gigType = gig['gigType'] as String? ?? 'quick';
     final title = gig['title'] as String? ?? 'Gig';
     final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
-    final workerName = gig['assignedWorkerName'] as String? ??
-        gig['workerName'] as String? ?? '';
+    final workerName =
+        gig['assignedWorkerName'] as String? ??
+        gig['workerName'] as String? ??
+        '';
     final completedAt = gig['completedAt'] as Timestamp?;
     final durationSec = (gig['durationSeconds'] as num?)?.toInt();
 
     final typeColor = gigType == 'quick'
         ? kAmber
         : gigType == 'open'
-            ? kBlue
-            : const Color(0xFF8B5CF6);
-    final typeLabel =
-        gigType == 'quick' ? 'Quick' : gigType == 'open' ? 'Open' : 'Offered';
+        ? kBlue
+        : const Color(0xFF8B5CF6);
+    final typeLabel = gigType == 'quick'
+        ? 'Quick'
+        : gigType == 'open'
+        ? 'Open'
+        : 'Offered';
     final typeIcon = gigType == 'quick'
         ? Icons.bolt_rounded
         : gigType == 'open'
-            ? Icons.work_outline_rounded
-            : Icons.handshake_outlined;
+        ? Icons.work_outline_rounded
+        : Icons.handshake_outlined;
 
     return GestureDetector(
       onTap: onTap,
@@ -1530,9 +1831,8 @@ class _GigHistoryCard extends StatelessWidget {
               : Colors.grey.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-              color: isDark
-                  ? kBorder
-                  : Colors.grey.withValues(alpha: 0.18)),
+            color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.18),
+          ),
         ),
         child: Row(
           children: [
@@ -1558,9 +1858,10 @@ class _GigHistoryCard extends StatelessWidget {
                         child: Text(
                           title,
                           style: TextStyle(
-                              color: onSurface,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600),
+                            color: onSurface,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1568,16 +1869,21 @@ class _GigHistoryCard extends StatelessWidget {
                       const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 2),
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: typeColor.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: Text(typeLabel,
-                            style: TextStyle(
-                                color: typeColor,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600)),
+                        child: Text(
+                          typeLabel,
+                          style: TextStyle(
+                            color: typeColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -1585,15 +1891,19 @@ class _GigHistoryCard extends StatelessWidget {
                   Row(
                     children: [
                       if (workerName.isNotEmpty) ...[
-                        const Icon(Icons.person_outline_rounded,
-                            size: 12, color: kSub),
+                        const Icon(
+                          Icons.person_outline_rounded,
+                          size: 12,
+                          color: kSub,
+                        ),
                         const SizedBox(width: 3),
                         Flexible(
-                          child: Text(workerName,
-                              style:
-                                  const TextStyle(color: kSub, fontSize: 11),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            workerName,
+                            style: const TextStyle(color: kSub, fontSize: 11),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         const SizedBox(width: 2),
                         GestureDetector(
@@ -1611,12 +1921,16 @@ class _GigHistoryCard extends StatelessWidget {
                         const SizedBox(width: 6),
                       ],
                       if (completedAt != null) ...[
-                        const Icon(Icons.calendar_today_outlined,
-                            size: 12, color: kSub),
+                        const Icon(
+                          Icons.calendar_today_outlined,
+                          size: 12,
+                          color: kSub,
+                        ),
                         const SizedBox(width: 3),
-                        Text(_fmtDate(completedAt),
-                            style:
-                                const TextStyle(color: kSub, fontSize: 11)),
+                        Text(
+                          _fmtDate(completedAt),
+                          style: const TextStyle(color: kSub, fontSize: 11),
+                        ),
                       ],
                     ],
                   ),
@@ -1624,12 +1938,12 @@ class _GigHistoryCard extends StatelessWidget {
                     const SizedBox(height: 3),
                     Row(
                       children: [
-                        const Icon(Icons.timer_outlined,
-                            size: 12, color: kSub),
+                        const Icon(Icons.timer_outlined, size: 12, color: kSub),
                         const SizedBox(width: 3),
-                        Text(_fmtDuration(durationSec),
-                            style:
-                                const TextStyle(color: kSub, fontSize: 11)),
+                        Text(
+                          _fmtDuration(durationSec),
+                          style: const TextStyle(color: kSub, fontSize: 11),
+                        ),
                       ],
                     ),
                   ],
@@ -1641,14 +1955,16 @@ class _GigHistoryCard extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text('₱${budget.toStringAsFixed(0)}',
-                    style: TextStyle(
-                        color: onSurface,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold)),
+                Text(
+                  '₱${budget.toStringAsFixed(0)}',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                const Icon(Icons.chevron_right_rounded,
-                    color: kSub, size: 18),
+                const Icon(Icons.chevron_right_rounded, color: kSub, size: 18),
               ],
             ),
           ],
@@ -1659,8 +1975,19 @@ class _GigHistoryCard extends StatelessWidget {
 
   static String _fmtDate(Timestamp ts) {
     const months = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     final dt = ts.toDate().toLocal();
     return '${months[dt.month]} ${dt.day}, ${dt.year}';
@@ -1694,8 +2021,10 @@ class _GigHistoryDetailSheet extends StatelessWidget {
     final description = gig['description'] as String? ?? '';
     final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
     final address = gig['address'] as String? ?? '';
-    final workerName = gig['assignedWorkerName'] as String? ??
-        gig['workerName'] as String? ?? '';
+    final workerName =
+        gig['assignedWorkerName'] as String? ??
+        gig['workerName'] as String? ??
+        '';
     final completedAt = gig['completedAt'] as Timestamp?;
     final workStartedAt = gig['workStartedAt'] as Timestamp?;
     final workCompletedAt = gig['workCompletedAt'] as Timestamp?;
@@ -1704,18 +2033,18 @@ class _GigHistoryDetailSheet extends StatelessWidget {
     final typeColor = gigType == 'quick'
         ? kAmber
         : gigType == 'open'
-            ? kBlue
-            : const Color(0xFF8B5CF6);
+        ? kBlue
+        : const Color(0xFF8B5CF6);
     final typeLabel = gigType == 'quick'
         ? 'Quick Gig'
         : gigType == 'open'
-            ? 'Open Gig'
-            : 'Offered Gig';
+        ? 'Open Gig'
+        : 'Offered Gig';
     final typeIcon = gigType == 'quick'
         ? Icons.bolt_rounded
         : gigType == 'open'
-            ? Icons.work_outline_rounded
-            : Icons.handshake_outlined;
+        ? Icons.work_outline_rounded
+        : Icons.handshake_outlined;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.7,
@@ -1749,25 +2078,33 @@ class _GigHistoryDetailSheet extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Text(title,
-                      style: TextStyle(
-                          color: onSurface,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold)),
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      color: onSurface,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF10B981).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Text('Completed',
-                      style: TextStyle(
-                          color: Color(0xFF10B981),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600)),
+                  child: const Text(
+                    'Completed',
+                    style: TextStyle(
+                      color: Color(0xFF10B981),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -1775,8 +2112,7 @@ class _GigHistoryDetailSheet extends StatelessWidget {
 
             // Type chip
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: typeColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
@@ -1786,11 +2122,14 @@ class _GigHistoryDetailSheet extends StatelessWidget {
                 children: [
                   Icon(typeIcon, color: typeColor, size: 12),
                   const SizedBox(width: 4),
-                  Text(typeLabel,
-                      style: TextStyle(
-                          color: typeColor,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600)),
+                  Text(
+                    typeLabel,
+                    style: TextStyle(
+                      color: typeColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1803,29 +2142,33 @@ class _GigHistoryDetailSheet extends StatelessWidget {
               children: [
                 if (description.isNotEmpty)
                   _HistoryDetailRow(
-                      icon: Icons.notes_rounded,
-                      label: 'Description',
-                      value: description,
-                      onSurface: onSurface),
+                    icon: Icons.notes_rounded,
+                    label: 'Description',
+                    value: description,
+                    onSurface: onSurface,
+                  ),
                 _HistoryDetailRow(
-                    icon: Icons.attach_money_rounded,
-                    label: 'Budget',
-                    value: '₱${budget.toStringAsFixed(0)}',
-                    valueColor: kAmber,
-                    onSurface: onSurface),
+                  icon: Icons.attach_money_rounded,
+                  label: 'Budget',
+                  value: '₱${budget.toStringAsFixed(0)}',
+                  valueColor: kAmber,
+                  onSurface: onSurface,
+                ),
                 if (address.isNotEmpty)
                   _HistoryDetailRow(
-                      icon: Icons.location_on_outlined,
-                      label: 'Location',
-                      value: address,
-                      onSurface: onSurface),
+                    icon: Icons.location_on_outlined,
+                    label: 'Location',
+                    value: address,
+                    onSurface: onSurface,
+                  ),
                 if (workerName.isNotEmpty)
                   _HistoryDetailRow(
-                      icon: Icons.person_outline_rounded,
-                      label: 'Worker',
-                      value: workerName,
-                      valueColor: kBlue,
-                      onSurface: onSurface),
+                    icon: Icons.person_outline_rounded,
+                    label: 'Worker',
+                    value: workerName,
+                    valueColor: kBlue,
+                    onSurface: onSurface,
+                  ),
               ],
             ),
             const SizedBox(height: 14),
@@ -1837,31 +2180,33 @@ class _GigHistoryDetailSheet extends StatelessWidget {
               children: [
                 if (workStartedAt != null)
                   _HistoryDetailRow(
-                      icon: Icons.play_circle_outline_rounded,
-                      label: 'Work Started',
-                      value: _fmtDateTime(workStartedAt),
-                      onSurface: onSurface),
+                    icon: Icons.play_circle_outline_rounded,
+                    label: 'Work Started',
+                    value: _fmtDateTime(workStartedAt),
+                    onSurface: onSurface,
+                  ),
                 if (workCompletedAt != null)
                   _HistoryDetailRow(
-                      icon: Icons.stop_circle_outlined,
-                      label: 'Work Ended',
-                      value: _fmtDateTime(workCompletedAt),
-                      onSurface: onSurface),
+                    icon: Icons.stop_circle_outlined,
+                    label: 'Work Ended',
+                    value: _fmtDateTime(workCompletedAt),
+                    onSurface: onSurface,
+                  ),
                 _HistoryDetailRow(
-                    icon: Icons.verified_rounded,
-                    label: 'Completed On',
-                    value: completedAt != null
-                        ? _fmtDateTime(completedAt)
-                        : '—',
-                    valueColor: const Color(0xFF10B981),
-                    onSurface: onSurface),
+                  icon: Icons.verified_rounded,
+                  label: 'Completed On',
+                  value: completedAt != null ? _fmtDateTime(completedAt) : '—',
+                  valueColor: const Color(0xFF10B981),
+                  onSurface: onSurface,
+                ),
                 if (durationSec != null && durationSec > 0)
                   _HistoryDetailRow(
-                      icon: Icons.hourglass_bottom_rounded,
-                      label: 'Total Time Spent',
-                      value: _fmtDuration(durationSec),
-                      valueColor: kAmber,
-                      onSurface: onSurface),
+                    icon: Icons.hourglass_bottom_rounded,
+                    label: 'Total Time Spent',
+                    value: _fmtDuration(durationSec),
+                    valueColor: kAmber,
+                    onSurface: onSurface,
+                  ),
               ],
             ),
           ],
@@ -1872,8 +2217,19 @@ class _GigHistoryDetailSheet extends StatelessWidget {
 
   static String _fmtDateTime(Timestamp ts) {
     const months = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     final dt = ts.toDate().toLocal();
     final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
@@ -1915,18 +2271,20 @@ class _HistoryDetailCard extends StatelessWidget {
             : Colors.black.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-            color: isDark
-                ? kBorder
-                : Colors.grey.withValues(alpha: 0.18)),
+          color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.18),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: TextStyle(
-                  color: onSurface,
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold)),
+          Text(
+            title,
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 12),
           ...children.expand((w) => [w, const SizedBox(height: 12)]).toList()
             ..removeLast(),
@@ -1962,15 +2320,23 @@ class _HistoryDetailRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label,
-                  style: const TextStyle(
-                      color: kSub, fontSize: 11, fontWeight: FontWeight.w500)),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: kSub,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
               const SizedBox(height: 2),
-              Text(value,
-                  style: TextStyle(
-                      color: valueColor ?? onSurface,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500)),
+              Text(
+                value,
+                style: TextStyle(
+                  color: valueColor ?? onSurface,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ],
           ),
         ),
@@ -1978,4 +2344,3 @@ class _HistoryDetailRow extends StatelessWidget {
     );
   }
 }
-

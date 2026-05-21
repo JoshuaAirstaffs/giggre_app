@@ -16,6 +16,7 @@ class WorkerHeader extends StatelessWidget {
   final String memberSince;
   final bool isDark;
   final VoidCallback onEdit;
+  final String isVerified;
 
   const WorkerHeader({
     super.key,
@@ -29,6 +30,7 @@ class WorkerHeader extends StatelessWidget {
     required this.memberSince,
     required this.isDark,
     required this.onEdit,
+    required this.isVerified,
   });
 
   @override
@@ -116,12 +118,23 @@ class WorkerHeader extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          name.isNotEmpty ? name : 'Worker',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold),
+                        Row(
+                          spacing: 8,
+                          children: [
+                            Text(
+                              name.isNotEmpty ? name : 'Worker',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                            if (isVerified == 'verified')
+                              const Icon(
+                                Icons.verified,
+                                color: Colors.green,
+                                size: 20,
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 6),
                         Row(

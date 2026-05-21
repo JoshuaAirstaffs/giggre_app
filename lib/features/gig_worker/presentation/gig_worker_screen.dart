@@ -1136,6 +1136,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                         memberSince: _memberSince,
                         isDark: isDark,
                         onEdit: _showEditPersonalInfo,
+                        isVerified: _isVerified,
                       ),
                     ),
                     SliverPadding(
