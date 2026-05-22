@@ -25,30 +25,24 @@ class _TermsAndConditionsState extends State<TermsAndConditions> {
 
   Future<void> _loadData() async {
     try {
-      //get the latest date from updatedDate
-      final latestUpdate = await FirebaseFirestore.instance
-          .collection('app_content')
-          .doc('terms_and_conditions')
-          .collection('items')
-          .where('sortNumber', isEqualTo: 1)
-          .orderBy('dateUpdated', descending: true)
-          .limit(1)
-          .get();
-
-      final formattedDate = DateFormat('MMMM d, y').format((latestUpdate.docs.first.data()['dateUpdated'] as Timestamp).toDate());
-      _latestUpdateDate = formattedDate;
-
       final response = await FirebaseFirestore.instance
           .collection('app_content')
           .doc('terms_and_conditions')
           .collection('items')
+          .orderBy('sortNumber')
           .get();
-      final filteredData = response.docs
-          .map((doc) => doc.data()['sortNumber'] == 1 ? doc.data() : null)
-          .where((element) => element != null)
-          .toList();
+
+      if (response.docs.isNotEmpty) {
+        final latestDoc = response.docs
+            .map((doc) => doc.data())
+            .where((data) => data['dateUpdated'] != null)
+            .reduce((a, b) => (a['dateUpdated'] as Timestamp).compareTo(b['dateUpdated'] as Timestamp) >= 0 ? a : b);
+        _latestUpdateDate = DateFormat('MMMM d, y').format((latestDoc['dateUpdated'] as Timestamp).toDate());
+      }
+
+      final filteredData = response.docs.map((doc) => doc.data()).toList();
       setState(() {
-        _termsAndConditions = filteredData.cast<Map<String, dynamic>>();
+        _termsAndConditions = filteredData;
         _isLoading = false;
       });
     } catch (e) {

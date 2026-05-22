@@ -29,7 +29,6 @@ final response = await FirebaseFirestore.instance
           .collection('app_content')
           .doc('help_faq')
           .collection('items')
-          .where('sortNumber', isEqualTo: 1)
           .get();
 
       final Map<String, List<Map<String, dynamic>>> grouped = {};
@@ -42,18 +41,26 @@ final response = await FirebaseFirestore.instance
       // Sort each category's items by sortNumberByCategory
       for (final items in grouped.values) {
         items.sort((a, b) =>
-            ((a['sortNumberByCategory'] as int?) ?? 0)
-                .compareTo((b['sortNumberByCategory'] as int?) ?? 0));
+            ((a['sortNumberByCategory'] as num?)?.toInt() ?? 0)
+                .compareTo((b['sortNumberByCategory'] as num?)?.toInt() ?? 0));
       }
+
+      // Sort categories by the sortNumber of their first item
+      final sortedGrouped = Map.fromEntries(
+        grouped.entries.toList()
+          ..sort((a, b) =>
+              ((a.value.first['sortNumber'] as num?)?.toInt() ?? 0)
+                  .compareTo((b.value.first['sortNumber'] as num?)?.toInt() ?? 0)),
+      );
 
       if (mounted) {
         setState(() {
-          _groupedFaq = grouped;
+          _groupedFaq = sortedGrouped;
           _isLoading = false;
         });
       }
-    } catch (e) {
-      debugPrint('Error loading help FAQ: $e');
+    } catch (e, st) {
+      debugPrint('Error loading help FAQ: $e\n$st');
       if (mounted) setState(() => _isLoading = false);
     }
   }

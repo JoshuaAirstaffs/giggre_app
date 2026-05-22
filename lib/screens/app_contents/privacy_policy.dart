@@ -25,8 +25,6 @@ class _PrivacyPolicyState extends State<PrivacyPolicy> {
       _isLoading = true;
     });
     try {
-
-        //get the latest date from updatedDate
       final latestUpdate = await FirebaseFirestore.instance
           .collection('app_content')
           .doc('privacy')
@@ -36,13 +34,17 @@ class _PrivacyPolicyState extends State<PrivacyPolicy> {
           .limit(1)
           .get();
 
-      final formattedDate = DateFormat('MMMM d, y').format((latestUpdate.docs.first.data()['dateUpdated'] as Timestamp).toDate());
-      _latestUpdateDate = formattedDate;
+      if (latestUpdate.docs.isNotEmpty) {
+        final formattedDate = DateFormat('MMMM d, y').format(
+            (latestUpdate.docs.first.data()['dateUpdated'] as Timestamp).toDate());
+        _latestUpdateDate = formattedDate;
+      }
+
       final response = await FirebaseFirestore.instance
           .collection('app_content')
           .doc('privacy')
           .collection('items')
-          .where('sortNumber', isEqualTo: 1)
+          .orderBy('sortNumber')
           .get();
       final data = response.docs.map((doc) => doc.data()).toList();
       setState(() {
