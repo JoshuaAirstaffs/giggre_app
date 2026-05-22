@@ -34,10 +34,11 @@ class _WorkerNotificationsSheetState
   List<Map<String, dynamic>> _quickGigs = [];
   List<Map<String, dynamic>> _openGigs = [];
   List<Map<String, dynamic>> _offeredGigs = [];
+  List<Map<String, dynamic>> _accountNotifs = [];
   Map<String, dynamic>? _verifData;
   bool _loading = true;
 
-  StreamSubscription? _quickSub, _openSub, _offeredSub, _verifSub;
+  StreamSubscription? _quickSub, _openSub, _offeredSub, _verifSub, _acctNotifSub;
   Timer? _ticker;
 
   @override
@@ -55,6 +56,7 @@ class _WorkerNotificationsSheetState
     _openSub?.cancel();
     _offeredSub?.cancel();
     _verifSub?.cancel();
+    _acctNotifSub?.cancel();
     _ticker?.cancel();
     super.dispose();
   }
@@ -109,6 +111,23 @@ class _WorkerNotificationsSheetState
     }, onError: (_) {
       // permission denied — verification notifications silently skipped
     });
+
+    _acctNotifSub = _db
+        .collection('notifications')
+        .where('userId', isEqualTo: _uid)
+        .limit(20)
+        .snapshots()
+        .listen((snap) {
+      _accountNotifs = snap.docs
+          .map((d) => Map<String, dynamic>.from(d.data()))
+          .toList()
+        ..sort((a, b) {
+          final ta = (a['createdAt'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
+          final tb = (b['createdAt'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
+          return tb.compareTo(ta);
+        });
+      if (mounted) setState(() {});
+    }, onError: (e) => debugPrint('[WorkerNotificationsSheet] acctNotif error: $e'));
   }
 
   List<_ActivityItem> get _activities {
@@ -271,6 +290,61 @@ class _WorkerNotificationsSheetState
       }
     }
 
+    // Account notifications from .collection('notifications')
+    const kAccountWindow = Duration(hours: 24);
+    for (final notif in _accountNotifs) {
+      final ts = notif['createdAt'] as Timestamp?;
+      if (ts == null) continue;
+      final dt = ts.toDate().toLocal();
+      if (now.difference(dt) > kAccountWindow) continue;
+      final category = notif['category'] as String? ?? '';
+      final message = notif['message'] as String? ?? '';
+
+      _ActivityType? type;
+      String title = '';
+
+      if (category == 'verification_requests') {
+        final requestStatus = notif['request_status'] as String? ?? '';
+        if (requestStatus == 'approved') {
+          type = _ActivityType.verificationApproved;
+          title = 'Verification Request Approved';
+        } else if (requestStatus == 'rejected') {
+          type = _ActivityType.verificationRejected;
+          title = 'Verification Request Rejected';
+        } else if (requestStatus == 'pending') {
+          type = _ActivityType.verificationSubmitted;
+          title = 'Verification Request Pending';
+        }
+      } else if (category == 'skill_request') {
+        final requestStatus = notif['request_status'] as String? ?? '';
+        if (requestStatus == 'approved') {
+          type = _ActivityType.verificationApproved;
+          title = 'Skill Request Approved';
+        } else if (requestStatus == 'rejected') {
+          type = _ActivityType.verificationRejected;
+          title = 'Skill Request Rejected';
+        } else if (requestStatus == 'pending') {
+          type = _ActivityType.verificationSubmitted;
+          title = 'Skill Request Pending';
+        }
+      } else {
+        type = _ActivityType.accountNotification;
+        title = category.isNotEmpty
+            ? category[0].toUpperCase() + category.substring(1).replaceAll('_', ' ')
+            : 'Account Notice';
+      }
+
+      if (type == null) continue;
+
+      items.add(_ActivityItem(
+        type: type,
+        title: title,
+        body: message,
+        timestamp: dt,
+        gigType: 'account',
+      ));
+    }
+
     items.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     return items;
   }
@@ -429,6 +503,7 @@ enum _ActivityType {
   verificationSubmitted,
   verificationApproved,
   verificationRejected,
+  accountNotification,
 }
 
 class _ActivityItem {
@@ -494,6 +569,8 @@ class _ActivityTile extends StatelessWidget {
         return (icon: Icons.verified_rounded, color: const Color(0xFF10B981));
       case _ActivityType.verificationRejected:
         return (icon: Icons.cancel_outlined, color: Colors.redAccent);
+      case _ActivityType.accountNotification:
+        return (icon: Icons.campaign_rounded, color: const Color(0xFF6366F1));
     }
   }
 
@@ -501,6 +578,7 @@ class _ActivityTile extends StatelessWidget {
     if (gigType == 'open') return kBlue;
     if (gigType == 'offered') return const Color(0xFF8B5CF6);
     if (gigType == 'verification') return const Color(0xFF8B5CF6);
+    if (gigType == 'account') return const Color(0xFF6366F1);
     return kAmber;
   }
 
@@ -516,7 +594,7 @@ class _ActivityTile extends StatelessWidget {
     final s = _style(item.type);
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final typeColor = _typeColor(item.gigType);
-    final typeLabel = item.gigType == 'verification'
+    final typeLabel = item.gigType == 'verification' || item.gigType == 'account'
         ? 'Account'
         : item.gigType == 'quick'
             ? 'Quick'

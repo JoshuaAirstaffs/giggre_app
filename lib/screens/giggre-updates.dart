@@ -29,15 +29,28 @@ class _GiggreUpdatesState extends State<GiggreUpdates> {
           .collection('items')
           .get();
 
-      setState(() {
-        _updates.addAll(response.docs.map((doc) {
+      final items = response.docs.map((doc) {
           final data = doc.data();
-          // Normalize Timestamp → DateTime here, once
           if (data['dateUpdated'] is Timestamp) {
             data['dateUpdated'] = (data['dateUpdated'] as Timestamp).toDate();
           }
+          if (data['dateCreated'] is Timestamp) {
+            data['dateCreated'] = (data['dateCreated'] as Timestamp).toDate();
+          }
           return data;
-        }));
+        }).toList();
+
+      items.sort((a, b) {
+        final aDate = a['dateCreated'] as DateTime?;
+        final bDate = b['dateCreated'] as DateTime?;
+        if (aDate == null && bDate == null) return 0;
+        if (aDate == null) return 1;
+        if (bDate == null) return -1;
+        return bDate.compareTo(aDate);
+      });
+
+      setState(() {
+        _updates.addAll(items);
       });
     } catch (e) {
       debugPrint('Error fetching updates: $e');

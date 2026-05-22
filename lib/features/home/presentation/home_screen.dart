@@ -61,14 +61,29 @@ class _HomeScreenState extends State<HomeScreen> {
         .doc('updates')
         .collection('items')
         .get();
+
+    final items = response.docs.map((doc) {
+      final data = doc.data();
+      // if (data['dateUpdated'] is Timestamp) {
+      //   data['dateUpdated'] = (data['dateUpdated'] as Timestamp).toDate();
+      // }
+      if (data['dateCreated'] is Timestamp) {
+        data['dateCreated'] = (data['dateCreated'] as Timestamp).toDate();
+      }
+      return data;
+    }).toList();
+
+    items.sort((a, b) {
+      final aDate = a['dateCreated'] as DateTime?;
+      final bDate = b['dateCreated'] as DateTime?;
+      if (aDate == null && bDate == null) return 0;
+      if (aDate == null) return 1;
+      if (bDate == null) return -1;
+      return bDate.compareTo(aDate);
+    });
+
     setState(() {
-      _updates = response.docs.map((doc) {
-        final data = doc.data();
-        if (data['dateUpdated'] is Timestamp) {
-          data['dateUpdated'] = (data['dateUpdated'] as Timestamp).toDate();
-        }
-        return data;
-      }).toList();
+      _updates = items;
     });
   } catch (e) {
     debugPrint('Error fetching updates: $e');
@@ -555,13 +570,13 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 16),
               ..._updates
-              .where((u) => u['sortNumber'] == 1)
+              .take(3)
               .map((update) => GestureDetector(
                     child: Padding(
                       padding: const EdgeInsets.only(bottom: 16),
                       child: UpdateCard(
                         title: update['title'] as String,
-                        date: update['dateUpdated'] as DateTime,
+                        date: update['dateCreated'] as DateTime,
                         category: update['category'] as String,
                         description: update['body'] as String,
                       ),
