@@ -269,6 +269,25 @@ class _ToolchestSheetState extends State<ToolchestSheet>
   // ── Tab 1: My Skills ──────────────────────────────────────────────────────
   Widget _buildMySkillsTab(bool isDark) {
     final divider = Theme.of(context).dividerColor;
+
+    // Approved requests whose skill isn't yet in skillsXP
+    final approvedPending = _requests
+        .where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final status = data['status'] as String? ?? '';
+          if (status != 'approved') return false;
+          final name = (data['skillName'] as String? ?? '').toLowerCase().trim();
+          return !_skillsXP.keys
+              .any((k) => k.toLowerCase().trim() == name);
+        })
+        .map((doc) =>
+            (doc.data() as Map<String, dynamic>)['skillName'] as String? ?? '')
+        .where((n) => n.isNotEmpty)
+        .toSet()
+        .toList();
+
+    final hasAny = _skillsXP.isNotEmpty || approvedPending.isNotEmpty;
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
       children: [
@@ -282,7 +301,7 @@ class _ToolchestSheetState extends State<ToolchestSheet>
           ),
         ),
         const SizedBox(height: 10),
-        if (_skillsXP.isEmpty)
+        if (!hasAny)
           Container(
             padding: const EdgeInsets.symmetric(vertical: 40),
             decoration: BoxDecoration(
@@ -315,10 +334,15 @@ class _ToolchestSheetState extends State<ToolchestSheet>
               ),
             ),
           )
-        else
+        else ...[
           ..._skillsXP.entries.map(
             (e) => _SkillChip(label: e.key, level: e.value, isDark: isDark),
           ),
+          ...approvedPending.map(
+            (name) => _SkillChip(
+                label: name, level: 0, isDark: isDark, isApproved: true),
+          ),
+        ],
       ],
     );
   }
@@ -891,11 +915,13 @@ class _SkillChip extends StatelessWidget {
   final String label;
   final int level;
   final bool isDark;
+  final bool isApproved;
 
   const _SkillChip({
     required this.label,
     required this.level,
     required this.isDark,
+    this.isApproved = false,
   });
 
   @override
@@ -932,23 +958,51 @@ class _SkillChip extends StatelessWidget {
               ),
             ),
           ),
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: kAmber.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: kAmber.withValues(alpha: 0.4)),
-            ),
-            child: Text(
-              'Lvl $level',
-              style: const TextStyle(
-                color: kAmber,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
+          if (isApproved)
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle_rounded,
+                      color: Color(0xFF22C55E), size: 11),
+                  SizedBox(width: 4),
+                  Text(
+                    'Approved',
+                    style: TextStyle(
+                      color: Color(0xFF22C55E),
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: kAmber.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: kAmber.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                'Lvl $level',
+                style: const TextStyle(
+                  color: kAmber,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

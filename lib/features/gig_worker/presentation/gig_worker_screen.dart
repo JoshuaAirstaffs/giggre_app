@@ -744,61 +744,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     );
   }
 
-  void _showComingSoon(String title) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-        decoration: BoxDecoration(
-          color: Theme.of(ctx).cardColor,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Theme.of(ctx).dividerColor),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: kBlue.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.construction_rounded,
-                  color: kBlue, size: 24),
-            ),
-            const SizedBox(height: 16),
-            Text(title,
-                style: TextStyle(
-                    color: Theme.of(ctx).colorScheme.onSurface,
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            const Text('This feature is coming soon!',
-                style: TextStyle(color: kSub, fontSize: 14)),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(ctx),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: kBlue,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                child: const Text('Got it'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Future<void> _pickAvatar(void Function(void Function()) setModal,
       void Function(XFile) onPicked) async {
@@ -1251,14 +1196,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                   builder: (_) => const WorkerSettingsScreen(),
                                 ),
                               ),
-                            ),
-                            const WorkerDivider(),
-                            MenuRow(
-                              icon: Icons.help_outline_rounded,
-                              iconColor: kBlue,
-                              label: 'Help & Support',
-                              onTap: () =>
-                                  _showComingSoon('Help & Support'),
                             ),
                           ]),
                           const SizedBox(height: 12),

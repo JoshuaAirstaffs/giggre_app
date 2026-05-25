@@ -1081,7 +1081,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                   Icon(Icons.percent, color: kBlue, size: 20),
                                   SizedBox(height: 4),
                                   Text(
-                                    '$_completionRate%',
+                                    '${_completionRate.toStringAsFixed(2)}%',
                                     style: TextStyle(
                                       color: onSurface,
                                       fontSize: 14,
