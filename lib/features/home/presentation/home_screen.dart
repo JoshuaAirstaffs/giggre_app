@@ -266,49 +266,95 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => _saving = false);
   }
 
-  Future<void> _logout() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: Theme.of(context).cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Log Out',
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+ Future<void> _logout() async {
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (_) => Dialog(
+      backgroundColor: Theme.of(context).cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 54, height: 54,
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 22),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Log out?',
+              style: TextStyle(
+                fontSize: 17, fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "You'll need to sign back in to access your account.",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
+            ),
+            const SizedBox(height: 22),
+            const Divider(height: 0.5, thickness: 0.5),
+            IntrinsicHeight(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
+                        ),
+                      ),
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Cancel', style: TextStyle(color: kSub, fontSize: 15)),
+                    ),
+                  ),
+                  const VerticalDivider(width: 0.5, thickness: 0.5),
+                  Expanded(
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.only(bottomRight: Radius.circular(20)),
+                        ),
+                      ),
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Log out',
+                        style: TextStyle(color: Colors.redAccent, fontSize: 15, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        content: const Text(
-          'Are you sure you want to log out?',
-          style: TextStyle(color: kSub),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(color: kSub)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Log Out', style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
       ),
-    );
+    ),
+  );
 
-    if (confirm == true) {
-      _roomsStreamSub?.cancel();
-      for (final sub in _roomSubs) {
-        sub.cancel();
-      }
-      _roomSubs.clear();
-      if (mounted) {
-        context.read<CurrentUserProvider>().clearUser();
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
-          (route) => false,
-        );
-      }
-      await FirebaseAuth.instance.signOut();
+  if (confirm == true) {
+    _roomsStreamSub?.cancel();
+    for (final sub in _roomSubs) {
+      sub.cancel();
     }
+    _roomSubs.clear();
+    if (mounted) {
+      context.read<CurrentUserProvider>().clearUser();
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (route) => false,
+      );
+    }
+    await FirebaseAuth.instance.signOut();
   }
+}
 
   
   
