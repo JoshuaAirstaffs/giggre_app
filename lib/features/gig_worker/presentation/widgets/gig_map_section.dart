@@ -62,7 +62,8 @@ class GigMapSection extends StatefulWidget {
   final bool seekingQuickGigs;
   final ValueChanged<GigMarkerData>? onQuickGigStarted;
   final ValueChanged<GigMarkerData>? onOpenGigApplied;
-  final String isVerified; // ✅ FIXED (bool now)
+  final String isVerified;
+  final List<String> workerSkills;
 
   const GigMapSection({
     super.key,
@@ -72,6 +73,7 @@ class GigMapSection extends StatefulWidget {
     this.onQuickGigStarted,
     this.onOpenGigApplied,
     required this.isVerified,
+    this.workerSkills = const [],
   });
 
   @override
@@ -274,23 +276,13 @@ class _GigMapSectionState extends State<GigMapSection> {
     if (zoom < 12) return 0.04;
     if (zoom < 13) return 0.02;
     if (zoom < 14) return 0.008;
-    return 0.0;
+    if (zoom < 16) return 0.0005;
+    return 0.0002; // ≈ 22 m — always cluster gigs this close together
   }
 
   List<_GigCluster> _buildClusters() {
     final all = _allGigs;
     final gridSize = _gridSize(_zoom);
-
-    if (gridSize == 0.0) {
-      return all
-          .map((g) => _GigCluster(
-                center: g.position,
-                count: 1,
-                gigs: [g],
-                singleGig: g,
-              ))
-          .toList();
-    }
 
     final Map<String, List<GigMarkerData>> grid = {};
     for (final g in all) {
@@ -323,7 +315,8 @@ class _GigMapSectionState extends State<GigMapSection> {
         height: 48,
         child: _GigPin(
           gig: singleGig,
-          isVerified: widget.isVerified, // ✅ FIX
+          isVerified: widget.isVerified,
+          workerSkills: widget.workerSkills,
           onStart: singleGig.gigType == 'quick' &&
                   singleGig.assignedWorkerId == widget.uid
               ? () => widget.onQuickGigStarted?.call(singleGig)
@@ -342,6 +335,8 @@ class _GigMapSectionState extends State<GigMapSection> {
       child: _GigClusterBadge(
         count: cluster.count,
         gigs: cluster.gigs,
+        isVerified: widget.isVerified,
+        workerSkills: widget.workerSkills,
         onQuickGigStarted: widget.onQuickGigStarted,
         onOpenGigApplied: _applyToOpenGig,
       ),
@@ -518,9 +513,16 @@ class _LegendDot extends StatelessWidget {
 class _GigPin extends StatelessWidget {
   final GigMarkerData gig;
   final String isVerified;
+  final List<String> workerSkills;
   final VoidCallback? onStart;
   final VoidCallback? onApply;
-  const _GigPin({required this.gig, required this.isVerified, this.onStart, this.onApply});
+  const _GigPin({
+    required this.gig,
+    required this.isVerified,
+    this.workerSkills = const [],
+    this.onStart,
+    this.onApply,
+  });
 
   Color get _pinColor {
     switch (gig.gigType) {
@@ -538,12 +540,19 @@ class _GigPin extends StatelessWidget {
     }
   }
 
+  List<String> _missingSkills() {
+    if (gig.gigType != 'open' || gig.requiredSkills.isEmpty) return [];
+    return gig.requiredSkills
+        .where((s) => !workerSkills.any(
+            (ws) => ws.toLowerCase().trim() == s.toLowerCase().trim()))
+        .toList();
+  }
+
   void _showGigSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-
         final cardColor = Theme.of(ctx).cardColor;
         final onSurface = Theme.of(ctx).colorScheme.onSurface;
         final color = _pinColor;
@@ -557,6 +566,9 @@ class _GigPin extends StatelessWidget {
             : gig.gigType == 'offered'
                 ? 'Accept Offer'
                 : 'Start Gig';
+        final missing = _missingSkills();
+        final canApply = missing.isEmpty;
+
         return Container(
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
@@ -647,26 +659,71 @@ class _GigPin extends StatelessWidget {
                       child: Wrap(
                         spacing: 6,
                         runSpacing: 4,
-                        children: gig.requiredSkills
-                            .map((s) => Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: color.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                        color: color.withValues(alpha: 0.3)),
-                                  ),
-                                  child: Text(s,
-                                      style: TextStyle(
-                                          color: color,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500)),
-                                ))
-                            .toList(),
+                        children: gig.requiredSkills.map((s) {
+                          final has = workerSkills.any((ws) =>
+                              ws.toLowerCase().trim() ==
+                              s.toLowerCase().trim());
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: has
+                                  ? const Color(0xFF10B981).withValues(alpha: 0.12)
+                                  : Colors.red.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: has
+                                      ? const Color(0xFF10B981).withValues(alpha: 0.4)
+                                      : Colors.red.withValues(alpha: 0.35)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  has ? Icons.check_circle_outline : Icons.cancel_outlined,
+                                  size: 11,
+                                  color: has ? const Color(0xFF10B981) : Colors.red,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(s,
+                                    style: TextStyle(
+                                        color: has
+                                            ? const Color(0xFF10B981)
+                                            : Colors.red,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500)),
+                              ],
+                            ),
+                          );
+                        }).toList(),
                       ),
                     ),
                   ],
+                ),
+              ],
+              if (missing.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.07),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline_rounded,
+                          color: Colors.red, size: 15),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'You lack ${missing.length == 1 ? 'a required skill' : '${missing.length} required skills'}: ${missing.join(', ')}',
+                          style: const TextStyle(
+                              color: Colors.red, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
               const SizedBox(height: 16),
@@ -674,27 +731,33 @@ class _GigPin extends StatelessWidget {
                 width: double.infinity,
                 height: 46,
                 child: ElevatedButton(
-                  onPressed: () {
-                    if(isVerified != 'verified') {
-                      _showModal(context);
-                      return;
-                    }
-                    Navigator.pop(ctx);
-                    if (gig.gigType == 'quick') {
-                      onStart?.call();
-                    } else if (gig.gigType == 'open') {
-                      onApply?.call();
-                    }
-                  },
+                  onPressed: canApply
+                      ? () {
+                          if (isVerified != 'verified') {
+                            _showModal(context);
+                            return;
+                          }
+                          Navigator.pop(ctx);
+                          if (gig.gigType == 'quick') {
+                            onStart?.call();
+                          } else if (gig.gigType == 'open') {
+                            onApply?.call();
+                          }
+                        }
+                      : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: color,
+                    backgroundColor: canApply ? color : Colors.grey.shade400,
                     foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey.shade400,
+                    disabledForegroundColor: Colors.white70,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
                   ),
-                  child: Text(btnLabel,
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  child: Text(
+                    canApply ? btnLabel : 'Skills Required',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -708,33 +771,39 @@ class _GigPin extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _pinColor;
-    return GestureDetector(
-      onTap: () => _showGigSheet(context),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2.5),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.45),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 480),
+      curve: Curves.elasticOut,
+      builder: (_, scale, child) => Transform.scale(scale: scale, child: child),
+      child: GestureDetector(
+        onTap: () => _showGigSheet(context),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.45),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Icon(_pinIcon, color: Colors.white, size: 18),
             ),
-            child: Icon(_pinIcon, color: Colors.white, size: 18),
-          ),
-          CustomPaint(
-            painter: _TrianglePainter(color: color),
-            size: const Size(10, 6),
-          ),
-        ],
+            CustomPaint(
+              painter: _TrianglePainter(color: color),
+              size: const Size(10, 6),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -780,17 +849,50 @@ class _GigSheetRow extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Cluster badge
 // ─────────────────────────────────────────────────────────────────────────────
-class _GigClusterBadge extends StatelessWidget {
+class _GigClusterBadge extends StatefulWidget {
   final int count;
   final List<GigMarkerData> gigs;
+  final String isVerified;
+  final List<String> workerSkills;
   final ValueChanged<GigMarkerData>? onQuickGigStarted;
   final ValueChanged<GigMarkerData>? onOpenGigApplied;
   const _GigClusterBadge({
     required this.count,
     required this.gigs,
+    required this.isVerified,
+    this.workerSkills = const [],
     this.onQuickGigStarted,
     this.onOpenGigApplied,
   });
+
+  @override
+  State<_GigClusterBadge> createState() => _GigClusterBadgeState();
+}
+
+class _GigClusterBadgeState extends State<_GigClusterBadge>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _pulseCtrl;
+  late Animation<double> _pulseScale;
+  late Animation<double> _pulseOpacity;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat();
+    _pulseScale = Tween<double>(begin: 1.0, end: 1.9)
+        .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut));
+    _pulseOpacity = Tween<double>(begin: 0.55, end: 0.0)
+        .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    super.dispose();
+  }
 
   void _showGigList(BuildContext context) {
     showModalBottomSheet(
@@ -838,7 +940,7 @@ class _GigClusterBadge extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('$count Gigs in this area',
+                        Text('${widget.count} Gigs in this area',
                             style: TextStyle(
                                 color: onSurface,
                                 fontSize: 15,
@@ -863,7 +965,7 @@ class _GigClusterBadge extends StatelessWidget {
                   shrinkWrap: true,
                   padding: const EdgeInsets.symmetric(
                       horizontal: 16, vertical: 8),
-                  itemCount: gigs.length,
+                  itemCount: widget.gigs.length,
                   separatorBuilder: (_, i) => Divider(
                     height: 1,
                     color: isDark
@@ -871,7 +973,7 @@ class _GigClusterBadge extends StatelessWidget {
                         : Colors.grey.withValues(alpha: 0.1),
                   ),
                   itemBuilder: (_, i) {
-                    final g = gigs[i];
+                    final g = widget.gigs[i];
                     final typeColor = g.gigType == 'open'
                         ? kBlue
                         : g.gigType == 'offered'
@@ -892,6 +994,16 @@ class _GigClusterBadge extends StatelessWidget {
                         : g.gigType == 'offered'
                             ? 'Accept'
                             : 'Start';
+                    final missing = g.gigType == 'open' &&
+                            g.requiredSkills.isNotEmpty
+                        ? g.requiredSkills
+                            .where((s) => !widget.workerSkills.any((ws) =>
+                                ws.toLowerCase().trim() ==
+                                s.toLowerCase().trim()))
+                            .toList()
+                        : <String>[];
+                    final canApply = missing.isEmpty;
+
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
@@ -911,41 +1023,67 @@ class _GigClusterBadge extends StatelessWidget {
                               fontWeight: FontWeight.w600),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
-                      subtitle: Row(
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 5, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: typeColor.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(4),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: typeColor.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(typeLabel,
+                                    style: TextStyle(
+                                        color: typeColor, fontSize: 10)),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '₱${g.budget.toStringAsFixed(0)}',
+                                style: const TextStyle(
+                                    color: kAmber,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                          if (missing.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              'Missing: ${missing.join(', ')}',
+                              style: const TextStyle(
+                                  color: Colors.red, fontSize: 10),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            child: Text(typeLabel,
-                                style:
-                                    TextStyle(color: typeColor, fontSize: 10)),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '₱${g.budget.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                                color: kAmber,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600),
-                          ),
+                          ],
                         ],
                       ),
                       trailing: TextButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          if (g.gigType == 'quick') {
-                            onQuickGigStarted?.call(g);
-                          } else if (g.gigType == 'open') {
-                            onOpenGigApplied?.call(g);
-                          }
-                        },
+                        onPressed: canApply
+                            ? () {
+                                if (widget.isVerified != 'verified') {
+                                  Navigator.pop(ctx);
+                                  _showModal(context);
+                                  return;
+                                }
+                                Navigator.pop(ctx);
+                                if (g.gigType == 'quick') {
+                                  widget.onQuickGigStarted?.call(g);
+                                } else if (g.gigType == 'open') {
+                                  widget.onOpenGigApplied?.call(g);
+                                }
+                              }
+                            : null,
                         style: TextButton.styleFrom(
-                          backgroundColor: typeColor.withValues(alpha: 0.1),
-                          foregroundColor: typeColor,
+                          backgroundColor: canApply
+                              ? typeColor.withValues(alpha: 0.1)
+                              : Colors.grey.withValues(alpha: 0.1),
+                          foregroundColor:
+                              canApply ? typeColor : Colors.grey,
+                          disabledForegroundColor: Colors.grey,
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 6),
                           shape: RoundedRectangleBorder(
@@ -953,9 +1091,11 @@ class _GigClusterBadge extends StatelessWidget {
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        child: Text(btnLabel,
-                            style: const TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.bold)),
+                        child: Text(
+                          canApply ? btnLabel : 'Locked',
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     );
                   },
@@ -970,42 +1110,80 @@ class _GigClusterBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => _showGigList(context),
-      child: Container(
-        width: 60,
-        height: 60,
-        decoration: BoxDecoration(
-          color: kAmber,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2.5),
-          boxShadow: [
-            BoxShadow(
-              color: kAmber.withValues(alpha: 0.45),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
+    final badge = Container(
+      width: 60,
+      height: 60,
+      decoration: BoxDecoration(
+        color: kAmber,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2.5),
+        boxShadow: [
+          BoxShadow(
+            color: kAmber.withValues(alpha: 0.45),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '${widget.count}',
+            style: const TextStyle(
+                color: Colors.black,
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+                height: 1),
+          ),
+          const Text(
+            'gigs',
+            style: TextStyle(
+                color: Colors.black87, fontSize: 8, letterSpacing: 0.3),
+          ),
+        ],
+      ),
+    );
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.elasticOut,
+      builder: (_, entryScale, child) =>
+          Transform.scale(scale: entryScale, child: child),
+      child: GestureDetector(
+        onTap: () => _showGigList(context),
+        child: AnimatedBuilder(
+          animation: _pulseCtrl,
+          builder: (_, child) => SizedBox(
+            width: 80,
+            height: 80,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Pulsing ring
+                Transform.scale(
+                  scale: _pulseScale.value,
+                  child: Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: kAmber.withValues(alpha: _pulseOpacity.value),
+                        width: 2.5,
+                      ),
+                      color: kAmber
+                          .withValues(alpha: _pulseOpacity.value * 0.25),
+                    ),
+                  ),
+                ),
+                // Main badge
+                child!,
+              ],
             ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              '$count',
-              style: const TextStyle(
-                  color: Colors.black,
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  height: 1),
-            ),
-            const Text(
-              'gigs',
-              style: TextStyle(
-                  color: Colors.black87,
-                  fontSize: 8,
-                  letterSpacing: 0.3),
-            ),
-          ],
+          ),
+          child: badge,
         ),
       ),
     );

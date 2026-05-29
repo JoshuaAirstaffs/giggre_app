@@ -171,7 +171,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         _phone = data['phone'] as String? ?? '';
         _bio = data['bio'] as String? ?? '';
         _photoUrl = data['photoUrl'] as String? ?? '';
-        _skills = List<String>.from(data['skills'] ?? []);
+        final skillsXP = data['skillsXP'] as Map<String, dynamic>? ?? {};
+        _skills = skillsXP.keys.toList();
         _ratingAsWorker =
             (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
         _ratingCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
@@ -1009,13 +1010,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               _offeredGigSub?.cancel();
               for (final sub in _earningsSubs) { sub.cancel(); }
               _earningsSubs.clear();
+              await FirebaseAuth.instance.signOut();
               if (!mounted) return;
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const LoginScreen()),
                 (_) => false,
               );
-              await WidgetsBinding.instance.endOfFrame;
-              await FirebaseAuth.instance.signOut();
             },
             child: const Text('Log out',
                 style: TextStyle(color: Colors.redAccent)),
@@ -1132,6 +1132,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                             onQuickGigStarted: _onQuickGigStarted,
                             onOpenGigApplied: _onOpenGigApplied,
                             isVerified: _isVerified,
+                            workerSkills: _skills,
                           ),
                           const SizedBox(height: 20),
 

@@ -31,6 +31,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _userName = '';
+  String _photoUrl = '';
   String? _selectedRole;
   bool _saving = false;
   bool _hasUnreadMessages = false;
@@ -134,7 +135,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
             _roomSubs.add(sub);
           }
-        }, onError: (e) => debugPrint('[HomeScreen] rooms stream error: $e'));
+        }, onError: (e) {
+          if (FirebaseAuth.instance.currentUser == null) return;
+          debugPrint('[HomeScreen] rooms stream error: $e');
+        });
   }
 
   void _showBetaModal() {
@@ -246,6 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _userName = data?['name'] ?? '';
       _selectedRole = data?['role'];
+      _photoUrl = data?['photoUrl'] ?? '';
     });
   }
 
@@ -299,6 +304,7 @@ class _HomeScreenState extends State<HomeScreen> {
         sub.cancel();
       }
       _roomSubs.clear();
+      await FirebaseAuth.instance.signOut();
       if (mounted) {
         context.read<CurrentUserProvider>().clearUser();
         Navigator.of(context).pushAndRemoveUntil(
@@ -306,7 +312,6 @@ class _HomeScreenState extends State<HomeScreen> {
           (route) => false,
         );
       }
-      await FirebaseAuth.instance.signOut();
     }
   }
 
@@ -435,15 +440,16 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Row(
                 children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: kBlue.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.account_circle_rounded,
-                        color: kBlue, size: 24),
+                  CircleAvatar(
+                    radius: 21,
+                    backgroundColor: kBlue.withValues(alpha: 0.12),
+                    backgroundImage: _photoUrl.isNotEmpty
+                        ? CachedNetworkImageProvider(_photoUrl)
+                        : null,
+                    child: _photoUrl.isEmpty
+                        ? const Icon(Icons.account_circle_rounded,
+                            color: kBlue, size: 24)
+                        : null,
                   ),
                   const SizedBox(width: 12),
                   Text(

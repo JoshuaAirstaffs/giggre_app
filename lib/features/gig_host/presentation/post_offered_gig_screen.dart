@@ -49,7 +49,15 @@ class _WorkerEntry {
 class PostOfferedGigScreen extends StatefulWidget {
   final String hostName;
   final GigTemplateModel? template;
-  const PostOfferedGigScreen({super.key, required this.hostName, this.template});
+  final String? preselectedWorkerId;
+  final String? preselectedWorkerName;
+  const PostOfferedGigScreen({
+    super.key,
+    required this.hostName,
+    this.template,
+    this.preselectedWorkerId,
+    this.preselectedWorkerName,
+  });
 
   @override
   State<PostOfferedGigScreen> createState() => _PostOfferedGigScreenState();
@@ -98,6 +106,36 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       if (t.budget > 0) _budgetCtrl.text = t.budget.toStringAsFixed(0);
       if (t.skillRequired.isNotEmpty) _selectedSkill = t.skillRequired;
       if (t.experienceLevel.isNotEmpty) _experienceLevel = t.experienceLevel;
+    }
+    final preId = widget.preselectedWorkerId;
+    if (preId != null && preId.isNotEmpty) {
+      _preloadWorker(preId, widget.preselectedWorkerName ?? '');
+    }
+  }
+
+  Future<void> _preloadWorker(String uid, String fallbackName) async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      if (!mounted) return;
+      final data = doc.data();
+      setState(() {
+        _selectedWorker = _WorkerEntry(
+          uid: uid,
+          userId: data?['userId'] as String? ?? '',
+          name: data?['name'] as String? ?? fallbackName,
+          email: data?['email'] as String? ?? '',
+        );
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _selectedWorker = _WorkerEntry(
+          uid: uid,
+          userId: '',
+          name: fallbackName,
+          email: '',
+        );
+      });
     }
   }
 

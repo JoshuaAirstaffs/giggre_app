@@ -84,9 +84,46 @@ class _ToolchestSheetState extends State<ToolchestSheet>
           return bTs.compareTo(aTs);
         });
       setState(() => _requests = sorted);
+      _syncApprovedSkillsToXP(sorted);
     }, onError: (_) {
       if (!mounted) return;
       setState(() => _requests = []);
+    });
+  }
+
+  Future<void> _syncApprovedSkillsToXP(
+      List<QueryDocumentSnapshot> requests) async {
+    final approvedNames = requests
+        .where((doc) =>
+            (doc.data() as Map<String, dynamic>)['status'] == 'approved')
+        .map((doc) =>
+            (doc.data() as Map<String, dynamic>)['skillName'] as String? ?? '')
+        .where((n) => n.isNotEmpty)
+        .toSet();
+
+    if (approvedNames.isEmpty) return;
+
+    final userRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.uid);
+
+    await FirebaseFirestore.instance.runTransaction((txn) async {
+      final userDoc = await txn.get(userRef);
+      final existingXP =
+          userDoc.data()?['skillsXP'] as Map<String, dynamic>? ?? {};
+
+      final updates = <String, dynamic>{};
+      for (final name in approvedNames) {
+        final alreadyPresent = existingXP.keys
+            .any((k) => k.toLowerCase().trim() == name.toLowerCase().trim());
+        if (!alreadyPresent) {
+          updates['skillsXP.$name'] = 1;
+        }
+      }
+
+      if (updates.isNotEmpty) {
+        txn.update(userRef, updates);
+      }
     });
   }
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -28,6 +29,7 @@ class GigHostScreen extends StatefulWidget {
 class _GigHostScreenState extends State<GigHostScreen> {
   String _userName = '';
   String? _isVerified;
+  String _photoUrl = '';
   @override
   void initState() {
     super.initState();
@@ -40,8 +42,11 @@ class _GigHostScreenState extends State<GigHostScreen> {
     final doc =
         await FirebaseFirestore.instance.collection('users').doc(uid).get();
     if (!mounted) return;
-    setState(() => _userName = doc.data()?['name'] ?? '');
-    setState(() => _isVerified = doc.data()?['isVerified'] ?? '');
+    setState(() {
+      _userName = doc.data()?['name'] ?? '';
+      _isVerified = doc.data()?['isVerified'] ?? '';
+      _photoUrl = doc.data()?['photoUrl'] ?? '';
+    });
   }
 
   void _showProfile() {
@@ -86,14 +91,13 @@ class _GigHostScreenState extends State<GigHostScreen> {
       ),
     );
     if (confirm == true) {
+      await FirebaseAuth.instance.signOut();
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),
           (route) => false,
         );
       }
-      await WidgetsBinding.instance.endOfFrame;
-      await FirebaseAuth.instance.signOut();
     }
   }
 
@@ -206,15 +210,16 @@ class _GigHostScreenState extends State<GigHostScreen> {
               // ── Greeting ──────────────────────────────────────
               Row(
                 children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: kAmber.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.account_circle_rounded,
-                        color: kAmber, size: 24),
+                  CircleAvatar(
+                    radius: 21,
+                    backgroundColor: kAmber.withValues(alpha: 0.15),
+                    backgroundImage: _photoUrl.isNotEmpty
+                        ? CachedNetworkImageProvider(_photoUrl)
+                        : null,
+                    child: _photoUrl.isEmpty
+                        ? const Icon(Icons.account_circle_rounded,
+                            color: kAmber, size: 24)
+                        : null,
                   ),
                   const SizedBox(width: 12),
                   Text(
@@ -236,7 +241,7 @@ class _GigHostScreenState extends State<GigHostScreen> {
               const SizedBox(height: 28),
 
               // ── Workers Map ───────────────────────────────────
-              const _WorkerMapSection(),
+              _WorkerMapSection(hostName: _userName),
               const SizedBox(height: 28),
 
               // ── Post a Gig ────────────────────────────────────
@@ -385,7 +390,10 @@ class _StatsRowState extends State<_StatsRow> {
     super.initState();
     if (widget.uid.isEmpty) return;
     final db = FirebaseFirestore.instance;
-    void onErr(Object e) => debugPrint('[_StatsRow] stream error: $e');
+    void onErr(Object e) {
+      if (FirebaseAuth.instance.currentUser == null) return;
+      debugPrint('[_StatsRow] stream error: $e');
+    }
 
     _quickSub = db.collection('quick_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
       _quick = s.docs.map((d) => d.data() as Map).toList();
@@ -604,7 +612,10 @@ class _GigPreviewListState extends State<_GigPreviewList> {
     super.initState();
     if (widget.uid.isEmpty) return;
     final db = FirebaseFirestore.instance;
-    void onErr(Object e) => debugPrint('[_GigPreviewList] stream error: $e');
+    void onErr(Object e) {
+      if (FirebaseAuth.instance.currentUser == null) return;
+      debugPrint('[_GigPreviewList] stream error: $e');
+    }
 
     _quickSub = db
         .collection('quick_gigs')
@@ -737,12 +748,18 @@ class _WorkerData {
   final String name;
   final String skill;
   final LatLng position;
+  final String photoUrl;
+  final double rating;
+  final int ratingCount;
 
   _WorkerData({
     required this.id,
     required this.name,
     required this.skill,
     required this.position,
+    this.photoUrl = '',
+    this.rating = 5.0,
+    this.ratingCount = 0,
   });
 }
 
@@ -764,7 +781,8 @@ class _WorkerCluster {
 }
 
 class _WorkerMapSection extends StatefulWidget {
-  const _WorkerMapSection();
+  final String hostName;
+  const _WorkerMapSection({required this.hostName});
 
   @override
   State<_WorkerMapSection> createState() => _WorkerMapSectionState();
@@ -828,53 +846,65 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
           name: data['name'] as String? ?? 'Worker',
           skill: skills.isNotEmpty ? skills.first : 'General',
           position: LatLng(geo.latitude, geo.longitude),
+          photoUrl: data['photoUrl'] as String? ?? '',
+          rating: (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0,
+          ratingCount: (data['ratingCount'] as num?)?.toInt() ?? 0,
         );
       }).whereType<_WorkerData>().toList();
       if (mounted) setState(() => _workers = workers);
-    }, onError: (e) => debugPrint('[_WorkerMapSection] stream error: $e'));
+    }, onError: (e) {
+      if (FirebaseAuth.instance.currentUser == null) return;
+      debugPrint('[_WorkerMapSection] stream error: $e');
+    });
   }
 
-  // Grid cell size shrinks as zoom increases — smaller = less grouping
-  static double _gridSize(double zoom) {
-    if (zoom < 10) return 0.15;
-    if (zoom < 11) return 0.08;
-    if (zoom < 12) return 0.04;
-    if (zoom < 13) return 0.02;
-    if (zoom < 14) return 0.008;
-    return 0.0; // individual markers
+  // Cluster radius in metres shrinks as zoom increases
+  static double _clusterRadius(double zoom) {
+    if (zoom >= 15) return 20.0;
+    if (zoom >= 14) return 60.0;
+    if (zoom >= 13) return 200.0;
+    if (zoom >= 12) return 600.0;
+    if (zoom >= 11) return 1800.0;
+    if (zoom >= 10) return 5000.0;
+    return 15000.0;
   }
 
   List<_WorkerCluster> _buildClusters() {
-    final gridSize = _gridSize(_zoom);
+    final radiusM = _clusterRadius(_zoom);
+    final assigned = List.filled(_workers.length, false);
+    final clusters = <_WorkerCluster>[];
 
-    if (gridSize == 0.0) {
-      return _workers
-          .map((w) => _WorkerCluster(
-                center: w.position,
-                count: 1,
-                workers: [w],
-                singleWorker: w,
-              ))
-          .toList();
-    }
+    for (int i = 0; i < _workers.length; i++) {
+      if (assigned[i]) continue;
+      assigned[i] = true;
+      final group = [_workers[i]];
 
-    final Map<String, List<_WorkerData>> grid = {};
-    for (final w in _workers) {
-      final latKey = (w.position.latitude / gridSize).floor();
-      final lngKey = (w.position.longitude / gridSize).floor();
-      grid.putIfAbsent('$latKey:$lngKey', () => []).add(w);
-    }
+      for (int j = i + 1; j < _workers.length; j++) {
+        if (assigned[j]) continue;
+        final dist = Geolocator.distanceBetween(
+          _workers[i].position.latitude,
+          _workers[i].position.longitude,
+          _workers[j].position.latitude,
+          _workers[j].position.longitude,
+        );
+        if (dist <= radiusM) {
+          assigned[j] = true;
+          group.add(_workers[j]);
+        }
+      }
 
-    return grid.values.map((group) {
-      final avgLat = group.fold(0.0, (s, w) => s + w.position.latitude) / group.length;
-      final avgLng = group.fold(0.0, (s, w) => s + w.position.longitude) / group.length;
-      return _WorkerCluster(
+      final avgLat =
+          group.fold(0.0, (s, w) => s + w.position.latitude) / group.length;
+      final avgLng =
+          group.fold(0.0, (s, w) => s + w.position.longitude) / group.length;
+      clusters.add(_WorkerCluster(
         center: LatLng(avgLat, avgLng),
         count: group.length,
         workers: group,
         singleWorker: group.length == 1 ? group.first : null,
-      );
-    }).toList();
+      ));
+    }
+    return clusters;
   }
 
   List<Marker> _buildMarkers() {
@@ -884,14 +914,14 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
           point: cluster.center,
           width: 40,
           height: 48,
-          child: _WorkerPin(worker: cluster.singleWorker!),
+          child: _WorkerPin(worker: cluster.singleWorker!, hostName: widget.hostName),
         );
       }
       return Marker(
         point: cluster.center,
         width: 56,
         height: 56,
-        child: _ClusterBadge(count: cluster.count, workers: cluster.workers),
+        child: _ClusterBadge(count: cluster.count, workers: cluster.workers, hostName: widget.hostName),
       );
     }).toList();
   }
@@ -978,6 +1008,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.giggre.app',
+                  errorTileCallback: (tile, error, stackTrace) {},
                 ),
                 MarkerLayer(markers: _buildMarkers()),
                 if (_myLocation != null)
@@ -1022,115 +1053,462 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Individual Worker Pin
 // ─────────────────────────────────────────────────────────────────────────────
-class _WorkerPin extends StatelessWidget {
+class _WorkerPin extends StatefulWidget {
   final _WorkerData worker;
-  const _WorkerPin({required this.worker});
+  final String hostName;
+  const _WorkerPin({required this.worker, required this.hostName});
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => _showWorkerSheet(context),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: kBlue,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2.5),
-              boxShadow: [
-                BoxShadow(
-                  color: kBlue.withValues(alpha: 0.45),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: const Icon(Icons.person, color: Colors.white, size: 20),
-          ),
-          // Pointer triangle
-          CustomPaint(
-            painter: _TrianglePainter(color: kBlue),
-            size: const Size(10, 6),
-          ),
-        ],
-      ),
+  State<_WorkerPin> createState() => _WorkerPinState();
+}
+
+class _WorkerPinState extends State<_WorkerPin>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
     );
+    _scale = CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut);
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<({int completedGigs, bool isFavorite})> _fetchWorkerSheetData(
+      String workerId) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    int count = 0;
+    for (final col in ['quick_gigs', 'open_gigs', 'offered_gigs']) {
+      final snap = await FirebaseFirestore.instance
+          .collection(col)
+          .where('workerId', isEqualTo: workerId)
+          .where('status', isEqualTo: 'completed')
+          .get();
+      count += snap.docs.length;
+    }
+    final hostDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
+    final favIds =
+        (hostDoc.data()?['favoriteWorkerIds'] as List?)?.cast<String>() ?? [];
+    return (completedGigs: count, isFavorite: favIds.contains(workerId));
   }
 
   void _showWorkerSheet(BuildContext context) {
+    final worker = widget.worker;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         final cardColor = Theme.of(ctx).cardColor;
         final onSurface = Theme.of(ctx).colorScheme.onSurface;
-        return Container(
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: kBlue.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.person, color: kBlue, size: 30),
+        final borderColor = Theme.of(ctx).dividerColor;
+        return FutureBuilder<({int completedGigs, bool isFavorite})>(
+          future: _fetchWorkerSheetData(worker.id),
+          builder: (_, snap) {
+            final completed = snap.data?.completedGigs ?? 0;
+            final isFavorite = snap.data?.isFavorite ?? false;
+            final loaded = snap.connectionState == ConnectionState.done;
+            return Container(
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(24),
               ),
-              const SizedBox(height: 12),
-              Text(worker.name,
-                  style: TextStyle(color: onSurface, fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(worker.skill, style: const TextStyle(color: kSub, fontSize: 13)),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  CircleAvatar(
+                    radius: 32,
+                    backgroundColor: kBlue.withValues(alpha: 0.15),
+                    backgroundImage: worker.photoUrl.isNotEmpty
+                        ? CachedNetworkImageProvider(worker.photoUrl)
+                        : null,
+                    child: worker.photoUrl.isEmpty
+                        ? const Icon(Icons.person, color: kBlue, size: 30)
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(worker.name,
+                      style: TextStyle(
+                          color: onSurface,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text(worker.skill,
+                      style: const TextStyle(color: kSub, fontSize: 13)),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF22C55E),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Text('Online now',
+                          style: TextStyle(
+                              color: Color(0xFF22C55E), fontSize: 12)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
                   Container(
-                    width: 7,
-                    height: 7,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF22C55E),
-                      shape: BoxShape.circle,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 12, horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(ctx)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: borderColor),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _StatCell(
+                          icon: Icons.star_rounded,
+                          iconColor: Colors.amber,
+                          value: worker.rating.toStringAsFixed(1),
+                          label: 'Rating (${worker.ratingCount})',
+                        ),
+                        Container(width: 1, height: 36, color: borderColor),
+                        _StatCell(
+                          icon: Icons.check_circle_rounded,
+                          iconColor: const Color(0xFF10B981),
+                          value: loaded ? '$completed' : '—',
+                          label: 'Gigs Done',
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  const Text('Online now',
-                      style: TextStyle(color: Color(0xFF22C55E), fontSize: 12)),
+                  const SizedBox(height: 16),
+                  if (loaded && isFavorite)
+                    SizedBox(
+                      width: double.infinity,
+                      height: 46,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => PostOfferedGigScreen(
+                              hostName: widget.hostName,
+                              preselectedWorkerId: worker.id,
+                              preselectedWorkerName: worker.name,
+                            ),
+                          ));
+                        },
+                        icon: const Icon(Icons.send_rounded, size: 16),
+                        label: const Text('Offer a Gig',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kBlue,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                        ),
+                      ),
+                    ),
+                  if (loaded && !isFavorite)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Text(
+                        'Add this worker to your Favorites to offer a gig',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: kSub.withValues(alpha: 0.8),
+                            fontSize: 12),
+                      ),
+                    ),
+                  const SizedBox(height: 8),
                 ],
               ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                height: 46,
-                child: ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(ctx),
-                  icon: const Icon(Icons.send_rounded, size: 16),
-                  label: const Text('Offer a Gig',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: kBlue,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
+            );
+          },
         );
       },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final worker = widget.worker;
+    return ScaleTransition(
+      scale: _scale,
+      child: GestureDetector(
+        onTap: () => _showWorkerSheet(context),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: kBlue,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: kBlue.withValues(alpha: 0.45),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: worker.photoUrl.isNotEmpty
+                  ? ClipOval(
+                      child: CachedNetworkImage(
+                        imageUrl: worker.photoUrl,
+                        width: 38,
+                        height: 38,
+                        fit: BoxFit.cover,
+                        errorWidget: (context, error, _) =>
+                            const Icon(Icons.person, color: Colors.white, size: 20),
+                      ),
+                    )
+                  : const Icon(Icons.person, color: Colors.white, size: 20),
+            ),
+            CustomPaint(
+              painter: _TrianglePainter(color: kBlue),
+              size: const Size(10, 6),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Stat Cell (used in worker bottom sheet)
+// ─────────────────────────────────────────────────────────────────────────────
+class _StatCell extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String value;
+  final String label;
+
+  const _StatCell({
+    required this.icon,
+    required this.iconColor,
+    required this.value,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: iconColor, size: 18),
+        const SizedBox(height: 4),
+        Text(value,
+            style: TextStyle(
+                color: onSurface, fontSize: 15, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 2),
+        Text(label,
+            style: const TextStyle(color: kSub, fontSize: 11)),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cluster Worker Tile (used inside cluster bottom sheet)
+// ─────────────────────────────────────────────────────────────────────────────
+class _ClusterWorkerTile extends StatefulWidget {
+  final _WorkerData w;
+  final VoidCallback onOffer;
+  const _ClusterWorkerTile({required this.w, required this.onOffer});
+
+  @override
+  State<_ClusterWorkerTile> createState() => _ClusterWorkerTileState();
+}
+
+class _ClusterWorkerTileState extends State<_ClusterWorkerTile> {
+  int _completedGigs = 0;
+  bool _isFavorite = false;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchData();
+  }
+
+  Future<void> _fetchData() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    int count = 0;
+    for (final col in ['quick_gigs', 'open_gigs', 'offered_gigs']) {
+      final snap = await FirebaseFirestore.instance
+          .collection(col)
+          .where('workerId', isEqualTo: widget.w.id)
+          .where('status', isEqualTo: 'completed')
+          .get();
+      count += snap.docs.length;
+    }
+    final hostDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
+    final favIds =
+        (hostDoc.data()?['favoriteWorkerIds'] as List?)?.cast<String>() ?? [];
+    if (!mounted) return;
+    setState(() {
+      _completedGigs = count;
+      _isFavorite = favIds.contains(widget.w.id);
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final w = widget.w;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+      child: Row(
+        children: [
+          // Avatar
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: kBlue.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: w.photoUrl.isNotEmpty
+                ? ClipOval(
+                    child: CachedNetworkImage(
+                      imageUrl: w.photoUrl,
+                      width: 44,
+                      height: 44,
+                      fit: BoxFit.cover,
+                      errorWidget: (context, error, _) =>
+                          const Icon(Icons.person, color: kBlue, size: 22),
+                    ),
+                  )
+                : const Icon(Icons.person, color: kBlue, size: 22),
+          ),
+          const SizedBox(width: 12),
+          // Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(w.name,
+                    style: TextStyle(
+                        color: onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    const Icon(Icons.work_outline_rounded,
+                        color: kSub, size: 12),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(w.skill,
+                          style: const TextStyle(color: kSub, fontSize: 12),
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF22C55E),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Text('Online',
+                        style: TextStyle(
+                            color: Color(0xFF22C55E), fontSize: 11)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    const Icon(Icons.star_rounded,
+                        color: Colors.amber, size: 13),
+                    const SizedBox(width: 3),
+                    Text(w.rating.toStringAsFixed(1),
+                        style: TextStyle(
+                            color: onSurface,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(width: 10),
+                    const Icon(Icons.check_circle_rounded,
+                        color: Color(0xFF10B981), size: 13),
+                    const SizedBox(width: 3),
+                    Text(_loading ? '—' : '$_completedGigs done',
+                        style: const TextStyle(color: kSub, fontSize: 12)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Offer button or lock indicator
+          if (_loading)
+            const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2, color: kBlue),
+            )
+          else if (_isFavorite)
+            TextButton(
+              onPressed: widget.onOffer,
+              style: TextButton.styleFrom(
+                backgroundColor: kBlue.withValues(alpha: 0.1),
+                foregroundColor: kBlue,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Offer',
+                  style:
+                      TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            )
+          else
+            Tooltip(
+              message: 'Add to favorites to offer',
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: kSub.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.lock_outline_rounded,
+                    color: kSub, size: 14),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -1138,10 +1516,50 @@ class _WorkerPin extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Cluster Badge
 // ─────────────────────────────────────────────────────────────────────────────
-class _ClusterBadge extends StatelessWidget {
+class _ClusterBadge extends StatefulWidget {
   final int count;
   final List<_WorkerData> workers;
-  const _ClusterBadge({required this.count, required this.workers});
+  final String hostName;
+  const _ClusterBadge(
+      {required this.count, required this.workers, required this.hostName});
+
+  @override
+  State<_ClusterBadge> createState() => _ClusterBadgeState();
+}
+
+class _ClusterBadgeState extends State<_ClusterBadge>
+    with TickerProviderStateMixin {
+  late final AnimationController _entryCtrl;
+  late final AnimationController _pulseCtrl;
+  late final Animation<double> _scaleAnim;
+  late final Animation<double> _pulseAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _entryCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 450),
+    );
+    _scaleAnim =
+        CurvedAnimation(parent: _entryCtrl, curve: Curves.elasticOut);
+    _entryCtrl.forward();
+
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    )..repeat(reverse: true);
+    _pulseAnim = Tween<double>(begin: 1.0, end: 1.06).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _entryCtrl.dispose();
+    _pulseCtrl.dispose();
+    super.dispose();
+  }
 
   void _showWorkerList(BuildContext context) {
     showModalBottomSheet(
@@ -1162,7 +1580,6 @@ class _ClusterBadge extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Handle
               Container(
                 width: 40,
                 height: 4,
@@ -1172,7 +1589,6 @@ class _ClusterBadge extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              // Header
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Row(
@@ -1191,7 +1607,7 @@ class _ClusterBadge extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('$count Workers in this area',
+                        Text('${widget.count} Workers in this area',
                             style: TextStyle(
                                 color: onSurface,
                                 fontSize: 15,
@@ -1208,7 +1624,6 @@ class _ClusterBadge extends StatelessWidget {
                   color: isDark
                       ? kBorder.withValues(alpha: 0.5)
                       : Colors.grey.withValues(alpha: 0.15)),
-              // Worker list
               ConstrainedBox(
                 constraints: BoxConstraints(
                   maxHeight: MediaQuery.of(ctx).size.height * 0.45,
@@ -1217,7 +1632,7 @@ class _ClusterBadge extends StatelessWidget {
                   shrinkWrap: true,
                   padding: const EdgeInsets.symmetric(
                       horizontal: 16, vertical: 8),
-                  itemCount: workers.length,
+                  itemCount: widget.workers.length,
                   separatorBuilder: (_, i) => Divider(
                     height: 1,
                     color: isDark
@@ -1225,68 +1640,19 @@ class _ClusterBadge extends StatelessWidget {
                         : Colors.grey.withValues(alpha: 0.1),
                   ),
                   itemBuilder: (_, i) {
-                    final w = workers[i];
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      leading: Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: kBlue.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.person,
-                            color: kBlue, size: 22),
-                      ),
-                      title: Text(w.name,
-                          style: TextStyle(
-                              color: onSurface,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600)),
-                      subtitle: Row(
-                        children: [
-                          const Icon(Icons.work_outline_rounded,
-                              color: kSub, size: 12),
-                          const SizedBox(width: 4),
-                          Text(w.skill,
-                              style: const TextStyle(
-                                  color: kSub, fontSize: 12)),
-                          const SizedBox(width: 10),
-                          Container(
-                            width: 6,
-                            height: 6,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF22C55E),
-                              shape: BoxShape.circle,
-                            ),
+                    final w = widget.workers[i];
+                    return _ClusterWorkerTile(
+                      w: w,
+                      onOffer: () {
+                        Navigator.pop(ctx);
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => PostOfferedGigScreen(
+                            hostName: widget.hostName,
+                            preselectedWorkerId: w.id,
+                            preselectedWorkerName: w.name,
                           ),
-                          const SizedBox(width: 4),
-                          const Text('Online',
-                              style: TextStyle(
-                                  color: Color(0xFF22C55E),
-                                  fontSize: 11)),
-                        ],
-                      ),
-                      trailing: TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        style: TextButton.styleFrom(
-                          backgroundColor:
-                              kBlue.withValues(alpha: 0.1),
-                          foregroundColor: kBlue,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                          minimumSize: Size.zero,
-                          tapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: const Text('Offer',
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold)),
-                      ),
+                        ));
+                      },
                     );
                   },
                 ),
@@ -1300,41 +1666,58 @@ class _ClusterBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => _showWorkerList(context),
-      child: Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          color: kAmber,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2.5),
-          boxShadow: [
-            BoxShadow(
-              color: kAmber.withValues(alpha: 0.45),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
+    return ScaleTransition(
+      scale: _scaleAnim,
+      child: AnimatedBuilder(
+        animation: _pulseAnim,
+        builder: (_, child) =>
+            Transform.scale(scale: _pulseAnim.value, child: child),
+        child: GestureDetector(
+          onTap: () => _showWorkerList(context),
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: kAmber,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2.5),
+              boxShadow: [
+                BoxShadow(
+                  color: kAmber.withValues(alpha: 0.5),
+                  blurRadius: 12,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 3),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              '$count',
-              style: const TextStyle(
-                color: Colors.black,
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-                height: 1,
-              ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 250),
+                  transitionBuilder: (child, anim) =>
+                      ScaleTransition(scale: anim, child: child),
+                  child: Text(
+                    '${widget.count}',
+                    key: ValueKey(widget.count),
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                      height: 1,
+                    ),
+                  ),
+                ),
+                const Text(
+                  'workers',
+                  style: TextStyle(
+                      color: Colors.black87,
+                      fontSize: 8,
+                      letterSpacing: 0.3),
+                ),
+              ],
             ),
-            const Text(
-              'workers',
-              style: TextStyle(
-                  color: Colors.black87, fontSize: 8, letterSpacing: 0.3),
-            ),
-          ],
+          ),
         ),
       ),
     );
