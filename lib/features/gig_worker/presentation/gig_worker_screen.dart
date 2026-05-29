@@ -986,44 +986,92 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   void _confirmLogout() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).cardColor,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        title: Text('Log out',
-            style: TextStyle(
-                color: Theme.of(ctx).colorScheme.onSurface)),
-        content: const Text('Are you sure you want to log out?',
-            style: TextStyle(color: kSub)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: kSub)),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              _profileSub?.cancel();
-              _dispatchSub?.cancel();
-              _offeredGigSub?.cancel();
-              for (final sub in _earningsSubs) { sub.cancel(); }
-              _earningsSubs.clear();
-              await FirebaseAuth.instance.signOut();
-              if (!mounted) return;
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
-                (_) => false,
-              );
-            },
-            child: const Text('Log out',
-                style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
+  showDialog(
+    context: context,
+    builder: (ctx) => Dialog(
+      backgroundColor: Theme.of(ctx).cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 54, height: 54,
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 22),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Log out?',
+              style: TextStyle(
+                fontSize: 17, fontWeight: FontWeight.w600,
+                color: Theme.of(ctx).colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "You'll be returned to the login screen and will need to sign in again.",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
+            ),
+            const SizedBox(height: 22),
+            const Divider(height: 0.5, thickness: 0.5),
+            IntrinsicHeight(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
+                        ),
+                      ),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cancel', style: TextStyle(color: kSub, fontSize: 15)),
+                    ),
+                  ),
+                  const VerticalDivider(width: 0.5, thickness: 0.5),
+                  Expanded(
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.only(bottomRight: Radius.circular(20)),
+                        ),
+                      ),
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        _profileSub?.cancel();
+                        _dispatchSub?.cancel();
+                        _offeredGigSub?.cancel();
+                        for (final sub in _earningsSubs) { sub.cancel(); }
+                        _earningsSubs.clear();
+                        if (!mounted) return;
+                        Navigator.of(context).pushAndRemoveUntil(
+                          MaterialPageRoute(builder: (_) => const LoginScreen()),
+                          (_) => false,
+                        );
+                        await WidgetsBinding.instance.endOfFrame;
+                        await FirebaseAuth.instance.signOut();
+                      },
+                      child: const Text('Log out',
+                        style: TextStyle(color: Colors.redAccent, fontSize: 15, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   String _monthName(int m) {
     const months = [

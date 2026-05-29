@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
@@ -19,8 +20,8 @@ void main() async {
   try {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
     await CurrentUserProvider.initNotifications();
-     FilePicker.platform; 
-    CurrentUserProvider.navigatorKey = navigatorKey; 
+    FilePicker.platform;
+    CurrentUserProvider.navigatorKey = navigatorKey;
   } catch (e) {
     firebaseError = e.toString();
   }
@@ -33,6 +34,30 @@ void main() async {
       child: GiggreApp(firebaseError: firebaseError),
     ),
   );
+}
+
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasData) {
+          return const MainNavigation();
+        }
+
+        return const LoginScreen();
+      },
+    );
+  }
 }
 
 class _FirebaseErrorScreen extends StatelessWidget {
@@ -67,6 +92,7 @@ class _FirebaseErrorScreen extends StatelessWidget {
 class GiggreApp extends StatelessWidget {
   final String? firebaseError;
   const GiggreApp({super.key, this.firebaseError});
+
   @override
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
@@ -79,7 +105,7 @@ class GiggreApp extends StatelessWidget {
       themeMode: themeProvider.mode,
       home: firebaseError != null
           ? _FirebaseErrorScreen(firebaseError!)
-          : const LoginScreen(),
+          : const AuthGate(),
       routes: {
         '/login':     (_) => const LoginScreen(),
         '/register':  (_) => const RegisterScreen(),
