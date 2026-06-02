@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
 import 'package:provider/provider.dart';
@@ -36,21 +37,61 @@ void main() async {
   );
 }
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  bool _restoringSession = false;
+
+  Future<void> _restoreSession(User user) async {
+    setState(() => _restoringSession = true);
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      if (!mounted) return;
+      if (doc.exists) {
+        context.read<CurrentUserProvider>().setCurrentUserInfo(
+          user.email,
+          doc.data()?['name'],
+          user.uid,
+          doc.data()?['userId'],
+          doc.data()?['isVerified'],
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _restoringSession = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting || _restoringSession) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
         if (snapshot.hasData) {
+          final provider = context.read<CurrentUserProvider>();
+          if (!provider.isLoggedIn) {
+            // Firebase has a cached session but provider is empty (app restart).
+            // Fetch user data from Firestore before rendering the main screen.
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _restoreSession(snapshot.data!),
+            );
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
           return const MainNavigation();
         }
 
