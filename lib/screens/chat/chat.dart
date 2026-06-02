@@ -64,12 +64,16 @@ class _ChatState extends State<Chat> {
   // Firestore cursor for paginating older messages
   DocumentSnapshot? _oldestDoc;
 
-  // Stream subscription for new incoming messages
+  // Stream subscriptions
   StreamSubscription? _incomingSub;
   StreamSubscription? _seenSub;
+  StreamSubscription? _roomSub;
 
   // Track the newest timestamp we've fetched, to avoid stream duplicates
   DateTime? _newestFetchedTime;
+
+  bool _isResolved = false;
+  bool _resolvedNotified = false;
 
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
@@ -85,12 +89,14 @@ class _ChatState extends State<Chat> {
     _loadInitial();
     _markSupportMessagesAsSeen();
     _listenAndMarkSeen();
+    _listenRoomStatus();
   }
 
   @override
   void dispose() {
     _incomingSub?.cancel();
     _seenSub?.cancel();
+    _roomSub?.cancel();
     _msgController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -231,8 +237,45 @@ class _ChatState extends State<Chat> {
     });
   }
 
+  // ── Listen to room status (close + block input when resolved) ─────────────
+  void _listenRoomStatus() {
+    bool isFirstSnapshot = true;
+    _roomSub = FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .doc(widget.roomId)
+        .snapshots()
+        .listen((snap) {
+      if (!snap.exists || !mounted) return;
+      final data = snap.data() as Map<String, dynamic>;
+      final resolved = (data['status'] as String? ?? '') == 'resolved';
+
+      if (resolved && isFirstSnapshot) {
+        // Already resolved when opened — show banner, no auto-close
+        setState(() => _isResolved = true);
+      } else if (resolved && !_resolvedNotified) {
+        // Became resolved while the user was in the chat — notify and close
+        setState(() {
+          _isResolved = true;
+          _resolvedNotified = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This conversation has been resolved and closed.'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) Navigator.of(context).pop();
+        });
+      }
+
+      isFirstSnapshot = false;
+    });
+  }
+
   // ── Send: optimistic UI ────────────────────────────────────────────────────
   Future<void> _sendMessage() async {
+    if (_isResolved) return;
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
 
@@ -451,65 +494,99 @@ _Msg _docToMsg(DocumentSnapshot doc) {
                       ),
           ),
 
-          // ── Input bar ────────────────────────────────────────────────────
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            decoration: BoxDecoration(
-              color: isDark ? Colors.black : Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withValues(alpha: 0.1),
-                  blurRadius: 10,
-                  offset: const Offset(0, -4),
-                ),
-              ],
-            ),
-            child: SafeArea(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.grey.shade900
-                            : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: TextField(
-                        controller: _msgController,
-                        minLines: 1,
-                        maxLines: 4,
-                        textCapitalization: TextCapitalization.sentences,
-                        style: TextStyle(fontSize: 14, color: onSurface),
-                        decoration: const InputDecoration(
-                          hintText: 'Type a message...',
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding:
-                              EdgeInsets.symmetric(vertical: 10),
-                        ),
-                        onSubmitted: (_) => _sendMessage(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: _sendMessage,
-                    child: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: const BoxDecoration(
-                        color: kBlue,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.send_rounded,
-                          color: Colors.white, size: 20),
-                    ),
+          // ── Input bar / resolved banner ──────────────────────────────────
+          if (_isResolved)
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, -4),
                   ),
                 ],
               ),
+              child: SafeArea(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.lock_outline,
+                        size: 16,
+                        color: Colors.green.shade600),
+                    const SizedBox(width: 8),
+                    Text(
+                      'This conversation is resolved and closed.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.green.shade700,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.black : Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.grey.shade900
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: TextField(
+                          controller: _msgController,
+                          minLines: 1,
+                          maxLines: 4,
+                          textCapitalization: TextCapitalization.sentences,
+                          style: TextStyle(fontSize: 14, color: onSurface),
+                          decoration: const InputDecoration(
+                            hintText: 'Type a message...',
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding:
+                                EdgeInsets.symmetric(vertical: 10),
+                          ),
+                          onSubmitted: (_) => _sendMessage(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: _sendMessage,
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: const BoxDecoration(
+                          color: kBlue,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.send_rounded,
+                            color: Colors.white, size: 20),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
         ],
       ),
     );
