@@ -15,6 +15,7 @@ import '../../../core/theme/theme_provider.dart';
 import '../models/gig_template_model.dart';
 import '../models/offered_gig_model.dart';
 import 'widgets/template_name_dialog.dart';
+import 'widgets/skill_picker_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Experience level options
@@ -73,7 +74,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   _WorkerEntry? _selectedWorker;
 
   // Skill (loaded from Firestore /skills)
-  List<String> _skills = [];
+  List<Map<String, dynamic>> _skills = [];
   String? _selectedSkill;
 
   // Experience level
@@ -726,53 +727,66 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   Future<void> _fetchSkills() async {
     try {
       final snap = await FirebaseFirestore.instance.collection('skills').get();
-      final names = snap.docs
+      final list = snap.docs
           .where((d) => d.id != '_counter')
-          .map((d) => (d.data()['name'] as String?) ?? d.id)
-          .where((s) => s.isNotEmpty)
+          .map((d) {
+            final data = d.data();
+            final name = (data['name'] as String?) ?? d.id;
+            return {'name': name, 'category': data['category'] as String? ?? ''};
+          })
+          .where((s) => (s['name'] as String).isNotEmpty)
           .toList()
-        ..sort();
-      if (mounted) setState(() => _skills = names);
+        ..sort((a, b) =>
+            (a['name'] as String).compareTo(b['name'] as String));
+      if (mounted) setState(() => _skills = list);
     } catch (_) {}
   }
 
-  // ── Skill Dropdown ────────────────────────────────────────────────────────────
+  // ── Skill Picker ──────────────────────────────────────────────────────────
   Widget _buildSkillDropdown() {
     final cardColor = Theme.of(context).cardColor;
     final borderColor = Theme.of(context).dividerColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _selectedSkill != null
-              ? _kPurple.withValues(alpha: 0.6)
-              : borderColor,
-          width: _selectedSkill != null ? 1.5 : 1,
-        ),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: _selectedSkill,
-          isExpanded: true,
-          dropdownColor: cardColor,
-          hint: Text(
-            _skills.isEmpty ? 'Loading skills...' : 'Select a skill...',
-            style: const TextStyle(color: kSub, fontSize: 14),
+    return GestureDetector(
+      onTap: _skills.isEmpty
+          ? null
+          : () async {
+              final picked = await SkillPickerSheet.show(
+                context,
+                skills: _skills,
+                selectedSkill: _selectedSkill,
+                accentColor: _kPurple,
+              );
+              if (picked != null) setState(() => _selectedSkill = picked);
+            },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _selectedSkill != null
+                ? _kPurple.withValues(alpha: 0.6)
+                : borderColor,
+            width: _selectedSkill != null ? 1.5 : 1,
           ),
-          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: kSub),
-          style: TextStyle(color: onSurface, fontSize: 14),
-          items: _skills
-              .map((skill) => DropdownMenuItem(
-                    value: skill,
-                    child: Text(skill,
-                        style: TextStyle(color: onSurface, fontSize: 14)),
-                  ))
-              .toList(),
-          onChanged: (v) => setState(() => _selectedSkill = v),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                _skills.isEmpty
+                    ? 'Loading skills...'
+                    : _selectedSkill ?? 'Select a skill...',
+                style: TextStyle(
+                  color: _selectedSkill != null ? onSurface : kSub,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            const Icon(Icons.keyboard_arrow_down_rounded, color: kSub),
+          ],
         ),
       ),
     );

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:giggre_app/core/theme/theme_provider.dart';
+import 'package:giggre_app/screens/app_contents/contact_us.dart';
 import 'package:provider/provider.dart';
 
 class HelpFaq extends StatefulWidget {
@@ -187,7 +188,10 @@ final response = await FirebaseFirestore.instance
                             const SizedBox(height: 12),
                             ElevatedButton(
                               onPressed: () {
-                                // TODO: Open support chat or email
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => const ContactUs()),
+                                );
                               },
                               style: ElevatedButton.styleFrom(
                                 minimumSize: const Size(double.infinity, 48),
