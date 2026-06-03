@@ -732,7 +732,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       _workerSkillsXP = {};
     });
     try {
-<<<<<<< HEAD
+
       final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
       if (!mounted) return;
       final raw = doc.data()?['skillsXP'] as Map<String, dynamic>? ?? {};
