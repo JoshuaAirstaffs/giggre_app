@@ -33,6 +33,10 @@ class _ToolchestSheetState extends State<ToolchestSheet>
   StreamSubscription? _requestSub;
   StreamSubscription? _skillsSub;
 
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  String? _selectedCategory;
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +52,7 @@ class _ToolchestSheetState extends State<ToolchestSheet>
     _userSub?.cancel();
     _requestSub?.cancel();
     _skillsSub?.cancel();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -504,90 +509,248 @@ class _ToolchestSheetState extends State<ToolchestSheet>
   Widget _buildApplySkillTab(bool isDark) {
     final divider = Theme.of(context).dividerColor;
 
-    // Skills from the global list that the user has NOT yet been awarded
-    final applyList = _availableSkills.where((s) {
+    // Skills the user hasn't been awarded yet
+    final unawardedSkills = _availableSkills.where((s) {
       final name = s['name'] as String? ?? '';
       return !_skillsXP.keys
           .any((u) => u.toLowerCase().trim() == name.toLowerCase().trim());
     }).toList();
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+    // Collect unique categories from unawarded skills
+    final categories = unawardedSkills
+        .map((s) => s['category'] as String? ?? '')
+        .where((c) => c.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+
+    // Apply search + category filter
+    final query = _searchQuery.toLowerCase().trim();
+    final applyList = unawardedSkills.where((s) {
+      final name = (s['name'] as String? ?? '').toLowerCase();
+      final cat = s['category'] as String? ?? '';
+      final matchesSearch = query.isEmpty || name.contains(query);
+      final matchesCategory =
+          _selectedCategory == null || cat == _selectedCategory;
+      return matchesSearch && matchesCategory;
+    }).toList();
+
+    return Column(
       children: [
-        const Text(
-          'AVAILABLE SKILLS',
-          style: TextStyle(
-            color: kSub,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.6,
-          ),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          'Apply for skills not yet awarded to you. Skills you already have appear in My Skills.',
-          style: TextStyle(color: kSub, fontSize: 12, height: 1.4),
-        ),
-        const SizedBox(height: 14),
-        if (applyList.isEmpty)
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 40),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.04)
-                  : Colors.black.withValues(alpha: 0.03),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: divider),
-            ),
-            child: Center(
-              child: Column(
-                children: [
-                  const Icon(Icons.bolt_outlined, color: kSub, size: 38),
-                  const SizedBox(height: 12),
-                  Text(
-                    _availableSkills.isEmpty
-                        ? 'No skills available yet.'
-                        : 'You have all available skills!',
-                    style: const TextStyle(
-                        color: kSub,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _availableSkills.isEmpty
-                        ? 'Check back later as admin adds skills.'
-                        : 'All listed skills have been awarded to you.',
-                    style: const TextStyle(color: kSub, fontSize: 12),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+        // ── Search + filter bar ─────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+          child: TextField(
+            controller: _searchController,
+            onChanged: (v) => setState(() => _searchQuery = v),
+            style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurface),
+            decoration: InputDecoration(
+              hintText: 'Search skills…',
+              hintStyle: const TextStyle(color: kSub, fontSize: 13),
+              prefixIcon:
+                  const Icon(Icons.search_rounded, color: kSub, size: 18),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? GestureDetector(
+                      onTap: () {
+                        _searchController.clear();
+                        setState(() => _searchQuery = '');
+                      },
+                      child: const Icon(Icons.close_rounded,
+                          color: kSub, size: 16),
+                    )
+                  : null,
+              filled: true,
+              fillColor: isDark
+                  ? Colors.white.withValues(alpha: 0.06)
+                  : Colors.black.withValues(alpha: 0.04),
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
               ),
             ),
-          )
-        else
-          ...applyList.map((skill) {
-            final name = skill['name'] as String? ?? '';
-            final category = skill['category'] as String? ?? '';
-            final description = skill['description'] as String? ?? '';
-            final reqStatus = _requestStatusForSkill(name);
-            return _ApplySkillCard(
-              skillName: name,
-              category: category,
-              description: description,
-              requestStatus: reqStatus,
-              isDark: isDark,
-              onApply: () {
-                Navigator.pop(context);
-                SkillRequestForm.push(context,
-                    initialSkillName: name,
-                    initialCategory: category.isNotEmpty ? category : null,
-                    initialSkillId: skill['skillId'] as String?,
-                    initialSkillDocId: skill['skillDocId'] as String?);
-              },
-            );
-          }),
+          ),
+        ),
+
+        // ── Category chips ──────────────────────────────────────────────
+        if (categories.isNotEmpty)
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              children: [
+                _CategoryChip(
+                  label: 'All',
+                  selected: _selectedCategory == null,
+                  isDark: isDark,
+                  onTap: () => setState(() => _selectedCategory = null),
+                ),
+                ...categories.map((cat) => _CategoryChip(
+                      label: cat,
+                      selected: _selectedCategory == cat,
+                      isDark: isDark,
+                      onTap: () => setState(() => _selectedCategory =
+                          _selectedCategory == cat ? null : cat),
+                    )),
+              ],
+            ),
+          ),
+
+        const SizedBox(height: 8),
+
+        // ── Results ────────────────────────────────────────────────────
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    'AVAILABLE SKILLS',
+                    style: TextStyle(
+                      color: kSub,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  if (applyList.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      '${applyList.length}',
+                      style: const TextStyle(color: kSub, fontSize: 11),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (applyList.isEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 40),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.04)
+                        : Colors.black.withValues(alpha: 0.03),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: divider),
+                  ),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(
+                          query.isNotEmpty || _selectedCategory != null
+                              ? Icons.search_off_rounded
+                              : _availableSkills.isEmpty
+                                  ? Icons.bolt_outlined
+                                  : Icons.check_circle_outline_rounded,
+                          color: kSub,
+                          size: 38,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          query.isNotEmpty || _selectedCategory != null
+                              ? 'No skills match your search.'
+                              : _availableSkills.isEmpty
+                                  ? 'No skills available yet.'
+                                  : 'You have all available skills!',
+                          style: const TextStyle(
+                              color: kSub,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          query.isNotEmpty || _selectedCategory != null
+                              ? 'Try a different search or category.'
+                              : _availableSkills.isEmpty
+                                  ? 'Check back later as admin adds skills.'
+                                  : 'All listed skills have been awarded to you.',
+                          style: const TextStyle(color: kSub, fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                ...applyList.map((skill) {
+                  final name = skill['name'] as String? ?? '';
+                  final category = skill['category'] as String? ?? '';
+                  final description = skill['description'] as String? ?? '';
+                  final reqStatus = _requestStatusForSkill(name);
+                  return _ApplySkillCard(
+                    skillName: name,
+                    category: category,
+                    description: description,
+                    requestStatus: reqStatus,
+                    isDark: isDark,
+                    onApply: () {
+                      Navigator.pop(context);
+                      SkillRequestForm.push(context,
+                          initialSkillName: name,
+                          initialCategory:
+                              category.isNotEmpty ? category : null,
+                          initialSkillId: skill['skillId'] as String?,
+                          initialSkillDocId: skill['skillDocId'] as String?);
+                    },
+                  );
+                }),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Category filter chip
+// ─────────────────────────────────────────────────────────────────────────────
+class _CategoryChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _CategoryChip({
+    required this.label,
+    required this.selected,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(right: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: selected
+              ? kAmber
+              : isDark
+                  ? Colors.white.withValues(alpha: 0.07)
+                  : Colors.black.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? kAmber : Colors.transparent,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected
+                ? Colors.black
+                : kSub,
+            fontSize: 11,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
+      ),
     );
   }
 }
