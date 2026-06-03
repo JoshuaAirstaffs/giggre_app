@@ -49,7 +49,8 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keyPropertiesFile.exists()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 }

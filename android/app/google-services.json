@@ -66,6 +66,14 @@
           }
         },
         {
+          "client_id": "770115931871-8nhot4u7qk5d27ij5eelvtrh0cve20na.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.giggre.mobile",
+            "certificate_hash": "3852e3732e8192cc316dbce0b587f14f0835e568"
+          }
+        },
+        {
           "client_id": "770115931871-okjqms9gnte35b9bcbjq67pdas4sardp.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

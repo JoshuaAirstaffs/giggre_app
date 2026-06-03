@@ -456,50 +456,96 @@ class _GigTileState extends State<GigTile> {
     }
   }
 
-  Future<void> _confirmDelete() async {
-    final gigType = widget.data['gigType'] as String? ?? 'quick';
-    final docId = widget.data['docId'] as String? ?? '';
-    if (docId.isEmpty) return;
+ Future<void> _confirmDelete() async {
+  final gigType = widget.data['gigType'] as String? ?? 'quick';
+  final docId = widget.data['docId'] as String? ?? '';
+  if (docId.isEmpty) return;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).cardColor,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Delete Gig',
-            style:
-                TextStyle(color: Theme.of(ctx).colorScheme.onSurface)),
-        content: const Text(
-            'This will permanently remove the gig. This cannot be undone.',
-            style: TextStyle(color: kSub)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep', style: TextStyle(color: kSub)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete',
-                style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => Dialog(
+      backgroundColor: Theme.of(ctx).cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 54, height: 54,
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 22),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Delete Gig?',
+              style: TextStyle(
+                fontSize: 17, fontWeight: FontWeight.w600,
+                color: Theme.of(ctx).colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'This will permanently remove the gig. This cannot be undone.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
+            ),
+            const SizedBox(height: 22),
+            const Divider(height: 0.5, thickness: 0.5),
+            IntrinsicHeight(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
+                        ),
+                      ),
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Keep', style: TextStyle(color: kSub, fontSize: 15)),
+                    ),
+                  ),
+                  const VerticalDivider(width: 0.5, thickness: 0.5),
+                  Expanded(
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.only(bottomRight: Radius.circular(20)),
+                        ),
+                      ),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Delete',
+                          style: TextStyle(color: Colors.redAccent, fontSize: 15, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
-    );
-    if (confirmed != true || !mounted) return;
+    ),
+  );
 
-    final messenger = ScaffoldMessenger.of(context);
-    await FirebaseFirestore.instance
-        .collection(_collectionFor(gigType))
-        .doc(docId)
-        .delete();
-    messenger.showSnackBar(const SnackBar(
-      content: Text('Gig deleted'),
-      backgroundColor: Colors.redAccent,
-      behavior: SnackBarBehavior.floating,
-    ));
-  }
+  if (confirmed != true || !mounted) return;
 
+  final messenger = ScaffoldMessenger.of(context);
+  await FirebaseFirestore.instance
+      .collection(_collectionFor(gigType))
+      .doc(docId)
+      .delete();
+  messenger.showSnackBar(const SnackBar(
+    content: Text('Gig deleted'),
+    backgroundColor: Colors.redAccent,
+    behavior: SnackBarBehavior.floating,
+  ));
+}
   Future<void> _dispatchGig() async {
     final gigType = widget.data['gigType'] as String? ?? 'quick';
     if (gigType != 'quick') return;
