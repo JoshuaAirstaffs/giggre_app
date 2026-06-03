@@ -71,9 +71,10 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
   // Worker selection
   _WorkerEntry? _selectedWorker;
+  Map<String, int> _workerSkillsXP = {};
+  bool _loadingWorkerSkills = false;
 
-  // Skill (loaded from Firestore /skills)
-  List<String> _skills = [];
+  // Skill (loaded from worker's skillsXP)
   String? _selectedSkill;
 
   // Experience level
@@ -98,7 +99,6 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   void initState() {
     super.initState();
     _fetchGpsLocation();
-    _fetchSkills();
     final t = widget.template;
     if (t != null) {
       _titleCtrl.text = t.title;
@@ -137,6 +137,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         );
       });
     }
+    _fetchWorkerSkills(uid);
   }
 
   @override
@@ -295,6 +296,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     );
     if (result != null) {
       setState(() => _selectedWorker = result);
+      _fetchWorkerSkills(result.uid);
     }
   }
 
@@ -722,18 +724,25 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     );
   }
 
-  // ── Fetch skills from Firestore /skills ────────────────────────────────────
-  Future<void> _fetchSkills() async {
+  // ── Fetch skills from selected worker's skillsXP ─────────────────────────
+  Future<void> _fetchWorkerSkills(String uid) async {
+    setState(() {
+      _loadingWorkerSkills = true;
+      _selectedSkill = null;
+      _workerSkillsXP = {};
+    });
     try {
-      final snap = await FirebaseFirestore.instance.collection('skills').get();
-      final names = snap.docs
-          .where((d) => d.id != '_counter')
-          .map((d) => (d.data()['name'] as String?) ?? d.id)
-          .where((s) => s.isNotEmpty)
-          .toList()
-        ..sort();
-      if (mounted) setState(() => _skills = names);
-    } catch (_) {}
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      if (!mounted) return;
+      final raw = doc.data()?['skillsXP'] as Map<String, dynamic>? ?? {};
+      setState(() {
+        _workerSkillsXP = raw.map((k, v) => MapEntry(k, (v as num?)?.toInt() ?? 0));
+        _loadingWorkerSkills = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingWorkerSkills = false);
+    }
   }
 
   // ── Skill Dropdown ────────────────────────────────────────────────────────────
@@ -742,10 +751,25 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     final borderColor = Theme.of(context).dividerColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
+    final workerSkills = _workerSkillsXP.keys.toList()..sort();
+    final noWorker = _selectedWorker == null;
+    final enabled = !noWorker && !_loadingWorkerSkills && workerSkills.isNotEmpty;
+
+    String hintText;
+    if (noWorker) {
+      hintText = 'Select a worker first...';
+    } else if (_loadingWorkerSkills) {
+      hintText = 'Loading worker skills...';
+    } else if (workerSkills.isEmpty) {
+      hintText = 'Worker has no skills yet';
+    } else {
+      hintText = 'Select a skill...';
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
-        color: cardColor,
+        color: enabled ? cardColor : cardColor.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: _selectedSkill != null
@@ -759,20 +783,25 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
           value: _selectedSkill,
           isExpanded: true,
           dropdownColor: cardColor,
-          hint: Text(
-            _skills.isEmpty ? 'Loading skills...' : 'Select a skill...',
-            style: const TextStyle(color: kSub, fontSize: 14),
-          ),
-          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: kSub),
+          hint: Text(hintText, style: const TextStyle(color: kSub, fontSize: 14)),
+          icon: _loadingWorkerSkills
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(color: kSub, strokeWidth: 2),
+                )
+              : const Icon(Icons.keyboard_arrow_down_rounded, color: kSub),
           style: TextStyle(color: onSurface, fontSize: 14),
-          items: _skills
-              .map((skill) => DropdownMenuItem(
-                    value: skill,
-                    child: Text(skill,
-                        style: TextStyle(color: onSurface, fontSize: 14)),
-                  ))
-              .toList(),
-          onChanged: (v) => setState(() => _selectedSkill = v),
+          items: enabled
+              ? workerSkills
+                  .map((skill) => DropdownMenuItem(
+                        value: skill,
+                        child: Text(skill,
+                            style: TextStyle(color: onSurface, fontSize: 14)),
+                      ))
+                  .toList()
+              : null,
+          onChanged: enabled ? (v) => setState(() => _selectedSkill = v) : null,
         ),
       ),
     );
