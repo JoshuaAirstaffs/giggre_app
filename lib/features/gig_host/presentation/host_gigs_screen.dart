@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:giggre_app/features/gig_host/models/gig_template_model.dart';
 import '../../../core/theme/app_colors.dart';
 import '../services/quick_gig_matching_service.dart';
 import 'widgets/gig_detail_sheet.dart';
@@ -27,7 +29,12 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
   int _visibleCount = _pageSize;
 
   static const _activeStatuses = [
-    'in_progress', 'navigating', 'arrived', 'working', 'task_complete', 'payment',
+    'in_progress',
+    'navigating',
+    'arrived',
+    'working',
+    'task_complete',
+    'payment',
   ];
 
   @override
@@ -45,45 +52,54 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
         .where('hostId', isEqualTo: widget.uid)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .listen((s) => setState(() {
-              _quick = s.docs.map((d) {
-                final m = Map<String, dynamic>.from(d.data());
-                m['gigType'] = m['gigType'] ?? 'quick';
-                m['docId'] = d.id;
-                return m;
-              }).toList();
-              _loading = false;
-            }), onError: onErr);
+        .listen(
+          (s) => setState(() {
+            _quick = s.docs.map((d) {
+              final m = Map<String, dynamic>.from(d.data());
+              m['gigType'] = m['gigType'] ?? 'quick';
+              m['docId'] = d.id;
+              return m;
+            }).toList();
+            _loading = false;
+          }),
+          onError: onErr,
+        );
 
     _openSub = db
         .collection('open_gigs')
         .where('hostId', isEqualTo: widget.uid)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .listen((s) => setState(() {
-              _open = s.docs.map((d) {
-                final m = Map<String, dynamic>.from(d.data());
-                m['gigType'] = m['gigType'] ?? 'open';
-                m['docId'] = d.id;
-                return m;
-              }).toList();
-              _loading = false;
-            }), onError: onErr);
+        .listen(
+          (s) => setState(() {
+            _open = s.docs.map((d) {
+              final m = Map<String, dynamic>.from(d.data());
+              m['gigType'] = m['gigType'] ?? 'open';
+              m['docId'] = d.id;
+              return m;
+            }).toList();
+            _loading = false;
+          }),
+          onError: onErr,
+        );
 
     _offeredSub = db
         .collection('offered_gigs')
         .where('hostId', isEqualTo: widget.uid)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .listen((s) => setState(() {
-              _offered = s.docs.map((d) {
-                final m = Map<String, dynamic>.from(d.data());
-                m['gigType'] = m['gigType'] ?? 'offered';
-                m['docId'] = d.id;
-                return m;
-              }).toList();
-              _loading = false;
-            }), onError: onErr);
+        .listen(
+          (s) => setState(() {
+            _offered = s.docs.map((d) {
+              final m = Map<String, dynamic>.from(d.data());
+              m['gigType'] = m['gigType'] ?? 'offered';
+              m['docId'] = d.id;
+              return m;
+            }).toList();
+            _loading = false;
+          }),
+          onError: onErr,
+        );
   }
 
   @override
@@ -111,16 +127,13 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
     }
 
     if (_statusFilter == 'all') {
-      all = all
-          .where((d) {
-            final s = d['status'] as String? ?? '';
-            return s != 'cancelled' && s != 'completed';
-          })
-          .toList();
+      all = all.where((d) {
+        final s = d['status'] as String? ?? '';
+        return s != 'cancelled' && s != 'completed';
+      }).toList();
     } else if (_statusFilter == 'active') {
       all = all
-          .where((d) =>
-              _activeStatuses.contains(d['status'] as String? ?? ''))
+          .where((d) => _activeStatuses.contains(d['status'] as String? ?? ''))
           .toList();
     } else {
       all = all
@@ -148,27 +161,31 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new_rounded,
-              color: onSurface, size: 20),
+          icon: Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: onSurface,
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
           'My Gigs',
           style: TextStyle(
-              color: onSurface,
-              fontSize: 17,
-              fontWeight: FontWeight.bold),
+            color: onSurface,
+            fontSize: 17,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(color: kAmber, strokeWidth: 2))
+              child: CircularProgressIndicator(color: kAmber, strokeWidth: 2),
+            )
           : Column(
               children: [
                 // ── Filter dropdowns ─────────────────────────────
                 Padding(
-                  padding:
-                      const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Row(
                     children: [
                       Expanded(
@@ -212,37 +229,39 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
                   child: filtered.isEmpty
                       ? _EmptyGigsPlaceholder(
                           typeFilter: _typeFilter,
-                          statusFilter: _statusFilter)
+                          statusFilter: _statusFilter,
+                        )
                       : ListView.builder(
-                          padding:
-                              const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                           itemCount: _visibleCount < filtered.length
                               ? _visibleCount + 1
                               : filtered.length,
                           itemBuilder: (ctx, i) {
                             if (i == _visibleCount) {
                               return Padding(
-                                padding:
-                                    const EdgeInsets.only(top: 4),
+                                padding: const EdgeInsets.only(top: 4),
                                 child: OutlinedButton(
                                   onPressed: () => setState(
-                                      () => _visibleCount += _pageSize),
+                                    () => _visibleCount += _pageSize,
+                                  ),
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: kAmber,
                                     side: BorderSide(
-                                        color: kAmber.withValues(
-                                            alpha: 0.5)),
+                                      color: kAmber.withValues(alpha: 0.5),
+                                    ),
                                     shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12)),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                     padding: const EdgeInsets.symmetric(
-                                        vertical: 12),
+                                      vertical: 12,
+                                    ),
                                   ),
                                   child: Text(
                                     'Load more (${filtered.length - _visibleCount} remaining)',
                                     style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ),
                               );
@@ -293,27 +312,32 @@ class GigDropdown extends StatelessWidget {
           value: value,
           isExpanded: true,
           dropdownColor: cardColor,
-          icon: Icon(Icons.keyboard_arrow_down_rounded,
-              color: isActive ? kAmber : kSub, size: 18),
+          icon: Icon(
+            Icons.keyboard_arrow_down_rounded,
+            color: isActive ? kAmber : kSub,
+            size: 18,
+          ),
           style: TextStyle(
             color: isActive ? kAmber : onSurface,
             fontSize: 13,
             fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
           ),
           items: items
-              .map((e) => DropdownMenuItem(
-                    value: e.$1,
-                    child: Text(
-                      e.$2,
-                      style: TextStyle(
-                        color: e.$1 == value ? kAmber : onSurface,
-                        fontSize: 13,
-                        fontWeight: e.$1 == value
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                      ),
+              .map(
+                (e) => DropdownMenuItem(
+                  value: e.$1,
+                  child: Text(
+                    e.$2,
+                    style: TextStyle(
+                      color: e.$1 == value ? kAmber : onSurface,
+                      fontSize: 13,
+                      fontWeight: e.$1 == value
+                          ? FontWeight.w600
+                          : FontWeight.normal,
                     ),
-                  ))
+                  ),
+                ),
+              )
               .toList(),
           onChanged: (v) {
             if (v != null) onChanged(v);
@@ -353,8 +377,7 @@ class _EmptyGigsPlaceholder extends StatelessWidget {
                 color: kAmber.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
-              child:
-                  const Icon(Icons.inbox_outlined, color: kAmber, size: 30),
+              child: const Icon(Icons.inbox_outlined, color: kAmber, size: 30),
             ),
             const SizedBox(height: 16),
             Text(
@@ -422,7 +445,8 @@ class _GigTileState extends State<GigTile> {
     final controller = TextEditingController();
     bool submitted = false;
     try {
-      submitted = await showDialog<bool>(
+      submitted =
+          await showDialog<bool>(
             context: context,
             barrierDismissible: false,
             builder: (_) => _CancelReasonDialog(controller: controller),
@@ -437,115 +461,189 @@ class _GigTileState extends State<GigTile> {
           .collection(_collectionFor(gigType))
           .doc(docId)
           .update({
-        'cancellation_reason': FieldValue.arrayUnion([
-          {
-            'reason': reason,
-            'approved': null,
-            'requestedBy': 'host',
-          }
-        ]),
-        'status': 'cancellation_requested',
-      });
-      messenger.showSnackBar(const SnackBar(
-        content: Text('Cancellation request submitted. Pending admin review.'),
-        backgroundColor: Colors.orange,
-        behavior: SnackBarBehavior.floating,
-      ));
+            'cancellation_reason': FieldValue.arrayUnion([
+              {'reason': reason, 'approved': null, 'requestedBy': 'host'},
+            ]),
+            'status': 'cancellation_requested',
+          });
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cancellation request submitted. Pending admin review.',
+          ),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } finally {
       controller.dispose();
     }
   }
 
- Future<void> _confirmDelete() async {
-  final gigType = widget.data['gigType'] as String? ?? 'quick';
-  final docId = widget.data['docId'] as String? ?? '';
-  if (docId.isEmpty) return;
+  Future<void> _confirmDelete() async {
+    final gigType = widget.data['gigType'] as String? ?? 'quick';
+    final docId = widget.data['docId'] as String? ?? '';
+    if (docId.isEmpty) return;
 
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => Dialog(
-      backgroundColor: Theme.of(ctx).cardColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 54, height: 54,
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                shape: BoxShape.circle,
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Colors.redAccent,
+                  size: 22,
+                ),
               ),
-              child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 22),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Delete Gig?',
-              style: TextStyle(
-                fontSize: 17, fontWeight: FontWeight.w600,
-                color: Theme.of(ctx).colorScheme.onSurface,
+              const SizedBox(height: 14),
+              Text(
+                'Delete Gig?',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(ctx).colorScheme.onSurface,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'This will permanently remove the gig. This cannot be undone.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
-            ),
-            const SizedBox(height: 22),
-            const Divider(height: 0.5, thickness: 0.5),
-            IntrinsicHeight(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
+              const SizedBox(height: 8),
+              const Text(
+                'This will permanently remove the gig. This cannot be undone.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
+              ),
+              const SizedBox(height: 22),
+              const Divider(height: 0.5, thickness: 0.5),
+              IntrinsicHeight(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                              bottomLeft: Radius.circular(20),
+                            ),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text(
+                          'Keep',
+                          style: TextStyle(color: kSub, fontSize: 15),
                         ),
                       ),
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Keep', style: TextStyle(color: kSub, fontSize: 15)),
                     ),
-                  ),
-                  const VerticalDivider(width: 0.5, thickness: 0.5),
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.only(bottomRight: Radius.circular(20)),
+                    const VerticalDivider(width: 0.5, thickness: 0.5),
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                              bottomRight: Radius.circular(20),
+                            ),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text(
+                          'Delete',
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Delete',
-                          style: TextStyle(color: Colors.redAccent, fontSize: 15, fontWeight: FontWeight.w600)),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
 
-  if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted) return;
 
-  final messenger = ScaffoldMessenger.of(context);
-  await FirebaseFirestore.instance
-      .collection(_collectionFor(gigType))
-      .doc(docId)
-      .delete();
-  messenger.showSnackBar(const SnackBar(
-    content: Text('Gig deleted'),
-    backgroundColor: Colors.redAccent,
-    behavior: SnackBarBehavior.floating,
-  ));
-}
+    final messenger = ScaffoldMessenger.of(context);
+    await FirebaseFirestore.instance
+        .collection(_collectionFor(gigType))
+        .doc(docId)
+        .delete();
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Gig deleted'),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _showSnack(String msg, String status) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: status == 'success' ? Colors.green : Colors.red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  Future<void> _saveAsTemplate() async {
+    final gigType = widget.data['gigType'] as String? ?? 'quick';
+    final gigInfo = widget.data;
+
+    final raw = gigInfo['budget'];
+    final budgetVal = raw is double
+        ? raw
+        : raw is int
+        ? raw.toDouble()
+        : double.tryParse(raw?.toString() ?? '0') ?? 0.0;
+
+    final rawSkills = gigInfo['requiredSkills'];
+    final skillRequired = rawSkills is List
+        ? (rawSkills).join(', ')
+        : rawSkills?.toString() ?? '';
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('gig_templates')
+          .add(
+            GigTemplateModel(
+              hostId: uid,
+              gigType: gigType,
+              name: gigInfo['title'] as String? ?? '',
+              title: gigInfo['title'] as String? ?? '',
+              description: gigInfo['description'] as String? ?? '',
+              budget: budgetVal,
+              skillRequired: skillRequired,
+              experienceLevel: gigInfo['experienceLevel'] as String? ?? '',
+              createdAt: DateTime.now(),
+            ).toMap(),
+          );
+      if (mounted) _showSnack('Template saved!', 'success');
+    } catch (err) {
+      debugPrint('Error saving template: $err');
+      if (mounted) _showSnack('Failed to save template.', 'error');
+    }
+  }
+
   Future<void> _dispatchGig() async {
     final gigType = widget.data['gigType'] as String? ?? 'quick';
     if (gigType != 'quick') return;
@@ -558,14 +656,16 @@ class _GigTileState extends State<GigTile> {
         .collection('quick_gigs')
         .doc(docId)
         .update({
-      'status': 'scanning',
-      'assignedWorkerId': null,
-      'assignedWorkerName': null,
-      'searchStartedAt': FieldValue.serverTimestamp(),
-    });
+          'status': 'scanning',
+          'assignedWorkerId': null,
+          'assignedWorkerName': null,
+          'searchStartedAt': FieldValue.serverTimestamp(),
+        });
 
     QuickGigMatchingService.startAutoSearch(
-        gigId: docId, gigLocation: location);
+      gigId: docId,
+      gigLocation: location,
+    );
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -573,8 +673,9 @@ class _GigTileState extends State<GigTile> {
           content: const Text('Searching for available workers...'),
           backgroundColor: kAmber,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       );
     }
@@ -635,8 +736,13 @@ class _GigTileState extends State<GigTile> {
     final titleColor = Theme.of(context).colorScheme.onSurface;
     final isClosed = status == 'cancelled' || status == 'completed';
     const activeGigStatuses = {
-      'in_progress', 'navigating', 'arrived', 'working',
-      'task_complete', 'payment', 'cancellation_requested',
+      'in_progress',
+      'navigating',
+      'arrived',
+      'working',
+      'task_complete',
+      'payment',
+      'cancellation_requested',
     };
     final isActiveGig = activeGigStatuses.contains(status);
 
@@ -687,8 +793,8 @@ class _GigTileState extends State<GigTile> {
     final timeAgo = diff.inMinutes < 60
         ? '${diff.inMinutes}m ago'
         : diff.inHours < 24
-            ? '${diff.inHours}h ago'
-            : '${diff.inDays}d ago';
+        ? '${diff.inHours}h ago'
+        : '${diff.inDays}d ago';
 
     return GestureDetector(
       onTap: _showDetail,
@@ -725,9 +831,10 @@ class _GigTileState extends State<GigTile> {
                         child: Text(
                           data['title'] as String? ?? 'Untitled Gig',
                           style: TextStyle(
-                              color: titleColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600),
+                            color: titleColor,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -735,7 +842,9 @@ class _GigTileState extends State<GigTile> {
                       const SizedBox(width: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: typeColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(6),
@@ -743,10 +852,11 @@ class _GigTileState extends State<GigTile> {
                         child: Text(
                           typeLabel,
                           style: TextStyle(
-                              color: typeColor,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5),
+                            color: typeColor,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
                         ),
                       ),
                     ],
@@ -756,31 +866,37 @@ class _GigTileState extends State<GigTile> {
                     children: [
                       if (subtitle.isNotEmpty) ...[
                         Flexible(
-                          child: Text(subtitle,
-                              style: const TextStyle(
-                                  color: kSub, fontSize: 12),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            subtitle,
+                            style: const TextStyle(color: kSub, fontSize: 12),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        const Text(' · ',
-                            style:
-                                TextStyle(color: kSub, fontSize: 12)),
+                        const Text(
+                          ' · ',
+                          style: TextStyle(color: kSub, fontSize: 12),
+                        ),
                       ],
                       Text(
                         '₱${(data['budget'] as num?)?.toStringAsFixed(0) ?? '0'}',
                         style: const TextStyle(
-                            color: kAmber,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600),
+                          color: kAmber,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      const Text(' · ',
-                          style: TextStyle(color: kSub, fontSize: 12)),
+                      const Text(
+                        ' · ',
+                        style: TextStyle(color: kSub, fontSize: 12),
+                      ),
                       Flexible(
-                        child: Text(timeAgo,
-                            style: const TextStyle(
-                                color: kSub, fontSize: 12),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          timeAgo,
+                          style: const TextStyle(color: kSub, fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
@@ -796,20 +912,24 @@ class _GigTileState extends State<GigTile> {
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: statusColor.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                        color: statusColor.withValues(alpha: 0.4)),
+                      color: statusColor.withValues(alpha: 0.4),
+                    ),
                   ),
                   child: Text(
                     _statusLabel(status),
                     style: TextStyle(
-                        color: statusColor,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.5),
+                      color: statusColor,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ),
                 if (widget.showActions) ...[
@@ -819,14 +939,19 @@ class _GigTileState extends State<GigTile> {
                     width: 20,
                     child: PopupMenuButton<String>(
                       padding: EdgeInsets.zero,
-                      icon: const Icon(Icons.more_horiz_rounded,
-                          color: kSub, size: 18),
+                      icon: const Icon(
+                        Icons.more_horiz_rounded,
+                        color: kSub,
+                        size: 18,
+                      ),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       onSelected: (val) {
                         if (val == 'dispatch') _dispatchGig();
                         if (val == 'cancel') _confirmCancel();
                         if (val == 'delete') _confirmDelete();
+                        if (val == 'saveAsTemplate') _saveAsTemplate();
                       },
                       itemBuilder: (ctx) => [
                         if (!isClosed &&
@@ -838,11 +963,16 @@ class _GigTileState extends State<GigTile> {
                             value: 'dispatch',
                             child: Row(
                               children: [
-                                Icon(Icons.send_rounded,
-                                    color: kAmber, size: 18),
+                                Icon(
+                                  Icons.send_rounded,
+                                  color: kAmber,
+                                  size: 18,
+                                ),
                                 const SizedBox(width: 10),
-                                Text('Dispatch',
-                                    style: TextStyle(color: kAmber)),
+                                Text(
+                                  'Dispatch',
+                                  style: TextStyle(color: kAmber),
+                                ),
                               ],
                             ),
                           ),
@@ -851,12 +981,16 @@ class _GigTileState extends State<GigTile> {
                             value: 'cancel',
                             child: Row(
                               children: [
-                                Icon(Icons.cancel_outlined,
-                                    color: Colors.orange, size: 18),
+                                Icon(
+                                  Icons.cancel_outlined,
+                                  color: Colors.orange,
+                                  size: 18,
+                                ),
                                 SizedBox(width: 10),
-                                Text('Cancel Gig',
-                                    style:
-                                        TextStyle(color: Colors.orange)),
+                                Text(
+                                  'Cancel Gig',
+                                  style: TextStyle(color: Colors.orange),
+                                ),
                               ],
                             ),
                           ),
@@ -865,15 +999,36 @@ class _GigTileState extends State<GigTile> {
                             value: 'delete',
                             child: Row(
                               children: [
-                                Icon(Icons.delete_outline_rounded,
-                                    color: Colors.redAccent, size: 18),
+                                Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: Colors.redAccent,
+                                  size: 18,
+                                ),
                                 SizedBox(width: 10),
-                                Text('Delete',
-                                    style: TextStyle(
-                                        color: Colors.redAccent)),
+                                Text(
+                                  'Delete',
+                                  style: TextStyle(color: Colors.redAccent),
+                                ),
                               ],
                             ),
                           ),
+                        const PopupMenuItem(
+                          value: 'saveAsTemplate',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.save_outlined,
+                                color: Colors.blue,
+                                size: 18,
+                              ),
+                              SizedBox(width: 10),
+                              Text(
+                                'Save as template',
+                                style: TextStyle(color: Colors.blue),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -938,8 +1093,11 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
               color: Colors.redAccent.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.cancel_outlined,
-                color: Colors.redAccent, size: 28),
+            child: const Icon(
+              Icons.cancel_outlined,
+              color: Colors.redAccent,
+              size: 28,
+            ),
           ),
           const SizedBox(height: 14),
           Text(
@@ -965,7 +1123,9 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
             decoration: InputDecoration(
               hintText: 'Describe your reason for cancelling...',
               hintStyle: TextStyle(
-                  color: kSub.withValues(alpha: 0.6), fontSize: 13),
+                color: kSub.withValues(alpha: 0.6),
+                fontSize: 13,
+              ),
               filled: true,
               fillColor: isDark
                   ? Colors.white.withValues(alpha: 0.05)
@@ -973,20 +1133,26 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(
-                    color: Colors.redAccent.withValues(alpha: 0.3)),
+                  color: Colors.redAccent.withValues(alpha: 0.3),
+                ),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(
-                    color: Colors.redAccent.withValues(alpha: 0.25)),
+                  color: Colors.redAccent.withValues(alpha: 0.25),
+                ),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide:
-                    const BorderSide(color: Colors.redAccent, width: 1.5),
+                borderSide: const BorderSide(
+                  color: Colors.redAccent,
+                  width: 1.5,
+                ),
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -995,29 +1161,32 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
               Expanded(
                 child: TextButton(
                   onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Go Back',
-                      style: TextStyle(color: kSub)),
+                  child: const Text('Go Back', style: TextStyle(color: kSub)),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 flex: 2,
                 child: ElevatedButton(
-                  onPressed:
-                      _hasText ? () => Navigator.pop(context, true) : null,
+                  onPressed: _hasText
+                      ? () => Navigator.pop(context, true)
+                      : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.redAccent,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor:
-                        Colors.redAccent.withValues(alpha: 0.35),
+                    disabledBackgroundColor: Colors.redAccent.withValues(
+                      alpha: 0.35,
+                    ),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 13),
                   ),
-                  child: const Text('Submit Request',
-                      style: TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'Submit Request',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             ],

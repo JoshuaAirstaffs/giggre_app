@@ -20,7 +20,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   String? firebaseError;
   try {
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
     await CurrentUserProvider.initNotifications();
     FilePicker.platform;
     CurrentUserProvider.navigatorKey = navigatorKey;
@@ -46,10 +48,23 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
-  bool _restoringSession = false;
+  // Pre-set to true if there's a cached user so the very first frame shows
+  // loading rather than LoginScreen while the Firestore restore runs.
+  bool _restoringSession = FirebaseAuth.instance.currentUser != null;
+  late final Stream<User?> _authStream;
 
-  Future<void> _restoreSession(User user) async {
-    setState(() => _restoringSession = true);
+  @override
+  void initState() {
+    super.initState();
+    _authStream = FirebaseAuth.instance.authStateChanges();
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser != null) {
+      _doRestore(currentUser);
+    }
+  }
+
+  // Core restore logic — called both from initState and from the stream path.
+  Future<void> _doRestore(User user) async {
     try {
       final doc = await FirebaseFirestore.instance
           .collection('users')
@@ -64,36 +79,64 @@ class _AuthGateState extends State<AuthGate> {
           doc.data()?['userId'],
           doc.data()?['isVerified'],
         );
+      } else {
+        // Document confirmed missing — user has no profile, force sign out.
+        await FirebaseAuth.instance.signOut();
+      }
+    } catch (_) {
+      // Firestore unreachable (network or token-refresh timing).
+      // Set minimal session from Firebase Auth so the app can open.
+      if (mounted) {
+        context.read<CurrentUserProvider>().setCurrentUserInfo(
+          user.email,
+          null,
+          user.uid,
+          null,
+          null,
+        );
       }
     } finally {
       if (mounted) setState(() => _restoringSession = false);
     }
   }
 
+  // Called from the stream builder when Firebase has a user but the provider
+  // is still empty (e.g. the stream fired before initState's restore finished).
+  Future<void> _restoreSession(User user) async {
+    if (_restoringSession) return;
+    setState(() => _restoringSession = true);
+    await _doRestore(user);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Watch the provider so a rebuild fires as soon as setCurrentUserInfo runs.
+    final provider = context.watch<CurrentUserProvider>();
+
     return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
+      stream: _authStream,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting || _restoringSession) {
+        if (snapshot.connectionState == ConnectionState.waiting ||
+            _restoringSession) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        if (snapshot.hasData) {
-          final provider = context.read<CurrentUserProvider>();
-          if (!provider.isLoggedIn) {
-            // Firebase has a cached session but provider is empty (app restart).
-            // Fetch user data from Firestore before rendering the main screen.
-            WidgetsBinding.instance.addPostFrameCallback(
-              (_) => _restoreSession(snapshot.data!),
-            );
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
-          }
+        // Trust the provider over the stream — avoids a LoginScreen flash if
+        // Firebase briefly emits null during token refresh on app restart.
+        if (provider.isLoggedIn) {
           return const MainNavigation();
+        }
+
+        if (snapshot.hasData) {
+          // Stream has a user but provider is empty (rare race).
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _restoreSession(snapshot.data!),
+          );
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
         return const LoginScreen();
@@ -117,12 +160,16 @@ class _FirebaseErrorScreen extends StatelessWidget {
             children: [
               const Icon(Icons.error_outline, color: Colors.red, size: 48),
               const SizedBox(height: 16),
-              const Text('Firebase failed to initialize',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text(
+                'Firebase failed to initialize',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 12),
-              Text(error,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 13, color: Colors.grey)),
+              Text(
+                error,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13, color: Colors.grey),
+              ),
             ],
           ),
         ),
@@ -185,18 +232,16 @@ class GiggreApp extends StatelessWidget {
           ? _FirebaseErrorScreen(firebaseError!)
           : const _MaintenanceGate(),
       routes: {
-        '/login':     (_) => const LoginScreen(),
-        '/register':  (_) => const RegisterScreen(),
+        '/login': (_) => const LoginScreen(),
+        '/register': (_) => const RegisterScreen(),
         '/dashboard': (_) => const MainNavigation(),
         '/gigworker': (_) => const MainNavigation(),
-        '/gighost':   (_) => const MainNavigation(),
+        '/gighost': (_) => const MainNavigation(),
       },
       onGenerateRoute: (settings) {
         if (settings.name?.startsWith('/chat/') == true) {
           final roomId = settings.name!.split('/').last;
-          return MaterialPageRoute(
-            builder: (_) => Chat(roomId: roomId),
-          );
+          return MaterialPageRoute(builder: (_) => Chat(roomId: roomId));
         }
         return null;
       },
