@@ -71,7 +71,9 @@ void _showModal(
 // ── ContactUs ─────────────────────────────────────────────────────────────────
 
 class ContactUs extends StatefulWidget {
-  const ContactUs({super.key});
+  const ContactUs({super.key, this.showTicketsTab = true});
+
+  final bool showTicketsTab;
 
   @override
   State<ContactUs> createState() => _ContactUsState();
@@ -84,7 +86,10 @@ class _ContactUsState extends State<ContactUs>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(
+      length: widget.showTicketsTab ? 2 : 1,
+      vsync: this,
+    );
   }
 
   @override
@@ -109,22 +114,27 @@ class _ContactUsState extends State<ContactUs>
             fontWeight: FontWeight.bold,
           ),
         ),
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: kBlue,
-          labelColor: kBlue,
-          unselectedLabelColor: onSurface.withValues(alpha: 0.5),
-          labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          tabs: const [
-            Tab(text: 'Send Message'),
-            Tab(text: 'My Tickets'),
-          ],
-        ),
+        bottom: widget.showTicketsTab
+            ? TabBar(
+                controller: _tabController,
+                indicatorColor: kBlue,
+                labelColor: kBlue,
+                unselectedLabelColor: onSurface.withValues(alpha: 0.5),
+                labelStyle:
+                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                tabs: const [
+                  Tab(text: 'Send Message'),
+                  Tab(text: 'My Tickets'),
+                ],
+              )
+            : null,
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: const [_SendMessageTab(), _MyTicketsTab()],
-      ),
+      body: widget.showTicketsTab
+          ? TabBarView(
+              controller: _tabController,
+              children: const [_SendMessageTab(), _MyTicketsTab()],
+            )
+          : const _SendMessageTab(),
     );
   }
 }
@@ -1093,81 +1103,107 @@ class _FormsState extends State<_Forms> {
 
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      final roomRef = FirebaseFirestore.instance.collection('chat_rooms').doc();
+      final isGuest = uid == null;
 
-      final ticketNumber = await _generateTicketNumber();
+      final ticketNumber = isGuest
+          ? await _generateGuestTicketNumber()
+          : await _generateTicketNumber();
 
-      await FirebaseFirestore.instance.collection('support_tickets').add({
-        'source': 'user',
-        'ticket_number': ticketNumber,
-        'userId': uid,
-        'name': name,
-        'email': email,
-        'subject': subject,
-        'message': message,
-        'roomId': roomRef.id,
-        'status': 'open',
-        'hasRead': false,
-        'createdAt': FieldValue.serverTimestamp(),
-        'recipientType': null,
-        'recipients': [],
-        'createdBy': null,
-      });
-
-      await roomRef.set({
-        'userId': uid,
-        'name': name,
-        'subject': subject,
-        'sendTo': 'Giggre Support',
-        'status': 'open',
-        'isSupport': true,
-        'ticketId': null,
-        'lastMessage': message,
-        'lastMessageSender': 'You',
-        'lastMessageAt': FieldValue.serverTimestamp(),
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      final autoReplySnap = await FirebaseFirestore.instance
-          .collection('support_settings')
-          .doc('qGDefSx1JYdx86VxlznN')
-          .get();
-
-      final isAutoReplyEnabled =
-          autoReplySnap.data()?['enabled_auto_reply'] ?? false;
-      final autoReply = autoReplySnap.data()?['auto_reply_message'] ??
-          "Thank you for contacting us! We'll get back to you shortly.";
-
-      await roomRef.collection('messages').add({
-        'senderId': uid,
-        'isSupport': false,
-        'name': name,
-        'text': message,
-        'hasSeen': true,
-        'hasSeenByAdmin': isAutoReplyEnabled ? true : false,
-        'createdAt': FieldValue.serverTimestamp(),
-        'isAutoReply': false,
-      });
-
-      await Future.delayed(const Duration(seconds: 2));
-
-      if (isAutoReplyEnabled) {
-        await roomRef.collection('messages').add({
-          'senderId': 'support',
-          'isSupport': true,
-          'name': 'Giggre Support',
-          'text': autoReply,
-          'hasSeen': false,
-          'hasSeenByAdmin': true,
+      if (isGuest) {
+        // Guest path: create ticket only (no chat room, no auto-reply)
+        await FirebaseFirestore.instance.collection('support_tickets').add({
+          'source': 'maintenance',
+          'ticket_number': ticketNumber,
+          'userId': email,
+          'name': name,
+          'email': email,
+          'subject': subject,
+          'message': message,
+          'roomId': null,
+          'status': 'open',
+          'hasRead': false,
           'createdAt': FieldValue.serverTimestamp(),
-          'isAutoReply': true,
+          'recipientType': null,
+          'recipients': [],
+          'createdBy': null,
+        });
+      } else {
+        // Authenticated path: full flow with chat room + auto-reply
+        final roomRef =
+            FirebaseFirestore.instance.collection('chat_rooms').doc();
+
+        await FirebaseFirestore.instance.collection('support_tickets').add({
+          'source': 'user',
+          'ticket_number': ticketNumber,
+          'userId': uid,
+          'name': name,
+          'email': email,
+          'subject': subject,
+          'message': message,
+          'roomId': roomRef.id,
+          'status': 'open',
+          'hasRead': false,
+          'createdAt': FieldValue.serverTimestamp(),
+          'recipientType': null,
+          'recipients': [],
+          'createdBy': null,
         });
 
-        await roomRef.update({
-          'lastMessage': autoReply,
-          'lastMessageSender': 'Support',
+        await roomRef.set({
+          'userId': uid,
+          'name': name,
+          'subject': subject,
+          'sendTo': 'Giggre Support',
+          'status': 'open',
+          'isSupport': true,
+          'ticketId': null,
+          'lastMessage': message,
+          'lastMessageSender': 'You',
           'lastMessageAt': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
         });
+
+        final autoReplySnap = await FirebaseFirestore.instance
+            .collection('support_settings')
+            .doc('qGDefSx1JYdx86VxlznN')
+            .get();
+
+        final isAutoReplyEnabled =
+            autoReplySnap.data()?['enabled_auto_reply'] ?? false;
+        final autoReply = autoReplySnap.data()?['auto_reply_message'] ??
+            "Thank you for contacting us! We'll get back to you shortly.";
+
+        await roomRef.collection('messages').add({
+          'senderId': uid,
+          'isSupport': false,
+          'name': name,
+          'text': message,
+          'hasSeen': true,
+          'hasSeenByAdmin': isAutoReplyEnabled ? true : false,
+          'createdAt': FieldValue.serverTimestamp(),
+          'isAutoReply': false,
+        });
+
+        await Future.delayed(const Duration(seconds: 2));
+
+        if (isAutoReplyEnabled) {
+          await roomRef.collection('messages').add({
+            'senderId': 'support',
+            'isSupport': true,
+            'name': 'Giggre Support',
+            'text': autoReply,
+            'hasSeen': false,
+            'hasSeenByAdmin': true,
+            'createdAt': FieldValue.serverTimestamp(),
+            'isAutoReply': true,
+          });
+
+          await roomRef.update({
+            'lastMessage': autoReply,
+            'lastMessageSender': 'Support',
+            'lastMessageAt': FieldValue.serverTimestamp(),
+          });
+        }
       }
 
       _subjectController.clear();
@@ -1178,7 +1214,7 @@ class _FormsState extends State<_Forms> {
           context,
           title: 'Ticket Submitted!',
           message:
-              'We\'ve received your message and will respond within 24–48 hours.',
+              "We've received your message and will respond within 24–48 hours.",
           isSuccess: true,
         );
       }
@@ -1194,6 +1230,23 @@ class _FormsState extends State<_Forms> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<String> _generateGuestTicketNumber() async {
+    final counterRef = FirebaseFirestore.instance
+        .collection('_counters')
+        .doc('guest_support_tickets');
+    final year = DateTime.now().year;
+
+    final count = await FirebaseFirestore.instance.runTransaction<int>((t) async {
+      final snap = await t.get(counterRef);
+      final current = (snap.data()?['count_$year'] as int?) ?? 0;
+      final next = current + 1;
+      t.set(counterRef, {'count_$year': next}, SetOptions(merge: true));
+      return next;
+    });
+
+    return 'TKT-$year-G${count.toString().padLeft(6, '0')}';
   }
 
   Future<String> _generateTicketNumber() async {

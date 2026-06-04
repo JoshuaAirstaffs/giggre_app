@@ -1,0 +1,53 @@
+<svg width="300" height="300" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">
+  <title>Giggre Maintenance Icon</title>
+  <desc>Maintenance icon with blue gears and wrench, orange small gear</desc>
+
+  <!-- Large gear (blue) -->
+  <g transform="translate(130, 160)">
+    <circle cx="0" cy="0" r="72" fill="#185FA5" />
+    <circle cx="0" cy="0" r="32" fill="#E6F1FB" />
+    <g fill="#185FA5">
+      <rect x="-10" y="-92" width="20" height="24" rx="4"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(30)"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(60)"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(90)"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(120)"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(150)"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(180)"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(210)"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(240)"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(270)"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(300)"/>
+      <rect x="-10" y="-92" width="20" height="24" rx="4" transform="rotate(330)"/>
+    </g>
+    <circle cx="0" cy="0" r="18" fill="#185FA5" />
+    <circle cx="0" cy="0" r="11" fill="#E6F1FB" />
+  </g>
+
+  <!-- Small gear (orange) -->
+  <g transform="translate(218, 95)">
+    <circle cx="0" cy="0" r="44" fill="#BA7517" />
+    <circle cx="0" cy="0" r="20" fill="#FAEEDA" />
+    <g fill="#BA7517">
+      <rect x="-7" y="-58" width="14" height="17" rx="3"/>
+      <rect x="-7" y="-58" width="14" height="17" rx="3" transform="rotate(45)"/>
+      <rect x="-7" y="-58" width="14" height="17" rx="3" transform="rotate(90)"/>
+      <rect x="-7" y="-58" width="14" height="17" rx="3" transform="rotate(135)"/>
+      <rect x="-7" y="-58" width="14" height="17" rx="3" transform="rotate(180)"/>
+      <rect x="-7" y="-58" width="14" height="17" rx="3" transform="rotate(225)"/>
+      <rect x="-7" y="-58" width="14" height="17" rx="3" transform="rotate(270)"/>
+      <rect x="-7" y="-58" width="14" height="17" rx="3" transform="rotate(315)"/>
+    </g>
+    <circle cx="0" cy="0" r="12" fill="#BA7517" />
+    <circle cx="0" cy="0" r="7" fill="#FAEEDA" />
+  </g>
+
+  <!-- Wrench (blue) -->
+  <g transform="translate(152, 185) rotate(-40)">
+    <rect x="-7" y="0" width="14" height="74" rx="6" fill="#0C447C" />
+    <rect x="-21" y="-32" width="42" height="36" rx="6" fill="#0C447C"/>
+    <rect x="-12" y="-26" width="24" height="23" rx="4" fill="#E6F1FB"/>
+    <rect x="-21" y="-12" width="9" height="14" rx="3" fill="#E6F1FB"/>
+    <rect x="12" y="-12" width="9" height="14" rx="3" fill="#E6F1FB"/>
+  </g>
+</svg>

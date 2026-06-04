@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
+import 'package:giggre_app/screens/maintenance_screen.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'features/auth/presentation/login_screen.dart';
@@ -130,6 +131,42 @@ class _FirebaseErrorScreen extends StatelessWidget {
   }
 }
 
+class _MaintenanceGate extends StatelessWidget {
+  const _MaintenanceGate();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('general_config')
+          .doc('maintenance')
+          .snapshots(),
+      builder: (context, snapshot) {
+        // Hold on splash-style loader until we have a definitive answer
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasData && snapshot.data!.exists) {
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+          if (data['enabled'] == true) {
+            return MaintenanceScreen(
+              message: data['message'] as String? ??
+                  'We\'re currently performing scheduled maintenance. Please check back shortly.',
+              startDate: data['startDate'] as String?,
+              endDate: data['endDate'] as String?,
+            );
+          }
+        }
+
+        return const AuthGate();
+      },
+    );
+  }
+}
+
 class GiggreApp extends StatelessWidget {
   final String? firebaseError;
   const GiggreApp({super.key, this.firebaseError});
@@ -146,7 +183,7 @@ class GiggreApp extends StatelessWidget {
       themeMode: themeProvider.mode,
       home: firebaseError != null
           ? _FirebaseErrorScreen(firebaseError!)
-          : const AuthGate(),
+          : const _MaintenanceGate(),
       routes: {
         '/login':     (_) => const LoginScreen(),
         '/register':  (_) => const RegisterScreen(),
