@@ -200,7 +200,8 @@ class _MaintenanceGate extends StatelessWidget {
           final data = snapshot.data!.data() as Map<String, dynamic>;
           if (data['enabled'] == true) {
             return MaintenanceScreen(
-              message: data['message'] as String? ??
+              message:
+                  data['message'] as String? ??
                   'We\'re currently performing scheduled maintenance. Please check back shortly.',
               startDate: data['startDate'] as String?,
               endDate: data['endDate'] as String?,

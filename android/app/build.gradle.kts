@@ -25,6 +25,8 @@ android {
     }
 
     kotlinOptions {
+        // Keeps your compilation working smoothly without deprecation blocks
+        @Suppress("DEPRECATION")
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
