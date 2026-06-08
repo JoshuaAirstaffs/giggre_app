@@ -8,16 +8,13 @@ import 'package:giggre_app/services/delete_account_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
-import 'package:giggre_app/features/gig_host/presentation/privacy_security_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
-import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
 import 'widgets/payment_history_sheet.dart';
 import 'widgets/notifications_sheet.dart';
-import 'host_privacy_security_screen.dart';
 
 class GigHostProfileScreen extends StatefulWidget {
   const GigHostProfileScreen({super.key});
@@ -1761,7 +1758,11 @@ class _GigHistorySheetState extends State<_GigHistorySheet> {
                         context: ctx,
                         isScrollControlled: true,
                         backgroundColor: Colors.transparent,
-                        builder: (_) => _GigHistoryDetailSheet(gig: gig),
+                        builder: (_) => _GigHistoryDetailSheet(
+                          gig: gig,
+                          isFavorite: _favoriteWorkerIds.contains(workerId),
+                          onFavoriteToggle: () => _toggleFavorite(workerId),
+                        ),
                       ),
                     );
                   },
@@ -1905,20 +1906,24 @@ class _GigHistoryCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        const SizedBox(width: 2),
+                        const SizedBox(width: 4),
                         GestureDetector(
                           onTap: onFavoriteToggle,
-                          child: Icon(
-                            isFavorite
-                                ? Icons.favorite_rounded
-                                : Icons.favorite_border_rounded,
-                            size: 14,
-                            color: isFavorite
-                                ? Colors.redAccent
-                                : kSub.withValues(alpha: 0.5),
+                          behavior: HitTestBehavior.opaque,
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(
+                              isFavorite
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              size: 20,
+                              color: isFavorite
+                                  ? Colors.redAccent
+                                  : kSub.withValues(alpha: 0.5),
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 4),
                       ],
                       if (completedAt != null) ...[
                         const Icon(
@@ -2006,9 +2011,33 @@ class _GigHistoryCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig history detail sheet (read-only)
 // ─────────────────────────────────────────────────────────────────────────────
-class _GigHistoryDetailSheet extends StatelessWidget {
+class _GigHistoryDetailSheet extends StatefulWidget {
   final Map<String, dynamic> gig;
-  const _GigHistoryDetailSheet({required this.gig});
+  final bool isFavorite;
+  final VoidCallback? onFavoriteToggle;
+  const _GigHistoryDetailSheet({
+    required this.gig,
+    this.isFavorite = false,
+    this.onFavoriteToggle,
+  });
+
+  @override
+  State<_GigHistoryDetailSheet> createState() => _GigHistoryDetailSheetState();
+}
+
+class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
+  late bool _isFavorite;
+
+  @override
+  void initState() {
+    super.initState();
+    _isFavorite = widget.isFavorite;
+  }
+
+  void _handleFavoriteToggle() {
+    setState(() => _isFavorite = !_isFavorite);
+    widget.onFavoriteToggle?.call();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2016,6 +2045,7 @@ class _GigHistoryDetailSheet extends StatelessWidget {
     final cardColor = Theme.of(context).cardColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
+    final gig = widget.gig;
     final gigType = gig['gigType'] as String? ?? 'quick';
     final title = gig['title'] as String? ?? 'Gig';
     final description = gig['description'] as String? ?? '';
@@ -2171,6 +2201,58 @@ class _GigHistoryDetailSheet extends StatelessWidget {
                   ),
               ],
             ),
+
+            // ── Add to Favorites button (only when worker exists) ────
+            if (workerName.isNotEmpty && widget.onFavoriteToggle != null) ...[
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: _handleFavoriteToggle,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: _isFavorite
+                        ? Colors.redAccent.withValues(alpha: 0.08)
+                        : isDark
+                            ? Colors.white.withValues(alpha: 0.04)
+                            : Colors.grey.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: _isFavorite
+                          ? Colors.redAccent.withValues(alpha: 0.4)
+                          : isDark
+                              ? kBorder
+                              : Colors.grey.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        _isFavorite
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                        color: _isFavorite
+                            ? Colors.redAccent
+                            : kSub,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        _isFavorite
+                            ? 'In Favorites'
+                            : 'Add worker to Favorites',
+                        style: TextStyle(
+                          color: _isFavorite ? Colors.redAccent : onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
 
             // ── Timeline card ────────────────────────────────────────
