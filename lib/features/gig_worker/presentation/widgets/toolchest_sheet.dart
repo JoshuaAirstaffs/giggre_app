@@ -694,7 +694,8 @@ class _ToolchestSheetState extends State<ToolchestSheet>
                           initialCategory:
                               category.isNotEmpty ? category : null,
                           initialSkillId: skill['skillId'] as String?,
-                          initialSkillDocId: skill['skillDocId'] as String?);
+                          initialSkillDocId: skill['skillDocId'] as String?,
+                          isApplyMode: true);
                     },
                   );
                 }),

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -24,6 +25,7 @@ class SkillRequestForm extends StatefulWidget {
   final String? initialCategory;
   final String? initialSkillId;
   final String? initialSkillDocId;
+  final bool isApplyMode;
 
   const SkillRequestForm({
     super.key,
@@ -31,6 +33,7 @@ class SkillRequestForm extends StatefulWidget {
     this.initialCategory,
     this.initialSkillId,
     this.initialSkillDocId,
+    this.isApplyMode = false,
   });
 
   static Future<void> push(
@@ -39,6 +42,7 @@ class SkillRequestForm extends StatefulWidget {
     String? initialCategory,
     String? initialSkillId,
     String? initialSkillDocId,
+    bool isApplyMode = false,
   }) {
     return Navigator.push(
       context,
@@ -48,6 +52,7 @@ class SkillRequestForm extends StatefulWidget {
           initialCategory: initialCategory,
           initialSkillId: initialSkillId,
           initialSkillDocId: initialSkillDocId,
+          isApplyMode: isApplyMode,
         ),
       ),
     );
@@ -62,7 +67,8 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
 
   final _skillNameCtrl = TextEditingController();
   final _reasonCtrl = TextEditingController();
-  final _durationCtrl = TextEditingController();
+  final _yearsCtrl = TextEditingController();
+  final _monthsCtrl = TextEditingController();
   final _relatedExpCtrl = TextEditingController();
   final _suggestedReqCtrl = TextEditingController();
   final _contactCtrl = TextEditingController();
@@ -96,7 +102,8 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
   void dispose() {
     _skillNameCtrl.dispose();
     _reasonCtrl.dispose();
-    _durationCtrl.dispose();
+    _yearsCtrl.dispose();
+    _monthsCtrl.dispose();
     _relatedExpCtrl.dispose();
     _suggestedReqCtrl.dispose();
     _contactCtrl.dispose();
@@ -190,7 +197,8 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
         'skillCategory': _category,
         'reason': _reasonCtrl.text.trim(),
         'experienceLevel': _level,
-        'experienceDuration': _durationCtrl.text.trim(),
+        'experienceDuration':
+            '${_yearsCtrl.text.trim()} year/s and ${_monthsCtrl.text.trim()} month/s',
         'proofUrls': proofUrls,
         'proofPaths': proofPaths,
         'proofNames': proofNames,
@@ -335,20 +343,22 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
               ),
               const SizedBox(height: 20),
 
-              // ── 3. Reason ─────────────────────────────────────
-              _SectionHeader(
-                  number: '3',
-                  title: 'Why do you want this skill added?',
-                  required: true),
-              const SizedBox(height: 8),
-              _Field(
-                controller: _reasonCtrl,
-                hint: 'Short explanation...',
-                maxLines: 3,
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 20),
+              // ── 3. Reason (Request mode only) ─────────────────
+              if (!widget.isApplyMode) ...[
+                _SectionHeader(
+                    number: '3',
+                    title: 'Why do you want this skill added?',
+                    required: true),
+                const SizedBox(height: 8),
+                _Field(
+                  controller: _reasonCtrl,
+                  hint: 'Short explanation...',
+                  maxLines: 3,
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: 20),
+              ],
 
               // ── 4. Experience Level ───────────────────────────
               _SectionHeader(
@@ -366,11 +376,32 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
                   title: 'Years or Months of Experience',
                   required: true),
               const SizedBox(height: 8),
-              _Field(
-                controller: _durationCtrl,
-                hint: 'e.g. 2 years, 6 months',
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
+              Row(
+                children: [
+                  Expanded(
+                    child: _NumericField(
+                      controller: _yearsCtrl,
+                      hint: 'Years',
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _NumericField(
+                      controller: _monthsCtrl,
+                      hint: 'Months',
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Required';
+                        final n = int.tryParse(v.trim());
+                        if (n == null || n < 0 || n > 11) {
+                          return '0–11';
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 20),
 
@@ -592,6 +623,65 @@ class _Field extends StatelessWidget {
     return TextFormField(
       controller: controller,
       maxLines: maxLines,
+      style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: kSub, fontSize: 13),
+        filled: true,
+        fillColor: isDark
+            ? const Color(0xFF1E293B)
+            : const Color(0xFFF8FAFC),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: kSub.withValues(alpha: 0.2)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: kSub.withValues(alpha: 0.2)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: kAmber),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide:
+              BorderSide(color: Colors.redAccent.withValues(alpha: 0.6)),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.redAccent),
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      ),
+      validator: validator,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Numeric-only text field
+// ─────────────────────────────────────────────────────────────────────────────
+class _NumericField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final String? Function(String?)? validator;
+
+  const _NumericField({
+    required this.controller,
+    required this.hint,
+    this.validator,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       style: TextStyle(
           color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
       decoration: InputDecoration(
