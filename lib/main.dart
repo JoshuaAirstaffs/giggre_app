@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
@@ -51,6 +52,7 @@ class _AuthGateState extends State<AuthGate> {
   // Pre-set to true if there's a cached user so the very first frame shows
   // loading rather than LoginScreen while the Firestore restore runs.
   bool _restoringSession = FirebaseAuth.instance.currentUser != null;
+  String? _accountError;
   late final Stream<User?> _authStream;
 
   @override
@@ -81,7 +83,24 @@ class _AuthGateState extends State<AuthGate> {
         );
       } else {
         // Document confirmed missing — user has no profile, force sign out.
+        // Keep _restoringSession true until the auth stream emits null so the
+        // StreamBuilder doesn't schedule another _restoreSession in the gap.
+        _accountError =
+            'Your account is no longer available. Please contact support.';
+        await GoogleSignIn().disconnect();
         await FirebaseAuth.instance.signOut();
+
+        // No profile yet — new user is mid-onboarding (completing profile screen).
+        // Keep the auth token alive so CompleteProfileScreen can write to Firestore.
+        // Do NOT sign out here; _handlePostSignIn already routed them to CompleteProfileScreen.
+        // context.read<CurrentUserProvider>().setCurrentUserInfo(
+        //   user.email,
+        //   null,
+        //   user.uid,
+        //   null,
+        //   null,
+        // );
+        return;
       }
     } catch (_) {
       // Firestore unreachable (network or token-refresh timing).
@@ -139,7 +158,7 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        return const LoginScreen();
+        return LoginScreen(errorMessage: _accountError);
       },
     );
   }

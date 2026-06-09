@@ -11,7 +11,8 @@ import 'register_screen.dart';
 import '../../../services/sound_service.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String? errorMessage;
+  const LoginScreen({super.key, this.errorMessage});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -24,7 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool isLoading         = false;
   bool isGoogleLoading   = false;
   bool _obscurePassword  = true;
-  String _error = '';
+  late String _error;
 
   static const _blue   = Color(0xFF1B6CA8);
   static const _yellow = Color(0xFFF5A623);
@@ -131,12 +132,19 @@ class _LoginScreenState extends State<LoginScreen> {
         final provider = GoogleAuthProvider();
         userCred = await FirebaseAuth.instance.signInWithPopup(provider);
       } else {
-        final googleUser = await GoogleSignIn().signIn();
+        final googleUser = await GoogleSignIn(
+          serverClientId: '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com',
+        ).signIn();
         if (googleUser == null) { setState(() => isGoogleLoading = false); return; }
         final googleAuth = await googleUser.authentication;
+        final idToken     = googleAuth.idToken;
+        final accessToken = googleAuth.accessToken;
+        if (idToken == null && accessToken == null) {
+          throw Exception('Failed to obtain Google credentials. Please try again.');
+        }
         final credential = GoogleAuthProvider.credential(
-          accessToken: googleAuth.accessToken,
-          idToken:     googleAuth.idToken,
+          accessToken: accessToken,
+          idToken:     idToken,
         );
         userCred = await FirebaseAuth.instance.signInWithCredential(credential);
       }
@@ -177,6 +185,12 @@ class _LoginScreenState extends State<LoginScreen> {
     } on FirebaseAuthException catch (e) {
       if (mounted) setState(() => _error = e.message ?? 'Failed to send reset email.');
     }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _error = widget.errorMessage ?? '';
   }
 
   @override

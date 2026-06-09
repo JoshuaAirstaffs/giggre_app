@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
@@ -146,6 +147,7 @@ Future<void> _logout() async {
       );
     }
     await WidgetsBinding.instance.endOfFrame;
+    await GoogleSignIn().disconnect();
     await FirebaseAuth.instance.signOut();
   }
 }
