@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/screens/app_contents/contact_us.dart';
@@ -364,6 +365,7 @@ class _HomeScreenState extends State<HomeScreen> {
         (route) => false,
       );
     }
+    await GoogleSignIn().disconnect();
     await FirebaseAuth.instance.signOut();
   }
 }

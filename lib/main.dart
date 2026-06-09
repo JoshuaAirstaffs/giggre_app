@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
@@ -81,7 +82,11 @@ class _AuthGateState extends State<AuthGate> {
         );
       } else {
         // Document confirmed missing — user has no profile, force sign out.
+        // Keep _restoringSession true until the auth stream emits null so the
+        // StreamBuilder doesn't schedule another _restoreSession in the gap.
+        await GoogleSignIn().disconnect();
         await FirebaseAuth.instance.signOut();
+        return;
       }
     } catch (_) {
       // Firestore unreachable (network or token-refresh timing).
