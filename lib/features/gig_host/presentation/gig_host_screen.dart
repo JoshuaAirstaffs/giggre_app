@@ -1031,61 +1031,95 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         const SizedBox(height: 12),
 
         // Map
-        ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            height: 280,
-            decoration: BoxDecoration(
+        Stack(
+          children: [
+            ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: borderColor),
-            ),
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: LatLng(14.5995, 120.9842),
-                initialZoom: 12.0,
-                minZoom: 9.0,
-                maxZoom: 18.0,
-                onMapEvent: (event) {
-                  final newZoom = _mapController.camera.zoom;
-                  if ((newZoom - _zoom).abs() >= 0.3) {
-                    setState(() => _zoom = newZoom);
-                  }
-                },
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.giggre.app',
-                  errorTileCallback: (tile, error, stackTrace) {},
+              child: Container(
+                height: 280,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: borderColor),
                 ),
-                MarkerLayer(markers: _buildMarkers()),
-                if (_myLocation != null)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: _myLocation!,
-                        width: 22,
-                        height: 22,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF22C55E),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2.5),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF22C55E).withValues(alpha: 0.45),
-                                blurRadius: 8,
+                child: FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: LatLng(14.5995, 120.9842),
+                    initialZoom: 12.0,
+                    minZoom: 9.0,
+                    maxZoom: 18.0,
+                    onMapEvent: (event) {
+                      final newZoom = _mapController.camera.zoom;
+                      if ((newZoom - _zoom).abs() >= 0.3) {
+                        setState(() => _zoom = newZoom);
+                      }
+                    },
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.giggre.app',
+                      errorTileCallback: (tile, error, stackTrace) {},
+                    ),
+                    MarkerLayer(markers: _buildMarkers()),
+                    if (_myLocation != null)
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: _myLocation!,
+                            width: 22,
+                            height: 22,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF22C55E),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2.5),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF22C55E).withValues(alpha: 0.45),
+                                    blurRadius: 8,
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
                           ),
-                        ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            // Recenter button
+            Positioned(
+              bottom: 12,
+              right: 12,
+              child: GestureDetector(
+                onTap: _fetchAndCenterMap,
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
                       ),
                     ],
                   ),
-              ],
+                  child: Icon(
+                    Icons.my_location_rounded,
+                    size: 18,
+                    color: _myLocation != null
+                        ? const Color(0xFF22C55E)
+                        : kSub,
+                  ),
+                ),
+              ),
             ),
-          ),
+          ],
         ),
         const SizedBox(height: 8),
         Center(

@@ -140,7 +140,7 @@ class _PrivacyPolicyState extends State<PrivacyPolicy> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'For more information about how we handle your data, please visit our website or contact our support team. www.giggre.com',
+                          'For more information about how we handle your data, please visit our website or contact our support team. https://app.giggre.com/',
                           style: TextStyle(color: isDark ? Colors.black : onSurface, fontSize: 12),
                         ),
                       ),
