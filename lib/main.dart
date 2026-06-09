@@ -52,6 +52,7 @@ class _AuthGateState extends State<AuthGate> {
   // Pre-set to true if there's a cached user so the very first frame shows
   // loading rather than LoginScreen while the Firestore restore runs.
   bool _restoringSession = FirebaseAuth.instance.currentUser != null;
+  String? _accountError;
   late final Stream<User?> _authStream;
 
   @override
@@ -84,6 +85,7 @@ class _AuthGateState extends State<AuthGate> {
         // Document confirmed missing — user has no profile, force sign out.
         // Keep _restoringSession true until the auth stream emits null so the
         // StreamBuilder doesn't schedule another _restoreSession in the gap.
+        _accountError = 'Your account is no longer available. Please contact support.';
         await GoogleSignIn().disconnect();
         await FirebaseAuth.instance.signOut();
         return;
@@ -144,7 +146,7 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        return const LoginScreen();
+        return LoginScreen(errorMessage: _accountError);
       },
     );
   }

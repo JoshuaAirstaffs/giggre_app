@@ -11,7 +11,8 @@ import 'register_screen.dart';
 import '../../../services/sound_service.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String? errorMessage;
+  const LoginScreen({super.key, this.errorMessage});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -24,7 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool isLoading         = false;
   bool isGoogleLoading   = false;
   bool _obscurePassword  = true;
-  String _error = '';
+  late String _error;
 
   static const _blue   = Color(0xFF1B6CA8);
   static const _yellow = Color(0xFFF5A623);
@@ -177,6 +178,12 @@ class _LoginScreenState extends State<LoginScreen> {
     } on FirebaseAuthException catch (e) {
       if (mounted) setState(() => _error = e.message ?? 'Failed to send reset email.');
     }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _error = widget.errorMessage ?? '';
   }
 
   @override
