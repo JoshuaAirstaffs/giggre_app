@@ -6,6 +6,7 @@ import '../../../main.dart';
 import '../../../utils/user_utils.dart';
 import '../../../core/theme/theme_provider.dart';
 import 'dashboard_screen.dart';
+import 'login_screen.dart';
 import '../../../services/sound_service.dart';
 import 'dart:math';
 
@@ -550,8 +551,20 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         });
       }
     } catch (e) {
-      if (mounted)
-        setState(() => _error = 'Failed to save profile. Please try again.');
+      // Firestore write failed — sign out and send back to login so the user
+      // isn't left authenticated without a profile record.
+      await GoogleSignIn().disconnect();
+      await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const LoginScreen(
+              errorMessage: 'Account setup failed. Please sign in again.',
+            ),
+          ),
+          (route) => false,
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -981,13 +994,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
     }
 
+    UserCredential? cred;
     try {
       setState(() {
         isLoading = true;
         error = '';
       });
 
-      final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
@@ -1118,6 +1132,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
       if (mounted) setState(() => error = message);
     } catch (e) {
+      // Auth succeeded but Firestore failed — delete the auth account so the
+      // email is not permanently locked out.
+      await cred?.user?.delete();
       if (mounted)
         setState(() => error = 'Something went wrong. Please try again.');
     } finally {
