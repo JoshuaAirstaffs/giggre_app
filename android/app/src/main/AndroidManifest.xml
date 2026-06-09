@@ -16,6 +16,8 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
 
     <!-- Foreground service permissions for Agora voice/video calls -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
@@ -56,6 +58,10 @@
         <service 
             android:name="io.agora.rtc.ss.impl.ScreenSharingService" 
             tools:node="remove"/>
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="incoming_calls" />
 
         <meta-data
             android:name="flutterEmbedding"

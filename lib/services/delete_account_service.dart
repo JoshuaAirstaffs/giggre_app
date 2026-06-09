@@ -278,12 +278,17 @@ class DeleteAccountService {
         final provider = GoogleAuthProvider();
         await user.reauthenticateWithProvider(provider);
       } else {
-        final googleUser = await GoogleSignIn().signIn();
+        final googleUser = await GoogleSignIn(
+          serverClientId: '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com',
+        ).signIn();
         if (googleUser == null) return false;
-        final googleAuth = await googleUser.authentication;
+        final googleAuth  = await googleUser.authentication;
+        final idToken     = googleAuth.idToken;
+        final accessToken = googleAuth.accessToken;
+        if (idToken == null && accessToken == null) return false;
         final credential = GoogleAuthProvider.credential(
-          accessToken: googleAuth.accessToken,
-          idToken: googleAuth.idToken,
+          accessToken: accessToken,
+          idToken: idToken,
         );
         await user.reauthenticateWithCredential(credential);
       }

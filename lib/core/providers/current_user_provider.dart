@@ -40,13 +40,20 @@ class CurrentUserProvider extends ChangeNotifier {
 
     final androidPlugin = _notifications
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     await androidPlugin?.requestNotificationsPermission();
 
     _notificationsInitialized = true;
   }
 
-  void setCurrentUserInfo(String? email, String? name, String? uid, String? userId, String? isVerified) {
+  void setCurrentUserInfo(
+    String? email,
+    String? name,
+    String? uid,
+    String? userId,
+    String? isVerified,
+  ) {
     _currentEmail = email;
     _currentName = name;
     _uid = uid;
@@ -86,59 +93,59 @@ class CurrentUserProvider extends ChangeNotifier {
   // ── Incoming call listener ────────────────────────────────────────────────
 
   void _listenToIncomingCall(String? uid) {
-  if (uid == null) return;
-  _callSubscription?.cancel();
+    if (uid == null) return;
+    _callSubscription?.cancel();
 
-  _callSubscription = FirebaseFirestore.instance
-      .collection('users')
-      .doc(uid)
-      .snapshots()
-      .listen((snap) {
-        debugPrint('🔔 user doc snapshot received');
-        if (!snap.exists) return;
-        final data = snap.data();
-        if (data == null) return;
+    _callSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) {
+          debugPrint('🔔 user doc snapshot received');
+          if (!snap.exists) return;
+          final data = snap.data();
+          if (data == null) return;
 
-        final incomingCall = data['incomingCall'];
-        debugPrint('📞 incomingCall: $incomingCall');
+          final incomingCall = data['incomingCall'];
+          debugPrint('📞 incomingCall: $incomingCall');
 
-        // Stop ringtone if call is gone or no longer ringing
-        if (incomingCall == null || incomingCall['status'] != 'ringing') {
-          _stopRingtone();
-          return;
-        }
+          // Stop ringtone if call is gone or no longer ringing
+          if (incomingCall == null || incomingCall['status'] != 'ringing') {
+            _stopRingtone();
+            return;
+          }
 
-        final context = navigatorKey?.currentContext;
-        debugPrint('🧭 navigatorKey context: $context');
-        if (context == null) return;
+          final context = navigatorKey?.currentContext;
+          debugPrint('🧭 navigatorKey context: $context');
+          if (context == null) return;
 
-        // Start ringtone
-        _startRingtone();
+          // Start ringtone
+          _startRingtone();
 
-        final isVideo = incomingCall['isVideo'] == true;
+          final isVideo = incomingCall['isVideo'] == true;
 
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => isVideo
-                  ? IncomingVideoCallScreen(
-                      callerId: incomingCall['callerId'] ?? '',
-                      callerName: incomingCall['callerName'] ?? 'Unknown',
-                      channelName: incomingCall['channelName'] ?? '',
-                      token: incomingCall['token'] ?? '',
-                    )
-                  : IncomingCallScreen(
-                      callerId: incomingCall['callerId'] ?? '',
-                      callerName: incomingCall['callerName'] ?? 'Unknown',
-                      channelName: incomingCall['channelName'] ?? '',
-                      token: incomingCall['token'] ?? '',
-                    ),
-            ),
-          ).then((_) => _stopRingtone());
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => isVideo
+                    ? IncomingVideoCallScreen(
+                        callerId: incomingCall['callerId'] ?? '',
+                        callerName: incomingCall['callerName'] ?? 'Unknown',
+                        channelName: incomingCall['channelName'] ?? '',
+                        token: incomingCall['token'] ?? '',
+                      )
+                    : IncomingCallScreen(
+                        callerId: incomingCall['callerId'] ?? '',
+                        callerName: incomingCall['callerName'] ?? 'Unknown',
+                        channelName: incomingCall['channelName'] ?? '',
+                        token: incomingCall['token'] ?? '',
+                      ),
+              ),
+            ).then((_) => _stopRingtone());
+          });
         });
-      });
-}
+  }
 
   // ── Ticket listener ───────────────────────────────────────────────────────
 
@@ -159,8 +166,8 @@ class CurrentUserProvider extends ChangeNotifier {
             (snapshot) {
               for (final change in snapshot.docChanges) {
                 if (change.type == DocumentChangeType.modified) {
-                  final data    = change.doc.data()!;
-                  final status  = data['status'] as String;
+                  final data = change.doc.data()!;
+                  final status = data['status'] as String;
                   final subject = data['subject'] as String;
                   _showNotification(subject, status);
                 }

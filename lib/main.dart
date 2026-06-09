@@ -85,9 +85,21 @@ class _AuthGateState extends State<AuthGate> {
         // Document confirmed missing — user has no profile, force sign out.
         // Keep _restoringSession true until the auth stream emits null so the
         // StreamBuilder doesn't schedule another _restoreSession in the gap.
-        _accountError = 'Your account is no longer available. Please contact support.';
+        _accountError =
+            'Your account is no longer available. Please contact support.';
         await GoogleSignIn().disconnect();
         await FirebaseAuth.instance.signOut();
+
+        // No profile yet — new user is mid-onboarding (completing profile screen).
+        // Keep the auth token alive so CompleteProfileScreen can write to Firestore.
+        // Do NOT sign out here; _handlePostSignIn already routed them to CompleteProfileScreen.
+        // context.read<CurrentUserProvider>().setCurrentUserInfo(
+        //   user.email,
+        //   null,
+        //   user.uid,
+        //   null,
+        //   null,
+        // );
         return;
       }
     } catch (_) {

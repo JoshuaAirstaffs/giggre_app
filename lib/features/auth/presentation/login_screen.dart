@@ -132,12 +132,19 @@ class _LoginScreenState extends State<LoginScreen> {
         final provider = GoogleAuthProvider();
         userCred = await FirebaseAuth.instance.signInWithPopup(provider);
       } else {
-        final googleUser = await GoogleSignIn().signIn();
+        final googleUser = await GoogleSignIn(
+          serverClientId: '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com',
+        ).signIn();
         if (googleUser == null) { setState(() => isGoogleLoading = false); return; }
         final googleAuth = await googleUser.authentication;
+        final idToken     = googleAuth.idToken;
+        final accessToken = googleAuth.accessToken;
+        if (idToken == null && accessToken == null) {
+          throw Exception('Failed to obtain Google credentials. Please try again.');
+        }
         final credential = GoogleAuthProvider.credential(
-          accessToken: googleAuth.accessToken,
-          idToken:     googleAuth.idToken,
+          accessToken: accessToken,
+          idToken:     idToken,
         );
         userCred = await FirebaseAuth.instance.signInWithCredential(credential);
       }
