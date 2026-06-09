@@ -347,7 +347,7 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
               if (!widget.isApplyMode) ...[
                 _SectionHeader(
                     number: '3',
-                    title: 'Why do you want this skill added?',
+                                        title: 'Why do you want this skill added?',
                     required: true),
                 const SizedBox(height: 8),
                 _Field(
@@ -373,7 +373,7 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
               // ── 5. Years/Months of Experience ─────────────────
               _SectionHeader(
                   number: '5',
-                  title: 'Years or Months of Experience',
+                                    title: 'Years or Months of Experience',
                   required: true),
               const SizedBox(height: 8),
               Row(
@@ -408,7 +408,7 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
               // ── 6. Proof Documents ────────────────────────────
               _SectionHeader(
                   number: '6',
-                  title: 'Proof or Supporting Documents',
+                                    title: 'Proof or Supporting Documents',
                   required: false),
               const SizedBox(height: 8),
               _ProofUploadSection(
@@ -422,7 +422,7 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
               // ── 7. Related Work Experience ────────────────────
               _SectionHeader(
                   number: '7',
-                  title: 'Related Work Experience',
+                                    title: 'Related Work Experience',
                   required: false),
               const SizedBox(height: 8),
               _Field(
@@ -436,7 +436,7 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
               // ── 8. Suggested Requirement ──────────────────────
               _SectionHeader(
                   number: '8',
-                  title: 'Suggested Requirement',
+                                    title: 'Suggested Requirement',
                   required: false,
                   subtitle: 'Optional: suggest what admin should require'),
               const SizedBox(height: 8),
@@ -451,7 +451,7 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
               // ── 9. Contact / Availability ─────────────────────
               _SectionHeader(
                   number: '9',
-                  title: 'Contact / Availability for Verification',
+                                    title: 'Contact / Availability for Verification',
                   required: false,
                   subtitle: 'Optional: phone, email, or preferred time'),
               const SizedBox(height: 8),
@@ -549,22 +549,6 @@ class _SectionHeader extends StatelessWidget {
       children: [
         Row(
           children: [
-            Container(
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                color: kAmber.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(number,
-                    style: const TextStyle(
-                        color: kAmber,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold)),
-              ),
-            ),
-            const SizedBox(width: 8),
             Expanded(
               child: Text(title,
                   style: TextStyle(
@@ -590,11 +574,9 @@ class _SectionHeader extends StatelessWidget {
         ),
         if (subtitle != null) ...[
           const SizedBox(height: 3),
-          Padding(
-            padding: const EdgeInsets.only(left: 30),
-            child: Text(subtitle!,
-                style: const TextStyle(color: kSub, fontSize: 11)),
-          ),
+            Text(subtitle!,
+              style: const TextStyle(color: kSub, fontSize: 11)),
+          
         ],
       ],
     );
