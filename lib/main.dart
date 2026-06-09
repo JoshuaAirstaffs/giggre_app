@@ -1,7 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
@@ -82,24 +81,15 @@ class _AuthGateState extends State<AuthGate> {
           doc.data()?['isVerified'],
         );
       } else {
-        // Document confirmed missing — user has no profile, force sign out.
-        // Keep _restoringSession true until the auth stream emits null so the
-        // StreamBuilder doesn't schedule another _restoreSession in the gap.
-        _accountError =
-            'Your account is no longer available. Please contact support.';
-        await GoogleSignIn().disconnect();
-        await FirebaseAuth.instance.signOut();
-
-        // No profile yet — new user is mid-onboarding (completing profile screen).
-        // Keep the auth token alive so CompleteProfileScreen can write to Firestore.
-        // Do NOT sign out here; _handlePostSignIn already routed them to CompleteProfileScreen.
-        // context.read<CurrentUserProvider>().setCurrentUserInfo(
-        //   user.email,
-        //   null,
-        //   user.uid,
-        //   null,
-        //   null,
-        // );
+        if (mounted) {
+          context.read<CurrentUserProvider>().setCurrentUserInfo(
+            user.email,
+            null,
+            user.uid,
+            null,
+            null,
+          );
+        }
         return;
       }
     } catch (_) {
