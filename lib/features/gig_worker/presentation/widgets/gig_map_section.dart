@@ -22,6 +22,7 @@ class GigMarkerData {
   final String experienceLevel;
   final List<String> requiredSkills;
   final String hostId;
+  final bool hasApplied;
 
   const GigMarkerData({
     required this.id,
@@ -36,6 +37,7 @@ class GigMarkerData {
     this.experienceLevel = '',
     this.requiredSkills = const [],
     required this.hostId,
+    this.hasApplied = false,
   });
 }
 
@@ -163,7 +165,8 @@ class _GigMapSectionState extends State<GigMapSection> {
         .listen((s) {
       setState(() {
         _openGigs = s.docs
-            .map((d) => _toMarker(d.id, d.data(), 'open'))
+            .where((d) => (d.data()['hostId'] as String?) != widget.uid)
+            .map((d) => _toMarker(d.id, d.data(), 'open', workerUid: widget.uid))
             .whereType<GigMarkerData>()
             .toList();
       });
@@ -188,13 +191,10 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   Future<void> _applyToOpenGig(GigMarkerData gig) async {
     try {
-      // Re-check the gig is still open before writing
       final snap = await FirebaseFirestore.instance
           .collection('open_gigs')
           .doc(gig.id)
           .get();
-
-      debugPrint('Gig Data ${snap.data()} GIG ID${gig.id}');
 
       if (!snap.exists) {
         if (mounted) {
@@ -216,17 +216,37 @@ class _GigMapSectionState extends State<GigMapSection> {
         return;
       }
 
+      // Prevent double-apply
+      final existing = List<dynamic>.from(snap.data()?['applicants'] ?? []);
+      final alreadyApplied = existing.any(
+          (a) => (a as Map<String, dynamic>)['workerId'] == widget.uid);
+      if (alreadyApplied) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('You have already applied to this gig.'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+        return;
+      }
+
       await FirebaseFirestore.instance
           .collection('open_gigs')
           .doc(gig.id)
           .update({
-        'workerId': widget.uid,
-        'assignedWorkerId': widget.uid,
-        'assignedWorkerName': widget.workerName,
-        'status': 'navigating',
-        'appliedAt': FieldValue.serverTimestamp(),
+        'applicants': FieldValue.arrayUnion([
+          {'workerId': widget.uid, 'workerName': widget.workerName},
+        ]),
       });
-      widget.onOpenGigApplied?.call(gig);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Application submitted! Waiting for host selection.'),
+          backgroundColor: Color(0xFF22C55E),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
     } catch (e) {
       debugPrint('[GigMap] apply to open gig error: $e');
       if (mounted) {
@@ -248,9 +268,13 @@ class _GigMapSectionState extends State<GigMapSection> {
   }
 
   GigMarkerData? _toMarker(
-      String id, Map<String, dynamic> data, String type) {
+      String id, Map<String, dynamic> data, String type, {String workerUid = ''}) {
     final geo = data['location'] as GeoPoint?;
     if (geo == null) return null;
+    final applicants = List<dynamic>.from(data['applicants'] ?? []);
+    final hasApplied = type == 'open' &&
+        workerUid.isNotEmpty &&
+        applicants.any((a) => (a as Map<String, dynamic>)['workerId'] == workerUid);
     return GigMarkerData(
       id: id,
       title: data['title'] as String? ?? 'Untitled Gig',
@@ -264,6 +288,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       experienceLevel: data['experienceLevel'] as String? ?? '',
       requiredSkills: List<String>.from(data['requiredSkills'] ?? []),
       hostId: data['hostId'] as String? ?? '',
+      hasApplied: hasApplied,
     );
   }
 
@@ -414,62 +439,94 @@ class _GigMapSectionState extends State<GigMapSection> {
           ],
         ),
         const SizedBox(height: 10),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            height: 300,
-            decoration: BoxDecoration(
+        Stack(
+          children: [
+            ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: borderColor),
-            ),
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: const LatLng(14.5995, 120.9842),
-                initialZoom: 12.0,
-                minZoom: 9.0,
-                maxZoom: 18.0,
-                onMapEvent: (event) {
-                  final newZoom = _mapController.camera.zoom;
-                  if ((newZoom - _zoom).abs() >= 0.3) {
-                    setState(() => _zoom = newZoom);
-                  }
-                },
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate:
-                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.giggre.app',
+              child: Container(
+                height: 300,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: borderColor),
                 ),
-                MarkerLayer(markers: _buildMarkers()),
-                if (_myLocation != null)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: _myLocation!,
-                        width: 22,
-                        height: 22,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: kBlue,
-                            shape: BoxShape.circle,
-                            border:
-                                Border.all(color: Colors.white, width: 2.5),
-                            boxShadow: [
-                              BoxShadow(
-                                color: kBlue.withValues(alpha: 0.45),
-                                blurRadius: 8,
+                child: FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: const LatLng(14.5995, 120.9842),
+                    initialZoom: 12.0,
+                    minZoom: 9.0,
+                    maxZoom: 18.0,
+                    onMapEvent: (event) {
+                      final newZoom = _mapController.camera.zoom;
+                      if ((newZoom - _zoom).abs() >= 0.3) {
+                        setState(() => _zoom = newZoom);
+                      }
+                    },
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.giggre.app',
+                    ),
+                    MarkerLayer(markers: _buildMarkers()),
+                    if (_myLocation != null)
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: _myLocation!,
+                            width: 22,
+                            height: 22,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: kBlue,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: Colors.white, width: 2.5),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: kBlue.withValues(alpha: 0.45),
+                                    blurRadius: 8,
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
                           ),
-                        ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            // Recenter button
+            Positioned(
+              bottom: 12,
+              right: 12,
+              child: GestureDetector(
+                onTap: _fetchAndCenterMap,
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
                       ),
                     ],
                   ),
-              ],
+                  child: Icon(
+                    Icons.my_location_rounded,
+                    size: 18,
+                    color: _myLocation != null ? kBlue : kSub,
+                  ),
+                ),
+              ),
             ),
-          ),
+          ],
         ),
         const SizedBox(height: 8),
         Center(
@@ -561,11 +618,14 @@ class _GigPin extends StatelessWidget {
             : gig.gigType == 'offered'
                 ? 'Offered to You'
                 : 'Quick Gig';
-        final btnLabel = gig.gigType == 'open'
-            ? 'Apply Now'
-            : gig.gigType == 'offered'
-                ? 'Accept Offer'
-                : 'Start Gig';
+        final isAppliedPending = gig.gigType == 'open' && gig.hasApplied;
+        final btnLabel = isAppliedPending
+            ? 'Application Pending'
+            : gig.gigType == 'open'
+                ? 'Apply Now'
+                : gig.gigType == 'offered'
+                    ? 'Accept Offer'
+                    : 'Start Gig';
         final missing = _missingSkills();
         final canApply = missing.isEmpty;
 
@@ -731,7 +791,7 @@ class _GigPin extends StatelessWidget {
                 width: double.infinity,
                 height: 46,
                 child: ElevatedButton(
-                  onPressed: canApply
+                  onPressed: (canApply && !isAppliedPending)
                       ? () {
                           if (isVerified != 'verified') {
                             _showModal(context);
@@ -748,15 +808,32 @@ class _GigPin extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: canApply ? color : Colors.grey.shade400,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.grey.shade400,
-                    disabledForegroundColor: Colors.white70,
+                    disabledBackgroundColor: isAppliedPending
+                        ? kAmber.withValues(alpha: 0.75)
+                        : Colors.grey.shade400,
+                    disabledForegroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
                   ),
-                  child: Text(
-                    canApply ? btnLabel : 'Skills Required',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (isAppliedPending) ...[
+                        const SizedBox(
+                          width: 14, height: 14,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(
+                        isAppliedPending
+                            ? 'Application Pending'
+                            : canApply ? btnLabel : 'Skills Required',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ],
                   ),
                 ),
               ),

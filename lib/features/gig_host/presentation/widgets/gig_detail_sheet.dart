@@ -332,6 +332,229 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     if (mounted) Navigator.pop(context);
   }
 
+  Future<void> _selectWorker(Map<String, dynamic> applicant) async {
+    final workerName = applicant['workerName'] as String? ?? 'Worker';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 54, height: 54,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF22C55E).withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.person_rounded,
+                    color: Color(0xFF22C55E), size: 24),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Assign $workerName?',
+                style: TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.w600,
+                  color: Theme.of(ctx).colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'This worker will be assigned to the gig and notified to proceed.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
+              ),
+              const SizedBox(height: 22),
+              const Divider(height: 0.5, thickness: 0.5),
+              IntrinsicHeight(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                                bottomLeft: Radius.circular(20)),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel',
+                            style: TextStyle(color: kSub, fontSize: 15)),
+                      ),
+                    ),
+                    const VerticalDivider(width: 0.5, thickness: 0.5),
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                                bottomRight: Radius.circular(20)),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Assign',
+                            style: TextStyle(
+                                color: Color(0xFF22C55E),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await FirebaseFirestore.instance
+        .collection(_collection)
+        .doc(widget.gigId)
+        .update({
+      'workerId': applicant['workerId'],
+      'assignedWorkerId': applicant['workerId'],
+      'assignedWorkerName': workerName,
+      'status': 'navigating',
+      'selectedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Widget _buildApplicantsSection(List<Map<String, dynamic>> applicants) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    const green = Color(0xFF22C55E);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'Applicants',
+              style: TextStyle(
+                color: onSurface, fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: kBlue.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: kBlue.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                '${applicants.length}',
+                style: const TextStyle(
+                    color: kBlue, fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (applicants.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.04)
+                  : Colors.black.withValues(alpha: 0.03),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: const Column(
+              children: [
+                Icon(Icons.people_outline_rounded, color: kSub, size: 28),
+                SizedBox(height: 8),
+                Text('No applicants yet',
+                    style: TextStyle(color: kSub, fontSize: 13)),
+              ],
+            ),
+          )
+        else
+          Container(
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.04)
+                  : Colors.black.withValues(alpha: 0.03),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: Column(
+              children: applicants.asMap().entries.map((entry) {
+                final i = entry.key;
+                final applicant = entry.value;
+                final name = applicant['workerName'] as String? ?? 'Worker';
+                final isLast = i == applicants.length - 1;
+                return Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              color: kBlue.withValues(alpha: 0.12),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.person_rounded,
+                                color: kBlue, size: 18),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              name,
+                              style: TextStyle(
+                                color: onSurface,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            height: 34,
+                            child: ElevatedButton(
+                              onPressed: () => _selectWorker(applicant),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: green,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10)),
+                              ),
+                              child: const Text('Select',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (!isLast)
+                      Divider(
+                        height: 0.5, thickness: 0.5,
+                        indent: 16, endIndent: 16,
+                        color: Theme.of(context).dividerColor,
+                      ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -475,6 +698,16 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       ],
                     ),
                   ),
+                const SizedBox(height: 16),
+              ],
+
+              // ── Applicants (open gig waiting for host to pick a worker) ──────
+              if (widget.gigType == 'open' && status == 'open') ...[
+                _buildApplicantsSection(
+                  List<Map<String, dynamic>>.from(
+                    (data['applicants'] as List<dynamic>? ?? [])
+                        .cast<Map<String, dynamic>>()),
+                ),
                 const SizedBox(height: 16),
               ],
 
@@ -764,7 +997,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Map showing gig location pin + live worker pin
 // ─────────────────────────────────────────────────────────────────────────────
-class _GigTrackingMap extends StatelessWidget {
+class _GigTrackingMap extends StatefulWidget {
   final LatLng gigLocation;
   final LatLng? workerLocation;
 
@@ -774,63 +1007,109 @@ class _GigTrackingMap extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final center = workerLocation != null
-        ? LatLng(
-            (gigLocation.latitude + workerLocation!.latitude) / 2,
-            (gigLocation.longitude + workerLocation!.longitude) / 2,
-          )
-        : gigLocation;
+  State<_GigTrackingMap> createState() => _GigTrackingMapState();
+}
 
-    return FlutterMap(
-      options: MapOptions(
-        initialCenter: center,
-        initialZoom: workerLocation != null ? 14.0 : 15.0,
-      ),
+class _GigTrackingMapState extends State<_GigTrackingMap> {
+  final _mapController = MapController();
+
+  @override
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final center = widget.workerLocation != null
+        ? LatLng(
+            (widget.gigLocation.latitude + widget.workerLocation!.latitude) / 2,
+            (widget.gigLocation.longitude + widget.workerLocation!.longitude) / 2,
+          )
+        : widget.gigLocation;
+
+    return Stack(
       children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.giggre.app',
-        ),
-        MarkerLayer(
-          markers: [
-            // Gig location — amber pin
-            Marker(
-              point: gigLocation,
-              width: 40,
-              height: 44,
-              child: const Column(
-                children: [
-                  Icon(Icons.location_on_rounded, color: kAmber, size: 36),
-                ],
-              ),
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: center,
+            initialZoom: widget.workerLocation != null ? 14.0 : 15.0,
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.giggre.app',
             ),
-            // Worker live location — blue circle
-            if (workerLocation != null)
-              Marker(
-                point: workerLocation!,
-                width: 36,
-                height: 36,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: kBlue,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: kBlue.withValues(alpha: 0.4),
-                        blurRadius: 8,
-                      ),
+            MarkerLayer(
+              markers: [
+                // Gig location — amber pin
+                Marker(
+                  point: widget.gigLocation,
+                  width: 40,
+                  height: 44,
+                  child: const Column(
+                    children: [
+                      Icon(Icons.location_on_rounded, color: kAmber, size: 36),
                     ],
                   ),
-                  child: const Icon(
-                    Icons.person_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
                 ),
-              ),
+                // Worker live location — blue circle
+                if (widget.workerLocation != null)
+                  Marker(
+                    point: widget.workerLocation!,
+                    width: 36,
+                    height: 36,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: kBlue,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: kBlue.withValues(alpha: 0.4),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.person_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ],
+        ),
+        Positioned(
+          bottom: 12,
+          right: 12,
+          child: GestureDetector(
+            onTap: () => _mapController.move(widget.gigLocation, 15.0),
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: cardColor,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.my_location_rounded,
+                size: 18,
+                color: kAmber,
+              ),
+            ),
+          ),
         ),
       ],
     );

@@ -940,6 +940,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   bool _geocoding = false;
   bool _searching = false;
   String? _searchError;
+  LatLng? _myLocation;
 
   static final _defaultCenter = LatLng(14.5995, 120.9842);
 
@@ -957,6 +958,30 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     _mapController.dispose();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _recenterToMyLocation() async {
+    if (_myLocation != null) {
+      _mapController.move(_myLocation!, 14.0);
+      return;
+    }
+    try {
+      bool enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return;
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) return;
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      if (!mounted) return;
+      setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));
+      _mapController.move(_myLocation!, 14.0);
+    } catch (_) {}
   }
 
   Future<void> _searchAddress() async {
@@ -1229,6 +1254,35 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                 ),
               ),
             ),
+
+          // ── Recenter button ───────────────────────────────────
+          Positioned(
+            bottom: 100,
+            right: 16,
+            child: GestureDetector(
+              onTap: _recenterToMyLocation,
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  Icons.my_location_rounded,
+                  size: 18,
+                  color: _myLocation != null ? kAmber : kSub,
+                ),
+              ),
+            ),
+          ),
 
           // ── Confirm card (pin placed) ─────────────────────────
           if (_picked != null)
