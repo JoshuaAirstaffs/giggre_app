@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../../core/theme/app_colors.dart';
 import '../../services/quick_gig_matching_service.dart';
@@ -22,11 +23,7 @@ class GigDetailSheet extends StatefulWidget {
   final String gigId;
   final String gigType; // 'quick' | 'open' | 'offered'
 
-  const GigDetailSheet({
-    super.key,
-    required this.gigId,
-    required this.gigType,
-  });
+  const GigDetailSheet({super.key, required this.gigId, required this.gigType});
 
   @override
   State<GigDetailSheet> createState() => _GigDetailSheetState();
@@ -42,14 +39,23 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
 
   String get _collection {
     switch (widget.gigType) {
-      case 'open':    return 'open_gigs';
-      case 'offered': return 'offered_gigs';
-      default:        return 'quick_gigs';
+      case 'open':
+        return 'open_gigs';
+      case 'offered':
+        return 'offered_gigs';
+      default:
+        return 'quick_gigs';
     }
   }
 
   static const _activeStatuses = [
-    'in_progress', 'navigating', 'arrived', 'working', 'task_complete', 'payment', 'cancellation_requested',
+    'in_progress',
+    'navigating',
+    'arrived',
+    'working',
+    'task_complete',
+    'payment',
+    'cancellation_requested',
   ];
 
   @override
@@ -60,33 +66,34 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         .doc(widget.gigId)
         .snapshots()
         .listen((snap) {
-      if (!mounted || !snap.exists) return;
-      final data = snap.data()!;
-      setState(() => _data = data);
+          if (!mounted || !snap.exists) return;
+          final data = snap.data()!;
+          setState(() => _data = data);
 
-      if (data['status'] == 'cancelled' && !_cancelledHandled) {
-        _cancelledHandled = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Gig cancellation has been approved by admin.'),
-              backgroundColor: Colors.redAccent,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-          Navigator.pop(context);
-        });
-        return;
-      }
-      // Watch worker location when a worker is assigned
-      final wid = data['workerId'] as String? ??
-                  data['assignedWorkerId'] as String?;
-      if (wid != null && wid.isNotEmpty && wid != _trackedWorkerId) {
-        _trackedWorkerId = wid;
-        _startWorkerStream(wid);
-      }
-    }, onError: (e) => debugPrint('[GigDetailSheet] gig stream error: $e'));
+          if (data['status'] == 'cancelled' && !_cancelledHandled) {
+            _cancelledHandled = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Gig cancellation has been approved by admin.'),
+                  backgroundColor: Colors.redAccent,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+              Navigator.pop(context);
+            });
+            return;
+          }
+          // Watch worker location when a worker is assigned
+          final wid =
+              data['workerId'] as String? ??
+              data['assignedWorkerId'] as String?;
+          if (wid != null && wid.isNotEmpty && wid != _trackedWorkerId) {
+            _trackedWorkerId = wid;
+            _startWorkerStream(wid);
+          }
+        }, onError: (e) => debugPrint('[GigDetailSheet] gig stream error: $e'));
   }
 
   void _startWorkerStream(String uid) {
@@ -95,13 +102,19 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         .collection('users')
         .doc(uid)
         .snapshots()
-        .listen((snap) {
-      if (!mounted) return;
-      final geo = snap.data()?['location'] as GeoPoint?;
-      if (geo != null) {
-        setState(() => _workerLocation = LatLng(geo.latitude, geo.longitude));
-      }
-    }, onError: (e) => debugPrint('[GigDetailSheet] worker stream error: $e'));
+        .listen(
+          (snap) {
+            if (!mounted) return;
+            final geo = snap.data()?['location'] as GeoPoint?;
+            if (geo != null) {
+              setState(
+                () => _workerLocation = LatLng(geo.latitude, geo.longitude),
+              );
+            }
+          },
+          onError: (e) =>
+              debugPrint('[GigDetailSheet] worker stream error: $e'),
+        );
   }
 
   @override
@@ -121,11 +134,11 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         .collection('quick_gigs')
         .doc(widget.gigId)
         .update({
-      'status': 'scanning',
-      'assignedWorkerId': null,
-      'assignedWorkerName': null,
-      'searchStartedAt': FieldValue.serverTimestamp(),
-    });
+          'status': 'scanning',
+          'assignedWorkerId': null,
+          'assignedWorkerName': null,
+          'searchStartedAt': FieldValue.serverTimestamp(),
+        });
 
     QuickGigMatchingService.startAutoSearch(
       gigId: widget.gigId,
@@ -138,105 +151,129 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           content: const Text('Searching for available workers...'),
           backgroundColor: kAmber,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       );
     }
   }
 
   Future<void> _deleteGig() async {
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => Dialog(
-      backgroundColor: Theme.of(ctx).cardColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 54, height: 54,
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                shape: BoxShape.circle,
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Colors.redAccent,
+                  size: 22,
+                ),
               ),
-              child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 22),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Delete Gig?',
-              style: TextStyle(
-                fontSize: 17, fontWeight: FontWeight.w600,
-                color: Theme.of(ctx).colorScheme.onSurface,
+              const SizedBox(height: 14),
+              Text(
+                'Delete Gig?',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(ctx).colorScheme.onSurface,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'This will permanently remove the gig. This cannot be undone.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
-            ),
-            const SizedBox(height: 22),
-            const Divider(height: 0.5, thickness: 0.5),
-            IntrinsicHeight(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
+              const SizedBox(height: 8),
+              const Text(
+                'This will permanently remove the gig. This cannot be undone.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
+              ),
+              const SizedBox(height: 22),
+              const Divider(height: 0.5, thickness: 0.5),
+              IntrinsicHeight(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                              bottomLeft: Radius.circular(20),
+                            ),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text(
+                          'Keep',
+                          style: TextStyle(color: kSub, fontSize: 15),
                         ),
                       ),
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Keep', style: TextStyle(color: kSub, fontSize: 15)),
                     ),
-                  ),
-                  const VerticalDivider(width: 0.5, thickness: 0.5),
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.only(bottomRight: Radius.circular(20)),
+                    const VerticalDivider(width: 0.5, thickness: 0.5),
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                              bottomRight: Radius.circular(20),
+                            ),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text(
+                          'Delete',
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Delete',
-                          style: TextStyle(color: Colors.redAccent, fontSize: 15, fontWeight: FontWeight.w600)),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
 
-  if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted) return;
 
-  final messenger = ScaffoldMessenger.of(context);
-  await FirebaseFirestore.instance
-      .collection(_collection)
-      .doc(widget.gigId)
-      .delete();
-  if (mounted) Navigator.pop(context);
-  messenger.showSnackBar(const SnackBar(
-    content: Text('Gig deleted'),
-    backgroundColor: Colors.redAccent,
-    behavior: SnackBarBehavior.floating,
-  ));
-}
+    final messenger = ScaffoldMessenger.of(context);
+    await FirebaseFirestore.instance
+        .collection(_collection)
+        .doc(widget.gigId)
+        .delete();
+    if (mounted) Navigator.pop(context);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Gig deleted'),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
 
   Future<void> _requestCancellation() async {
     final controller = TextEditingController();
     bool submitted = false;
     try {
-      submitted = await showDialog<bool>(
+      submitted =
+          await showDialog<bool>(
             context: context,
             barrierDismissible: false,
             builder: (_) => _CancelReasonDialog(controller: controller),
@@ -249,22 +286,19 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           .collection(_collection)
           .doc(widget.gigId)
           .update({
-        'cancellation_reason': FieldValue.arrayUnion([
-          {
-            'reason': reason,
-            'approved': null,
-            'requestedBy': 'host',
-          }
-        ]),
-        'lastProgressStatus': _data?['status'] as String? ?? 'working',
-        'cancellationRequestedAt': FieldValue.serverTimestamp(),
-        'status': 'cancellation_requested',
-      });
+            'cancellation_reason': FieldValue.arrayUnion([
+              {'reason': reason, 'approved': null, 'requestedBy': 'host'},
+            ]),
+            'lastProgressStatus': _data?['status'] as String? ?? 'working',
+            'cancellationRequestedAt': FieldValue.serverTimestamp(),
+            'status': 'cancellation_requested',
+          });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-                'Cancellation request submitted. Pending admin review.'),
+              'Cancellation request submitted. Pending admin review.',
+            ),
             backgroundColor: Colors.orange,
           ),
         );
@@ -279,10 +313,12 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     final data = _data;
     if (data == null) return;
     final db = FirebaseFirestore.instance;
-    final workerId = data['workerId'] as String? ??
-                     data['assignedWorkerId'] as String?;
-    final workerName = data['assignedWorkerName'] as String? ??
-                       data['workerName'] as String? ?? 'Worker';
+    final workerId =
+        data['workerId'] as String? ?? data['assignedWorkerId'] as String?;
+    final workerName =
+        data['assignedWorkerName'] as String? ??
+        data['workerName'] as String? ??
+        'Worker';
     final title = data['title'] as String? ?? 'Gig';
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
 
@@ -572,8 +608,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           return Container(
             decoration: BoxDecoration(
               color: cardColor,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
             ),
             child: const Center(
               child: CircularProgressIndicator(color: kAmber, strokeWidth: 2),
@@ -587,20 +624,34 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         final budget = (data['budget'] as num?)?.toDouble() ?? 0;
         final address = data['address'] as String? ?? '';
         final geo = data['location'] as GeoPoint?;
-        final gigLocation =
-            geo != null ? LatLng(geo.latitude, geo.longitude) : null;
-        final workerName = data['assignedWorkerName'] as String? ??
-                           data['workerName'] as String? ?? '';
+        final gigLocation = geo != null
+            ? LatLng(geo.latitude, geo.longitude)
+            : null;
+        final workerName =
+            data['assignedWorkerName'] as String? ??
+            data['workerName'] as String? ??
+            '';
+        final workerId = data['assignedWorkerId'] as String? ?? '';
         final isActive = _activeStatuses.contains(status);
         final isTaskComplete = status == 'task_complete';
         const green = Color(0xFF22C55E);
 
         // Stepper config for quick gigs
         const stepStatuses = [
-          'navigating', 'arrived', 'working', 'task_complete', 'payment', 'completed'
+          'navigating',
+          'arrived',
+          'working',
+          'task_complete',
+          'payment',
+          'completed',
         ];
         const stepLabels = [
-          'On the way', 'Arrived', 'Working', 'Done', 'Payment', 'Completed'
+          'On the way',
+          'Arrived',
+          'Working',
+          'Done',
+          'Payment',
+          'Completed',
         ];
         const stepIcons = [
           Icons.directions_rounded,
@@ -614,14 +665,14 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             ? (data['lastProgressStatus'] as String? ?? 'working')
             : status;
 
-        final stepIndex =
-            stepStatuses.indexOf(progressStatus).clamp(0, stepStatuses.length - 1);
+        final stepIndex = stepStatuses
+            .indexOf(progressStatus)
+            .clamp(0, stepStatuses.length - 1);
 
         return Container(
           decoration: BoxDecoration(
             color: cardColor,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: ListView(
             controller: scroll,
@@ -670,10 +721,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     height: 220,
                     child: _GigTrackingMap(
                       gigLocation: gigLocation,
-                      workerLocation:
-                          (isActive && _workerLocation != null)
-                              ? _workerLocation
-                              : null,
+                      workerLocation: (isActive && _workerLocation != null)
+                          ? _workerLocation
+                          : null,
                     ),
                   ),
                 ),
@@ -712,7 +762,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               ],
 
               // ── Progress stepper (quick/open/offered gigs with active worker) ─
-              if ((widget.gigType == 'quick' || widget.gigType == 'open' || widget.gigType == 'offered') && isActive) ...[
+              if ((widget.gigType == 'quick' ||
+                      widget.gigType == 'open' ||
+                      widget.gigType == 'offered') &&
+                  isActive) ...[
                 Text(
                   'Task Progress',
                   style: TextStyle(
@@ -732,10 +785,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       final dotBg = isDone
                           ? green
                           : isStepActive
-                              ? green.withValues(alpha: 0.12)
-                              : (isDark
-                                  ? kBorder.withValues(alpha: 0.5)
-                                  : Colors.grey.withValues(alpha: 0.12));
+                          ? green.withValues(alpha: 0.12)
+                          : (isDark
+                                ? kBorder.withValues(alpha: 0.5)
+                                : Colors.grey.withValues(alpha: 0.12));
                       return Row(
                         children: [
                           Column(
@@ -755,9 +808,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                                   ),
                                 ),
                                 child: Icon(
-                                  isDone
-                                      ? Icons.check_rounded
-                                      : stepIcons[i],
+                                  isDone ? Icons.check_rounded : stepIcons[i],
                                   size: 14,
                                   color: isDone ? Colors.white : dotColor,
                                 ),
@@ -767,7 +818,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                                 stepLabels[i],
                                 style: TextStyle(
                                   fontSize: 9,
-                                  color: (isStepActive || isDone) ? green : kSub,
+                                  color: (isStepActive || isDone)
+                                      ? green
+                                      : kSub,
                                   fontWeight: isStepActive
                                       ? FontWeight.bold
                                       : FontWeight.normal,
@@ -797,25 +850,31 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF22C55E).withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                        color:
-                            const Color(0xFF22C55E).withValues(alpha: 0.3)),
+                      color: const Color(0xFF22C55E).withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Row(
                     children: [
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF22C55E)
-                              .withValues(alpha: 0.12),
+                          color: const Color(
+                            0xFF22C55E,
+                          ).withValues(alpha: 0.12),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.location_on_rounded,
-                            color: Color(0xFF22C55E), size: 18),
+                        child: const Icon(
+                          Icons.location_on_rounded,
+                          color: Color(0xFF22C55E),
+                          size: 18,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       const Expanded(
@@ -858,10 +917,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (description.isNotEmpty) ...[
-                      _DetailRow(
-                        icon: Icons.notes_rounded,
-                        label: description,
-                      ),
+                      _DetailRow(icon: Icons.notes_rounded, label: description),
                       const SizedBox(height: 10),
                     ],
                     _DetailRow(
@@ -878,10 +934,26 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     ],
                     if (workerName.isNotEmpty) ...[
                       const SizedBox(height: 10),
-                      _DetailRow(
-                        icon: Icons.person_outline_rounded,
-                        label: workerName,
-                        iconColor: kBlue,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _DetailRow(
+                              icon: Icons.person_outline_rounded,
+                              label: workerName,
+                              iconColor: kBlue,
+                            ),
+                          ),
+                          CallUserAction(
+                            callType: CallType.voice,
+                            targetUserId: workerId,
+                            targetUserName: workerName,
+                          ),
+                          CallUserAction(
+                            callType: CallType.video,
+                            targetUserId: workerId,
+                            targetUserName: workerName,
+                          ),
+                        ],
                       ),
                     ],
                   ],
@@ -889,25 +961,36 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               ),
 
               // ── Cancel Gig request (before task_complete / payment) ───
-              if (!['completed', 'cancelled', 'no_worker',
-                    'task_complete', 'payment',
-                    'cancellation_requested'].contains(status)) ...[
+              if (![
+                'completed',
+                'cancelled',
+                'no_worker',
+                'task_complete',
+                'payment',
+                'cancellation_requested',
+              ].contains(status)) ...[
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
                   height: 48,
                   child: OutlinedButton.icon(
                     onPressed: _requestCancellation,
-                    icon: const Icon(Icons.cancel_outlined,
-                        size: 20, color: Colors.redAccent),
-                    label: const Text('Cancel Gig',
-                        style: TextStyle(
-                            fontSize: 15, color: Colors.redAccent)),
+                    icon: const Icon(
+                      Icons.cancel_outlined,
+                      size: 20,
+                      color: Colors.redAccent,
+                    ),
+                    label: const Text(
+                      'Cancel Gig',
+                      style: TextStyle(fontSize: 15, color: Colors.redAccent),
+                    ),
                     style: OutlinedButton.styleFrom(
                       side: BorderSide(
-                          color: Colors.redAccent.withValues(alpha: 0.5)),
+                        color: Colors.redAccent.withValues(alpha: 0.5),
+                      ),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
                   ),
                 ),
@@ -925,14 +1008,17 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     label: const Text(
                       'Gig Completed',
                       style: TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.bold),
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: green,
                       foregroundColor: Colors.white,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
                   ),
                 ),
@@ -950,15 +1036,20 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   child: ElevatedButton.icon(
                     onPressed: _dispatchGig,
                     icon: const Icon(Icons.send_rounded, size: 18),
-                    label: const Text('Dispatch',
-                        style: TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600)),
+                    label: const Text(
+                      'Dispatch',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: kAmber,
                       foregroundColor: Colors.white,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
                   ),
                 ),
@@ -972,16 +1063,22 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   height: 48,
                   child: OutlinedButton.icon(
                     onPressed: _deleteGig,
-                    icon: const Icon(Icons.delete_outline_rounded,
-                        size: 18, color: Colors.redAccent),
-                    label: const Text('Delete Gig',
-                        style: TextStyle(
-                            fontSize: 15, color: Colors.redAccent)),
+                    icon: const Icon(
+                      Icons.delete_outline_rounded,
+                      size: 18,
+                      color: Colors.redAccent,
+                    ),
+                    label: const Text(
+                      'Delete Gig',
+                      style: TextStyle(fontSize: 15, color: Colors.redAccent),
+                    ),
                     style: OutlinedButton.styleFrom(
                       side: BorderSide(
-                          color: Colors.redAccent.withValues(alpha: 0.5)),
+                        color: Colors.redAccent.withValues(alpha: 0.5),
+                      ),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
                   ),
                 ),
@@ -1001,10 +1098,7 @@ class _GigTrackingMap extends StatefulWidget {
   final LatLng gigLocation;
   final LatLng? workerLocation;
 
-  const _GigTrackingMap({
-    required this.gigLocation,
-    this.workerLocation,
-  });
+  const _GigTrackingMap({required this.gigLocation, this.workerLocation});
 
   @override
   State<_GigTrackingMap> createState() => _GigTrackingMapState();
@@ -1125,39 +1219,66 @@ class _StatusBadge extends StatelessWidget {
 
   Color _color() {
     switch (status) {
-      case 'scanning':      return kAmber;
+      case 'scanning':
+        return kAmber;
       case 'in_progress':
-      case 'navigating':    return kBlue;
-      case 'arrived':       return const Color(0xFF06B6D4);
-      case 'working':       return const Color(0xFF8B5CF6);
-      case 'task_complete': return const Color(0xFF22C55E);
-      case 'payment':       return const Color(0xFF22C55E);
-      case 'completed':     return const Color(0xFF22C55E);
-      case 'open':          return const Color(0xFF22C55E);
-      case 'offered':       return const Color(0xFF8B5CF6);
-      case 'cancelled':              return Colors.redAccent;
-      case 'no_worker':              return Colors.redAccent;
-      case 'cancellation_requested': return Colors.orange;
-      default:              return kSub;
+      case 'navigating':
+        return kBlue;
+      case 'arrived':
+        return const Color(0xFF06B6D4);
+      case 'working':
+        return const Color(0xFF8B5CF6);
+      case 'task_complete':
+        return const Color(0xFF22C55E);
+      case 'payment':
+        return const Color(0xFF22C55E);
+      case 'completed':
+        return const Color(0xFF22C55E);
+      case 'open':
+        return const Color(0xFF22C55E);
+      case 'offered':
+        return const Color(0xFF8B5CF6);
+      case 'cancelled':
+        return Colors.redAccent;
+      case 'no_worker':
+        return Colors.redAccent;
+      case 'cancellation_requested':
+        return Colors.orange;
+      default:
+        return kSub;
     }
   }
 
   String _label() {
     switch (status) {
-      case 'scanning':      return 'SCANNING';
-      case 'in_progress':   return 'IN PROGRESS';
-      case 'navigating':    return 'NAVIGATING';
-      case 'arrived':       return 'ARRIVED';
-      case 'working':       return 'WORKING';
-      case 'task_complete': return 'TASK DONE';
-      case 'payment':       return 'PAYMENT';
-      case 'completed':     return 'COMPLETED';
-      case 'open':          return 'OPEN';
-      case 'offered':       return 'OFFERED';
-      case 'cancelled':              return 'CANCELLED';
-      case 'no_worker':              return 'NO WORKER';
-      case 'cancellation_requested': return 'CANCEL PENDING';
-      default:              return status.toUpperCase();
+      case 'scanning':
+        return 'SCANNING';
+      case 'in_progress':
+        return 'IN PROGRESS';
+      case 'navigating':
+        return 'NAVIGATING';
+      case 'arrived':
+        return 'ARRIVED';
+      case 'working':
+        return 'WORKING';
+      case 'task_complete':
+        return 'TASK DONE';
+      case 'payment':
+        return 'PAYMENT';
+      case 'completed':
+        return 'COMPLETED';
+      case 'open':
+        return 'OPEN';
+      case 'offered':
+        return 'OFFERED';
+      case 'cancelled':
+        return 'CANCELLED';
+      case 'no_worker':
+        return 'NO WORKER';
+      case 'cancellation_requested':
+        return 'CANCEL PENDING';
+      default:
+        return status.toUpperCase();
     }
   }
 
@@ -1195,17 +1316,17 @@ class _TypeBadge extends StatelessWidget {
     final String label;
     switch (gigType) {
       case 'open':
-        icon  = Icons.workspace_premium_outlined;
+        icon = Icons.workspace_premium_outlined;
         color = kBlue;
         label = 'Open Gig';
         break;
       case 'offered':
-        icon  = Icons.send_rounded;
+        icon = Icons.send_rounded;
         color = const Color(0xFF8B5CF6);
         label = 'Offered Gig';
         break;
       default:
-        icon  = Icons.flash_on_rounded;
+        icon = Icons.flash_on_rounded;
         color = kAmber;
         label = 'Quick Gig';
     }
@@ -1307,8 +1428,11 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
               color: Colors.redAccent.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.cancel_outlined,
-                color: Colors.redAccent, size: 28),
+            child: const Icon(
+              Icons.cancel_outlined,
+              color: Colors.redAccent,
+              size: 28,
+            ),
           ),
           const SizedBox(height: 14),
           Text(
@@ -1334,7 +1458,9 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
             decoration: InputDecoration(
               hintText: 'Describe your reason for cancelling...',
               hintStyle: TextStyle(
-                  color: kSub.withValues(alpha: 0.6), fontSize: 13),
+                color: kSub.withValues(alpha: 0.6),
+                fontSize: 13,
+              ),
               filled: true,
               fillColor: isDark
                   ? Colors.white.withValues(alpha: 0.05)
@@ -1342,20 +1468,26 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(
-                    color: Colors.redAccent.withValues(alpha: 0.3)),
+                  color: Colors.redAccent.withValues(alpha: 0.3),
+                ),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(
-                    color: Colors.redAccent.withValues(alpha: 0.25)),
+                  color: Colors.redAccent.withValues(alpha: 0.25),
+                ),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide:
-                    const BorderSide(color: Colors.redAccent, width: 1.5),
+                borderSide: const BorderSide(
+                  color: Colors.redAccent,
+                  width: 1.5,
+                ),
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -1364,29 +1496,32 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
               Expanded(
                 child: TextButton(
                   onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Go Back',
-                      style: TextStyle(color: kSub)),
+                  child: const Text('Go Back', style: TextStyle(color: kSub)),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 flex: 2,
                 child: ElevatedButton(
-                  onPressed:
-                      _hasText ? () => Navigator.pop(context, true) : null,
+                  onPressed: _hasText
+                      ? () => Navigator.pop(context, true)
+                      : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.redAccent,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor:
-                        Colors.redAccent.withValues(alpha: 0.35),
+                    disabledBackgroundColor: Colors.redAccent.withValues(
+                      alpha: 0.35,
+                    ),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 13),
                   ),
-                  child: const Text('Submit Request',
-                      style: TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'Submit Request',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             ],
@@ -1435,8 +1570,7 @@ class _RatingDialogState extends State<_RatingDialog> {
       final currentRating = (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
       final currentCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
       final newCount = currentCount + 1;
-      final newRating =
-          ((currentRating * currentCount) + _selected) / newCount;
+      final newRating = ((currentRating * currentCount) + _selected) / newCount;
       await Future.wait([
         db.collection('users').doc(widget.workerId).update({
           'ratingAsWorker': double.parse(newRating.toStringAsFixed(2)),
@@ -1516,9 +1650,7 @@ class _RatingDialogState extends State<_RatingDialog> {
               style: TextStyle(
                 color: _selected > 0 ? _starActive : kSub,
                 fontSize: 13,
-                fontWeight: _selected > 0
-                    ? FontWeight.bold
-                    : FontWeight.normal,
+                fontWeight: _selected > 0 ? FontWeight.bold : FontWeight.normal,
               ),
             ),
           ),
@@ -1527,25 +1659,26 @@ class _RatingDialogState extends State<_RatingDialog> {
             children: [
               Expanded(
                 child: TextButton(
-                  onPressed:
-                      _submitting ? null : () => Navigator.pop(context),
-                  child: const Text('Skip',
-                      style: TextStyle(color: kSub, fontSize: 14)),
+                  onPressed: _submitting ? null : () => Navigator.pop(context),
+                  child: const Text(
+                    'Skip',
+                    style: TextStyle(color: kSub, fontSize: 14),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 flex: 2,
                 child: ElevatedButton(
-                  onPressed:
-                      (_selected == 0 || _submitting) ? null : _submit,
+                  onPressed: (_selected == 0 || _submitting) ? null : _submit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _green,
                     foregroundColor: Colors.white,
                     disabledBackgroundColor: _green.withValues(alpha: 0.4),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 13),
                   ),
                   child: _submitting
@@ -1553,11 +1686,17 @@ class _RatingDialogState extends State<_RatingDialog> {
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2),
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
                         )
-                      : const Text('Submit',
+                      : const Text(
+                          'Submit',
                           style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.bold)),
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
               ),
             ],
