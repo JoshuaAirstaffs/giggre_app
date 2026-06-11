@@ -37,9 +37,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _saving = false;
   bool _hasUnreadMessages = false;
   bool _hasUnreadGigMessages = false;
-  StreamSubscription? _roomsStreamSub;           // support rooms-level sub
+  StreamSubscription? _roomsStreamSub; // support rooms-level sub
   final List<StreamSubscription> _roomSubs = []; // support message-level subs
-  StreamSubscription? _gigRoomsStreamSub;           // gig rooms-level sub
+  StreamSubscription? _gigRoomsStreamSub; // gig rooms-level sub
   final List<StreamSubscription> _gigRoomSubs = []; // gig message-level subs
   List<Map<String, dynamic>> _updates = [];
 
@@ -48,7 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadUser();
     _fetchUpdates();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _showBetaModal());
+    // WidgetsBinding.instance.addPostFrameCallback((_) => _showBetaModal());
     _listenForUnreadMessages();
     _listenForUnreadGigMessages();
   }
@@ -62,42 +62,41 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
- Future<void> _fetchUpdates() async {
-  try {
-    final response = await FirebaseFirestore.instance
-        .collection('app_content')
-        .doc('updates')
-        .collection('items')
-        .get();
+  Future<void> _fetchUpdates() async {
+    try {
+      final response = await FirebaseFirestore.instance
+          .collection('app_content')
+          .doc('updates')
+          .collection('items')
+          .get();
 
-    final items = response.docs.map((doc) {
-      final data = doc.data();
-      // if (data['dateUpdated'] is Timestamp) {
-      //   data['dateUpdated'] = (data['dateUpdated'] as Timestamp).toDate();
-      // }
-      if (data['dateCreated'] is Timestamp) {
-        data['dateCreated'] = (data['dateCreated'] as Timestamp).toDate();
-      }
-      return data;
-    }).toList();
+      final items = response.docs.map((doc) {
+        final data = doc.data();
+        // if (data['dateUpdated'] is Timestamp) {
+        //   data['dateUpdated'] = (data['dateUpdated'] as Timestamp).toDate();
+        // }
+        if (data['dateCreated'] is Timestamp) {
+          data['dateCreated'] = (data['dateCreated'] as Timestamp).toDate();
+        }
+        return data;
+      }).toList();
 
-    items.sort((a, b) {
-      final aDate = a['dateCreated'] as DateTime?;
-      final bDate = b['dateCreated'] as DateTime?;
-      if (aDate == null && bDate == null) return 0;
-      if (aDate == null) return 1;
-      if (bDate == null) return -1;
-      return bDate.compareTo(aDate);
-    });
+      items.sort((a, b) {
+        final aDate = a['dateCreated'] as DateTime?;
+        final bDate = b['dateCreated'] as DateTime?;
+        if (aDate == null && bDate == null) return 0;
+        if (aDate == null) return 1;
+        if (bDate == null) return -1;
+        return bDate.compareTo(aDate);
+      });
 
-    setState(() {
-      _updates = items;
-    });
-  } catch (e) {
-    debugPrint('Error fetching updates: $e');
+      setState(() {
+        _updates = items;
+      });
+    } catch (e) {
+      debugPrint('Error fetching updates: $e');
+    }
   }
-}
-
 
   void _listenForUnreadMessages() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -108,44 +107,49 @@ class _HomeScreenState extends State<HomeScreen> {
         .where('userId', isEqualTo: uid)
         .where('isSupport', isEqualTo: true)
         .snapshots()
-        .listen((roomsSnap) {
-          // Cancel old message subs before setting up new ones
-          for (final sub in _roomSubs) sub.cancel();
-          _roomSubs.clear();
+        .listen(
+          (roomsSnap) {
+            // Cancel old message subs before setting up new ones
+            for (final sub in _roomSubs) sub.cancel();
+            _roomSubs.clear();
 
-          if (roomsSnap.docs.isEmpty) {
-            if (mounted) setState(() => _hasUnreadMessages = false);
-            return;
-          }
+            if (roomsSnap.docs.isEmpty) {
+              if (mounted) setState(() => _hasUnreadMessages = false);
+              return;
+            }
 
-          final Map<int, bool> roomUnread = {};
+            final Map<int, bool> roomUnread = {};
 
-          for (int i = 0; i < roomsSnap.docs.length; i++) {
-            final room = roomsSnap.docs[i];
-            final sub = FirebaseFirestore.instance
-                .collection('chat_rooms')
-                .doc(room.id)
-                .collection('messages')
-                .where('isSupport', isEqualTo: true)
-                .where('hasSeen', isEqualTo: false)
-                .limit(1)
-                .snapshots()
-                .map((s) => s.docs.isNotEmpty)
-                .listen(
-                  (hasUnread) {
-                    roomUnread[i] = hasUnread;
-                    final anyUnread = roomUnread.values.any((v) => v);
-                    if (mounted) setState(() => _hasUnreadMessages = anyUnread);
-                    debugPrint('[Unread] Badge → $anyUnread');
-                  },
-                  onError: (e) => debugPrint('[HomeScreen] message stream error: $e'),
-                );
-            _roomSubs.add(sub);
-          }
-        }, onError: (e) {
-          if (FirebaseAuth.instance.currentUser == null) return;
-          debugPrint('[HomeScreen] rooms stream error: $e');
-        });
+            for (int i = 0; i < roomsSnap.docs.length; i++) {
+              final room = roomsSnap.docs[i];
+              final sub = FirebaseFirestore.instance
+                  .collection('chat_rooms')
+                  .doc(room.id)
+                  .collection('messages')
+                  .where('isSupport', isEqualTo: true)
+                  .where('hasSeen', isEqualTo: false)
+                  .limit(1)
+                  .snapshots()
+                  .map((s) => s.docs.isNotEmpty)
+                  .listen(
+                    (hasUnread) {
+                      roomUnread[i] = hasUnread;
+                      final anyUnread = roomUnread.values.any((v) => v);
+                      if (mounted)
+                        setState(() => _hasUnreadMessages = anyUnread);
+                      debugPrint('[Unread] Badge → $anyUnread');
+                    },
+                    onError: (e) =>
+                        debugPrint('[HomeScreen] message stream error: $e'),
+                  );
+              _roomSubs.add(sub);
+            }
+          },
+          onError: (e) {
+            if (FirebaseAuth.instance.currentUser == null) return;
+            debugPrint('[HomeScreen] rooms stream error: $e');
+          },
+        );
   }
 
   // Mirrors _listenForUnreadMessages but for gig chats.
@@ -174,10 +178,9 @@ class _HomeScreenState extends State<HomeScreen> {
               final room = roomsSnap.docs[i];
               final participants =
                   (room.data()['participants'] as List<dynamic>?) ?? [];
-              final otherUid = participants.firstWhere(
-                (p) => p != uid,
-                orElse: () => '',
-              ) as String;
+              final otherUid =
+                  participants.firstWhere((p) => p != uid, orElse: () => '')
+                      as String;
 
               if (otherUid.isEmpty) continue;
 
@@ -247,12 +250,19 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
-                    child: Icon(Icons.science_outlined, color: kAmber, size: 32),
+                    child: Icon(
+                      Icons.science_outlined,
+                      color: kAmber,
+                      size: 32,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: kAmber.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
@@ -300,7 +310,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: const Text(
                       'Got it, let\'s go!',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -315,7 +328,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadUser() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
     final data = doc.data();
     if (!mounted) return;
     setState(() {
@@ -349,109 +365,124 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => _saving = false);
   }
 
- Future<void> _logout() async {
-  final confirm = await showDialog<bool>(
-    context: context,
-    builder: (_) => Dialog(
-      backgroundColor: Theme.of(context).cardColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 54, height: 54,
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                shape: BoxShape.circle,
+  Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Theme.of(context).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.logout_rounded,
+                  color: Colors.redAccent,
+                  size: 22,
+                ),
               ),
-              child: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 22),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Log out?',
-              style: TextStyle(
-                fontSize: 17, fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurface,
+              const SizedBox(height: 14),
+              Text(
+                'Log out?',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              "You'll need to sign back in to access your account.",
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
-            ),
-            const SizedBox(height: 22),
-            const Divider(height: 0.5, thickness: 0.5),
-            IntrinsicHeight(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
+              const SizedBox(height: 8),
+              const Text(
+                "You'll need to sign back in to access your account.",
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
+              ),
+              const SizedBox(height: 22),
+              const Divider(height: 0.5, thickness: 0.5),
+              IntrinsicHeight(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                              bottomLeft: Radius.circular(20),
+                            ),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(color: kSub, fontSize: 15),
                         ),
                       ),
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Cancel', style: TextStyle(color: kSub, fontSize: 15)),
                     ),
-                  ),
-                  const VerticalDivider(width: 0.5, thickness: 0.5),
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.only(bottomRight: Radius.circular(20)),
+                    const VerticalDivider(width: 0.5, thickness: 0.5),
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                              bottomRight: Radius.circular(20),
+                            ),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text(
+                          'Log out',
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Log out',
-                        style: TextStyle(color: Colors.redAccent, fontSize: 15, fontWeight: FontWeight.w600)),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
 
-  if (confirm == true) {
-    _roomsStreamSub?.cancel();
-    for (final sub in _roomSubs) {
-      sub.cancel();
+    if (confirm == true) {
+      _roomsStreamSub?.cancel();
+      for (final sub in _roomSubs) {
+        sub.cancel();
+      }
+      _roomSubs.clear();
+      if (mounted) {
+        context.read<CurrentUserProvider>().clearUser();
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      }
+      await GoogleSignIn().disconnect();
+      await FirebaseAuth.instance.signOut();
     }
-    _roomSubs.clear();
-    if (mounted) {
-      context.read<CurrentUserProvider>().clearUser();
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (route) => false,
-      );
-    }
-    await GoogleSignIn().disconnect();
-    await FirebaseAuth.instance.signOut();
   }
-}
 
-  
-  
-  final GlobalKey<RefreshIndicatorState> _refreshKey = GlobalKey<RefreshIndicatorState>();
+  final GlobalKey<RefreshIndicatorState> _refreshKey =
+      GlobalKey<RefreshIndicatorState>();
   int _carouselRefreshKey = 0;
 
   Future<void> _refreshAll() async {
-  await Future.wait([
-    _loadUser(),
-    _fetchUpdates()
-  ]);
-  if (mounted) setState(() => _carouselRefreshKey++);
-}
+    await Future.wait([_loadUser(), _fetchUpdates()]);
+    if (mounted) setState(() => _carouselRefreshKey++);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -491,7 +522,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   backgroundColor: const Color(0xFF1E1E2C),
                   isScrollControlled: true,
                   shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
                   ),
                   builder: (_) => const _GiggreMenu(),
                 );
@@ -555,228 +588,315 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         child: RefreshIndicator(
           key: _refreshKey,
-          onRefresh: _refreshAll, 
+          onRefresh: _refreshAll,
           color: kBlue,
           child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 21,
-                    backgroundColor: kBlue.withValues(alpha: 0.12),
-                    backgroundImage: _photoUrl.isNotEmpty
-                        ? CachedNetworkImageProvider(_photoUrl)
-                        : null,
-                    child: _photoUrl.isEmpty
-                        ? const Icon(Icons.account_circle_rounded,
-                            color: kBlue, size: 24)
-                        : null,
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    firstName.isNotEmpty ? 'Hey, $firstName 👋' : 'Welcome back 👋',
-                    style: TextStyle(
-                      color: onSurface,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 21,
+                      backgroundColor: kBlue.withValues(alpha: 0.12),
+                      backgroundImage: _photoUrl.isNotEmpty
+                          ? CachedNetworkImageProvider(_photoUrl)
+                          : null,
+                      child: _photoUrl.isEmpty
+                          ? const Icon(
+                              Icons.account_circle_rounded,
+                              color: kBlue,
+                              size: 24,
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      firstName.isNotEmpty
+                          ? 'Hey, $firstName 👋'
+                          : 'Welcome back 👋',
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'How do you want to use Giggre today?',
+                  style: TextStyle(color: kSub, fontSize: 14),
+                ),
+                const SizedBox(height: 20),
+                _TestimonialCarousel(key: ValueKey(_carouselRefreshKey)),
+                const SizedBox(height: 28),
+                _RoleCard(
+                  role: 'worker',
+                  title: 'Gig Worker',
+                  subtitle: 'Find gigs, earn money, and grow your skills.',
+                  icon: Icons.work_outline_rounded,
+                  accentColor: kBlue,
+                  isSelected: _selectedRole == 'worker',
+                  onTap: () => _selectRole('worker'),
+                ),
+                const SizedBox(height: 12),
+                _RoleCard(
+                  role: 'host',
+                  title: 'Gig Host',
+                  subtitle: 'Post gigs, find talent, and get things done.',
+                  icon: Icons.business_center_outlined,
+                  accentColor: kAmber,
+                  isSelected: _selectedRole == 'host',
+                  onTap: () => _selectRole('host'),
+                ),
+                if (_selectedRole != null) ...[
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _saving
+                          ? null
+                          : () {
+                              if (_selectedRole == 'host') {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const GigHostScreen(),
+                                  ),
+                                );
+                              } else {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const GigWorkerScreen(),
+                                  ),
+                                );
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _selectedRole == 'worker'
+                            ? kBlue
+                            : kAmber,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                      ),
+                      child: _saving
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Text(
+                              _selectedRole == 'worker'
+                                  ? 'Continue as Gig Worker'
+                                  : 'Continue as Gig Host',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'How do you want to use Giggre today?',
-                style: TextStyle(color: kSub, fontSize: 14),
-              ),
-              const SizedBox(height: 20),
-              _TestimonialCarousel(key: ValueKey(_carouselRefreshKey)),
-              const SizedBox(height: 28),
-              _RoleCard(
-                role: 'worker',
-                title: 'Gig Worker',
-                subtitle: 'Find gigs, earn money, and grow your skills.',
-                icon: Icons.work_outline_rounded,
-                accentColor: kBlue,
-                isSelected: _selectedRole == 'worker',
-                onTap: () => _selectRole('worker'),
-              ),
-              const SizedBox(height: 12),
-              _RoleCard(
-                role: 'host',
-                title: 'Gig Host',
-                subtitle: 'Post gigs, find talent, and get things done.',
-                icon: Icons.business_center_outlined,
-                accentColor: kAmber,
-                isSelected: _selectedRole == 'host',
-                onTap: () => _selectRole('host'),
-              ),
-              if (_selectedRole != null) ...[
                 const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: _saving
-                        ? null
-                        : () {
-                            if (_selectedRole == 'host') {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (_) => const GigHostScreen()),
-                              );
-                            } else {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const GigWorkerScreen()),
-                              );
-                            }
-                          },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _selectedRole == 'worker' ? kBlue : kAmber,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
+                Row(
+                  children: [
+                    Container(
+                      width: 4,
+                      height: 20,
+                      decoration: BoxDecoration(
+                        color: kAmber,
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                    child: _saving
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : Text(
-                            _selectedRole == 'worker'
-                                ? 'Continue as Gig Worker'
-                                : 'Continue as Gig Host',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
+                    const SizedBox(width: 18),
+                    Expanded(
+                      child: Text(
+                        'Giggre Updates',
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => GiggreUpdates(),
                           ),
+                        );
+                      },
+                      child: const Text(
+                        "See All",
+                        style: TextStyle(color: kBlue, fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                ..._updates
+                    .take(3)
+                    .map(
+                      (update) => GestureDetector(
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: UpdateCard(
+                            title: update['title'] as String,
+                            date: update['dateCreated'] as DateTime,
+                            category: update['category'] as String,
+                            description: update['body'] as String,
+                          ),
+                        ),
+                      ),
+                    ),
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: isDark ? Color(0xFF1E1E2C) : Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.grey.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Image.asset(
+                          'assets/images/logo.png',
+                          width: 94,
+                          height: 64,
+                        ),
+                        Text(
+                          "The fatest way to find gigs or hire workers near you.",
+                          style: const TextStyle(fontSize: 12, color: kSub),
+                        ),
+                        const SizedBox(height: 8),
+                        Divider(),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          spacing: 16,
+                          children: [
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        AboutGiggre() as Widget,
+                                  ),
+                                );
+                              },
+                              child: Text(
+                                "About",
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: kBlue,
+                                ),
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        TermsAndConditions() as Widget,
+                                  ),
+                                );
+                              },
+                              child: Text(
+                                "Term",
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: kBlue,
+                                ),
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        PrivacyPolicy() as Widget,
+                                  ),
+                                );
+                              },
+                              child: Text(
+                                "Privacy",
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: kBlue,
+                                ),
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => HelpFaq() as Widget,
+                                  ),
+                                );
+                              },
+                              child: Text(
+                                "Help/FAQ",
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: kBlue,
+                                ),
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => ContactUs() as Widget,
+                                  ),
+                                );
+                              },
+                              child: Text(
+                                "Contact Us",
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: kBlue,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          "Copyright © $currentYear Giggre. All rights reserved.",
+                          style: const TextStyle(fontSize: 12, color: kSub),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Container(
-                    width: 4,
-                    height: 20,
-                    decoration: BoxDecoration(
-                      color: kAmber,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(width: 18),
-                  Expanded(
-                    child: Text(
-                      'Giggre Updates',
-                      style: TextStyle(color: onSurface, fontSize: 14, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => GiggreUpdates(),
-                        ),
-                      );
-                    },
-                    child: const Text(
-                      "See All",
-                      style: TextStyle(color: kBlue, fontSize: 14),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              ..._updates
-              .take(3)
-              .map((update) => GestureDetector(
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: UpdateCard(
-                        title: update['title'] as String,
-                        date: update['dateCreated'] as DateTime,
-                        category: update['category'] as String,
-                        description: update['body'] as String,
-                      ),
-                    ),
-              )),
-               const SizedBox(height: 16),
-               Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: isDark ? Color(0xFF1E1E2C) : Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-                ),
-                child: Padding(padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Image.asset('assets/images/logo.png', width: 94, height: 64),
-                    Text("The fatest way to find gigs or hire workers near you.", style: const TextStyle(fontSize: 12, color: kSub)),
-                    const SizedBox(height: 8),
-                    Divider(),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      spacing: 16,
-                      children: [
-                        GestureDetector(
-                          onTap: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => AboutGiggre() as Widget));
-                          },
-                          child: Text("About", style: const TextStyle(fontSize: 12, color: kBlue)),
-                        ),
-                         GestureDetector(
-                          onTap: () {
-                             Navigator.push(context, MaterialPageRoute(builder: (context) => TermsAndConditions() as Widget));
-                          },
-                          child: Text("Term", style: const TextStyle(fontSize: 12, color: kBlue)),
-                        ),
-                         GestureDetector(
-                          onTap: () {
-                             Navigator.push(context, MaterialPageRoute(builder: (context) => PrivacyPolicy() as Widget));
-                          },
-                          child: Text("Privacy", style: const TextStyle(fontSize: 12, color: kBlue)),
-                        ),
-                         GestureDetector(
-                          onTap: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => HelpFaq() as Widget));
-                          },
-                          child: Text("Help/FAQ", style: const TextStyle(fontSize: 12, color: kBlue)),
-                        ),
-                         GestureDetector(
-                          onTap: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => ContactUs() as Widget));
-                          },
-                          child: Text("Contact Us", style: const TextStyle(fontSize: 12, color: kBlue)),
-                        )
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    Text("Copyright © $currentYear Giggre. All rights reserved.", style: const TextStyle(fontSize: 12, color: kSub)),
-                  ],
-                ),
-                )
-               )
-            ],
+            ),
           ),
         ),
       ),
-      )
     );
   }
 }
@@ -787,10 +907,22 @@ class _GiggreMenu extends StatelessWidget {
 
   static final List<Map<String, dynamic>> gigMenuData = [
     {'title': 'About Giggre', 'icon': Icons.info, 'screen': AboutGiggre()},
-    {'title': 'Terms & Conditions', 'icon': Icons.description, 'screen': TermsAndConditions()},
-    {'title': 'Privacy Policy', 'icon': Icons.privacy_tip, 'screen': PrivacyPolicy()},
+    {
+      'title': 'Terms & Conditions',
+      'icon': Icons.description,
+      'screen': TermsAndConditions(),
+    },
+    {
+      'title': 'Privacy Policy',
+      'icon': Icons.privacy_tip,
+      'screen': PrivacyPolicy(),
+    },
     {'title': 'Help/FAQ', 'icon': Icons.help, 'screen': HelpFaq()},
-    {'title': 'Contact Us', 'icon': Icons.contact_support, 'screen': ContactUs()},
+    {
+      'title': 'Contact Us',
+      'icon': Icons.contact_support,
+      'screen': ContactUs(),
+    },
   ];
 
   @override
@@ -802,7 +934,9 @@ class _GiggreMenu extends StatelessWidget {
       expand: false,
       builder: (context, scrollController) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        final iconBg = isDark ? const Color(0xFF001B52) : const Color(0xFFEBF0FB);
+        final iconBg = isDark
+            ? const Color(0xFF001B52)
+            : const Color(0xFFEBF0FB);
         return Container(
           color: Theme.of(context).scaffoldBackgroundColor,
           child: Padding(
@@ -815,12 +949,18 @@ class _GiggreMenu extends StatelessWidget {
                     const SizedBox(height: 12),
                     Text(
                       "Version 1.0.0.0.0.0",
-                      style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 14),
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.black54,
+                        fontSize: 14,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     Text(
                       "The fastest way to find jobs or hire workers near you",
-                      style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 10),
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.black54,
+                        fontSize: 10,
+                      ),
                     ),
                     const SizedBox(height: 12),
                   ],
@@ -836,7 +976,12 @@ class _GiggreMenu extends StatelessWidget {
                       final item = gigMenuData[index];
                       return GestureDetector(
                         onTap: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => item['screen'] as Widget));
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => item['screen'] as Widget,
+                            ),
+                          );
                         },
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -850,16 +995,24 @@ class _GiggreMenu extends StatelessWidget {
                                     color: iconBg,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: Icon(item['icon'] as IconData, color: kBlue),
+                                  child: Icon(
+                                    item['icon'] as IconData,
+                                    color: kBlue,
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
                                   item['title'] as String,
-                                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                                  style: TextStyle(
+                                    color: isDark ? Colors.white : Colors.black,
+                                  ),
                                 ),
                               ],
                             ),
-                            Icon(Icons.chevron_right, color: isDark ? Colors.white : Colors.black),
+                            Icon(
+                              Icons.chevron_right,
+                              color: isDark ? Colors.white : Colors.black,
+                            ),
                           ],
                         ),
                       );
@@ -966,11 +1119,12 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
           .collection('items')
           .get();
 
-      final items = snapshot.docs
-          .map((doc) => _CarouselItem.fromMap(doc.data()))
-          .where((item) => item.sortNumber != 0 && item.picture.isNotEmpty)
-          .toList()
-        ..sort((a, b) => a.sortNumber.compareTo(b.sortNumber));
+      final items =
+          snapshot.docs
+              .map((doc) => _CarouselItem.fromMap(doc.data()))
+              .where((item) => item.sortNumber != 0 && item.picture.isNotEmpty)
+              .toList()
+            ..sort((a, b) => a.sortNumber.compareTo(b.sortNumber));
 
       if (mounted) {
         setState(() {
