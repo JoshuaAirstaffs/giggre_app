@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:giggre_app/features/call/voice_call_screen.dart';
 import 'package:giggre_app/features/call/video_call_screen.dart';
 import 'package:giggre_app/main.dart' show navigatorKey;
+import 'package:giggre_app/screens/chat/chat.dart';
 
 class HomeChat extends StatefulWidget {
   const HomeChat({super.key});
@@ -19,19 +20,25 @@ class _HomeChatState extends State<HomeChat>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   bool _hasUnread = false;
+  bool _hasUnreadGig = false;
   final List<StreamSubscription> _roomSubs = [];
+  StreamSubscription? _gigRoomsStreamSub;
+  final List<StreamSubscription> _gigRoomSubs = [];
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _listenForUnread();
+    _listenForUnreadGig();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     for (final sub in _roomSubs) sub.cancel();
+    _gigRoomsStreamSub?.cancel();
+    for (final sub in _gigRoomSubs) sub.cancel();
     super.dispose();
   }
 
@@ -74,6 +81,65 @@ class _HomeChatState extends State<HomeChat>
         });
   }
 
+  void _listenForUnreadGig() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _gigRoomsStreamSub = FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .where('participants', arrayContains: uid)
+        .snapshots()
+        .listen(
+          (roomsSnap) {
+            for (final sub in _gigRoomSubs) sub.cancel();
+            _gigRoomSubs.clear();
+
+            if (roomsSnap.docs.isEmpty) {
+              if (mounted) setState(() => _hasUnreadGig = false);
+              return;
+            }
+
+            final Map<int, bool> roomUnread = {};
+
+            for (int i = 0; i < roomsSnap.docs.length; i++) {
+              final room = roomsSnap.docs[i];
+              final participants =
+                  (room.data()['participants'] as List<dynamic>?) ?? [];
+              final otherUid = participants.firstWhere(
+                (p) => p != uid,
+                orElse: () => '',
+              ) as String;
+
+              if (otherUid.isEmpty) continue;
+
+              final sub = FirebaseFirestore.instance
+                  .collection('chat_rooms')
+                  .doc(room.id)
+                  .collection('messages')
+                  .where('senderId', isEqualTo: otherUid)
+                  .where('hasSeen', isEqualTo: false)
+                  .limit(1)
+                  .snapshots()
+                  .map((s) => s.docs.isNotEmpty)
+                  .listen(
+                    (hasUnread) {
+                      roomUnread[i] = hasUnread;
+                      final anyUnread = roomUnread.values.any((v) => v);
+                      if (mounted) setState(() => _hasUnreadGig = anyUnread);
+                    },
+                    onError: (e) =>
+                        debugPrint('[HomeChat] gig message stream error: $e'),
+                  );
+              _gigRoomSubs.add(sub);
+            }
+          },
+          onError: (e) {
+            if (FirebaseAuth.instance.currentUser == null) return;
+            debugPrint('[HomeChat] gig rooms stream error: $e');
+          },
+        );
+  }
+
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
@@ -100,7 +166,28 @@ class _HomeChatState extends State<HomeChat>
             fontWeight: FontWeight.w600,
           ),
           tabs: [
-            const Tab(icon: Icon(Icons.people_outline), text: 'Friends'),
+            Tab(
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.chat_bubble_outline_rounded),
+                  if (_hasUnreadGig)
+                    Positioned(
+                      top: -2,
+                      right: -2,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              text: 'Gig Chats',
+            ),
             Tab(
               icon: Stack(
                 clipBehavior: Clip.none,
@@ -128,28 +215,118 @@ class _HomeChatState extends State<HomeChat>
       ),
       body: TabBarView(
         controller: _tabController,
-        children: const [_FriendsTab(), _SupportTab()],
+        children: const [_GigChatsTab(), _SupportTab()],
       ),
     );
   }
 }
 
-// ── Friends Tab ───────────────────────────────────────────────────────────────
+// ── Gig Chats Tab ─────────────────────────────────────────────────────────────
 
-class _FriendsTab extends StatelessWidget {
-  const _FriendsTab();
+class _GigChatsTab extends StatefulWidget {
+  const _GigChatsTab();
+
+  @override
+  State<_GigChatsTab> createState() => _GigChatsTabState();
+}
+
+class _GigChatsTabState extends State<_GigChatsTab> {
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+
+  @override
+  void initState() {
+    super.initState();
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    _stream = FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .where('participants', arrayContains: uid)
+        .snapshots();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: const [
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _stream,
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-          ],
-        ),
-      ),
+        if (snap.hasError) {
+          debugPrint('GigChatsTab error: ${snap.error}');
+          return Center(
+            child: Text(
+              'Error loading chats:\n${snap.error}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.red, fontSize: 13),
+            ),
+          );
+        }
+
+        final docs = List.of(snap.data?.docs ?? []);
+        docs.sort((a, b) {
+          final aTime = a.data()['lastMessageAt'] as Timestamp?;
+          final bTime = b.data()['lastMessageAt'] as Timestamp?;
+          if (aTime == null && bTime == null) return 0;
+          if (aTime == null) return 1;
+          if (bTime == null) return -1;
+          return bTime.compareTo(aTime);
+        });
+
+        if (docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.chat_bubble_outline_rounded,
+                    size: 48, color: Colors.grey),
+                const SizedBox(height: 12),
+                Text(
+                  'No gig chats yet',
+                  style: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return RefreshIndicator(
+          onRefresh: () async => setState(() {}),
+          child: ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: docs.length,
+            itemBuilder: (context, i) {
+              final data = docs[i].data();
+              final rawDate = data['lastMessageAt'] ?? data['createdAt'];
+              final date =
+                  rawDate != null ? (rawDate as Timestamp).toDate() : null;
+              final sender = data['lastMessageSender'] as String? ?? '';
+              final lastMessage = data['lastMessage'] as String? ?? '';
+              final displayMessage =
+                  sender.isNotEmpty ? '$sender: $lastMessage' : lastMessage;
+
+              final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+              final participants =
+                  (data['participants'] as List<dynamic>?) ?? [];
+              final peerUid = participants
+                  .firstWhere((p) => p != uid, orElse: () => '')
+                  as String;
+
+              return _ChatHomeItem(
+                roomId: docs[i].id,
+                sendTo: data['sendTo'] as String? ?? 'Gig Chat',
+                subject: data['subject'] as String? ?? 'Gig Chat',
+                message: displayMessage,
+                status: data['status'] as String? ?? 'open',
+                date: date,
+                isGigChat: true,
+                gigId: data['gigId'] as String? ?? '',
+                peerUid: peerUid,
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
@@ -754,6 +931,9 @@ class _ChatHomeItem extends StatefulWidget {
     required this.roomId,
     required this.sendTo,
     this.date,
+    this.isGigChat = false,
+    this.gigId = '',
+    this.peerUid = '',
   });
 
   final String subject;
@@ -762,31 +942,49 @@ class _ChatHomeItem extends StatefulWidget {
   final String roomId;
   final String sendTo;
   final DateTime? date;
+  final bool isGigChat;
+  final String gigId;
+  final String peerUid;
 
   @override
   State<_ChatHomeItem> createState() => _ChatHomeItemState();
 }
 
 class _ChatHomeItemState extends State<_ChatHomeItem> {
-  late final Stream<bool> _unreadStream = FirebaseFirestore.instance
-      .collection('chat_rooms')
-      .doc(widget.roomId)
-      .collection('messages')
-      .where('isSupport', isEqualTo: true)
-      .where('hasSeen', isEqualTo: false)
-      .limit(1)
-      .snapshots()
-      .map((snap) => snap.docs.isNotEmpty);
+  late final Stream<bool> _unreadStream = widget.isGigChat
+      ? FirebaseFirestore.instance
+          .collection('chat_rooms')
+          .doc(widget.roomId)
+          .collection('messages')
+          .where('hasSeen', isEqualTo: false)
+          .where('senderId',
+              isNotEqualTo: FirebaseAuth.instance.currentUser?.uid ?? '')
+          .limit(1)
+          .snapshots()
+          .map((snap) => snap.docs.isNotEmpty)
+      : FirebaseFirestore.instance
+          .collection('chat_rooms')
+          .doc(widget.roomId)
+          .collection('messages')
+          .where('isSupport', isEqualTo: true)
+          .where('hasSeen', isEqualTo: false)
+          .limit(1)
+          .snapshots()
+          .map((snap) => snap.docs.isNotEmpty);
 
   Future<void> _markMessagesAsSeen() async {
-    final snap = await FirebaseFirestore.instance
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final base = FirebaseFirestore.instance
         .collection('chat_rooms')
         .doc(widget.roomId)
         .collection('messages')
-        .where('isSupport', isEqualTo: true)
-        .where('hasSeen', isEqualTo: false)
-        .get();
+        .where('hasSeen', isEqualTo: false);
 
+    final q = widget.isGigChat
+        ? base.where('senderId', isNotEqualTo: uid)
+        : base.where('isSupport', isEqualTo: true);
+
+    final snap = await q.get();
     if (snap.docs.isEmpty) return;
 
     final batch = FirebaseFirestore.instance.batch();
@@ -798,7 +996,24 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
 
   Future<void> _onTap() async {
     if (!mounted) return;
-    await Navigator.pushNamed(context, '/chat/${widget.roomId}');
+    if (widget.isGigChat && widget.peerUid.isNotEmpty) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => Chat(
+            roomId: widget.roomId,
+            isGigChat: true,
+            gigChatParams: GigChatParams(
+              gigId: widget.gigId,
+              peerUid: widget.peerUid,
+              peerName: widget.sendTo,
+            ),
+          ),
+        ),
+      );
+    } else {
+      await Navigator.pushNamed(context, '/chat/${widget.roomId}');
+    }
     await _markMessagesAsSeen();
   }
 
@@ -863,11 +1078,17 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: _statusColor,
+                      color: widget.isGigChat
+                          ? const Color(0xFF3B82F6)
+                          : _statusColor,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child:
-                        const Icon(Icons.support_agent, color: Colors.white),
+                    child: Icon(
+                      widget.isGigChat
+                          ? Icons.work_outline_rounded
+                          : Icons.support_agent,
+                      color: Colors.white,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -922,13 +1143,15 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
                             ],
                           ],
                         ),
-                        Text(
-                          'Subject: ${widget.subject}',
-                          style: const TextStyle(fontSize: 12),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
+                        if (!widget.isGigChat) ...[
+                          Text(
+                            'Subject: ${widget.subject}',
+                            style: const TextStyle(fontSize: 12),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                        ],
                         SizedBox(
                           width: 200,
                           child: Text(

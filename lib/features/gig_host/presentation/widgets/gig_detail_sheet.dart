@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
+import 'package:giggre_app/features/chat/gig_chat_action.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../../core/theme/app_colors.dart';
 import '../../services/quick_gig_matching_service.dart';
@@ -950,6 +951,11 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                           ),
                           CallUserAction(
                             callType: CallType.video,
+                            targetUserId: workerId,
+                            targetUserName: workerName,
+                          ),
+                          GigChatAction(
+                            gigId: widget.gigId,
                             targetUserId: workerId,
                             targetUserName: workerName,
                           ),

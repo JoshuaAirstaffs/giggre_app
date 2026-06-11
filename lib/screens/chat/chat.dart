@@ -9,14 +9,14 @@ import 'package:provider/provider.dart';
 
 // ── Local message model ────────────────────────────────────────────────────────
 class _Msg {
-  final String? id;         // null = optimistic (not yet committed)
+  final String? id; // null = optimistic (not yet committed)
   final String text;
   final bool isMe;
   final bool isSupport;
   final bool isAutoReply;
   final bool hasSeenBySupport;
   final DateTime? time;
-  final bool pending;       // true while waiting for server
+  final bool pending; // true while waiting for server
 
   const _Msg({
     this.id,
@@ -29,22 +29,47 @@ class _Msg {
     this.pending = false,
   });
 
-  _Msg copyWith({String? id, bool? pending, bool? hasSeenBySupport, DateTime? time}) => _Msg(
-        id: id ?? this.id,
-        text: text,
-        isMe: isMe,
-        isSupport: isSupport,
-        isAutoReply: isAutoReply,
-        hasSeenBySupport: hasSeenBySupport ?? this.hasSeenBySupport,
-        time: time ?? this.time,
-        pending: pending ?? this.pending,
-      );
+  _Msg copyWith({
+    String? id,
+    bool? pending,
+    bool? hasSeenBySupport,
+    DateTime? time,
+  }) => _Msg(
+    id: id ?? this.id,
+    text: text,
+    isMe: isMe,
+    isSupport: isSupport,
+    isAutoReply: isAutoReply,
+    hasSeenBySupport: hasSeenBySupport ?? this.hasSeenBySupport,
+    time: time ?? this.time,
+    pending: pending ?? this.pending,
+  );
+}
+
+// ── Gig chat metadata (passed when room doesn't exist yet) ────────────────────
+class GigChatParams {
+  final String gigId;
+  final String peerUid;
+  final String peerName;
+
+  const GigChatParams({
+    required this.gigId,
+    required this.peerUid,
+    required this.peerName,
+  });
 }
 
 // ── Chat screen ────────────────────────────────────────────────────────────────
 class Chat extends StatefulWidget {
   final String roomId;
-  const Chat({super.key, required this.roomId});
+  final GigChatParams? gigChatParams;
+  final bool isGigChat;
+  const Chat({
+    super.key,
+    required this.roomId,
+    this.gigChatParams,
+    this.isGigChat = false,
+  });
 
   @override
   State<Chat> createState() => _ChatState();
@@ -74,6 +99,11 @@ class _ChatState extends State<Chat> {
 
   bool _isResolved = false;
   bool _resolvedNotified = false;
+  bool _isGigChat = false;
+  String? _peerName;
+  // True once the room doc exists in Firestore — false for lazy gig chats
+  // until the first message is sent.
+  bool _roomCreated = true;
 
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
@@ -86,9 +116,16 @@ class _ChatState extends State<Chat> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    _loadInitial();
-    _markSupportMessagesAsSeen();
-    _listenAndMarkSeen();
+    _isGigChat = widget.isGigChat || widget.gigChatParams != null;
+    final params = widget.gigChatParams;
+    if (params != null) {
+      _roomCreated = false;
+      _peerName = params.peerName;
+      _isLoadingInitial = false;
+    } else {
+      _loadInitial();
+      _listenAndMarkSeen();
+    }
     _listenRoomStatus();
   }
 
@@ -183,8 +220,10 @@ class _ChatState extends State<Chat> {
 
     // Scope stream to only new messages
     if (_newestFetchedTime != null) {
-      q = q.where('createdAt',
-          isGreaterThan: Timestamp.fromDate(_newestFetchedTime!));
+      q = q.where(
+        'createdAt',
+        isGreaterThan: Timestamp.fromDate(_newestFetchedTime!),
+      );
     }
 
     _incomingSub = q.snapshots().listen((snap) {
@@ -239,38 +278,59 @@ class _ChatState extends State<Chat> {
 
   // ── Listen to room status (close + block input when resolved) ─────────────
   void _listenRoomStatus() {
-    bool isFirstSnapshot = true;
+    bool firstExistingSnapshot = true;
     _roomSub = FirebaseFirestore.instance
         .collection('chat_rooms')
         .doc(widget.roomId)
         .snapshots()
         .listen((snap) {
-      if (!snap.exists || !mounted) return;
-      final data = snap.data() as Map<String, dynamic>;
-      final resolved = (data['status'] as String? ?? '') == 'resolved';
+          if (!mounted) return;
 
-      if (resolved && isFirstSnapshot) {
-        // Already resolved when opened — show banner, no auto-close
-        setState(() => _isResolved = true);
-      } else if (resolved && !_resolvedNotified) {
-        // Became resolved while the user was in the chat — notify and close
-        setState(() {
-          _isResolved = true;
-          _resolvedNotified = true;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('This conversation has been resolved and closed.'),
-            duration: Duration(seconds: 3),
-          ),
-        );
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) Navigator.of(context).pop();
-        });
-      }
+          if (!snap.exists) {
+            if (_roomCreated) setState(() => _roomCreated = false);
+            return;
+          }
 
-      isFirstSnapshot = false;
-    });
+          // Room now exists — if it just appeared (other user sent first), start streams.
+          if (!_roomCreated) {
+            setState(() => _roomCreated = true);
+            _loadInitial();
+            _listenAndMarkSeen();
+          }
+
+          final data = snap.data() as Map<String, dynamic>;
+          final resolved = (data['status'] as String? ?? '') == 'resolved';
+          final peer = data['sendTo'] as String?;
+          if (peer != _peerName) {
+            setState(() => _peerName = peer);
+          }
+
+          if (firstExistingSnapshot) {
+            _markSupportMessagesAsSeen();
+          }
+
+          if (resolved && firstExistingSnapshot) {
+            setState(() => _isResolved = true);
+          } else if (resolved && !_resolvedNotified) {
+            setState(() {
+              _isResolved = true;
+              _resolvedNotified = true;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'This conversation has been resolved and closed.',
+                ),
+                duration: Duration(seconds: 3),
+              ),
+            );
+            Future.delayed(const Duration(seconds: 2), () {
+              if (mounted) Navigator.of(context).pop();
+            });
+          }
+
+          firstExistingSnapshot = false;
+        });
   }
 
   // ── Send: optimistic UI ────────────────────────────────────────────────────
@@ -294,7 +354,28 @@ class _ChatState extends State<Chat> {
     _scrollToBottom();
 
     try {
-      // 2. Write to Firestore
+      // 2. Lazy-create gig chat room on first message
+      if (!_roomCreated && widget.gigChatParams != null) {
+        final p = widget.gigChatParams!;
+        await FirebaseFirestore.instance
+            .collection('chat_rooms')
+            .doc(widget.roomId)
+            .set({
+              'gigId': p.gigId,
+              'isGigChat': true,
+              'participants': [uid, p.peerUid],
+              'sendTo': p.peerName,
+              'subject': 'Gig Chat',
+              'status': 'open',
+              'lastMessage': '',
+              'lastMessageSender': '',
+              'lastMessageAt': FieldValue.serverTimestamp(),
+              'createdAt': FieldValue.serverTimestamp(),
+            });
+        if (mounted) setState(() => _roomCreated = true);
+      }
+
+      // 3. Write to Firestore
       final docRef = await _messagesRef.add({
         'senderId': uid,
         'isSupport': false,
@@ -310,15 +391,17 @@ class _ChatState extends State<Chat> {
           .collection('chat_rooms')
           .doc(widget.roomId)
           .update({
-        'lastMessage': text,
-        'lastMessageSender': 'You',
-        'lastMessageAt': FieldValue.serverTimestamp(),
-      });
+            'lastMessage': text,
+            'lastMessageSender': 'You',
+            'lastMessageAt': FieldValue.serverTimestamp(),
+          });
 
-      // 3. Confirm: replace optimistic with real doc id + remove pending flag
+      // 4. Confirm: replace optimistic with real doc id + remove pending flag
       if (mounted) {
         setState(() {
-          final idx = _msgs.indexWhere((m) => m.pending && m.text == text && m.isMe);
+          final idx = _msgs.indexWhere(
+            (m) => m.pending && m.text == text && m.isMe,
+          );
           if (idx != -1) {
             _msgs[idx] = _msgs[idx].copyWith(id: docRef.id, pending: false);
           }
@@ -336,10 +419,12 @@ class _ChatState extends State<Chat> {
   // ── Mark seen ──────────────────────────────────────────────────────────────
   Future<void> _markSupportMessagesAsSeen() async {
     try {
-      final snap = await _messagesRef
-          .where('isSupport', isEqualTo: true)
-          .where('hasSeen', isEqualTo: false)
-          .get();
+      final uid = _uid ?? '';
+      final base = _messagesRef.where('hasSeen', isEqualTo: false);
+      final q = _isGigChat
+          ? base.where('senderId', isNotEqualTo: uid)
+          : base.where('isSupport', isEqualTo: true);
+      final snap = await q.get();
       if (snap.docs.isEmpty) return;
       final batch = FirebaseFirestore.instance.batch();
       for (final doc in snap.docs) {
@@ -352,35 +437,38 @@ class _ChatState extends State<Chat> {
   }
 
   void _listenAndMarkSeen() {
+    // For support chats: mark admin messages seen in real-time.
+    // For gig chats: _markSupportMessagesAsSeen handles the initial pass;
+    // the stream here is a no-op for gig rooms (isSupport always false).
     _seenSub = _messagesRef
         .where('isSupport', isEqualTo: true)
         .where('hasSeen', isEqualTo: false)
         .snapshots()
         .listen((snap) async {
-      if (snap.docs.isEmpty) return;
-      final batch = FirebaseFirestore.instance.batch();
-      for (final doc in snap.docs) {
-        batch.update(doc.reference, {'hasSeen': true});
-      }
-      await batch.commit();
-    });
+          if (snap.docs.isEmpty) return;
+          final batch = FirebaseFirestore.instance.batch();
+          for (final doc in snap.docs) {
+            batch.update(doc.reference, {'hasSeen': true});
+          }
+          await batch.commit();
+        });
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-_Msg _docToMsg(DocumentSnapshot doc) {
-  final data = doc.data() as Map<String, dynamic>;
-  final ts = data['createdAt'] as Timestamp?;
-  return _Msg(
-    id: doc.id,
-    text: data['text'] as String? ?? '',
-    isMe: data['senderId'] == _uid,
-    isSupport: data['isSupport'] as bool? ?? false,
-    isAutoReply: data['isAutoReply'] as bool? ?? false,
-    hasSeenBySupport: data['hasSeenByAdmin'] as bool? ?? false,
-    time: ts?.toDate(),
-    pending: false,
-  );
-}
+  _Msg _docToMsg(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    final ts = data['createdAt'] as Timestamp?;
+    return _Msg(
+      id: doc.id,
+      text: data['text'] as String? ?? '',
+      isMe: data['senderId'] == _uid,
+      isSupport: data['isSupport'] as bool? ?? false,
+      isAutoReply: data['isAutoReply'] as bool? ?? false,
+      hasSeenBySupport: data['hasSeenByAdmin'] as bool? ?? false,
+      time: ts?.toDate(),
+      pending: false,
+    );
+  }
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -411,8 +499,22 @@ _Msg _docToMsg(DocumentSnapshot doc) {
     final timeStr = '$h:$m $period';
     if (diff == 0) return timeStr;
     if (diff == 1) return 'Yesterday $timeStr';
-    if (diff < 7) return '${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][dt.weekday - 1]} $timeStr';
-    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    if (diff < 7)
+      return '${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][dt.weekday - 1]} $timeStr';
+    const mo = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return '${mo[dt.month - 1]} ${dt.day} $timeStr';
   }
 
@@ -432,23 +534,38 @@ _Msg _docToMsg(DocumentSnapshot doc) {
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: const Color(0xFFFBBF24),
+                color: _isGigChat
+                    ? const Color(0xFF3B82F6)
+                    : const Color(0xFFFBBF24),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.support_agent, color: Colors.white, size: 20),
+              child: Icon(
+                _isGigChat ? Icons.work_outline_rounded : Icons.support_agent,
+                color: Colors.white,
+                size: 20,
+              ),
             ),
             const SizedBox(width: 10),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Giggre Support',
-                    style: TextStyle(
-                        color: onSurface,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold)),
-                Text('We\'ll respond within 24–48 hours',
-                    style: TextStyle(
-                        color: onSurface.withValues(alpha: 0.5), fontSize: 10)),
+                Text(
+                  _isGigChat ? (_peerName ?? 'Gig Chat') : 'Giggre Support',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  _isGigChat
+                      ? 'Gig conversation'
+                      : 'We\'ll respond within 24–48 hours',
+                  style: TextStyle(
+                    color: onSurface.withValues(alpha: 0.5),
+                    fontSize: 10,
+                  ),
+                ),
               ],
             ),
           ],
@@ -461,37 +578,38 @@ _Msg _docToMsg(DocumentSnapshot doc) {
             child: _isLoadingInitial
                 ? const Center(child: CircularProgressIndicator())
                 : _msgs.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No messages yet.\nSay hello! 👋',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              color: Colors.grey.shade400, fontSize: 14),
-                        ),
-                      )
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                        itemCount: _msgs.length + (_isLoadingMore ? 1 : 0),
-                        itemBuilder: (ctx, i) {
-                          if (_isLoadingMore && i == 0) {
-                            return const Padding(
-                              padding: EdgeInsets.only(bottom: 8),
-                              child: Center(
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2)),
-                            );
-                          }
-                          final msg = _msgs[_isLoadingMore ? i - 1 : i];
-                          return _MessageBubble(
-                            msg: msg,
-                            isDark: isDark,
-                            timeStr: msg.time != null
-                                ? _formatTime(msg.time!)
-                                : '',
-                          );
-                        },
+                ? Center(
+                    child: Text(
+                      'No messages yet.\nSay hello! 👋',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.grey.shade400,
+                        fontSize: 14,
                       ),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                    itemCount: _msgs.length + (_isLoadingMore ? 1 : 0),
+                    itemBuilder: (ctx, i) {
+                      if (_isLoadingMore && i == 0) {
+                        return const Padding(
+                          padding: EdgeInsets.only(bottom: 8),
+                          child: Center(
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        );
+                      }
+                      final msg = _msgs[_isLoadingMore ? i - 1 : i];
+                      return _MessageBubble(
+                        msg: msg,
+                        isDark: isDark,
+                        timeStr: msg.time != null ? _formatTime(msg.time!) : '',
+                        isGigChat: _isGigChat,
+                      );
+                    },
+                  ),
           ),
 
           // ── Input bar / resolved banner ──────────────────────────────────
@@ -512,9 +630,11 @@ _Msg _docToMsg(DocumentSnapshot doc) {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.lock_outline,
-                        size: 16,
-                        color: Colors.green.shade600),
+                    Icon(
+                      Icons.lock_outline,
+                      size: 16,
+                      color: Colors.green.shade600,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       'This conversation is resolved and closed.',
@@ -563,8 +683,7 @@ _Msg _docToMsg(DocumentSnapshot doc) {
                             hintText: 'Type a message...',
                             border: InputBorder.none,
                             isDense: true,
-                            contentPadding:
-                                EdgeInsets.symmetric(vertical: 10),
+                            contentPadding: EdgeInsets.symmetric(vertical: 10),
                           ),
                           onSubmitted: (_) => _sendMessage(),
                         ),
@@ -579,8 +698,11 @@ _Msg _docToMsg(DocumentSnapshot doc) {
                           color: kBlue,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.send_rounded,
-                            color: Colors.white, size: 20),
+                        child: const Icon(
+                          Icons.send_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
                       ),
                     ),
                   ],
@@ -599,11 +721,13 @@ class _MessageBubble extends StatelessWidget {
     required this.msg,
     required this.isDark,
     required this.timeStr,
+    required this.isGigChat,
   });
 
   final _Msg msg;
   final bool isDark;
   final String timeStr;
+  final bool isGigChat;
 
   bool get _isHtml => msg.text.contains('<') && msg.text.contains('>');
 
@@ -612,19 +736,25 @@ class _MessageBubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
-        mainAxisAlignment:
-            msg.isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: msg.isMe
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!msg.isMe) ...[
             Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: const Color(0xFFFBBF24),
+                color: isGigChat
+                    ? const Color(0xFF3B82F6)
+                    : const Color(0xFFFBBF24),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: const Icon(Icons.support_agent,
-                  color: Colors.white, size: 14),
+              child: const Icon(
+                Icons.support_agent,
+                color: Colors.white,
+                size: 14,
+              ),
             ),
             const SizedBox(width: 6),
           ],
@@ -639,21 +769,25 @@ class _MessageBubble extends StatelessWidget {
                   opacity: msg.pending ? 0.6 : 1.0,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       border: (msg.isMe && !msg.isAutoReply)
                           ? null
                           : Border.all(
                               color: msg.isMe
                                   ? Colors.white.withValues(alpha: 0.3)
+                                  : isGigChat
+                                  ? const Color(0xFF3B82F6)
                                   : kAmber,
                               width: 1.5,
                             ),
                       color: msg.isMe
                           ? kBlue
                           : isDark
-                              ? Colors.grey.shade800
-                              : Colors.grey.shade200,
+                          ? Colors.grey.shade800
+                          : Colors.grey.shade200,
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(16),
                         topRight: const Radius.circular(16),
@@ -668,19 +802,24 @@ class _MessageBubble extends StatelessWidget {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.auto_fix_high,
-                                  size: 15,
+                              Icon(
+                                Icons.auto_fix_high,
+                                size: 15,
+                                color: msg.isMe
+                                    ? Colors.white70
+                                    : Colors.grey.shade600,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Auto Reply',
+                                style: TextStyle(
+                                  fontSize: 12,
                                   color: msg.isMe
                                       ? Colors.white70
-                                      : Colors.grey.shade600),
-                              const SizedBox(width: 4),
-                              Text('Auto Reply',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: msg.isMe
-                                          ? Colors.white70
-                                          : Colors.grey.shade600,
-                                      fontWeight: FontWeight.w500)),
+                                      : Colors.grey.shade600,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
                             ],
                           ),
                           const SizedBox(height: 8),
@@ -694,21 +833,23 @@ class _MessageBubble extends StatelessWidget {
                                     color: msg.isMe
                                         ? Colors.white
                                         : isDark
-                                            ? Colors.white
-                                            : Colors.black87,
+                                        ? Colors.white
+                                        : Colors.black87,
                                     margin: Margins.zero,
                                     padding: HtmlPaddings.zero,
                                   ),
                                   'div': Style(
-                                      margin: Margins.zero,
-                                      padding: HtmlPaddings.zero),
+                                    margin: Margins.zero,
+                                    padding: HtmlPaddings.zero,
+                                  ),
                                 },
                               )
                             : Text(
                                 msg.text,
                                 style: TextStyle(
-                                    fontSize: 14,
-                                    color: msg.isMe ? Colors.white : null),
+                                  fontSize: 14,
+                                  color: msg.isMe ? Colors.white : null,
+                                ),
                               ),
                       ],
                     ),
@@ -720,15 +861,25 @@ class _MessageBubble extends StatelessWidget {
                   spacing: 4,
                   children: [
                     if (msg.pending)
-                      Icon(Icons.access_time,
-                          size: 10, color: Colors.grey.shade400)
+                      Icon(
+                        Icons.access_time,
+                        size: 10,
+                        color: Colors.grey.shade400,
+                      )
                     else
-                      Text(timeStr,
-                          style: TextStyle(
-                              fontSize: 10, color: Colors.grey.shade400)),
+                      Text(
+                        timeStr,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey.shade400,
+                        ),
+                      ),
                     if (msg.isMe && msg.hasSeenBySupport)
-                      Icon(Icons.done_all,
-                          size: 12, color: Colors.grey.shade400),
+                      Icon(
+                        Icons.done_all,
+                        size: 12,
+                        color: Colors.grey.shade400,
+                      ),
                   ],
                 ),
               ],

@@ -36,8 +36,11 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _selectedRole;
   bool _saving = false;
   bool _hasUnreadMessages = false;
-  StreamSubscription? _roomsStreamSub;        // ← rooms-level sub
-  final List<StreamSubscription> _roomSubs = []; // ← message-level subs
+  bool _hasUnreadGigMessages = false;
+  StreamSubscription? _roomsStreamSub;           // support rooms-level sub
+  final List<StreamSubscription> _roomSubs = []; // support message-level subs
+  StreamSubscription? _gigRoomsStreamSub;           // gig rooms-level sub
+  final List<StreamSubscription> _gigRoomSubs = []; // gig message-level subs
   List<Map<String, dynamic>> _updates = [];
 
   @override
@@ -47,12 +50,15 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchUpdates();
     WidgetsBinding.instance.addPostFrameCallback((_) => _showBetaModal());
     _listenForUnreadMessages();
+    _listenForUnreadGigMessages();
   }
 
   @override
   void dispose() {
     _roomsStreamSub?.cancel();
     for (final sub in _roomSubs) sub.cancel();
+    _gigRoomsStreamSub?.cancel();
+    for (final sub in _gigRoomSubs) sub.cancel();
     super.dispose();
   }
 
@@ -140,6 +146,70 @@ class _HomeScreenState extends State<HomeScreen> {
           if (FirebaseAuth.instance.currentUser == null) return;
           debugPrint('[HomeScreen] rooms stream error: $e');
         });
+  }
+
+  // Mirrors _listenForUnreadMessages but for gig chats.
+  // Uses where('participants', arrayContains: uid) — no composite index needed.
+  void _listenForUnreadGigMessages() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _gigRoomsStreamSub = FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .where('participants', arrayContains: uid)
+        .snapshots()
+        .listen(
+          (roomsSnap) {
+            for (final sub in _gigRoomSubs) sub.cancel();
+            _gigRoomSubs.clear();
+
+            if (roomsSnap.docs.isEmpty) {
+              if (mounted) setState(() => _hasUnreadGigMessages = false);
+              return;
+            }
+
+            final Map<int, bool> roomUnread = {};
+
+            for (int i = 0; i < roomsSnap.docs.length; i++) {
+              final room = roomsSnap.docs[i];
+              final participants =
+                  (room.data()['participants'] as List<dynamic>?) ?? [];
+              final otherUid = participants.firstWhere(
+                (p) => p != uid,
+                orElse: () => '',
+              ) as String;
+
+              if (otherUid.isEmpty) continue;
+
+              final sub = FirebaseFirestore.instance
+                  .collection('chat_rooms')
+                  .doc(room.id)
+                  .collection('messages')
+                  .where('senderId', isEqualTo: otherUid)
+                  .where('hasSeen', isEqualTo: false)
+                  .limit(1)
+                  .snapshots()
+                  .map((s) => s.docs.isNotEmpty)
+                  .listen(
+                    (hasUnread) {
+                      roomUnread[i] = hasUnread;
+                      final anyUnread = roomUnread.values.any((v) => v);
+                      if (mounted) {
+                        setState(() => _hasUnreadGigMessages = anyUnread);
+                      }
+                      debugPrint('[Unread] Gig Badge → $anyUnread');
+                    },
+                    onError: (e) =>
+                        debugPrint('[HomeScreen] gig message stream error: $e'),
+                  );
+              _gigRoomSubs.add(sub);
+            }
+          },
+          onError: (e) {
+            if (FirebaseAuth.instance.currentUser == null) return;
+            debugPrint('[HomeScreen] gig rooms stream error: $e');
+          },
+        );
   }
 
   void _showBetaModal() {
@@ -452,7 +522,7 @@ class _HomeScreenState extends State<HomeScreen> {
               clipBehavior: Clip.none,
               children: [
                 const Icon(Icons.message_outlined, color: kSub),
-                if (_hasUnreadMessages)
+                if (_hasUnreadMessages || _hasUnreadGigMessages)
                   Positioned(
                     top: -2,
                     right: -2,

@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
+import 'package:giggre_app/features/chat/gig_chat_action.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../../core/theme/app_colors.dart';
@@ -1169,6 +1170,12 @@ class _GigInfoCard extends StatelessWidget {
                     targetUserId: gig.hostId,
                     targetUserName: gig.hostName,
                     callType: CallType.video,
+                  ),
+                  const SizedBox(width: 4),
+                  GigChatAction(
+                    gigId: gig.id,
+                    targetUserId: gig.hostId,
+                    targetUserName: gig.hostName,
                   ),
                 ],
               ),

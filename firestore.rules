@@ -86,19 +86,34 @@ service cloud.firestore {
 
     // ─── Chat Rooms ────────────────────────────────────────────
     match /chat_rooms/{roomId} {
-      allow read: if isAuth() && (
-        resource.data.userId == request.auth.uid || isAdmin()
+      // get: single-doc reads (support + gig chats + non-existent doc check)
+      allow get: if isAuth() && (
+        resource == null ||
+        resource.data.userId == request.auth.uid ||
+        request.auth.uid in resource.data.participants ||
+        isAdmin()
       );
-      allow create: if isAuth() &&
-        request.resource.data.userId == request.auth.uid;
+      // list: collection queries — support uses where('userId'), gig uses arrayContains('participants')
+      allow list: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        request.auth.uid in resource.data.participants ||
+        isAdmin()
+      );
+      allow create: if isAuth() && (
+        request.resource.data.userId == request.auth.uid ||
+        request.auth.uid in request.resource.data.participants
+      );
       allow update: if isAuth() && (
-        resource.data.userId == request.auth.uid || isAdmin()
+        resource.data.userId == request.auth.uid ||
+        request.auth.uid in resource.data.participants ||
+        isAdmin()
       );
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
         allow read, write: if isAuth() && (
           get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.userId == request.auth.uid
+          || request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.participants
           || isAdmin()
         );
       }
