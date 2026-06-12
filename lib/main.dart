@@ -11,6 +11,7 @@ import 'firebase_options.dart';
 import 'features/auth/presentation/login_screen.dart';
 import 'features/auth/presentation/register_screen.dart';
 import 'core/widgets/main_navigation.dart';
+import 'core/widgets/app_update_checker.dart';
 import 'core/theme/theme_provider.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -238,6 +239,8 @@ class GiggreApp extends StatelessWidget {
       theme: ThemeProvider.lightTheme,
       darkTheme: ThemeProvider.darkTheme,
       themeMode: themeProvider.mode,
+      builder: (context, child) =>
+          AppUpdateChecker(child: child ?? const SizedBox()),
       home: firebaseError != null
           ? _FirebaseErrorScreen(firebaseError!)
           : const _MaintenanceGate(),

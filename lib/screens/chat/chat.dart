@@ -15,6 +15,7 @@ class _Msg {
   final bool isSupport;
   final bool isAutoReply;
   final bool hasSeenBySupport;
+  final bool hasSeenByPeer; // for gig chats: peer read the message
   final DateTime? time;
   final bool pending; // true while waiting for server
 
@@ -25,6 +26,7 @@ class _Msg {
     this.isSupport = false,
     this.isAutoReply = false,
     this.hasSeenBySupport = false,
+    this.hasSeenByPeer = false,
     this.time,
     this.pending = false,
   });
@@ -33,6 +35,7 @@ class _Msg {
     String? id,
     bool? pending,
     bool? hasSeenBySupport,
+    bool? hasSeenByPeer,
     DateTime? time,
   }) => _Msg(
     id: id ?? this.id,
@@ -41,6 +44,7 @@ class _Msg {
     isSupport: isSupport,
     isAutoReply: isAutoReply,
     hasSeenBySupport: hasSeenBySupport ?? this.hasSeenBySupport,
+    hasSeenByPeer: hasSeenByPeer ?? this.hasSeenByPeer,
     time: time ?? this.time,
     pending: pending ?? this.pending,
   );
@@ -92,6 +96,7 @@ class _ChatState extends State<Chat> {
   // Stream subscriptions
   StreamSubscription? _incomingSub;
   StreamSubscription? _seenSub;
+  StreamSubscription? _gigSeenSub;
   StreamSubscription? _roomSub;
 
   // Track the newest timestamp we've fetched, to avoid stream duplicates
@@ -133,6 +138,7 @@ class _ChatState extends State<Chat> {
   void dispose() {
     _incomingSub?.cancel();
     _seenSub?.cancel();
+    _gigSeenSub?.cancel();
     _roomSub?.cancel();
     _msgController.dispose();
     _scrollController.dispose();
@@ -383,6 +389,7 @@ class _ChatState extends State<Chat> {
         'text': text,
         'hasSeen': false,
         'hasSeenByAdmin': false,
+        if (_isGigChat) 'hasSeenByPeer': false,
         'isAutoReply': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -425,12 +432,29 @@ class _ChatState extends State<Chat> {
           ? base.where('senderId', isNotEqualTo: uid)
           : base.where('isSupport', isEqualTo: true);
       final snap = await q.get();
-      if (snap.docs.isEmpty) return;
-      final batch = FirebaseFirestore.instance.batch();
-      for (final doc in snap.docs) {
-        batch.update(doc.reference, {'hasSeen': true});
+      if (snap.docs.isNotEmpty) {
+        final batch = FirebaseFirestore.instance.batch();
+        for (final doc in snap.docs) {
+          batch.update(doc.reference, {'hasSeen': true});
+        }
+        await batch.commit();
       }
-      await batch.commit();
+
+      // For gig chats: also mark hasSeenByPeer on messages sent by the peer,
+      // so the sender's bubble shows a "Seen" indicator.
+      if (_isGigChat) {
+        final peerSnap = await _messagesRef
+            .where('senderId', isNotEqualTo: uid)
+            .where('hasSeenByPeer', isEqualTo: false)
+            .get();
+        if (peerSnap.docs.isNotEmpty) {
+          final batch = FirebaseFirestore.instance.batch();
+          for (final doc in peerSnap.docs) {
+            batch.update(doc.reference, {'hasSeenByPeer': true});
+          }
+          await batch.commit();
+        }
+      }
     } catch (e) {
       debugPrint('Mark seen error: $e');
     }
@@ -438,8 +462,6 @@ class _ChatState extends State<Chat> {
 
   void _listenAndMarkSeen() {
     // For support chats: mark admin messages seen in real-time.
-    // For gig chats: _markSupportMessagesAsSeen handles the initial pass;
-    // the stream here is a no-op for gig rooms (isSupport always false).
     _seenSub = _messagesRef
         .where('isSupport', isEqualTo: true)
         .where('hasSeen', isEqualTo: false)
@@ -452,6 +474,23 @@ class _ChatState extends State<Chat> {
           }
           await batch.commit();
         });
+
+    // For gig chats: stream peer messages and mark hasSeenByPeer in real-time.
+    if (_isGigChat) {
+      final uid = _uid ?? '';
+      _gigSeenSub = _messagesRef
+          .where('senderId', isNotEqualTo: uid)
+          .where('hasSeenByPeer', isEqualTo: false)
+          .snapshots()
+          .listen((snap) async {
+            if (snap.docs.isEmpty) return;
+            final batch = FirebaseFirestore.instance.batch();
+            for (final doc in snap.docs) {
+              batch.update(doc.reference, {'hasSeenByPeer': true});
+            }
+            await batch.commit();
+          });
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -465,6 +504,7 @@ class _ChatState extends State<Chat> {
       isSupport: data['isSupport'] as bool? ?? false,
       isAutoReply: data['isAutoReply'] as bool? ?? false,
       hasSeenBySupport: data['hasSeenByAdmin'] as bool? ?? false,
+      hasSeenByPeer: data['hasSeenByPeer'] as bool? ?? false,
       time: ts?.toDate(),
       pending: false,
     );
@@ -874,7 +914,10 @@ class _MessageBubble extends StatelessWidget {
                           color: Colors.grey.shade400,
                         ),
                       ),
-                    if (msg.isMe && msg.hasSeenBySupport)
+                    if (msg.isMe &&
+                        (isGigChat
+                            ? msg.hasSeenByPeer
+                            : msg.hasSeenBySupport))
                       Icon(
                         Icons.done_all,
                         size: 12,

@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:in_app_update/in_app_update.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:giggre_app/screens/app_contents/contact_us.dart';
 import 'package:giggre_app/screens/app_contents/help_faq.dart';
 import 'package:giggre_app/screens/app_contents/privacy_policy.dart';
@@ -37,6 +40,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _saving = false;
   bool _hasUnreadMessages = false;
   bool _hasUnreadGigMessages = false;
+  bool _hasUpdate = false;
+  bool _updateDismissed = false;
   StreamSubscription? _roomsStreamSub; // support rooms-level sub
   final List<StreamSubscription> _roomSubs = []; // support message-level subs
   StreamSubscription? _gigRoomsStreamSub; // gig rooms-level sub
@@ -51,6 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // WidgetsBinding.instance.addPostFrameCallback((_) => _showBetaModal());
     _listenForUnreadMessages();
     _listenForUnreadGigMessages();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkAppUpdate());
   }
 
   @override
@@ -60,6 +66,126 @@ class _HomeScreenState extends State<HomeScreen> {
     _gigRoomsStreamSub?.cancel();
     for (final sub in _gigRoomSubs) sub.cancel();
     super.dispose();
+  }
+
+  Future<void> _checkAppUpdate() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    try {
+      final info = await InAppUpdate.checkForUpdate();
+      if (info.updateAvailability == UpdateAvailability.updateAvailable) {
+        if (!mounted) return;
+        setState(() => _hasUpdate = true);
+        _showUpdateModal();
+      }
+    } catch (e) {
+      debugPrint('[AppUpdate] check error: $e');
+    }
+  }
+
+  void _showUpdateModal() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final cardColor = Theme.of(ctx).cardColor;
+        final borderColor = Theme.of(ctx).dividerColor;
+        final onSurface = Theme.of(ctx).colorScheme.onSurface;
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: borderColor),
+              boxShadow: [
+                BoxShadow(
+                  color: kBlue.withValues(alpha: 0.12),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: kBlue.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.system_update_rounded,
+                      color: kBlue,
+                      size: 32,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'New Update Available',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'A new version of Giggre is available. Update now to get the latest features and improvements.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: kSub, fontSize: 13.5, height: 1.6),
+                ),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      Navigator.of(ctx, rootNavigator: true).pop();
+                      try {
+                        await InAppUpdate.performImmediateUpdate();
+                      } catch (e) {
+                        debugPrint('[AppUpdate] update error: $e');
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kBlue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Update Now',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(ctx, rootNavigator: true).pop();
+                    if (mounted) setState(() => _updateDismissed = true);
+                  },
+                  child: const Text(
+                    'Later',
+                    style: TextStyle(color: kSub, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _fetchUpdates() async {
@@ -526,7 +652,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       top: Radius.circular(20),
                     ),
                   ),
-                  builder: (_) => const _GiggreMenu(),
+                  builder: (_) => _GiggreMenu(
+                    hasPendingUpdate: _hasUpdate && _updateDismissed,
+                    onUpdate: _showUpdateModal,
+                  ),
                 );
               },
               child: Text(
@@ -630,6 +759,63 @@ class _HomeScreenState extends State<HomeScreen> {
                   'How do you want to use Giggre today?',
                   style: TextStyle(color: kSub, fontSize: 14),
                 ),
+                if (_hasUpdate) ...[
+                  const SizedBox(height: 14),
+                  GestureDetector(
+                    onTap: _showUpdateModal,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: kBlue.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: kBlue.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.system_update_rounded,
+                            color: kBlue,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'A new version of Giggre is available!',
+                              style: TextStyle(
+                                color: kBlue,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: kBlue,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'Update',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 20),
                 _TestimonialCarousel(key: ValueKey(_carouselRefreshKey)),
                 const SizedBox(height: 28),
@@ -903,7 +1089,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
 //GIGGRE MENU
 class _GiggreMenu extends StatelessWidget {
-  const _GiggreMenu({super.key});
+  final bool hasPendingUpdate;
+  final VoidCallback onUpdate;
+
+  const _GiggreMenu({
+    super.key,
+    this.hasPendingUpdate = false,
+    required this.onUpdate,
+  });
 
   static final List<Map<String, dynamic>> gigMenuData = [
     {'title': 'About Giggre', 'icon': Icons.info, 'screen': AboutGiggre()},
@@ -947,12 +1140,71 @@ class _GiggreMenu extends StatelessWidget {
                   children: [
                     Image.asset('assets/images/logo.png', height: 60),
                     const SizedBox(height: 12),
-                    Text(
-                      "Version 1.0.0.0.0.0",
-                      style: TextStyle(
-                        color: isDark ? Colors.white70 : Colors.black54,
-                        fontSize: 14,
-                      ),
+                    FutureBuilder<PackageInfo>(
+                      future: PackageInfo.fromPlatform(),
+                      builder: (context, snapshot) {
+                        final version = snapshot.hasData
+                            ? 'Version ${snapshot.data!.version}'
+                            : 'Version ...';
+                        return Column(
+                          children: [
+                            Text(
+                              version,
+                              style: TextStyle(
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.black54,
+                                fontSize: 14,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            if (hasPendingUpdate)
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  onUpdate();
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: kBlue,
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: const Text(
+                                    'Update Available',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: const Text(
+                                  'Latest',
+                                  style: TextStyle(
+                                    color: Colors.green,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
                     ),
                     const SizedBox(height: 12),
                     Text(
