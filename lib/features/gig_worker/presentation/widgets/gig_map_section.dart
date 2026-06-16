@@ -113,10 +113,13 @@ class _GigMapSectionState extends State<GigMapSection> {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) { return; }
+          perm == LocationPermission.deniedForever) {
+        return;
+      }
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
       if (!mounted) return;
       setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));
@@ -144,17 +147,20 @@ class _GigMapSectionState extends State<GigMapSection> {
         .where('status', whereIn: ['scanning', 'in_progress'])
         .snapshots()
         .listen((s) {
-      final all = s.docs.map((d) {
-        final data = d.data();
-        final status = data['status'] as String? ?? '';
-        if (status == 'in_progress' &&
-            data['assignedWorkerId'] != widget.uid) {
-          return null;
-        }
-        return _toMarker(d.id, data, 'quick');
-      }).whereType<GigMarkerData>().toList();
-      setState(() => _quickGigs = all);
-    }, onError: (e) => debugPrint('[GigMap] quick stream error: $e'));
+          final all = s.docs
+              .map((d) {
+                final data = d.data();
+                final status = data['status'] as String? ?? '';
+                if (status == 'in_progress' &&
+                    data['assignedWorkerId'] != widget.uid) {
+                  return null;
+                }
+                return _toMarker(d.id, data, 'quick');
+              })
+              .whereType<GigMarkerData>()
+              .toList();
+          setState(() => _quickGigs = all);
+        }, onError: (e) => debugPrint('[GigMap] quick stream error: $e'));
   }
 
   void _startOpenSub(FirebaseFirestore db) {
@@ -163,14 +169,17 @@ class _GigMapSectionState extends State<GigMapSection> {
         .where('status', isEqualTo: 'open')
         .snapshots()
         .listen((s) {
-      setState(() {
-        _openGigs = s.docs
-            .where((d) => (d.data()['hostId'] as String?) != widget.uid)
-            .map((d) => _toMarker(d.id, d.data(), 'open', workerUid: widget.uid))
-            .whereType<GigMarkerData>()
-            .toList();
-      });
-    }, onError: (e) => debugPrint('[GigMap] open stream error: $e'));
+          setState(() {
+            _openGigs = s.docs
+                .where((d) => (d.data()['hostId'] as String?) != widget.uid)
+                .map(
+                  (d) =>
+                      _toMarker(d.id, d.data(), 'open', workerUid: widget.uid),
+                )
+                .whereType<GigMarkerData>()
+                .toList();
+          });
+        }, onError: (e) => debugPrint('[GigMap] open stream error: $e'));
   }
 
   void _startOfferedSub(FirebaseFirestore db) {
@@ -180,13 +189,13 @@ class _GigMapSectionState extends State<GigMapSection> {
         .where('status', isEqualTo: 'offered')
         .snapshots()
         .listen((s) {
-      setState(() {
-        _offeredGigs = s.docs
-            .map((d) => _toMarker(d.id, d.data(), 'offered'))
-            .whereType<GigMarkerData>()
-            .toList();
-      });
-    }, onError: (e) => debugPrint('[GigMap] offered stream error: $e'));
+          setState(() {
+            _offeredGigs = s.docs
+                .map((d) => _toMarker(d.id, d.data(), 'offered'))
+                .whereType<GigMarkerData>()
+                .toList();
+          });
+        }, onError: (e) => debugPrint('[GigMap] offered stream error: $e'));
   }
 
   Future<void> _applyToOpenGig(GigMarkerData gig) async {
@@ -198,20 +207,26 @@ class _GigMapSectionState extends State<GigMapSection> {
 
       if (!snap.exists) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('This gig no longer exists.'),
-            backgroundColor: Colors.redAccent,
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('This gig no longer exists.'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
         }
         return;
       }
       final currentStatus = snap.data()?['status'] as String? ?? '';
       if (currentStatus != 'open') {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Gig is no longer available (status: $currentStatus).'),
-            backgroundColor: Colors.orange,
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Gig is no longer available (status: $currentStatus).',
+              ),
+              backgroundColor: Colors.orange,
+            ),
+          );
         }
         return;
       }
@@ -219,14 +234,17 @@ class _GigMapSectionState extends State<GigMapSection> {
       // Prevent double-apply
       final existing = List<dynamic>.from(snap.data()?['applicants'] ?? []);
       final alreadyApplied = existing.any(
-          (a) => (a as Map<String, dynamic>)['workerId'] == widget.uid);
+        (a) => (a as Map<String, dynamic>)['workerId'] == widget.uid,
+      );
       if (alreadyApplied) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('You have already applied to this gig.'),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('You have already applied to this gig.'),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
         }
         return;
       }
@@ -235,25 +253,29 @@ class _GigMapSectionState extends State<GigMapSection> {
           .collection('open_gigs')
           .doc(gig.id)
           .update({
-        'applicants': FieldValue.arrayUnion([
-          {'workerId': widget.uid, 'workerName': widget.workerName},
-        ]),
-      });
+            'applicants': FieldValue.arrayUnion([
+              {'workerId': widget.uid, 'workerName': widget.workerName},
+            ]),
+          });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Application submitted! Waiting for host selection.'),
-          backgroundColor: Color(0xFF22C55E),
-          behavior: SnackBarBehavior.floating,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Application submitted! Waiting for host selection.'),
+            backgroundColor: Color(0xFF22C55E),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     } catch (e) {
       debugPrint('[GigMap] apply to open gig error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Failed to apply: $e'),
-          backgroundColor: Colors.redAccent,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to apply: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
       }
     }
   }
@@ -268,13 +290,20 @@ class _GigMapSectionState extends State<GigMapSection> {
   }
 
   GigMarkerData? _toMarker(
-      String id, Map<String, dynamic> data, String type, {String workerUid = ''}) {
+    String id,
+    Map<String, dynamic> data,
+    String type, {
+    String workerUid = '',
+  }) {
     final geo = data['location'] as GeoPoint?;
     if (geo == null) return null;
     final applicants = List<dynamic>.from(data['applicants'] ?? []);
-    final hasApplied = type == 'open' &&
+    final hasApplied =
+        type == 'open' &&
         workerUid.isNotEmpty &&
-        applicants.any((a) => (a as Map<String, dynamic>)['workerId'] == workerUid);
+        applicants.any(
+          (a) => (a as Map<String, dynamic>)['workerId'] == workerUid,
+        );
     return GigMarkerData(
       id: id,
       title: data['title'] as String? ?? 'Untitled Gig',
@@ -292,8 +321,11 @@ class _GigMapSectionState extends State<GigMapSection> {
     );
   }
 
-  List<GigMarkerData> get _allGigs =>
-      [..._quickGigs, ..._openGigs, ..._offeredGigs];
+  List<GigMarkerData> get _allGigs => [
+    ..._quickGigs,
+    ..._openGigs,
+    ..._offeredGigs,
+  ];
 
   static double _gridSize(double zoom) {
     if (zoom < 10) return 0.15;
@@ -331,43 +363,44 @@ class _GigMapSectionState extends State<GigMapSection> {
   }
 
   List<Marker> _buildMarkers() {
-  return _buildClusters().map((cluster) {
-    if (cluster.count == 1 && cluster.singleGig != null) {
-      final singleGig = cluster.singleGig!;
+    return _buildClusters().map((cluster) {
+      if (cluster.count == 1 && cluster.singleGig != null) {
+        final singleGig = cluster.singleGig!;
+        return Marker(
+          point: cluster.center,
+          width: 40,
+          height: 48,
+          child: _GigPin(
+            gig: singleGig,
+            isVerified: widget.isVerified,
+            workerSkills: widget.workerSkills,
+            onStart:
+                singleGig.gigType == 'quick' &&
+                    singleGig.assignedWorkerId == widget.uid
+                ? () => widget.onQuickGigStarted?.call(singleGig)
+                : null,
+            onApply: singleGig.gigType == 'open'
+                ? () => _applyToOpenGig(singleGig)
+                : null,
+          ),
+        );
+      }
+
       return Marker(
         point: cluster.center,
-        width: 40,
-        height: 48,
-        child: _GigPin(
-          gig: singleGig,
+        width: 60,
+        height: 60,
+        child: _GigClusterBadge(
+          count: cluster.count,
+          gigs: cluster.gigs,
           isVerified: widget.isVerified,
           workerSkills: widget.workerSkills,
-          onStart: singleGig.gigType == 'quick' &&
-                  singleGig.assignedWorkerId == widget.uid
-              ? () => widget.onQuickGigStarted?.call(singleGig)
-              : null,
-          onApply: singleGig.gigType == 'open'
-              ? () => _applyToOpenGig(singleGig)
-              : null,
+          onQuickGigStarted: widget.onQuickGigStarted,
+          onOpenGigApplied: _applyToOpenGig,
         ),
       );
-    }
-
-    return Marker(
-      point: cluster.center,
-      width: 60,
-      height: 60,
-      child: _GigClusterBadge(
-        count: cluster.count,
-        gigs: cluster.gigs,
-        isVerified: widget.isVerified,
-        workerSkills: widget.workerSkills,
-        onQuickGigStarted: widget.onQuickGigStarted,
-        onOpenGigApplied: _applyToOpenGig,
-      ),
-    );
-  }).toList();
-}
+    }).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -382,34 +415,40 @@ class _GigMapSectionState extends State<GigMapSection> {
         Row(
           children: [
             Expanded(
-              child: Text('Gigs Near You',
-                  style: TextStyle(
-                      color: onSurface,
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold)),
+              child: Text(
+                'Gigs Near You',
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
             if (offeredCount > 0)
               Container(
                 margin: const EdgeInsets.only(right: 8),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.4)),
+                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
+                  ),
                 ),
                 child: Text(
                   '$offeredCount Offered',
                   style: const TextStyle(
-                      color: Color(0xFF8B5CF6),
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold),
+                    color: Color(0xFF8B5CF6),
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: kAmber.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
@@ -418,9 +457,10 @@ class _GigMapSectionState extends State<GigMapSection> {
               child: Text(
                 '$total ${total == 1 ? 'Gig' : 'Gigs'}',
                 style: const TextStyle(
-                    color: kAmber,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold),
+                  color: kAmber,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -434,8 +474,7 @@ class _GigMapSectionState extends State<GigMapSection> {
             ],
             _LegendDot(color: kBlue, label: 'Open'),
             const SizedBox(width: 14),
-            _LegendDot(
-                color: const Color(0xFF8B5CF6), label: 'Offered to me'),
+            _LegendDot(color: const Color(0xFF8B5CF6), label: 'Offered to me'),
           ],
         ),
         const SizedBox(height: 10),
@@ -455,7 +494,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                     initialCenter: const LatLng(14.5995, 120.9842),
                     initialZoom: 12.0,
                     minZoom: 9.0,
-                    maxZoom: 18.0,
+                    maxZoom: 50.0,
                     onMapEvent: (event) {
                       final newZoom = _mapController.camera.zoom;
                       if ((newZoom - _zoom).abs() >= 0.3) {
@@ -482,7 +521,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                                 color: kBlue,
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                    color: Colors.white, width: 2.5),
+                                  color: Colors.white,
+                                  width: 2.5,
+                                ),
                                 boxShadow: [
                                   BoxShadow(
                                     color: kBlue.withValues(alpha: 0.45),
@@ -532,8 +573,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         Center(
           child: Text(
             'Zoom in to see individual gigs · Tap a pin for details',
-            style: TextStyle(
-                color: kSub.withValues(alpha: 0.7), fontSize: 11),
+            style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 11),
           ),
         ),
       ],
@@ -551,17 +591,17 @@ class _LegendDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-              width: 8,
-              height: 8,
-              decoration:
-                  BoxDecoration(color: color, shape: BoxShape.circle)),
-          const SizedBox(width: 5),
-          Text(label, style: const TextStyle(color: kSub, fontSize: 11)),
-        ],
-      );
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      ),
+      const SizedBox(width: 5),
+      Text(label, style: const TextStyle(color: kSub, fontSize: 11)),
+    ],
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -583,25 +623,34 @@ class _GigPin extends StatelessWidget {
 
   Color get _pinColor {
     switch (gig.gigType) {
-      case 'open':    return kBlue;
-      case 'offered': return const Color(0xFF8B5CF6);
-      default:        return kAmber;
+      case 'open':
+        return kBlue;
+      case 'offered':
+        return const Color(0xFF8B5CF6);
+      default:
+        return kAmber;
     }
   }
 
   IconData get _pinIcon {
     switch (gig.gigType) {
-      case 'open':    return Icons.workspace_premium_outlined;
-      case 'offered': return Icons.send_rounded;
-      default:        return Icons.flash_on_rounded;
+      case 'open':
+        return Icons.workspace_premium_outlined;
+      case 'offered':
+        return Icons.send_rounded;
+      default:
+        return Icons.flash_on_rounded;
     }
   }
 
   List<String> _missingSkills() {
     if (gig.gigType != 'open' || gig.requiredSkills.isEmpty) return [];
     return gig.requiredSkills
-        .where((s) => !workerSkills.any(
-            (ws) => ws.toLowerCase().trim() == s.toLowerCase().trim()))
+        .where(
+          (s) => !workerSkills.any(
+            (ws) => ws.toLowerCase().trim() == s.toLowerCase().trim(),
+          ),
+        )
         .toList();
   }
 
@@ -616,16 +665,16 @@ class _GigPin extends StatelessWidget {
         final typeLabel = gig.gigType == 'open'
             ? 'Open Gig'
             : gig.gigType == 'offered'
-                ? 'Offered to You'
-                : 'Quick Gig';
+            ? 'Offered to You'
+            : 'Quick Gig';
         final isAppliedPending = gig.gigType == 'open' && gig.hasApplied;
         final btnLabel = isAppliedPending
             ? 'Application Pending'
             : gig.gigType == 'open'
-                ? 'Apply Now'
-                : gig.gigType == 'offered'
-                    ? 'Accept Offer'
-                    : 'Start Gig';
+            ? 'Apply Now'
+            : gig.gigType == 'offered'
+            ? 'Accept Offer'
+            : 'Start Gig';
         final missing = _missingSkills();
         final canApply = missing.isEmpty;
 
@@ -655,26 +704,34 @@ class _GigPin extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(gig.title,
-                            style: TextStyle(
-                                color: onSurface,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis),
+                        Text(
+                          gig.title,
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         const SizedBox(height: 2),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2),
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: color.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(6),
                           ),
-                          child: Text(typeLabel,
-                              style: TextStyle(
-                                  color: color,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold)),
+                          child: Text(
+                            typeLabel,
+                            style: TextStyle(
+                              color: color,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -710,48 +767,69 @@ class _GigPin extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.construction_rounded,
-                        color: kSub, size: 16),
+                    const Icon(
+                      Icons.construction_rounded,
+                      color: kSub,
+                      size: 16,
+                    ),
                     const SizedBox(width: 8),
-                    const Text('Skills: ',
-                        style: TextStyle(color: kSub, fontSize: 13)),
+                    const Text(
+                      'Skills: ',
+                      style: TextStyle(color: kSub, fontSize: 13),
+                    ),
                     Expanded(
                       child: Wrap(
                         spacing: 6,
                         runSpacing: 4,
                         children: gig.requiredSkills.map((s) {
-                          final has = workerSkills.any((ws) =>
-                              ws.toLowerCase().trim() ==
-                              s.toLowerCase().trim());
+                          final has = workerSkills.any(
+                            (ws) =>
+                                ws.toLowerCase().trim() ==
+                                s.toLowerCase().trim(),
+                          );
                           return Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
                             decoration: BoxDecoration(
                               color: has
-                                  ? const Color(0xFF10B981).withValues(alpha: 0.12)
+                                  ? const Color(
+                                      0xFF10B981,
+                                    ).withValues(alpha: 0.12)
                                   : Colors.red.withValues(alpha: 0.10),
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                  color: has
-                                      ? const Color(0xFF10B981).withValues(alpha: 0.4)
-                                      : Colors.red.withValues(alpha: 0.35)),
+                                color: has
+                                    ? const Color(
+                                        0xFF10B981,
+                                      ).withValues(alpha: 0.4)
+                                    : Colors.red.withValues(alpha: 0.35),
+                              ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  has ? Icons.check_circle_outline : Icons.cancel_outlined,
+                                  has
+                                      ? Icons.check_circle_outline
+                                      : Icons.cancel_outlined,
                                   size: 11,
-                                  color: has ? const Color(0xFF10B981) : Colors.red,
+                                  color: has
+                                      ? const Color(0xFF10B981)
+                                      : Colors.red,
                                 ),
                                 const SizedBox(width: 3),
-                                Text(s,
-                                    style: TextStyle(
-                                        color: has
-                                            ? const Color(0xFF10B981)
-                                            : Colors.red,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500)),
+                                Text(
+                                  s,
+                                  style: TextStyle(
+                                    color: has
+                                        ? const Color(0xFF10B981)
+                                        : Colors.red,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
                               ],
                             ),
                           );
@@ -764,22 +842,32 @@ class _GigPin extends StatelessWidget {
               if (missing.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.red.withValues(alpha: 0.07),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+                    border: Border.all(
+                      color: Colors.red.withValues(alpha: 0.25),
+                    ),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.info_outline_rounded,
-                          color: Colors.red, size: 15),
+                      const Icon(
+                        Icons.info_outline_rounded,
+                        color: Colors.red,
+                        size: 15,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'You lack ${missing.length == 1 ? 'a required skill' : '${missing.length} required skills'}: ${missing.join(', ')}',
                           style: const TextStyle(
-                              color: Colors.red, fontSize: 12),
+                            color: Colors.red,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
                     ],
@@ -814,23 +902,29 @@ class _GigPin extends StatelessWidget {
                     disabledForegroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       if (isAppliedPending) ...[
                         const SizedBox(
-                          width: 14, height: 14,
+                          width: 14,
+                          height: 14,
                           child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2),
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
                         ),
                         const SizedBox(width: 8),
                       ],
                       Text(
                         isAppliedPending
                             ? 'Application Pending'
-                            : canApply ? btnLabel : 'Skills Required',
+                            : canApply
+                            ? btnLabel
+                            : 'Skills Required',
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ],
@@ -891,11 +985,12 @@ class _GigSheetRow extends StatelessWidget {
   final String label;
   final String value;
   final Color? valueColor;
-  const _GigSheetRow(
-      {required this.icon,
-      required this.label,
-      required this.value,
-      this.valueColor});
+  const _GigSheetRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -905,17 +1000,18 @@ class _GigSheetRow extends StatelessWidget {
         children: [
           Icon(icon, color: kSub, size: 16),
           const SizedBox(width: 8),
-          Text('$label: ',
-              style: const TextStyle(color: kSub, fontSize: 13)),
+          Text('$label: ', style: const TextStyle(color: kSub, fontSize: 13)),
           Expanded(
-            child: Text(value,
-                style: TextStyle(
-                    color: valueColor ??
-                        Theme.of(context).colorScheme.onSurface,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
+            child: Text(
+              value,
+              style: TextStyle(
+                color: valueColor ?? Theme.of(context).colorScheme.onSurface,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
@@ -959,10 +1055,14 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat();
-    _pulseScale = Tween<double>(begin: 1.0, end: 1.9)
-        .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut));
-    _pulseOpacity = Tween<double>(begin: 0.55, end: 0.0)
-        .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut));
+    _pulseScale = Tween<double>(
+      begin: 1.0,
+      end: 1.9,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut));
+    _pulseOpacity = Tween<double>(
+      begin: 0.55,
+      end: 0.0,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut));
   }
 
   @override
@@ -1010,20 +1110,28 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                         color: kAmber.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.work_outline_rounded,
-                          color: kAmber, size: 18),
+                      child: const Icon(
+                        Icons.work_outline_rounded,
+                        color: kAmber,
+                        size: 18,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('${widget.count} Gigs in this area',
-                            style: TextStyle(
-                                color: onSurface,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
-                        const Text('Tap a gig to see details',
-                            style: TextStyle(color: kSub, fontSize: 11)),
+                        Text(
+                          '${widget.count} Gigs in this area',
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Text(
+                          'Tap a gig to see details',
+                          style: TextStyle(color: kSub, fontSize: 11),
+                        ),
                       ],
                     ),
                   ],
@@ -1031,9 +1139,10 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
               ),
               const SizedBox(height: 12),
               Divider(
-                  color: isDark
-                      ? kBorder.withValues(alpha: 0.5)
-                      : Colors.grey.withValues(alpha: 0.15)),
+                color: isDark
+                    ? kBorder.withValues(alpha: 0.5)
+                    : Colors.grey.withValues(alpha: 0.15),
+              ),
               ConstrainedBox(
                 constraints: BoxConstraints(
                   maxHeight: MediaQuery.of(ctx).size.height * 0.45,
@@ -1041,7 +1150,9 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                 child: ListView.separated(
                   shrinkWrap: true,
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8),
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   itemCount: widget.gigs.length,
                   separatorBuilder: (_, i) => Divider(
                     height: 1,
@@ -1054,36 +1165,42 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                     final typeColor = g.gigType == 'open'
                         ? kBlue
                         : g.gigType == 'offered'
-                            ? const Color(0xFF8B5CF6)
-                            : kAmber;
+                        ? const Color(0xFF8B5CF6)
+                        : kAmber;
                     final typeIcon = g.gigType == 'open'
                         ? Icons.workspace_premium_outlined
                         : g.gigType == 'offered'
-                            ? Icons.send_rounded
-                            : Icons.flash_on_rounded;
+                        ? Icons.send_rounded
+                        : Icons.flash_on_rounded;
                     final typeLabel = g.gigType == 'open'
                         ? 'Open'
                         : g.gigType == 'offered'
-                            ? 'Offered'
-                            : 'Quick';
+                        ? 'Offered'
+                        : 'Quick';
                     final btnLabel = g.gigType == 'open'
                         ? 'Apply'
                         : g.gigType == 'offered'
-                            ? 'Accept'
-                            : 'Start';
-                    final missing = g.gigType == 'open' &&
-                            g.requiredSkills.isNotEmpty
+                        ? 'Accept'
+                        : 'Start';
+                    final missing =
+                        g.gigType == 'open' && g.requiredSkills.isNotEmpty
                         ? g.requiredSkills
-                            .where((s) => !widget.workerSkills.any((ws) =>
-                                ws.toLowerCase().trim() ==
-                                s.toLowerCase().trim()))
-                            .toList()
+                              .where(
+                                (s) => !widget.workerSkills.any(
+                                  (ws) =>
+                                      ws.toLowerCase().trim() ==
+                                      s.toLowerCase().trim(),
+                                ),
+                              )
+                              .toList()
                         : <String>[];
                     final canApply = missing.isEmpty;
 
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       leading: Container(
                         width: 44,
                         height: 44,
@@ -1093,13 +1210,16 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                         ),
                         child: Icon(typeIcon, color: typeColor, size: 20),
                       ),
-                      title: Text(g.title,
-                          style: TextStyle(
-                              color: onSurface,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
+                      title: Text(
+                        g.title,
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1107,22 +1227,29 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                             children: [
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 5, vertical: 1),
+                                  horizontal: 5,
+                                  vertical: 1,
+                                ),
                                 decoration: BoxDecoration(
                                   color: typeColor.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
-                                child: Text(typeLabel,
-                                    style: TextStyle(
-                                        color: typeColor, fontSize: 10)),
+                                child: Text(
+                                  typeLabel,
+                                  style: TextStyle(
+                                    color: typeColor,
+                                    fontSize: 10,
+                                  ),
+                                ),
                               ),
                               const SizedBox(width: 8),
                               Text(
                                 '₱${g.budget.toStringAsFixed(0)}',
                                 style: const TextStyle(
-                                    color: kAmber,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600),
+                                  color: kAmber,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ],
                           ),
@@ -1131,7 +1258,9 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                             Text(
                               'Missing: ${missing.join(', ')}',
                               style: const TextStyle(
-                                  color: Colors.red, fontSize: 10),
+                                color: Colors.red,
+                                fontSize: 10,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -1158,20 +1287,24 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                           backgroundColor: canApply
                               ? typeColor.withValues(alpha: 0.1)
                               : Colors.grey.withValues(alpha: 0.1),
-                          foregroundColor:
-                              canApply ? typeColor : Colors.grey,
+                          foregroundColor: canApply ? typeColor : Colors.grey,
                           disabledForegroundColor: Colors.grey,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         child: Text(
                           canApply ? btnLabel : 'Locked',
                           style: const TextStyle(
-                              fontSize: 12, fontWeight: FontWeight.bold),
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     );
@@ -1208,15 +1341,19 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
           Text(
             '${widget.count}',
             style: const TextStyle(
-                color: Colors.black,
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-                height: 1),
+              color: Colors.black,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+              height: 1,
+            ),
           ),
           const Text(
             'gigs',
             style: TextStyle(
-                color: Colors.black87, fontSize: 8, letterSpacing: 0.3),
+              color: Colors.black87,
+              fontSize: 8,
+              letterSpacing: 0.3,
+            ),
           ),
         ],
       ),
@@ -1250,8 +1387,9 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                         color: kAmber.withValues(alpha: _pulseOpacity.value),
                         width: 2.5,
                       ),
-                      color: kAmber
-                          .withValues(alpha: _pulseOpacity.value * 0.25),
+                      color: kAmber.withValues(
+                        alpha: _pulseOpacity.value * 0.25,
+                      ),
                     ),
                   ),
                 ),
@@ -1289,9 +1427,7 @@ class _TrianglePainter extends CustomPainter {
   bool shouldRepaint(_TrianglePainter old) => old.color != color;
 }
 
-void _showModal(
-  BuildContext context, 
-) {
+void _showModal(BuildContext context) {
   showDialog(
     context: context,
     builder: (_) => AlertDialog(
@@ -1303,14 +1439,10 @@ void _showModal(
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: ( Colors.red).withValues(alpha: 0.1),
+              color: (Colors.red).withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              Icons.error_outline,
-              color: Colors.red,
-              size: 40,
-            ),
+            child: Icon(Icons.error_outline, color: Colors.red, size: 40),
           ),
           const SizedBox(height: 16),
           Text(
@@ -1329,7 +1461,7 @@ void _showModal(
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor:  Colors.red,
+                backgroundColor: Colors.red,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),

@@ -27,8 +27,6 @@ class DeleteAccountService {
     final reauthed = await _reAuthenticate(context, user, signInMethod);
     if (!reauthed || !context.mounted) return;
 
-    // Navigate to login FIRST so all screen subscriptions are disposed
-    // before we delete data — prevents permission-denied stream errors.
     if (context.mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -48,16 +46,20 @@ class DeleteAccountService {
         // ignore: use_build_context_synchronously
         ScaffoldMessenger.of(ctx).showSnackBar(
           SnackBar(
-            content: const Row(children: [
-              Icon(Icons.check_circle_outline, color: Colors.white),
-              SizedBox(width: 10),
-              Expanded(
-                  child: Text('Your account has been successfully deleted.')),
-            ]),
+            content: const Row(
+              children: [
+                Icon(Icons.check_circle_outline, color: Colors.white),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text('Your account has been successfully deleted.'),
+                ),
+              ],
+            ),
             backgroundColor: const Color(0xFF1B6CA8),
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+              borderRadius: BorderRadius.circular(12),
+            ),
             duration: const Duration(seconds: 4),
           ),
         );
@@ -84,7 +86,8 @@ class DeleteAccountService {
           builder: (ctx) => AlertDialog(
             backgroundColor: Theme.of(ctx).cardColor,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+              borderRadius: BorderRadius.circular(16),
+            ),
             titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
             contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
             actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -96,8 +99,11 @@ class DeleteAccountService {
                     color: Colors.red.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.warning_amber_rounded,
-                      color: Colors.redAccent, size: 20),
+                  child: const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.redAccent,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Text(
@@ -144,7 +150,9 @@ class DeleteAccountService {
                 child: const Text(
                   'Delete Account',
                   style: TextStyle(
-                      color: Colors.redAccent, fontWeight: FontWeight.w600),
+                    color: Colors.redAccent,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -154,15 +162,17 @@ class DeleteAccountService {
   }
 
   static Future<bool> _reAuthenticate(
-      BuildContext context, User user, String signInMethod) async {
+    BuildContext context,
+    User user,
+    String signInMethod,
+  ) async {
     if (signInMethod == 'google') {
       return _reAuthWithGoogle(context, user);
     }
     return _reAuthWithEmail(context, user);
   }
 
-  static Future<bool> _reAuthWithEmail(
-      BuildContext context, User user) async {
+  static Future<bool> _reAuthWithEmail(BuildContext context, User user) async {
     final passwordController = TextEditingController();
     String localError = '';
 
@@ -173,7 +183,8 @@ class DeleteAccountService {
         builder: (ctx, setState) => AlertDialog(
           backgroundColor: Theme.of(ctx).cardColor,
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16)),
+            borderRadius: BorderRadius.circular(16),
+          ),
           titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
           contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
           actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -199,8 +210,9 @@ class DeleteAccountService {
                 obscureText: true,
                 autofocus: true,
                 style: TextStyle(
-                    color: Theme.of(ctx).colorScheme.onSurface,
-                    fontSize: 14),
+                  color: Theme.of(ctx).colorScheme.onSurface,
+                  fontSize: 14,
+                ),
                 decoration: InputDecoration(
                   labelText: 'Password',
                   labelStyle: const TextStyle(color: kSub, fontSize: 14),
@@ -222,9 +234,10 @@ class DeleteAccountService {
               ),
               if (localError.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text(localError,
-                    style: const TextStyle(
-                        color: Colors.redAccent, fontSize: 12)),
+                Text(
+                  localError,
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                ),
               ],
             ],
           ),
@@ -242,24 +255,32 @@ class DeleteAccountService {
                 }
                 try {
                   final credential = EmailAuthProvider.credential(
-                      email: user.email!, password: password);
+                    email: user.email!,
+                    password: password,
+                  );
                   await user.reauthenticateWithCredential(credential);
                   if (ctx.mounted) Navigator.pop(ctx, true);
                 } on FirebaseAuthException catch (e) {
-                  setState(() => localError =
-                      (e.code == 'wrong-password' ||
-                              e.code == 'invalid-credential')
-                          ? 'Incorrect password.'
-                          : (e.message ?? 'Authentication failed.'));
+                  setState(
+                    () => localError =
+                        (e.code == 'wrong-password' ||
+                            e.code == 'invalid-credential')
+                        ? 'Incorrect password.'
+                        : (e.message ?? 'Authentication failed.'),
+                  );
                 } catch (_) {
-                  setState(() => localError =
-                      'Authentication failed. Please try again.');
+                  setState(
+                    () =>
+                        localError = 'Authentication failed. Please try again.',
+                  );
                 }
               },
               child: const Text(
                 'Confirm',
                 style: TextStyle(
-                    color: Colors.redAccent, fontWeight: FontWeight.w600),
+                  color: Colors.redAccent,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
@@ -271,19 +292,19 @@ class DeleteAccountService {
     return result ?? false;
   }
 
-  static Future<bool> _reAuthWithGoogle(
-      BuildContext context, User user) async {
+  static Future<bool> _reAuthWithGoogle(BuildContext context, User user) async {
     try {
       if (kIsWeb) {
         final provider = GoogleAuthProvider();
         await user.reauthenticateWithProvider(provider);
       } else {
         final googleUser = await GoogleSignIn(
-          serverClientId: '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com',
+          serverClientId:
+              '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com',
         ).signIn();
         if (googleUser == null) return false;
-        final googleAuth  = await googleUser.authentication;
-        final idToken     = googleAuth.idToken;
+        final googleAuth = await googleUser.authentication;
+        final idToken = googleAuth.idToken;
         final accessToken = googleAuth.accessToken;
         if (idToken == null && accessToken == null) return false;
         final credential = GoogleAuthProvider.credential(
@@ -296,7 +317,9 @@ class DeleteAccountService {
     } catch (_) {
       if (context.mounted) {
         _showError(
-            context, 'Google re-authentication failed. Please try again.');
+          context,
+          'Google re-authentication failed. Please try again.',
+        );
       }
       return false;
     }
@@ -342,11 +365,13 @@ class DeleteAccountService {
 
     // ── 5. Firestore: skill_requests owned by user ────────────────────────────
     await _deleteCollection(
-        db.collection('skill_requests').where('userId', isEqualTo: uid));
+      db.collection('skill_requests').where('userId', isEqualTo: uid),
+    );
 
     // ── 6. Firestore: gig_templates created by user ───────────────────────────
     await _deleteCollection(
-        db.collection('gig_templates').where('hostId', isEqualTo: uid));
+      db.collection('gig_templates').where('hostId', isEqualTo: uid),
+    );
 
     // ── 7. Firestore: verification_requests (doc keyed by uid) ────────────────
     await db
@@ -357,15 +382,18 @@ class DeleteAccountService {
 
     // ── 8. Firestore: support_tickets submitted by user ───────────────────────
     await _deleteCollection(
-        db.collection('support_tickets').where('userId', isEqualTo: uid));
+      db.collection('support_tickets').where('userId', isEqualTo: uid),
+    );
 
     // ── 9. Firestore: notifications addressed to user ─────────────────────────
     await _deleteCollection(
-        db.collection('notifications').where('userId', isEqualTo: uid));
+      db.collection('notifications').where('userId', isEqualTo: uid),
+    );
 
     // ── 10. Firestore: chat_rooms owned by user (support chats) ──────────────
     await _deleteCollection(
-        db.collection('chat_rooms').where('userId', isEqualTo: uid));
+      db.collection('chat_rooms').where('userId', isEqualTo: uid),
+    );
 
     // ── 11. ANONYMIZE: quick_gigs where user was the host ────────────────────
     await _anonymizeCollection(
@@ -410,7 +438,9 @@ class DeleteAccountService {
 
   // Updates all documents returned by a query with the given fields.
   static Future<void> _anonymizeCollection(
-      Query query, Map<String, dynamic> fields) async {
+    Query query,
+    Map<String, dynamic> fields,
+  ) async {
     try {
       final snap = await query.get();
       for (final doc in snap.docs) {
@@ -422,15 +452,16 @@ class DeleteAccountService {
   static void _showError(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Row(children: [
-          const Icon(Icons.error_outline, color: Colors.white),
-          const SizedBox(width: 10),
-          Expanded(child: Text(message)),
-        ]),
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message)),
+          ],
+        ),
         backgroundColor: Colors.redAccent,
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         duration: const Duration(seconds: 4),
       ),
     );
