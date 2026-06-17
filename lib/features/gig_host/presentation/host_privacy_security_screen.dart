@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../services/delete_account_service.dart';
+import '../../../services/delete_acc_service.dart';
 
 class HostPrivacySecurityScreen extends StatelessWidget {
   const HostPrivacySecurityScreen({super.key});

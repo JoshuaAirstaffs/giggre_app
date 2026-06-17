@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../services/delete_account_service.dart';
+import '../../../services/delete_acc_service.dart';
 import 'widgets/worker_widgets.dart';
 
 class WorkerSettingsScreen extends StatefulWidget {

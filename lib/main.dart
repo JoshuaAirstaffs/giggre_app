@@ -13,6 +13,7 @@ import 'features/auth/presentation/register_screen.dart';
 import 'core/widgets/main_navigation.dart';
 import 'core/widgets/app_update_checker.dart';
 import 'core/theme/theme_provider.dart';
+import 'services/delete_acc_service.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<NavigatorState> callNavigatorKey = GlobalKey<NavigatorState>();
@@ -52,7 +53,12 @@ class _AuthGateState extends State<AuthGate> {
   // Pre-set to true if there's a cached user so the very first frame shows
   // loading rather than LoginScreen while the Firestore restore runs.
   bool _restoringSession = FirebaseAuth.instance.currentUser != null;
+  bool _pendingDeletion = false;
+  DateTime? _scheduledDeleteAt;
   String? _accountError;
+  // UID for which _doRestore has completed — guards against the LoginScreen
+  // calling setCurrentUserInfo before _doRestore runs its pendingDeletion check.
+  String? _restoredForUid;
   late final Stream<User?> _authStream;
 
   @override
@@ -74,13 +80,29 @@ class _AuthGateState extends State<AuthGate> {
           .get();
       if (!mounted) return;
       if (doc.exists) {
+        final data = doc.data()!;
+
+        if (data['pendingDeletion'] == true) {
+          final ts = data['scheduledDeleteAt'];
+          if (mounted) {
+            setState(() {
+              _pendingDeletion = true;
+              _scheduledDeleteAt =
+                  ts != null ? (ts as Timestamp).toDate() : null;
+              _restoredForUid = user.uid;
+            });
+          }
+          return;
+        }
+
         context.read<CurrentUserProvider>().setCurrentUserInfo(
           user.email,
-          doc.data()?['name'],
+          data['name'],
           user.uid,
-          doc.data()?['userId'],
-          doc.data()?['isVerified'],
+          data['userId'],
+          data['isVerified'],
         );
+        if (mounted) setState(() => _restoredForUid = user.uid);
       } else {
         if (mounted) {
           context.read<CurrentUserProvider>().setCurrentUserInfo(
@@ -90,6 +112,7 @@ class _AuthGateState extends State<AuthGate> {
             null,
             null,
           );
+          setState(() => _restoredForUid = user.uid);
         }
         return;
       }
@@ -104,6 +127,7 @@ class _AuthGateState extends State<AuthGate> {
           null,
           null,
         );
+        setState(() => _restoredForUid = user.uid);
       }
     } finally {
       if (mounted) setState(() => _restoringSession = false);
@@ -133,9 +157,35 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
+        // No Firebase user — signed out. Reset deletion gate and go to login.
+        if (!snapshot.hasData && !provider.isLoggedIn) {
+          if (_pendingDeletion || _restoredForUid != null) {
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => setState(() {
+                _pendingDeletion = false;
+                _scheduledDeleteAt = null;
+                _restoredForUid = null;
+              }),
+            );
+          }
+          return LoginScreen(errorMessage: _accountError);
+        }
+
+        if (_pendingDeletion) {
+          return _PendingDeletionScreen(
+            scheduledDeleteAt: _scheduledDeleteAt,
+            onCancelled: () => setState(() {
+              _pendingDeletion = false;
+              _scheduledDeleteAt = null;
+            }),
+          );
+        }
+
         // Trust the provider over the stream — avoids a LoginScreen flash if
         // Firebase briefly emits null during token refresh on app restart.
-        if (provider.isLoggedIn) {
+        // Also require _doRestore ran for this user so the pendingDeletion
+        // check always runs before we open the home screen.
+        if (provider.isLoggedIn && _restoredForUid == snapshot.data?.uid) {
           return const MainNavigation();
         }
 
@@ -151,6 +201,91 @@ class _AuthGateState extends State<AuthGate> {
 
         return LoginScreen(errorMessage: _accountError);
       },
+    );
+  }
+}
+
+class _PendingDeletionScreen extends StatelessWidget {
+  final DateTime? scheduledDeleteAt;
+  final VoidCallback onCancelled;
+
+  const _PendingDeletionScreen({
+    required this.scheduledDeleteAt,
+    required this.onCancelled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final daysLeft = scheduledDeleteAt != null
+        ? scheduledDeleteAt!.difference(DateTime.now()).inDays + 1
+        : 30;
+    final dateStr = scheduledDeleteAt != null
+        ? '${scheduledDeleteAt!.day}/${scheduledDeleteAt!.month}/${scheduledDeleteAt!.year}'
+        : '';
+
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.delete_forever_outlined,
+                    color: Colors.redAccent, size: 48),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Account Pending Deletion',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Your account is scheduled for permanent deletion in $daysLeft day${daysLeft == 1 ? '' : 's'}${dateStr.isNotEmpty ? ' (on $dateStr)' : ''}.',
+                style: const TextStyle(fontSize: 14, color: Colors.grey, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'You can cancel this request to restore full access to your account.',
+                style: TextStyle(fontSize: 14, color: Colors.grey, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () async {
+                    await DeleteAccountService.cancelDeletion(context);
+                    onCancelled();
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF1B6CA8),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('Cancel Deletion',
+                      style:
+                          TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => FirebaseAuth.instance.signOut(),
+                child: const Text('Sign Out',
+                    style: TextStyle(color: Colors.grey, fontSize: 14)),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
