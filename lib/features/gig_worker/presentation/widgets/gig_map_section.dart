@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart' hide Path;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../../core/theme/app_colors.dart';
 
@@ -83,9 +84,13 @@ class GigMapSection extends StatefulWidget {
 }
 
 class _GigMapSectionState extends State<GigMapSection> {
-  final _mapController = MapController();
+  GoogleMapController? _googleMapController;
   double _zoom = 12.0;
   LatLng? _myLocation;
+  bool _mapInteractive = false;
+
+  // Store context for use in marker callbacks
+  BuildContext? _context;
 
   List<GigMarkerData> _quickGigs = [];
   List<GigMarkerData> _openGigs = [];
@@ -100,7 +105,7 @@ class _GigMapSectionState extends State<GigMapSection> {
     final db = FirebaseFirestore.instance;
     _startOpenSub(db);
     _startOfferedSub(db);
-    if (widget.seekingQuickGigs) _startQuickSub(db);
+    _startQuickSub(db);
     _fetchAndCenterMap();
   }
 
@@ -122,23 +127,17 @@ class _GigMapSectionState extends State<GigMapSection> {
         ),
       );
       if (!mounted) return;
-      setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));
-      _mapController.move(_myLocation!, 14.0);
+      final loc = LatLng(pos.latitude, pos.longitude);
+      setState(() => _myLocation = loc);
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(loc, 14.0),
+      );
     } catch (_) {}
   }
 
   @override
   void didUpdateWidget(GigMapSection old) {
     super.didUpdateWidget(old);
-    if (old.seekingQuickGigs != widget.seekingQuickGigs) {
-      if (widget.seekingQuickGigs) {
-        _startQuickSub(FirebaseFirestore.instance);
-      } else {
-        _quickSub?.cancel();
-        _quickSub = null;
-        setState(() => _quickGigs = []);
-      }
-    }
   }
 
   void _startQuickSub(FirebaseFirestore db) {
@@ -282,7 +281,7 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   @override
   void dispose() {
-    _mapController.dispose();
+    _googleMapController?.dispose();
     _quickSub?.cancel();
     _openSub.cancel();
     _offeredSub.cancel();
@@ -362,306 +361,111 @@ class _GigMapSectionState extends State<GigMapSection> {
     }).toList();
   }
 
-  List<Marker> _buildMarkers() {
-    return _buildClusters().map((cluster) {
+  double _hueForType(String type) {
+    switch (type) {
+      case 'open':
+        return BitmapDescriptor.hueBlue;
+      case 'offered':
+        return BitmapDescriptor.hueViolet;
+      default:
+        return BitmapDescriptor.hueYellow;
+    }
+  }
+
+  List<Marker> _buildGoogleMarkers() {
+    final markers = _buildClusters().map((cluster) {
       if (cluster.count == 1 && cluster.singleGig != null) {
         final singleGig = cluster.singleGig!;
         return Marker(
-          point: cluster.center,
-          width: 40,
-          height: 48,
-          child: _GigPin(
-            gig: singleGig,
-            isVerified: widget.isVerified,
-            workerSkills: widget.workerSkills,
-            onStart:
-                singleGig.gigType == 'quick' &&
-                    singleGig.assignedWorkerId == widget.uid
-                ? () => widget.onQuickGigStarted?.call(singleGig)
-                : null,
-            onApply: singleGig.gigType == 'open'
-                ? () => _applyToOpenGig(singleGig)
-                : null,
+          markerId: MarkerId(singleGig.id),
+          position: cluster.center,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            _hueForType(singleGig.gigType),
           ),
+          onTap: () {
+            final ctx = _context;
+            if (ctx != null) _showGigSheet(ctx, singleGig);
+          },
         );
       }
 
       return Marker(
-        point: cluster.center,
-        width: 60,
-        height: 60,
-        child: _GigClusterBadge(
-          count: cluster.count,
-          gigs: cluster.gigs,
-          isVerified: widget.isVerified,
-          workerSkills: widget.workerSkills,
-          onQuickGigStarted: widget.onQuickGigStarted,
-          onOpenGigApplied: _applyToOpenGig,
+        markerId: MarkerId(
+          'cluster_${cluster.center.latitude}_${cluster.center.longitude}',
         ),
+        position: cluster.center,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+        infoWindow: InfoWindow(title: '${cluster.count} gigs'),
+        onTap: () {
+          final ctx = _context;
+          if (ctx != null) _showClusterSheet(ctx, cluster.gigs);
+        },
       );
     }).toList();
+
+    if (_myLocation != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('my_location'),
+          position: _myLocation!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan),
+          infoWindow: InfoWindow(title: widget.workerName.isNotEmpty
+              ? widget.workerName
+              : 'Your Location'),
+          zIndex: 10,
+        ),
+      );
+    }
+
+    return markers;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    final borderColor = Theme.of(context).dividerColor;
-    final total = _allGigs.length;
-    final offeredCount = _offeredGigs.length;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Gigs Near You',
-                style: TextStyle(
-                  color: onSurface,
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            if (offeredCount > 0)
-              Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
-                  ),
-                ),
-                child: Text(
-                  '$offeredCount Offered',
-                  style: const TextStyle(
-                    color: Color(0xFF8B5CF6),
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: kAmber.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: kAmber.withValues(alpha: 0.4)),
-              ),
-              child: Text(
-                '$total ${total == 1 ? 'Gig' : 'Gigs'}',
-                style: const TextStyle(
-                  color: kAmber,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            if (widget.seekingQuickGigs) ...[
-              _LegendDot(color: kAmber, label: 'Quick'),
-              const SizedBox(width: 14),
-            ],
-            _LegendDot(color: kBlue, label: 'Open'),
-            const SizedBox(width: 14),
-            _LegendDot(color: const Color(0xFF8B5CF6), label: 'Offered to me'),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Stack(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                height: 300,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: borderColor),
-                ),
-                child: FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: const LatLng(14.5995, 120.9842),
-                    initialZoom: 12.0,
-                    minZoom: 9.0,
-                    maxZoom: 50.0,
-                    onMapEvent: (event) {
-                      final newZoom = _mapController.camera.zoom;
-                      if ((newZoom - _zoom).abs() >= 0.3) {
-                        setState(() => _zoom = newZoom);
-                      }
-                    },
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.giggre.app',
-                    ),
-                    MarkerLayer(markers: _buildMarkers()),
-                    if (_myLocation != null)
-                      MarkerLayer(
-                        markers: [
-                          Marker(
-                            point: _myLocation!,
-                            width: 22,
-                            height: 22,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: kBlue,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 2.5,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: kBlue.withValues(alpha: 0.45),
-                                    blurRadius: 8,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            // Recenter button
-            Positioned(
-              bottom: 12,
-              right: 12,
-              child: GestureDetector(
-                onTap: _fetchAndCenterMap,
-                child: Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.18),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    Icons.my_location_rounded,
-                    size: 18,
-                    color: _myLocation != null ? kBlue : kSub,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Center(
-          child: Text(
-            'Zoom in to see individual gigs · Tap a pin for details',
-            style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 11),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Legend dot
-// ─────────────────────────────────────────────────────────────────────────────
-class _LegendDot extends StatelessWidget {
-  final Color color;
-  final String label;
-  const _LegendDot({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(
-        width: 8,
-        height: 8,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      ),
-      const SizedBox(width: 5),
-      Text(label, style: const TextStyle(color: kSub, fontSize: 11)),
-    ],
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Gig Pin (single marker)
-// ─────────────────────────────────────────────────────────────────────────────
-class _GigPin extends StatelessWidget {
-  final GigMarkerData gig;
-  final String isVerified;
-  final List<String> workerSkills;
-  final VoidCallback? onStart;
-  final VoidCallback? onApply;
-  const _GigPin({
-    required this.gig,
-    required this.isVerified,
-    this.workerSkills = const [],
-    this.onStart,
-    this.onApply,
-  });
-
-  Color get _pinColor {
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Bottom sheet: single gig
+  // ─────────────────────────────────────────────────────────────────────────
+  void _showGigSheet(BuildContext context, GigMarkerData gig) {
+    Color pinColor;
     switch (gig.gigType) {
       case 'open':
-        return kBlue;
+        pinColor = kBlue;
+        break;
       case 'offered':
-        return const Color(0xFF8B5CF6);
+        pinColor = const Color(0xFF8B5CF6);
+        break;
       default:
-        return kAmber;
+        pinColor = kAmber;
     }
-  }
 
-  IconData get _pinIcon {
+    IconData pinIcon;
     switch (gig.gigType) {
       case 'open':
-        return Icons.workspace_premium_outlined;
+        pinIcon = Icons.workspace_premium_outlined;
+        break;
       case 'offered':
-        return Icons.send_rounded;
+        pinIcon = Icons.send_rounded;
+        break;
       default:
-        return Icons.flash_on_rounded;
+        pinIcon = Icons.flash_on_rounded;
     }
-  }
 
-  List<String> _missingSkills() {
-    if (gig.gigType != 'open' || gig.requiredSkills.isEmpty) return [];
-    return gig.requiredSkills
-        .where(
-          (s) => !workerSkills.any(
-            (ws) => ws.toLowerCase().trim() == s.toLowerCase().trim(),
-          ),
-        )
-        .toList();
-  }
+    List<String> missingSkills() {
+      if (gig.gigType != 'open' || gig.requiredSkills.isEmpty) return [];
+      return gig.requiredSkills
+          .where(
+            (s) => !widget.workerSkills.any(
+              (ws) => ws.toLowerCase().trim() == s.toLowerCase().trim(),
+            ),
+          )
+          .toList();
+    }
 
-  void _showGigSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         final cardColor = Theme.of(ctx).cardColor;
         final onSurface = Theme.of(ctx).colorScheme.onSurface;
-        final color = _pinColor;
+        final color = pinColor;
         final typeLabel = gig.gigType == 'open'
             ? 'Open Gig'
             : gig.gigType == 'offered'
@@ -675,7 +479,7 @@ class _GigPin extends StatelessWidget {
             : gig.gigType == 'offered'
             ? 'Accept Offer'
             : 'Start Gig';
-        final missing = _missingSkills();
+        final missing = missingSkills();
         final canApply = missing.isEmpty;
 
         return Container(
@@ -697,7 +501,7 @@ class _GigPin extends StatelessWidget {
                       color: color.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(_pinIcon, color: color, size: 22),
+                    child: Icon(pinIcon, color: color, size: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -782,7 +586,7 @@ class _GigPin extends StatelessWidget {
                         spacing: 6,
                         runSpacing: 4,
                         children: gig.requiredSkills.map((s) {
-                          final has = workerSkills.any(
+                          final has = widget.workerSkills.any(
                             (ws) =>
                                 ws.toLowerCase().trim() ==
                                 s.toLowerCase().trim(),
@@ -881,15 +685,15 @@ class _GigPin extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: (canApply && !isAppliedPending)
                       ? () {
-                          if (isVerified != 'verified') {
+                          if (widget.isVerified != 'verified') {
                             _showModal(context);
                             return;
                           }
                           Navigator.pop(ctx);
                           if (gig.gigType == 'quick') {
-                            onStart?.call();
+                            widget.onQuickGigStarted?.call(gig);
                           } else if (gig.gigType == 'open') {
-                            onApply?.call();
+                            _applyToOpenGig(gig);
                           }
                         }
                       : null,
@@ -939,139 +743,10 @@ class _GigPin extends StatelessWidget {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final color = _pinColor;
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 480),
-      curve: Curves.elasticOut,
-      builder: (_, scale, child) => Transform.scale(scale: scale, child: child),
-      child: GestureDetector(
-        onTap: () => _showGigSheet(context),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2.5),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.45),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: Icon(_pinIcon, color: Colors.white, size: 18),
-            ),
-            CustomPaint(
-              painter: _TrianglePainter(color: color),
-              size: const Size(10, 6),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GigSheetRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color? valueColor;
-  const _GigSheetRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.valueColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: [
-          Icon(icon, color: kSub, size: 16),
-          const SizedBox(width: 8),
-          Text('$label: ', style: const TextStyle(color: kSub, fontSize: 13)),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                color: valueColor ?? Theme.of(context).colorScheme.onSurface,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Cluster badge
-// ─────────────────────────────────────────────────────────────────────────────
-class _GigClusterBadge extends StatefulWidget {
-  final int count;
-  final List<GigMarkerData> gigs;
-  final String isVerified;
-  final List<String> workerSkills;
-  final ValueChanged<GigMarkerData>? onQuickGigStarted;
-  final ValueChanged<GigMarkerData>? onOpenGigApplied;
-  const _GigClusterBadge({
-    required this.count,
-    required this.gigs,
-    required this.isVerified,
-    this.workerSkills = const [],
-    this.onQuickGigStarted,
-    this.onOpenGigApplied,
-  });
-
-  @override
-  State<_GigClusterBadge> createState() => _GigClusterBadgeState();
-}
-
-class _GigClusterBadgeState extends State<_GigClusterBadge>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _pulseCtrl;
-  late Animation<double> _pulseScale;
-  late Animation<double> _pulseOpacity;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat();
-    _pulseScale = Tween<double>(
-      begin: 1.0,
-      end: 1.9,
-    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut));
-    _pulseOpacity = Tween<double>(
-      begin: 0.55,
-      end: 0.0,
-    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut));
-  }
-
-  @override
-  void dispose() {
-    _pulseCtrl.dispose();
-    super.dispose();
-  }
-
-  void _showGigList(BuildContext context) {
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Bottom sheet: cluster list
+  // ─────────────────────────────────────────────────────────────────────────
+  void _showClusterSheet(BuildContext context, List<GigMarkerData> gigs) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1121,7 +796,7 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '${widget.count} Gigs in this area',
+                          '${gigs.length} Gigs in this area',
                           style: TextStyle(
                             color: onSurface,
                             fontSize: 15,
@@ -1153,7 +828,7 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                     horizontal: 16,
                     vertical: 8,
                   ),
-                  itemCount: widget.gigs.length,
+                  itemCount: gigs.length,
                   separatorBuilder: (_, i) => Divider(
                     height: 1,
                     color: isDark
@@ -1161,7 +836,7 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                         : Colors.grey.withValues(alpha: 0.1),
                   ),
                   itemBuilder: (_, i) {
-                    final g = widget.gigs[i];
+                    final g = gigs[i];
                     final typeColor = g.gigType == 'open'
                         ? kBlue
                         : g.gigType == 'offered'
@@ -1279,7 +954,7 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
                                 if (g.gigType == 'quick') {
                                   widget.onQuickGigStarted?.call(g);
                                 } else if (g.gigType == 'open') {
-                                  widget.onOpenGigApplied?.call(g);
+                                  _applyToOpenGig(g);
                                 }
                               }
                             : null,
@@ -1320,113 +995,313 @@ class _GigClusterBadgeState extends State<_GigClusterBadge>
 
   @override
   Widget build(BuildContext context) {
-    final badge = Container(
-      width: 60,
-      height: 60,
-      decoration: BoxDecoration(
-        color: kAmber,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2.5),
-        boxShadow: [
-          BoxShadow(
-            color: kAmber.withValues(alpha: 0.45),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            '${widget.count}',
-            style: const TextStyle(
-              color: Colors.black,
-              fontSize: 17,
-              fontWeight: FontWeight.bold,
-              height: 1,
-            ),
-          ),
-          const Text(
-            'gigs',
-            style: TextStyle(
-              color: Colors.black87,
-              fontSize: 8,
-              letterSpacing: 0.3,
-            ),
-          ),
-        ],
-      ),
-    );
+    _context = context;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final borderColor = Theme.of(context).dividerColor;
+    final total = _allGigs.length;
+    final offeredCount = _offeredGigs.length;
 
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.elasticOut,
-      builder: (_, entryScale, child) =>
-          Transform.scale(scale: entryScale, child: child),
-      child: GestureDetector(
-        onTap: () => _showGigList(context),
-        child: AnimatedBuilder(
-          animation: _pulseCtrl,
-          builder: (_, child) => SizedBox(
-            width: 80,
-            height: 80,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // Pulsing ring
-                Transform.scale(
-                  scale: _pulseScale.value,
-                  child: Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: kAmber.withValues(alpha: _pulseOpacity.value),
-                        width: 2.5,
-                      ),
-                      color: kAmber.withValues(
-                        alpha: _pulseOpacity.value * 0.25,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Gigs Near You',
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            if (offeredCount > 0)
+              Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Text(
+                  '$offeredCount Offered',
+                  style: const TextStyle(
+                    color: Color(0xFF8B5CF6),
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: kAmber.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: kAmber.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                '$total ${total == 1 ? 'Gig' : 'Gigs'}',
+                style: const TextStyle(
+                  color: kAmber,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _LegendDot(color: kAmber, label: 'Quick'),
+            const SizedBox(width: 14),
+            _LegendDot(color: kBlue, label: 'Open'),
+            const SizedBox(width: 14),
+            _LegendDot(color: const Color(0xFF8B5CF6), label: 'Offered to me'),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Stack(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                height: 300,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: borderColor),
+                ),
+                child: GoogleMap(
+                  gestureRecognizers: _mapInteractive
+                      ? <Factory<OneSequenceGestureRecognizer>>{
+                          Factory<OneSequenceGestureRecognizer>(
+                            () => EagerGestureRecognizer(),
+                          ),
+                        }
+                      : const <Factory<OneSequenceGestureRecognizer>>{},
+                  onMapCreated: (controller) {
+                    _googleMapController = controller;
+                    if (_myLocation != null) {
+                      controller.animateCamera(
+                        CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
+                      );
+                    }
+                  },
+                  initialCameraPosition: const CameraPosition(
+                    target: LatLng(14.5995, 120.9842),
+                    zoom: 12.0,
+                  ),
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: false,
+                  markers: Set<Marker>.from(_buildGoogleMarkers()),
+                  onCameraMove: (position) {
+                    final newZoom = position.zoom;
+                    if ((newZoom - _zoom).abs() >= 0.3) {
+                      setState(() => _zoom = newZoom);
+                    }
+                  },
+                ),
+              ),
+            ),
+            // Tap-to-interact overlay — blocks map from stealing scroll gestures
+            if (!_mapInteractive)
+              Positioned.fill(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() => _mapInteractive = true),
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.touch_app_rounded,
+                              color: Colors.white,
+                              size: 13,
+                            ),
+                            SizedBox(width: 5),
+                            Text(
+                              'Tap to interact with map',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-                // Main badge
-                child!,
-              ],
+              ),
+            // Lock-map button shown while map is interactive
+            if (_mapInteractive)
+              Positioned(
+                top: 8,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _mapInteractive = false),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.lock_open_rounded,
+                            color: Colors.white,
+                            size: 13,
+                          ),
+                          SizedBox(width: 5),
+                          Text(
+                            'Tap to lock map',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // Recenter button
+            Positioned(
+              bottom: 12,
+              right: 12,
+              child: GestureDetector(
+                onTap: _fetchAndCenterMap,
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    Icons.my_location_rounded,
+                    size: 18,
+                    color: _myLocation != null ? kBlue : kSub,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: Text(
+            'Zoom in to see individual gigs · Tap a pin for details',
+            style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 11),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Legend dot
+// ─────────────────────────────────────────────────────────────────────────────
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      ),
+      const SizedBox(width: 5),
+      Text(label, style: const TextStyle(color: kSub, fontSize: 11)),
+    ],
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Gig sheet row
+// ─────────────────────────────────────────────────────────────────────────────
+class _GigSheetRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color? valueColor;
+  const _GigSheetRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Icon(icon, color: kSub, size: 16),
+          const SizedBox(width: 8),
+          Text('$label: ', style: const TextStyle(color: kSub, fontSize: 13)),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                color: valueColor ?? Theme.of(context).colorScheme.onSurface,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          child: badge,
-        ),
+        ],
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Triangle pointer painter
+//  Verification modal
 // ─────────────────────────────────────────────────────────────────────────────
-class _TrianglePainter extends CustomPainter {
-  final Color color;
-  const _TrianglePainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color;
-    final path = Path()
-      ..moveTo(0, 0)
-      ..lineTo(size.width, 0)
-      ..lineTo(size.width / 2, size.height)
-      ..close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(_TrianglePainter old) => old.color != color;
-}
-
 void _showModal(BuildContext context) {
   showDialog(
     context: context,
@@ -1442,12 +1317,12 @@ void _showModal(BuildContext context) {
               color: (Colors.red).withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.error_outline, color: Colors.red, size: 40),
+            child: const Icon(Icons.error_outline, color: Colors.red, size: 40),
           ),
           const SizedBox(height: 16),
-          Text(
+          const Text(
             'Account not Verified',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),

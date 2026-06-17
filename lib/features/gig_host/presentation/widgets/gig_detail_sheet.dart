@@ -2,10 +2,9 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:giggre_app/features/chat/gig_chat_action.dart';
-import 'package:latlong2/latlong.dart' hide Path;
 import '../../../../core/theme/app_colors.dart';
 import '../../services/quick_gig_matching_service.dart';
 import 'host_payment_code_sheet.dart';
@@ -1111,84 +1110,88 @@ class _GigTrackingMap extends StatefulWidget {
 }
 
 class _GigTrackingMapState extends State<_GigTrackingMap> {
-  final _mapController = MapController();
+  GoogleMapController? _googleMapController;
+
+  @override
+  void didUpdateWidget(_GigTrackingMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Re-center when worker location first appears or gig location changes
+    if (oldWidget.workerLocation != widget.workerLocation ||
+        oldWidget.gigLocation != widget.gigLocation) {
+      _animateToCenter();
+    }
+  }
+
+  void _animateToCenter() {
+    final center = _computeCenter();
+    final zoom = widget.workerLocation != null ? 14.0 : 15.0;
+    _googleMapController?.animateCamera(
+      CameraUpdate.newLatLngZoom(center, zoom),
+    );
+  }
+
+  LatLng _computeCenter() {
+    if (widget.workerLocation != null) {
+      return LatLng(
+        (widget.gigLocation.latitude + widget.workerLocation!.latitude) / 2,
+        (widget.gigLocation.longitude + widget.workerLocation!.longitude) / 2,
+      );
+    }
+    return widget.gigLocation;
+  }
+
+  Set<Marker> _buildMarkers() {
+    return {
+      // Gig location — amber/orange hue
+      Marker(
+        markerId: const MarkerId('gig_location'),
+        position: widget.gigLocation,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+      ),
+      // Worker live location — azure/blue hue
+      if (widget.workerLocation != null)
+        Marker(
+          markerId: const MarkerId('worker_location'),
+          position: widget.workerLocation!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        ),
+    };
+  }
 
   @override
   void dispose() {
-    _mapController.dispose();
+    _googleMapController?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final cardColor = Theme.of(context).cardColor;
-    final center = widget.workerLocation != null
-        ? LatLng(
-            (widget.gigLocation.latitude + widget.workerLocation!.latitude) / 2,
-            (widget.gigLocation.longitude + widget.workerLocation!.longitude) / 2,
-          )
-        : widget.gigLocation;
+    final center = _computeCenter();
+    final initialZoom = widget.workerLocation != null ? 14.0 : 15.0;
 
     return Stack(
       children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: center,
-            initialZoom: widget.workerLocation != null ? 14.0 : 15.0,
+        GoogleMap(
+          onMapCreated: (controller) {
+            _googleMapController = controller;
+          },
+          initialCameraPosition: CameraPosition(
+            target: center,
+            zoom: initialZoom,
           ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.giggre.app',
-            ),
-            MarkerLayer(
-              markers: [
-                // Gig location — amber pin
-                Marker(
-                  point: widget.gigLocation,
-                  width: 40,
-                  height: 44,
-                  child: const Column(
-                    children: [
-                      Icon(Icons.location_on_rounded, color: kAmber, size: 36),
-                    ],
-                  ),
-                ),
-                // Worker live location — blue circle
-                if (widget.workerLocation != null)
-                  Marker(
-                    point: widget.workerLocation!,
-                    width: 36,
-                    height: 36,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: kBlue,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: kBlue.withValues(alpha: 0.4),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.person_rounded,
-                        color: Colors.white,
-                        size: 18,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ],
+          myLocationEnabled: false,
+          myLocationButtonEnabled: false,
+          zoomControlsEnabled: false,
+          markers: _buildMarkers(),
         ),
         Positioned(
           bottom: 12,
           right: 12,
           child: GestureDetector(
-            onTap: () => _mapController.move(widget.gigLocation, 15.0),
+            onTap: () => _googleMapController?.animateCamera(
+              CameraUpdate.newLatLngZoom(widget.gigLocation, 15.0),
+            ),
             child: Container(
               width: 38,
               height: 38,

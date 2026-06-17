@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart' hide Path;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
@@ -840,11 +841,13 @@ class _WorkerMapSection extends StatefulWidget {
 }
 
 class _WorkerMapSectionState extends State<_WorkerMapSection> {
-  final _mapController = MapController();
+  GoogleMapController? _googleMapController;
   double _zoom = 12.0;
   LatLng? _myLocation;
+  bool _mapInteractive = false;
   List<_WorkerData> _workers = [];
   StreamSubscription? _workerSub;
+  BuildContext? _context;
 
   @override
   void initState() {
@@ -856,7 +859,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   @override
   void dispose() {
     _workerSub?.cancel();
-    _mapController.dispose();
+    _googleMapController?.dispose();
     super.dispose();
   }
 
@@ -875,8 +878,11 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
             const LocationSettings(accuracy: LocationAccuracy.high),
       );
       if (!mounted) return;
-      setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));
-      _mapController.move(_myLocation!, 14.0);
+      final loc = LatLng(pos.latitude, pos.longitude);
+      setState(() => _myLocation = loc);
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(loc, 14.0),
+      );
     } catch (_) {}
   }
 
@@ -958,215 +964,27 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     return clusters;
   }
 
-  List<Marker> _buildMarkers() {
-    return _buildClusters().map((cluster) {
+  Set<Marker> _buildMarkers() {
+    final ctx = _context;
+    final clusters = _buildClusters();
+    return clusters.map((cluster) {
       if (cluster.count == 1 && cluster.singleWorker != null) {
+        final worker = cluster.singleWorker!;
         return Marker(
-          point: cluster.center,
-          width: 40,
-          height: 48,
-          child: _WorkerPin(worker: cluster.singleWorker!, hostName: widget.hostName),
+          markerId: MarkerId('worker_${worker.id}'),
+          position: cluster.center,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          onTap: ctx != null ? () => _showWorkerSheet(ctx, worker) : null,
         );
       }
+      // Cluster marker — use yellow/amber hue
       return Marker(
-        point: cluster.center,
-        width: 56,
-        height: 56,
-        child: _ClusterBadge(count: cluster.count, workers: cluster.workers, hostName: widget.hostName),
+        markerId: MarkerId('cluster_${cluster.center.latitude}_${cluster.center.longitude}'),
+        position: cluster.center,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
+        onTap: ctx != null ? () => _showWorkerList(ctx, cluster.workers) : null,
       );
-    }).toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    final borderColor = Theme.of(context).dividerColor;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Section header
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Workers Near You',
-                style: TextStyle(
-                  color: onSurface,
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFF22C55E).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 7,
-                    height: 7,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF22C55E),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '${_workers.length} Online',
-                    style: const TextStyle(
-                      color: Color(0xFF22C55E),
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-
-        // Map
-        Stack(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                height: 280,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: borderColor),
-                ),
-                child: FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: LatLng(14.5995, 120.9842),
-                    initialZoom: 12.0,
-                    minZoom: 9.0,
-                    maxZoom: 18.0,
-                    onMapEvent: (event) {
-                      final newZoom = _mapController.camera.zoom;
-                      if ((newZoom - _zoom).abs() >= 0.3) {
-                        setState(() => _zoom = newZoom);
-                      }
-                    },
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.giggre.app',
-                      errorTileCallback: (tile, error, stackTrace) {},
-                    ),
-                    MarkerLayer(markers: _buildMarkers()),
-                    if (_myLocation != null)
-                      MarkerLayer(
-                        markers: [
-                          Marker(
-                            point: _myLocation!,
-                            width: 22,
-                            height: 22,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF22C55E),
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 2.5),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFF22C55E).withValues(alpha: 0.45),
-                                    blurRadius: 8,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            // Recenter button
-            Positioned(
-              bottom: 12,
-              right: 12,
-              child: GestureDetector(
-                onTap: _fetchAndCenterMap,
-                child: Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.18),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    Icons.my_location_rounded,
-                    size: 18,
-                    color: _myLocation != null
-                        ? const Color(0xFF22C55E)
-                        : kSub,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Center(
-          child: Text(
-            'Zoom in to see individual workers · Tap a pin for details',
-            style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 11),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Individual Worker Pin
-// ─────────────────────────────────────────────────────────────────────────────
-class _WorkerPin extends StatefulWidget {
-  final _WorkerData worker;
-  final String hostName;
-  const _WorkerPin({required this.worker, required this.hostName});
-
-  @override
-  State<_WorkerPin> createState() => _WorkerPinState();
-}
-
-class _WorkerPinState extends State<_WorkerPin>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _scale;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 420),
-    );
-    _scale = CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut);
-    _ctrl.forward();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
+    }).toSet();
   }
 
   Future<({int completedGigs, bool isFavorite})> _fetchWorkerSheetData(
@@ -1190,8 +1008,7 @@ class _WorkerPinState extends State<_WorkerPin>
     return (completedGigs: count, isFavorite: favIds.contains(workerId));
   }
 
-  void _showWorkerSheet(BuildContext context) {
-    final worker = widget.worker;
+  void _showWorkerSheet(BuildContext context, _WorkerData worker) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1332,51 +1149,330 @@ class _WorkerPinState extends State<_WorkerPin>
     );
   }
 
+  void _showWorkerList(BuildContext context, List<_WorkerData> workers) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final cardColor = Theme.of(ctx).cardColor;
+        final onSurface = Theme.of(ctx).colorScheme.onSurface;
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(0, 20, 0, 16),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: kBorder,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: kAmber.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.people_alt_outlined,
+                          color: kAmber, size: 18),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${workers.length} Workers in this area',
+                            style: TextStyle(
+                                color: onSurface,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold)),
+                        const Text('Tap a worker to offer a gig',
+                            style: TextStyle(color: kSub, fontSize: 11)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Divider(
+                  color: isDark
+                      ? kBorder.withValues(alpha: 0.5)
+                      : Colors.grey.withValues(alpha: 0.15)),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.45,
+                ),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8),
+                  itemCount: workers.length,
+                  separatorBuilder: (_, i) => Divider(
+                    height: 1,
+                    color: isDark
+                        ? kBorder.withValues(alpha: 0.4)
+                        : Colors.grey.withValues(alpha: 0.1),
+                  ),
+                  itemBuilder: (_, i) {
+                    final w = workers[i];
+                    return _ClusterWorkerTile(
+                      w: w,
+                      onOffer: () {
+                        Navigator.pop(ctx);
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => PostOfferedGigScreen(
+                            hostName: widget.hostName,
+                            preselectedWorkerId: w.id,
+                            preselectedWorkerName: w.name,
+                          ),
+                        ));
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final worker = widget.worker;
-    return ScaleTransition(
-      scale: _scale,
-      child: GestureDetector(
-        onTap: () => _showWorkerSheet(context),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    _context = context;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final borderColor = Theme.of(context).dividerColor;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Section header
+        Row(
           children: [
+            Expanded(
+              child: Text(
+                'Workers Near You',
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
             Container(
-              width: 38,
-              height: 38,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: kBlue,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2.5),
-                boxShadow: [
-                  BoxShadow(
-                    color: kBlue.withValues(alpha: 0.45),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
+                color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF22C55E),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${_workers.length} Online',
+                    style: const TextStyle(
+                      color: Color(0xFF22C55E),
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),
-              child: worker.photoUrl.isNotEmpty
-                  ? ClipOval(
-                      child: CachedNetworkImage(
-                        imageUrl: worker.photoUrl,
-                        width: 38,
-                        height: 38,
-                        fit: BoxFit.cover,
-                        errorWidget: (context, error, _) =>
-                            const Icon(Icons.person, color: Colors.white, size: 20),
-                      ),
-                    )
-                  : const Icon(Icons.person, color: Colors.white, size: 20),
-            ),
-            CustomPaint(
-              painter: _TrianglePainter(color: kBlue),
-              size: const Size(10, 6),
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 12),
+
+        // Map
+        Stack(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                height: 280,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: borderColor),
+                ),
+                child: GoogleMap(
+                  gestureRecognizers: _mapInteractive
+                      ? <Factory<OneSequenceGestureRecognizer>>{
+                          Factory<OneSequenceGestureRecognizer>(
+                            () => EagerGestureRecognizer(),
+                          ),
+                        }
+                      : const <Factory<OneSequenceGestureRecognizer>>{},
+                  onMapCreated: (controller) {
+                    _googleMapController = controller;
+                    if (_myLocation != null) {
+                      _googleMapController?.animateCamera(
+                        CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
+                      );
+                    }
+                  },
+                  initialCameraPosition: const CameraPosition(
+                    target: LatLng(14.5995, 120.9842),
+                    zoom: 12.0,
+                  ),
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: false,
+                  markers: _buildMarkers(),
+                  onCameraMove: (position) {
+                    final newZoom = position.zoom;
+                    if ((newZoom - _zoom).abs() >= 0.3) {
+                      setState(() => _zoom = newZoom);
+                    }
+                  },
+                ),
+              ),
+            ),
+            // Tap-to-interact overlay
+            if (!_mapInteractive)
+              Positioned.fill(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() => _mapInteractive = true),
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.touch_app_rounded,
+                              color: Colors.white,
+                              size: 13,
+                            ),
+                            SizedBox(width: 5),
+                            Text(
+                              'Tap to interact with map',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // Lock-map button shown while map is interactive
+            if (_mapInteractive)
+              Positioned(
+                top: 8,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _mapInteractive = false),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.lock_open_rounded,
+                            color: Colors.white,
+                            size: 13,
+                          ),
+                          SizedBox(width: 5),
+                          Text(
+                            'Tap to lock map',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // Recenter button
+            Positioned(
+              bottom: 12,
+              right: 12,
+              child: GestureDetector(
+                onTap: _fetchAndCenterMap,
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    Icons.my_location_rounded,
+                    size: 18,
+                    color: _myLocation != null
+                        ? const Color(0xFF22C55E)
+                        : kSub,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: Text(
+            'Zoom in to see individual workers · Tap a pin for details',
+            style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 11),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1596,239 +1692,6 @@ class _ClusterWorkerTileState extends State<_ClusterWorkerTile> {
       ),
     );
   }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Cluster Badge
-// ─────────────────────────────────────────────────────────────────────────────
-class _ClusterBadge extends StatefulWidget {
-  final int count;
-  final List<_WorkerData> workers;
-  final String hostName;
-  const _ClusterBadge(
-      {required this.count, required this.workers, required this.hostName});
-
-  @override
-  State<_ClusterBadge> createState() => _ClusterBadgeState();
-}
-
-class _ClusterBadgeState extends State<_ClusterBadge>
-    with TickerProviderStateMixin {
-  late final AnimationController _entryCtrl;
-  late final AnimationController _pulseCtrl;
-  late final Animation<double> _scaleAnim;
-  late final Animation<double> _pulseAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _entryCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 450),
-    );
-    _scaleAnim =
-        CurvedAnimation(parent: _entryCtrl, curve: Curves.elasticOut);
-    _entryCtrl.forward();
-
-    _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1600),
-    )..repeat(reverse: true);
-    _pulseAnim = Tween<double>(begin: 1.0, end: 1.06).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
-    );
-  }
-
-  @override
-  void dispose() {
-    _entryCtrl.dispose();
-    _pulseCtrl.dispose();
-    super.dispose();
-  }
-
-  void _showWorkerList(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) {
-        final cardColor = Theme.of(ctx).cardColor;
-        final onSurface = Theme.of(ctx).colorScheme.onSurface;
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        return Container(
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.fromLTRB(0, 20, 0, 16),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: kBorder,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: kAmber.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.people_alt_outlined,
-                          color: kAmber, size: 18),
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('${widget.count} Workers in this area',
-                            style: TextStyle(
-                                color: onSurface,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
-                        const Text('Tap a worker to offer a gig',
-                            style: TextStyle(color: kSub, fontSize: 11)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Divider(
-                  color: isDark
-                      ? kBorder.withValues(alpha: 0.5)
-                      : Colors.grey.withValues(alpha: 0.15)),
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(ctx).size.height * 0.45,
-                ),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8),
-                  itemCount: widget.workers.length,
-                  separatorBuilder: (_, i) => Divider(
-                    height: 1,
-                    color: isDark
-                        ? kBorder.withValues(alpha: 0.4)
-                        : Colors.grey.withValues(alpha: 0.1),
-                  ),
-                  itemBuilder: (_, i) {
-                    final w = widget.workers[i];
-                    return _ClusterWorkerTile(
-                      w: w,
-                      onOffer: () {
-                        Navigator.pop(ctx);
-                        Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => PostOfferedGigScreen(
-                            hostName: widget.hostName,
-                            preselectedWorkerId: w.id,
-                            preselectedWorkerName: w.name,
-                          ),
-                        ));
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: _scaleAnim,
-      child: AnimatedBuilder(
-        animation: _pulseAnim,
-        builder: (_, child) =>
-            Transform.scale(scale: _pulseAnim.value, child: child),
-        child: GestureDetector(
-          onTap: () => _showWorkerList(context),
-          child: Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: kAmber,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2.5),
-              boxShadow: [
-                BoxShadow(
-                  color: kAmber.withValues(alpha: 0.5),
-                  blurRadius: 12,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 250),
-                  transitionBuilder: (child, anim) =>
-                      ScaleTransition(scale: anim, child: child),
-                  child: Text(
-                    '${widget.count}',
-                    key: ValueKey(widget.count),
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                      height: 1,
-                    ),
-                  ),
-                ),
-                const Text(
-                  'workers',
-                  style: TextStyle(
-                      color: Colors.black87,
-                      fontSize: 8,
-                      letterSpacing: 0.3),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Triangle pointer painter for worker pin
-// ─────────────────────────────────────────────────────────────────────────────
-class _TrianglePainter extends CustomPainter {
-  final Color color;
-  const _TrianglePainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color;
-    final path = Path()
-      ..moveTo(0, 0)
-      ..lineTo(size.width, 0)
-      ..lineTo(size.width / 2, size.height)
-      ..close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(_TrianglePainter old) => old.color != color;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2134,7 +1997,7 @@ class _TemplatesSheet extends StatelessWidget {
 }
 
 void _showModal(
-  BuildContext context, 
+  BuildContext context,
 ) {
   showDialog(
     context: context,

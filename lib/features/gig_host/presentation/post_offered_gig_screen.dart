@@ -4,12 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:latlong2/latlong.dart' hide Path;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../models/gig_template_model.dart';
@@ -1685,7 +1684,7 @@ class _MapPickerScreen extends StatefulWidget {
 }
 
 class _MapPickerScreenState extends State<_MapPickerScreen> {
-  final _mapController = MapController();
+  GoogleMapController? _googleMapController;
   final _searchCtrl = TextEditingController();
   LatLng? _picked;
   String _address = '';
@@ -1707,14 +1706,16 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
 
   @override
   void dispose() {
-    _mapController.dispose();
+    _googleMapController?.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _recenterToMyLocation() async {
     if (_myLocation != null) {
-      _mapController.move(_myLocation!, 14.0);
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
+      );
       return;
     }
     try {
@@ -1732,7 +1733,9 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       );
       if (!mounted) return;
       setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));
-      _mapController.move(_myLocation!, 14.0);
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
+      );
     } catch (_) {}
   }
 
@@ -1765,7 +1768,9 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         _address = '';
         _searching = false;
       });
-      _mapController.move(point, 15.0);
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(point, 15.0),
+      );
       _geocodePosition(point);
     } catch (_) {
       if (!mounted) return;
@@ -1813,7 +1818,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     }
   }
 
-  void _onMapTap(TapPosition tapPos, LatLng point) {
+  void _onMapTap(LatLng point) {
     setState(() {
       _picked = point;
       _address = '';
@@ -1856,57 +1861,25 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       ),
       body: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: widget.initialPosition ?? _defaultCenter,
-              initialZoom: 14.0,
-              onTap: _onMapTap,
+          GoogleMap(
+            onMapCreated: (controller) => _googleMapController = controller,
+            initialCameraPosition: CameraPosition(
+              target: widget.initialPosition ?? _defaultCenter,
+              zoom: 14.0,
             ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.giggre.app',
-              ),
-              if (_picked != null)
-                MarkerLayer(
-                  markers: [
+            myLocationEnabled: true,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            onTap: _onMapTap,
+            markers: _picked != null
+                ? {
                     Marker(
-                      point: _picked!,
-                      width: 40,
-                      height: 50,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: purple,
-                              shape: BoxShape.circle,
-                              border:
-                                  Border.all(color: Colors.white, width: 2.5),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: purple.withValues(alpha: 0.5),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: const Icon(Icons.location_on_rounded,
-                                color: Colors.white, size: 18),
-                          ),
-                          CustomPaint(
-                            painter: _TrianglePainter(color: purple),
-                            size: const Size(10, 7),
-                          ),
-                        ],
-                      ),
+                      markerId: const MarkerId('picked'),
+                      position: _picked!,
+                      icon: BitmapDescriptor.defaultMarker,
                     ),
-                  ],
-                ),
-            ],
+                  }
+                : {},
           ),
           // ── Search bar ───────────────────────────────────────
           Positioned(
@@ -2151,25 +2124,6 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       ),
     );
   }
-}
-
-class _TrianglePainter extends CustomPainter {
-  final Color color;
-  const _TrianglePainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color;
-    final path = Path()
-      ..moveTo(0, 0)
-      ..lineTo(size.width, 0)
-      ..lineTo(size.width / 2, size.height)
-      ..close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(_TrianglePainter old) => old.color != color;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

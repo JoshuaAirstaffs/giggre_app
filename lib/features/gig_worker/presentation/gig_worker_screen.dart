@@ -8,7 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart' hide Path;
+import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import '../../../core/theme/app_colors.dart';
 import '../../auth/presentation/login_screen.dart';
 import 'widgets/dispatch_offer_card.dart';

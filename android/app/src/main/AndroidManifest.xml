@@ -64,6 +64,10 @@
             android:value="incoming_calls" />
 
         <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyBS6dc6ntXcW8O8ZAdCMcvMigxttlEEHZ8" />
+
+        <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
     </application>

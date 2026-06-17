@@ -2,13 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:giggre_app/features/chat/gig_chat_action.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
-import 'package:latlong2/latlong.dart' hide Path;
 import '../../../../core/theme/app_colors.dart';
 import 'gig_map_section.dart';
 import 'worker_payment_confirm_sheet.dart';
@@ -69,7 +68,7 @@ class _WorkingUIState extends State<WorkingUI> {
   _GigStep _lastActiveStep = _GigStep.navigating;
   String _lastStatusString = 'navigating';
   bool _cancelPending = false;
-  
+
   // Guard: show host rating dialog only once
   bool _ratingShown = false;
   // Guard: handle admin-approved cancellation only once
@@ -193,6 +192,10 @@ class _WorkingUIState extends State<WorkingUI> {
         _checkGeofence(pos);
         // Re-fetch route only when navigating and moved >30 m from last fetch
         if (_step == _GigStep.navigating) {
+          final gigPos = LatLng(
+            widget.gig.position.latitude,
+            widget.gig.position.longitude,
+          );
           final shouldFetch = _lastRouteFetch == null ||
               Geolocator.distanceBetween(
                 _lastRouteFetch!.latitude, _lastRouteFetch!.longitude,
@@ -200,7 +203,7 @@ class _WorkingUIState extends State<WorkingUI> {
               ) > 30;
           if (shouldFetch) {
             _lastRouteFetch = loc;
-            _fetchRoute(loc, widget.gig.position);
+            _fetchRoute(loc, gigPos);
           }
         }
       }, onError: (e) => debugPrint('[WorkingUI] location stream error: $e'));
@@ -679,7 +682,7 @@ class _ProgressStepper extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Navigating section — map with route line
 // ─────────────────────────────────────────────────────────────────────────────
-class _NavigatingSection extends StatelessWidget {
+class _NavigatingSection extends StatefulWidget {
   final GigMarkerData gig;
   final LatLng? workerLocation;
   final List<LatLng> routePoints;
@@ -692,7 +695,78 @@ class _NavigatingSection extends StatelessWidget {
   });
 
   @override
+  State<_NavigatingSection> createState() => _NavigatingSectionState();
+}
+
+class _NavigatingSectionState extends State<_NavigatingSection> {
+  GoogleMapController? _googleMapController;
+
+  @override
+  void dispose() {
+    _googleMapController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(_NavigatingSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Pan the camera when the worker location updates
+    if (widget.workerLocation != null &&
+        widget.workerLocation != oldWidget.workerLocation) {
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLng(widget.workerLocation!),
+      );
+    }
+  }
+
+  Set<Marker> _buildGoogleMarkers() {
+    final markers = <Marker>{};
+
+    if (widget.workerLocation != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('worker'),
+          position: widget.workerLocation!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          anchor: const Offset(0.5, 0.5),
+        ),
+      );
+    }
+
+    final gigPos = LatLng(
+      widget.gig.position.latitude,
+      widget.gig.position.longitude,
+    );
+    markers.add(
+      Marker(
+        markerId: const MarkerId('gig'),
+        position: gigPos,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+      ),
+    );
+
+    return markers;
+  }
+
+  Set<Polyline> _buildPolylines() {
+    if (widget.routePoints.isEmpty) return {};
+    return {
+      Polyline(
+        polylineId: const PolylineId('route'),
+        points: widget.routePoints,
+        color: kBlue,
+        width: 4,
+      ),
+    };
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final gigPos = LatLng(
+      widget.gig.position.latitude,
+      widget.gig.position.longitude,
+    );
+    final initialTarget = widget.workerLocation ?? gigPos;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -711,87 +785,21 @@ class _NavigatingSection extends StatelessWidget {
             height: 220,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: divider),
+              border: Border.all(color: widget.divider),
             ),
-            child: FlutterMap(
-              options: MapOptions(
-                initialCenter: workerLocation ?? gig.position,
-                initialZoom: 14.0,
+            child: GoogleMap(
+              onMapCreated: (controller) {
+                _googleMapController = controller;
+              },
+              initialCameraPosition: CameraPosition(
+                target: initialTarget,
+                zoom: 14.0,
               ),
-              children: [
-                TileLayer(
-                  urlTemplate:
-                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.giggre.app',
-                ),
-                if (routePoints.isNotEmpty)
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: routePoints,
-                        color: kBlue,
-                        strokeWidth: 4.0,
-                      ),
-                    ],
-                  ),
-                MarkerLayer(
-                  markers: [
-                    if (workerLocation != null)
-                      Marker(
-                        point: workerLocation!,
-                        width: 22,
-                        height: 22,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: kBlue,
-                            shape: BoxShape.circle,
-                            border:
-                                Border.all(color: Colors.white, width: 2.5),
-                            boxShadow: [
-                              BoxShadow(
-                                color: kBlue.withValues(alpha: 0.45),
-                                blurRadius: 8,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    Marker(
-                      point: gig.position,
-                      width: 40,
-                      height: 48,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: kAmber,
-                              shape: BoxShape.circle,
-                              border:
-                                  Border.all(color: Colors.white, width: 2.5),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: kAmber.withValues(alpha: 0.45),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: const Icon(Icons.flash_on_rounded,
-                                color: Colors.white, size: 18),
-                          ),
-                          CustomPaint(
-                            painter: _TrianglePainter(color: kAmber),
-                            size: const Size(10, 6),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+              myLocationEnabled: true,
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              markers: _buildGoogleMarkers(),
+              polylines: _buildPolylines(),
             ),
           ),
         ),
@@ -1632,26 +1640,4 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
       ),
     );
   }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Triangle painter for map pin pointer
-// ─────────────────────────────────────────────────────────────────────────────
-class _TrianglePainter extends CustomPainter {
-  final Color color;
-  const _TrianglePainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color;
-    final path = Path()
-      ..moveTo(0, 0)
-      ..lineTo(size.width, 0)
-      ..lineTo(size.width / 2, size.height)
-      ..close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(_TrianglePainter old) => old.color != color;
 }
