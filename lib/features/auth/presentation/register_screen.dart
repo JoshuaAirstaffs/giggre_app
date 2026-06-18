@@ -816,6 +816,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final userDoc = await userRef.get();
     if (!mounted) return;
     final data = userDoc.data();
+
+    // Block access if the account has a pending deletion request.
+    // AuthGate will detect this via authStateChanges and show the deletion screen.
+    if (data?['pendingDeletion'] == true) return;
+
     final bool needsProfile = !userDoc.exists ||
         (data?['phone'] == null || (data?['phone'] as String).isEmpty);
     if (needsProfile) {
