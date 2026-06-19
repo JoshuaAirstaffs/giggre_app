@@ -211,4 +211,27 @@ class CurrentUserProvider extends ChangeNotifier {
       ),
     );
   }
+
+  static Future<void> showGigAssignedNotification(
+      String gigType, String gigTitle) async {
+    final label = gigType == 'quick'
+        ? 'Quick Gig'
+        : gigType == 'offered'
+            ? 'Offered Gig'
+            : 'Open Gig';
+    await _notifications.show(
+      1,
+      'You\'re Assigned! — $label',
+      'You\'ve been assigned to: $gigTitle. Head to the location now.',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'gig_assignments',
+          'Gig Assignments',
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+    );
+  }
 }

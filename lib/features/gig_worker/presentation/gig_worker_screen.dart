@@ -10,6 +10,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import '../../../core/theme/app_colors.dart';
+import '../../../core/providers/current_user_provider.dart';
 import '../../auth/presentation/login_screen.dart';
 import 'widgets/dispatch_offer_card.dart';
 import 'widgets/earnings_card.dart';
@@ -20,6 +21,7 @@ import 'widgets/worker_header.dart';
 import 'widgets/worker_widgets.dart';
 import 'widgets/working_ui.dart';
 import 'widgets/offered_gig_offer_card.dart';
+import 'widgets/gig_assigned_popup.dart'; // exports GigAssignedDialog
 import 'widgets/toolchest_sheet.dart';
 import 'gig_history_screen.dart';
 import 'worker_ratings_screen.dart';
@@ -78,6 +80,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
   StreamSubscription? _dispatchSub;
   StreamSubscription? _offeredGigSub;
+  StreamSubscription? _openGigAssignSub;
   StreamSubscription? _profileSub;
 
   // Earnings streams
@@ -87,6 +90,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   // Decline suspension
   DateTime? _suspendedUntil;
   Timer? _suspensionTimer;
+
+  // True while WorkingUI is pushed as a route so the body doesn't render a duplicate.
+  bool _workingUIRouteActive = false;
 
   @override
   void initState() {
@@ -101,6 +107,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _profileSub?.cancel();
     _dispatchSub?.cancel();
     _offeredGigSub?.cancel();
+    _openGigAssignSub?.cancel();
     _suspensionTimer?.cancel();
     for (final sub in _earningsSubs) {
       sub.cancel();
@@ -191,6 +198,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         _saveLocationToFirestore();
         _startDispatchSub(uid);
         _startOfferedGigSub(uid);
+        _startOpenGigAssignSub(uid);
         _checkForActiveGig(uid);
       }
 
@@ -394,6 +402,114 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     }, onError: (e) => debugPrint('[GigWorker] offered gig stream error: $e'));
   }
 
+  // Watches for open gig assignments initiated by the host (worker doesn't tap accept).
+  void _startOpenGigAssignSub(String uid) {
+    _openGigAssignSub?.cancel();
+    bool firstLoad = true;
+    _openGigAssignSub = FirebaseFirestore.instance
+        .collection('open_gigs')
+        .where('workerId', isEqualTo: uid)
+        .where('status', isEqualTo: 'navigating')
+        .snapshots()
+        .listen((snap) {
+      if (firstLoad) {
+        firstLoad = false;
+        return;
+      }
+      if (!mounted) return;
+      for (final change in snap.docChanges) {
+        if (change.type == DocumentChangeType.added) {
+          final data = change.doc.data()!;
+          final geo = data['location'] as GeoPoint?;
+          if (geo == null) continue;
+          final gig = GigMarkerData(
+            id: change.doc.id,
+            title: data['title'] as String? ?? 'Open Gig',
+            gigType: 'open',
+            budget: (data['budget'] as num?)?.toDouble() ?? 0,
+            status: 'navigating',
+            hostName: data['hostName'] as String? ?? '',
+            address: data['address'] as String? ?? '',
+            position: LatLng(geo.latitude, geo.longitude),
+            assignedWorkerId: uid,
+            hostId: data['hostId'] as String? ?? '',
+          );
+          _showAssignedPopup(gig);
+          break;
+        }
+      }
+    }, onError: (e) => debugPrint('[GigWorker] open gig assign stream error: $e'));
+  }
+
+  void _showAssignedPopup(GigMarkerData gig) {
+    if (!mounted) return;
+    CurrentUserProvider.showGigAssignedNotification(gig.gigType, gig.title);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => GigAssignedDialog(
+          gig: gig,
+          onGoToLocation: () {
+            Navigator.of(ctx).pop(); // close the dialog
+            _openWorkingUIRoute(gig);
+          },
+        ),
+      );
+    });
+  }
+
+  void _openWorkingUIRoute(GigMarkerData gig) {
+    if (!mounted) return;
+
+    final String collection;
+    final Future<void> Function() onComplete;
+    final Future<void> Function() onCancel;
+
+    if (gig.gigType == 'quick') {
+      collection = 'quick_gigs';
+      onComplete = _finishQuickGig;
+      onCancel = _cancelQuickGig;
+    } else if (gig.gigType == 'open') {
+      collection = 'open_gigs';
+      onComplete = _finishOpenGig;
+      onCancel = _cancelOpenGig;
+    } else {
+      collection = 'offered_gigs';
+      onComplete = _finishOfferedGig;
+      onCancel = _cancelOfferedGig;
+    }
+
+    setState(() => _workingUIRouteActive = true);
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => WorkingUI(
+          gig: gig,
+          gigCollection: collection,
+          onComplete: () async {
+            await onComplete();
+            if (mounted) {
+              setState(() => _workingUIRouteActive = false);
+              Navigator.of(context).maybePop();
+            }
+          },
+          onCancel: () async {
+            await onCancel();
+            if (mounted) {
+              setState(() => _workingUIRouteActive = false);
+              Navigator.of(context).maybePop();
+            }
+          },
+        ),
+      ),
+    ).then((_) {
+      // Reset if the route was dismissed via back gesture / hardware back button.
+      if (mounted) setState(() => _workingUIRouteActive = false);
+    });
+  }
+
   Future<void> _acceptOfferedGig(GigMarkerData gig) async {
     await FirebaseFirestore.instance
         .collection('offered_gigs')
@@ -407,6 +523,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         _pendingOfferedGig = null;
         _activeOfferedGig = gig;
       });
+      _showAssignedPopup(gig);
     }
   }
 
@@ -530,15 +647,15 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _cancelOpenGig() async {
+    // onCancel is only reached via admin-approved cancellation (_onAdminCancelled
+    // in WorkingUI), so the status is already 'cancelled' in Firestore — do not
+    // overwrite it. Just clear the worker assignment and local state.
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null && _activeOpenGig != null) {
       await FirebaseFirestore.instance
           .collection('open_gigs')
           .doc(_activeOpenGig!.id)
-          .update({
-        'status': 'open',
-        'workerId': FieldValue.delete(),
-      });
+          .update({'workerId': FieldValue.delete()});
     }
     if (mounted) setState(() => _activeOpenGig = null);
   }
@@ -562,6 +679,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         _dispatchedGig = null;
         _activeQuickGig = gig;
       });
+      _showAssignedPopup(gig);
     }
   }
 
@@ -1094,21 +1212,21 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           ? const Center(
               child: CircularProgressIndicator(
                   color: kBlue, strokeWidth: 2))
-          : _activeQuickGig != null
+          : !_workingUIRouteActive && _activeQuickGig != null
           ? WorkingUI(
               gig: _activeQuickGig!,
               gigCollection: 'quick_gigs',
               onComplete: _finishQuickGig,
               onCancel: _cancelQuickGig,
             )
-          : _activeOpenGig != null
+          : !_workingUIRouteActive && _activeOpenGig != null
           ? WorkingUI(
               gig: _activeOpenGig!,
               gigCollection: 'open_gigs',
               onComplete: _finishOpenGig,
               onCancel: _cancelOpenGig,
             )
-          : _activeOfferedGig != null
+          : !_workingUIRouteActive && _activeOfferedGig != null
           ? WorkingUI(
               gig: _activeOfferedGig!,
               gigCollection: 'offered_gigs',
