@@ -1,11 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import '../utils/notification_web_stub.dart'
+    if (dart.library.html) '../utils/notification_web_impl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:giggre_app/features/call/incoming_call_screen.dart';
 import 'package:giggre_app/features/call/incoming_video_call_screen.dart';
+import 'package:giggre_app/screens/chat/chat.dart';
 
 class CurrentUserProvider extends ChangeNotifier {
   String? _currentEmail;
@@ -15,6 +19,8 @@ class CurrentUserProvider extends ChangeNotifier {
   String? _isVerified;
   StreamSubscription? _ticketSubscription;
   StreamSubscription? _callSubscription;
+  StreamSubscription? _chatRoomsSubscription;
+  final Map<String, StreamSubscription> _chatMessageSubs = {};
 
   final _audioPlayer = AudioPlayer(); // ← new
 
@@ -36,7 +42,10 @@ class CurrentUserProvider extends ChangeNotifier {
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       iOS: DarwinInitializationSettings(),
     );
-    await _notifications.initialize(settings);
+    await _notifications.initialize(
+      settings,
+      onDidReceiveNotificationResponse: _onNotificationTap,
+    );
 
     final androidPlugin = _notifications
         .resolvePlatformSpecificImplementation<
@@ -45,6 +54,37 @@ class CurrentUserProvider extends ChangeNotifier {
     await androidPlugin?.requestNotificationsPermission();
 
     _notificationsInitialized = true;
+  }
+
+  static void _onNotificationTap(NotificationResponse response) {
+    final payload = response.payload;
+    if (payload == null) return;
+    try {
+      final data = jsonDecode(payload) as Map<String, dynamic>;
+      final roomId = data['roomId'] as String? ?? '';
+      final gigId = data['gigId'] as String? ?? '';
+      final peerUid = data['peerUid'] as String? ?? '';
+      final peerName = data['peerName'] as String? ?? 'Chat';
+      if (roomId.isEmpty) return;
+      final context = navigatorKey?.currentContext;
+      if (context == null) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => Chat(
+            roomId: roomId,
+            isGigChat: true,
+            gigChatParams: GigChatParams(
+              gigId: gigId,
+              peerUid: peerUid,
+              peerName: peerName,
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('[CurrentUserProvider] notification tap error: $e');
+    }
   }
 
   void setCurrentUserInfo(
@@ -62,6 +102,7 @@ class CurrentUserProvider extends ChangeNotifier {
     notifyListeners();
     _listenToTicketUpdates(uid);
     _listenToIncomingCall(uid);
+    _listenToGigChatMessages(uid);
   }
 
   void clearUser() {
@@ -72,6 +113,12 @@ class CurrentUserProvider extends ChangeNotifier {
     _ticketSubscription = null;
     _callSubscription?.cancel();
     _callSubscription = null;
+    _chatRoomsSubscription?.cancel();
+    _chatRoomsSubscription = null;
+    for (final sub in _chatMessageSubs.values) {
+      sub.cancel();
+    }
+    _chatMessageSubs.clear();
     _stopRingtone();
     _audioPlayer.dispose(); // ← clean up
     notifyListeners();
@@ -193,6 +240,131 @@ class CurrentUserProvider extends ChangeNotifier {
             }
           }
         });
+  }
+
+  // ── GigChat message listener ──────────────────────────────────────────────
+
+  void _listenToGigChatMessages(String? uid) {
+    if (uid == null) return;
+    _chatRoomsSubscription?.cancel();
+    for (final sub in _chatMessageSubs.values) {
+      sub.cancel();
+    }
+    _chatMessageSubs.clear();
+
+    _chatRoomsSubscription = FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .where('participants', arrayContains: uid)
+        .snapshots()
+        .listen(
+          (roomsSnap) {
+            // Remove subs for rooms that no longer exist.
+            final liveIds = roomsSnap.docs.map((d) => d.id).toSet();
+            final gone =
+                _chatMessageSubs.keys.where((id) => !liveIds.contains(id)).toList();
+            for (final id in gone) {
+              _chatMessageSubs[id]?.cancel();
+              _chatMessageSubs.remove(id);
+            }
+
+            // Add subs only for rooms not yet subscribed — never cancel existing ones.
+            // This prevents the rooms snapshot (triggered by lastMessage updates)
+            // from resetting the initialLoad flag and swallowing incoming messages.
+            for (final room in roomsSnap.docs) {
+              if (_chatMessageSubs.containsKey(room.id)) continue;
+
+              final data = room.data();
+              final participants =
+                  (data['participants'] as List<dynamic>?) ?? [];
+              final peerUid = participants.firstWhere(
+                (p) => p != uid,
+                orElse: () => '',
+              ) as String;
+
+              if (peerUid.isEmpty) continue;
+
+              final gigId = data['gigId'] as String? ?? '';
+              final createdByUid = data['createdByUid'] as String? ?? '';
+              final createdByName = data['createdByName'] as String? ?? '';
+              final sendTo = data['sendTo'] as String? ?? 'Someone';
+              final peerName =
+                  (createdByUid.isNotEmpty && uid != createdByUid)
+                      ? (createdByName.isNotEmpty ? createdByName : sendTo)
+                      : sendTo;
+
+              bool initialLoad = true;
+
+              final sub = FirebaseFirestore.instance
+                  .collection('chat_rooms')
+                  .doc(room.id)
+                  .collection('messages')
+                  .where('senderId', isEqualTo: peerUid)
+                  .where('hasSeen', isEqualTo: false)
+                  .snapshots()
+                  .listen(
+                    (msgSnap) {
+                      if (initialLoad) {
+                        initialLoad = false;
+                        return;
+                      }
+                      for (final change in msgSnap.docChanges) {
+                        if (change.type == DocumentChangeType.added) {
+                          final text =
+                              change.doc.data()?['text'] as String? ??
+                              'New message';
+                          _showChatNotification(
+                            peerName,
+                            text,
+                            room.id,
+                            gigId,
+                            peerUid,
+                          );
+                        }
+                      }
+                    },
+                    onError: (e) => debugPrint(
+                        '[CurrentUserProvider] chat msg error: $e'),
+                  );
+              _chatMessageSubs[room.id] = sub;
+            }
+          },
+          onError: (e) =>
+              debugPrint('[CurrentUserProvider] chat rooms error: $e'),
+        );
+  }
+
+  Future<void> _showChatNotification(
+    String peerName,
+    String message,
+    String roomId,
+    String gigId,
+    String peerUid,
+  ) async {
+    final payload = jsonEncode({
+      'roomId': roomId,
+      'gigId': gigId,
+      'peerUid': peerUid,
+      'peerName': peerName,
+    });
+    await Future.wait([
+      _notifications.show(
+        roomId.hashCode.abs() % 100000,
+        peerName,
+        message,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'gig_chat',
+            'Gig Chat',
+            icon: 'ic_chat_notification',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        payload: payload,
+      ),
+      showBrowserNotification(peerName, message, '/icons/Icon-192.png'),
+    ]);
   }
 
   Future<void> _showNotification(String subject, String status) async {

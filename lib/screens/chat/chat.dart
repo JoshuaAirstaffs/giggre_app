@@ -306,9 +306,15 @@ class _ChatState extends State<Chat> {
 
           final data = snap.data() as Map<String, dynamic>;
           final resolved = (data['status'] as String? ?? '') == 'resolved';
-          final peer = data['sendTo'] as String?;
+          final createdByUid = data['createdByUid'] as String? ?? '';
+          final createdByName = data['createdByName'] as String? ?? '';
+          final sendTo = data['sendTo'] as String? ?? '';
+          final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+          final peer = (createdByUid.isNotEmpty && currentUid != createdByUid)
+              ? (createdByName.isNotEmpty ? createdByName : sendTo)
+              : sendTo;
           if (peer != _peerName) {
-            setState(() => _peerName = peer);
+            setState(() => _peerName = peer.isNotEmpty ? peer : null);
           }
 
           if (firstExistingSnapshot) {
@@ -371,6 +377,8 @@ class _ChatState extends State<Chat> {
               'isGigChat': true,
               'participants': [uid, p.peerUid],
               'sendTo': p.peerName,
+              'createdByUid': uid,
+              'createdByName': name,
               'subject': 'Gig Chat',
               'status': 'open',
               'lastMessage': '',

@@ -312,9 +312,19 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                   .firstWhere((p) => p != uid, orElse: () => '')
                   as String;
 
+              // Resolve the correct display name for the peer.
+              // If the current user created the room, the peer is sendTo.
+              // If the current user is the receiver, the peer is createdByName.
+              final createdByUid = data['createdByUid'] as String? ?? '';
+              final createdByName = data['createdByName'] as String? ?? '';
+              final sendTo = data['sendTo'] as String? ?? 'Gig Chat';
+              final peerDisplayName = (createdByUid.isNotEmpty && uid != createdByUid)
+                  ? (createdByName.isNotEmpty ? createdByName : sendTo)
+                  : sendTo;
+
               return _ChatHomeItem(
                 roomId: docs[i].id,
-                sendTo: data['sendTo'] as String? ?? 'Gig Chat',
+                sendTo: peerDisplayName,
                 subject: data['subject'] as String? ?? 'Gig Chat',
                 message: displayMessage,
                 status: data['status'] as String? ?? 'open',
