@@ -56,6 +56,9 @@ class _AuthGateState extends State<AuthGate> {
   bool _pendingDeletion = false;
   DateTime? _scheduledDeleteAt;
   String? _accountError;
+  // Set when Firestore is unreachable during restore — shows a retry screen
+  // instead of opening the app without completing the pendingDeletion check.
+  bool _restoreError = false;
   // UID for which _doRestore has completed — guards against the LoginScreen
   // calling setCurrentUserInfo before _doRestore runs its pendingDeletion check.
   String? _restoredForUid;
@@ -73,6 +76,7 @@ class _AuthGateState extends State<AuthGate> {
 
   // Core restore logic — called both from initState and from the stream path.
   Future<void> _doRestore(User user) async {
+    if (mounted) setState(() => _restoreError = false);
     try {
       final doc = await FirebaseFirestore.instance
           .collection('users')
@@ -117,18 +121,9 @@ class _AuthGateState extends State<AuthGate> {
         return;
       }
     } catch (_) {
-      // Firestore unreachable (network or token-refresh timing).
-      // Set minimal session from Firebase Auth so the app can open.
-      if (mounted) {
-        context.read<CurrentUserProvider>().setCurrentUserInfo(
-          user.email,
-          null,
-          user.uid,
-          null,
-          null,
-        );
-        setState(() => _restoredForUid = user.uid);
-      }
+      // Firestore unreachable — do not open the home screen. The pendingDeletion
+      // check must succeed before granting access. Show a retry screen instead.
+      if (mounted) setState(() => _restoreError = true);
     } finally {
       if (mounted) setState(() => _restoringSession = false);
     }
@@ -157,14 +152,21 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        // No Firebase user — signed out. Reset deletion gate and go to login.
+        if (_restoreError && snapshot.hasData) {
+          return _RestoreErrorScreen(
+            onRetry: () => _doRestore(snapshot.data!),
+          );
+        }
+
+        // No Firebase user — signed out. Reset all gate state and go to login.
         if (!snapshot.hasData && !provider.isLoggedIn) {
-          if (_pendingDeletion || _restoredForUid != null) {
+          if (_pendingDeletion || _restoredForUid != null || _restoreError) {
             WidgetsBinding.instance.addPostFrameCallback(
               (_) => setState(() {
                 _pendingDeletion = false;
                 _scheduledDeleteAt = null;
                 _restoredForUid = null;
+                _restoreError = false;
               }),
             );
           }
@@ -272,6 +274,62 @@ class _PendingDeletionScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12)),
                   ),
                   child: const Text('Cancel Deletion',
+                      style:
+                          TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => FirebaseAuth.instance.signOut(),
+                child: const Text('Sign Out',
+                    style: TextStyle(color: Colors.grey, fontSize: 14)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RestoreErrorScreen extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _RestoreErrorScreen({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.wifi_off_outlined, size: 48, color: Colors.grey),
+              const SizedBox(height: 24),
+              const Text(
+                'Unable to connect',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'A connection is required to verify your account status. Please check your internet connection and try again.',
+                style: TextStyle(fontSize: 14, color: Colors.grey, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: onRetry,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF1B6CA8),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('Try Again',
                       style:
                           TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                 ),
