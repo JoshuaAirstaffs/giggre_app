@@ -3,7 +3,9 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:in_app_update/in_app_update.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:giggre_app/main.dart' show navigatorKey;
 import 'package:giggre_app/core/theme/app_colors.dart';
 
@@ -58,7 +60,9 @@ class _AppUpdateCheckerState extends State<AppUpdateChecker>
       if (info.updateAvailability == UpdateAvailability.updateAvailable) {
         debugPrint('[AppUpdate] → New version detected, showing modal');
         _dialogShown = true;
-        _showUpdateDialog();
+        final packageInfo = await PackageInfo.fromPlatform();
+        final notes = await _fetchReleaseNotes(packageInfo.packageName);
+        _showUpdateDialog(releaseNotes: notes);
       } else {
         debugPrint('[AppUpdate] → No update available');
       }
@@ -67,16 +71,59 @@ class _AppUpdateCheckerState extends State<AppUpdateChecker>
     }
   }
 
-  void _showUpdateDialog() {
+  Future<List<String>> _fetchReleaseNotes(String packageName) async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://play.google.com/store/apps/details?id=$packageName&hl=en'),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) return [];
+
+      final body = response.body;
+      // The "What's New" text is embedded in Play Store's JSON data
+      final regex = RegExp(r',"recentChanges":"((?:[^"\\]|\\.)*)"');
+      final match = regex.firstMatch(body);
+
+      if (match != null) {
+        final rawText = match.group(1) ?? '';
+        final decoded = rawText
+            .replaceAll(r'\n', '\n')
+            .replaceAll(r'<', '<')
+            .replaceAll(r'>', '>')
+            .replaceAll(r'&', '&')
+            .replaceAll(RegExp(r'<[^>]+>'), '')
+            .trim();
+
+        if (decoded.isNotEmpty) {
+          return decoded
+              .split('\n')
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty)
+              .toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('[AppUpdate] release notes fetch error: $e');
+    }
+    return [];
+  }
+
+  void _showUpdateDialog({List<String> releaseNotes = const []}) {
     final ctx = navigatorKey.currentContext;
     if (ctx == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _showUpdateDialog());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _showUpdateDialog(releaseNotes: releaseNotes),
+      );
       return;
     }
     showDialog(
       context: ctx,
       barrierDismissible: false,
       builder: (_) => _UpdateDialog(
+        releaseNotes: releaseNotes,
         onUpdate: () async {
           Navigator.of(ctx, rootNavigator: true).pop();
           try {
@@ -100,7 +147,12 @@ class _AppUpdateCheckerState extends State<AppUpdateChecker>
 class _UpdateDialog extends StatelessWidget {
   final VoidCallback onUpdate;
   final VoidCallback onLater;
-  const _UpdateDialog({required this.onUpdate, required this.onLater});
+  final List<String> releaseNotes;
+  const _UpdateDialog({
+    required this.onUpdate,
+    required this.onLater,
+    this.releaseNotes = const [],
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -157,6 +209,57 @@ class _UpdateDialog extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: kSub, fontSize: 13.5, height: 1.6),
             ),
+            if (releaseNotes.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              Divider(color: borderColor),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "What's New",
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 120),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: releaseNotes
+                        .map(
+                          (note) => Padding(
+                            padding: const EdgeInsets.only(bottom: 5),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  '• ',
+                                  style: TextStyle(color: kSub, fontSize: 13),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    note,
+                                    style: const TextStyle(
+                                      color: kSub,
+                                      fontSize: 13,
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 28),
             SizedBox(
               width: double.infinity,

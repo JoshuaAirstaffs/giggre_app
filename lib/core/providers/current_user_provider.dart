@@ -20,7 +20,10 @@ class CurrentUserProvider extends ChangeNotifier {
   StreamSubscription? _ticketSubscription;
   StreamSubscription? _callSubscription;
   StreamSubscription? _chatRoomsSubscription;
+  StreamSubscription? _supportRoomsSubscription;
   final Map<String, StreamSubscription> _chatMessageSubs = {};
+  final Set<String> _supportRoomIds = {};
+  Timestamp? _chatListenStart;
 
   final _audioPlayer = AudioPlayer(); // ← new
 
@@ -52,6 +55,34 @@ class CurrentUserProvider extends ChangeNotifier {
           AndroidFlutterLocalNotificationsPlugin
         >();
     await androidPlugin?.requestNotificationsPermission();
+
+    // Explicitly create channels so importance is set correctly on first install.
+    // Android locks channel importance after first creation — explicit creation
+    // here guarantees HIGH importance before any notification is shown.
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_chat',
+        'Gig Chat',
+        description: 'Notifications for new chat messages',
+        importance: Importance.max,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_assignments',
+        'Gig Assignments',
+        description: 'Notifications for gig assignments',
+        importance: Importance.max,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'ticket_updates',
+        'Ticket Updates',
+        description: 'Notifications for support ticket updates',
+        importance: Importance.high,
+      ),
+    );
 
     _notificationsInitialized = true;
   }
@@ -115,10 +146,14 @@ class CurrentUserProvider extends ChangeNotifier {
     _callSubscription = null;
     _chatRoomsSubscription?.cancel();
     _chatRoomsSubscription = null;
+    _supportRoomsSubscription?.cancel();
+    _supportRoomsSubscription = null;
     for (final sub in _chatMessageSubs.values) {
       sub.cancel();
     }
     _chatMessageSubs.clear();
+    _supportRoomIds.clear();
+    _chatListenStart = null;
     _stopRingtone();
     _audioPlayer.dispose(); // ← clean up
     notifyListeners();
@@ -246,11 +281,89 @@ class CurrentUserProvider extends ChangeNotifier {
 
   void _listenToGigChatMessages(String? uid) {
     if (uid == null) return;
+
+    // Keep the original login timestamp so repeated setCurrentUserInfo calls
+    // (home screen reload) don't reset the cutoff and miss in-flight messages.
+    _chatListenStart ??= Timestamp.now();
+    final listenStart = _chatListenStart!;
+
     _chatRoomsSubscription?.cancel();
-    for (final sub in _chatMessageSubs.values) {
-      sub.cancel();
-    }
+    _supportRoomsSubscription?.cancel();
+    for (final sub in _chatMessageSubs.values) sub.cancel();
     _chatMessageSubs.clear();
+    _supportRoomIds.clear();
+
+    debugPrint('[ChatNotif] listener started for uid=$uid, cutoff=${listenStart.toDate()}');
+
+    void subscribeRoom(QueryDocumentSnapshot<Map<String, dynamic>> room) {
+      if (_chatMessageSubs.containsKey(room.id)) return;
+
+      final data = room.data();
+      final participants = (data['participants'] as List<dynamic>?) ?? [];
+      final isSupport = data['isSupport'] as bool? ?? false;
+
+      // For rooms without participants (e.g. old support rooms), fall back to
+      // 'support' as the peer so auto-reply messages still trigger notifications.
+      final peerUid = participants.isNotEmpty
+          ? participants.firstWhere(
+                (p) => p != uid,
+                orElse: () => isSupport ? 'support' : '',
+              ) as String
+          : isSupport
+              ? 'support'
+              : '';
+
+      debugPrint('[ChatNotif] room ${room.id}: participants=$participants, peerUid=$peerUid, isSupport=$isSupport');
+
+      if (peerUid.isEmpty) {
+        debugPrint('[ChatNotif] skipping room ${room.id}: peerUid is empty');
+        return;
+      }
+
+      final gigId = data['gigId'] as String? ?? '';
+      final createdByUid = data['createdByUid'] as String? ?? '';
+      final createdByName = data['createdByName'] as String? ?? '';
+      final sendTo = data['sendTo'] as String? ?? 'Someone';
+      final peerName = (createdByUid.isNotEmpty && uid != createdByUid)
+          ? (createdByName.isNotEmpty ? createdByName : sendTo)
+          : sendTo;
+
+      debugPrint('[ChatNotif] subscribing to messages in room ${room.id}, peerName=$peerName');
+
+      final sub = FirebaseFirestore.instance
+          .collection('chat_rooms')
+          .doc(room.id)
+          .collection('messages')
+          .orderBy('createdAt')
+          .startAfter([listenStart])
+          .snapshots()
+          .listen(
+            (msgSnap) {
+              debugPrint('[ChatNotif] room ${room.id}: ${msgSnap.docChanges.length} changes');
+              for (final change in msgSnap.docChanges) {
+                if (change.type != DocumentChangeType.added) continue;
+                final msgData = change.doc.data() ?? {};
+                final senderId = msgData['senderId'];
+                final hasSeen = msgData['hasSeen'] as bool? ?? false;
+                debugPrint('[ChatNotif] new msg: senderId=$senderId, peerUid=$peerUid, hasSeen=$hasSeen');
+                if (senderId != peerUid) {
+                  debugPrint('[ChatNotif] skipped: senderId != peerUid');
+                  continue;
+                }
+                if (hasSeen) {
+                  debugPrint('[ChatNotif] skipped: hasSeen=true');
+                  continue;
+                }
+                final text = msgData['text'] as String? ?? 'New message';
+                debugPrint('[ChatNotif] firing notification from $peerName: "$text"');
+                _showChatNotification(peerName, text, room.id, gigId, peerUid);
+              }
+            },
+            onError: (e) =>
+                debugPrint('[ChatNotif] msg stream error in ${room.id}: $e'),
+          );
+      _chatMessageSubs[room.id] = sub;
+    }
 
     _chatRoomsSubscription = FirebaseFirestore.instance
         .collection('chat_rooms')
@@ -258,78 +371,41 @@ class CurrentUserProvider extends ChangeNotifier {
         .snapshots()
         .listen(
           (roomsSnap) {
-            // Remove subs for rooms that no longer exist.
+            debugPrint('[ChatNotif] rooms snapshot: ${roomsSnap.docs.length} rooms');
+            // Remove subs for rooms that disappeared, but keep support-room subs.
             final liveIds = roomsSnap.docs.map((d) => d.id).toSet();
-            final gone =
-                _chatMessageSubs.keys.where((id) => !liveIds.contains(id)).toList();
+            final gone = _chatMessageSubs.keys
+                .where((id) => !liveIds.contains(id) && !_supportRoomIds.contains(id))
+                .toList();
             for (final id in gone) {
               _chatMessageSubs[id]?.cancel();
               _chatMessageSubs.remove(id);
             }
-
-            // Add subs only for rooms not yet subscribed — never cancel existing ones.
-            // This prevents the rooms snapshot (triggered by lastMessage updates)
-            // from resetting the initialLoad flag and swallowing incoming messages.
             for (final room in roomsSnap.docs) {
-              if (_chatMessageSubs.containsKey(room.id)) continue;
-
-              final data = room.data();
-              final participants =
-                  (data['participants'] as List<dynamic>?) ?? [];
-              final peerUid = participants.firstWhere(
-                (p) => p != uid,
-                orElse: () => '',
-              ) as String;
-
-              if (peerUid.isEmpty) continue;
-
-              final gigId = data['gigId'] as String? ?? '';
-              final createdByUid = data['createdByUid'] as String? ?? '';
-              final createdByName = data['createdByName'] as String? ?? '';
-              final sendTo = data['sendTo'] as String? ?? 'Someone';
-              final peerName =
-                  (createdByUid.isNotEmpty && uid != createdByUid)
-                      ? (createdByName.isNotEmpty ? createdByName : sendTo)
-                      : sendTo;
-
-              bool initialLoad = true;
-
-              final sub = FirebaseFirestore.instance
-                  .collection('chat_rooms')
-                  .doc(room.id)
-                  .collection('messages')
-                  .where('senderId', isEqualTo: peerUid)
-                  .where('hasSeen', isEqualTo: false)
-                  .snapshots()
-                  .listen(
-                    (msgSnap) {
-                      if (initialLoad) {
-                        initialLoad = false;
-                        return;
-                      }
-                      for (final change in msgSnap.docChanges) {
-                        if (change.type == DocumentChangeType.added) {
-                          final text =
-                              change.doc.data()?['text'] as String? ??
-                              'New message';
-                          _showChatNotification(
-                            peerName,
-                            text,
-                            room.id,
-                            gigId,
-                            peerUid,
-                          );
-                        }
-                      }
-                    },
-                    onError: (e) => debugPrint(
-                        '[CurrentUserProvider] chat msg error: $e'),
-                  );
-              _chatMessageSubs[room.id] = sub;
+              subscribeRoom(room);
             }
           },
           onError: (e) =>
-              debugPrint('[CurrentUserProvider] chat rooms error: $e'),
+              debugPrint('[ChatNotif] rooms stream error: $e'),
+        );
+
+    // Second listener: catches support rooms that don't have a participants field
+    // (e.g. rooms created before the field was added, or via contact_us flow).
+    _supportRoomsSubscription = FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .where('userId', isEqualTo: uid)
+        .where('isSupport', isEqualTo: true)
+        .snapshots()
+        .listen(
+          (roomsSnap) {
+            debugPrint('[ChatNotif] support rooms snapshot: ${roomsSnap.docs.length} rooms');
+            for (final room in roomsSnap.docs) {
+              _supportRoomIds.add(room.id);
+              subscribeRoom(room);
+            }
+          },
+          onError: (e) =>
+              debugPrint('[ChatNotif] support rooms stream error: $e'),
         );
   }
 
@@ -340,31 +416,37 @@ class CurrentUserProvider extends ChangeNotifier {
     String gigId,
     String peerUid,
   ) async {
-    final payload = jsonEncode({
-      'roomId': roomId,
-      'gigId': gigId,
-      'peerUid': peerUid,
-      'peerName': peerName,
-    });
-    await Future.wait([
-      _notifications.show(
-        roomId.hashCode.abs() % 100000,
-        peerName,
-        message,
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'gig_chat',
-            'Gig Chat',
-            icon: 'ic_chat_notification',
-            importance: Importance.high,
-            priority: Priority.high,
+    try {
+      final payload = jsonEncode({
+        'roomId': roomId,
+        'gigId': gigId,
+        'peerUid': peerUid,
+        'peerName': peerName,
+      });
+      debugPrint('[ChatNotif] calling _notifications.show id=${roomId.hashCode.abs() % 100000}');
+      await Future.wait([
+        _notifications.show(
+          roomId.hashCode.abs() % 100000,
+          peerName,
+          message,
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'gig_chat',
+              'Gig Chat',
+              importance: Importance.max,
+              priority: Priority.max,
+              playSound: true,
+            ),
+            iOS: DarwinNotificationDetails(presentAlert: true, presentSound: true),
           ),
-          iOS: DarwinNotificationDetails(),
+          payload: payload,
         ),
-        payload: payload,
-      ),
-      showBrowserNotification(peerName, message, '/icons/Icon-192.png'),
-    ]);
+        showBrowserNotification(peerName, message, '/icons/Icon-192.png'),
+      ]);
+      debugPrint('[ChatNotif] notification shown successfully');
+    } catch (e, st) {
+      debugPrint('[ChatNotif] notification error: $e\n$st');
+    }
   }
 
   Future<void> _showNotification(String subject, String status) async {

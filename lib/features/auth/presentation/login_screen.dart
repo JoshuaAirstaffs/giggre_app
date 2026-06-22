@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import '../../../utils/user_utils.dart';
 import '../../../core/theme/theme_provider.dart';
@@ -201,6 +202,11 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     _error = widget.errorMessage ?? '';
+    if (!kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await Permission.notification.request();
+      });
+    }
   }
 
   @override
