@@ -62,3 +62,7 @@ app.*.symbols
 # Obfuscation related
 
 app.*.map.json
+
+# Node modules
+node_modules/
+functions/node_modules/

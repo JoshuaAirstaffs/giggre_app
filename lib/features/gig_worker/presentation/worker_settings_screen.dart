@@ -40,7 +40,12 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
     if (_uid.isEmpty) return;
     _profileSub = _db.collection('users').doc(_uid).snapshots().listen((doc) {
       final data = doc.data() ?? {};
-      final count = (data['decline_count'] as num?)?.toInt() ?? 0;
+      final today = DateTime.now();
+      final todayStr =
+          '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+      final storedDate = data['decline_count_date'] as String? ?? '';
+      final rawCount = (data['decline_count'] as num?)?.toInt() ?? 0;
+      final count = storedDate == todayStr ? rawCount : 0;
       final ts = data['suspended_until'] as Timestamp?;
       DateTime? until;
       if (ts != null) {
