@@ -691,8 +691,17 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .collection('users')
         .doc(uid)
         .get();
+    final data = userSnap.data() ?? {};
+
+    final today = DateTime.now();
+    final todayStr =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    final storedDate = data['decline_count_date'] as String? ?? '';
+    final isNewDay = storedDate != todayStr;
+
     final currentDeclineCount =
-        (userSnap.data()?['decline_count'] as num?)?.toInt() ?? 0;
+        isNewDay ? 0 : (data['decline_count'] as num?)?.toInt() ?? 0;
+    final newDeclineCount = currentDeclineCount + 1;
 
     await Future.wait([
       FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id).update({
@@ -704,11 +713,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       FirebaseFirestore.instance.collection('users').doc(uid).update({
         'slot': 'AVAILABLE',
         'acceptanceRate': FieldValue.increment(-0.10),
-        'decline_count': FieldValue.increment(1),
+        'decline_count': newDeclineCount,
+        'decline_count_date': todayStr,
       }),
     ]);
     if (mounted) setState(() => _dispatchedGig = null);
-    await _checkAndApplySuspension(uid, currentDeclineCount + 1);
+    await _checkAndApplySuspension(uid, newDeclineCount);
   }
 
   // Called by WorkingUI when Firestore status becomes 'completed' (set by host).
@@ -757,7 +767,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           data['suspension_tier_table'] as List<dynamic>? ?? [];
       if (tierTable.isEmpty) return;
 
-      // Find the highest matching tier
+      // Triggers are relative to the free limit.
+      // e.g. freeLimit=5, trigger=2 → fires at decline #7.
+      final declinesOverLimit = newDeclineCount - freeLimit;
+
       int? suspensionMinutes;
       int highestTrigger = 0;
       for (final tier in tierTable) {
@@ -765,7 +778,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             (tier['decline_count_trigger'] as num?)?.toInt() ?? 0;
         final mins =
             (tier['suspension_duration_minutes'] as num?)?.toInt() ?? 0;
-        if (newDeclineCount >= trigger && trigger >= highestTrigger) {
+        if (declinesOverLimit >= trigger && trigger >= highestTrigger) {
           highestTrigger = trigger;
           suspensionMinutes = mins;
         }
