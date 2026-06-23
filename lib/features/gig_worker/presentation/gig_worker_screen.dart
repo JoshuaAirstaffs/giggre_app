@@ -511,6 +511,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _acceptOfferedGig(GigMarkerData gig) async {
+    if (_suspendedUntil != null && DateTime.now().isBefore(_suspendedUntil!)) {
+      _showSuspensionDialog();
+      return;
+    }
     await FirebaseFirestore.instance
         .collection('offered_gigs')
         .doc(gig.id)
@@ -661,6 +665,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _acceptDispatch(GigMarkerData gig) async {
+    if (_suspendedUntil != null && DateTime.now().isBefore(_suspendedUntil!)) {
+      _showSuspensionDialog();
+      return;
+    }
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     await Future.wait([
@@ -795,11 +803,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       });
 
       if (!mounted) return;
-      setState(() {
-        _suspendedUntil = suspendedUntil;
-        _seekingQuickGigs = false;
-      });
-      _startSuspensionTimer();
+      // Only update seekingQuickGigs locally; let the profile listener manage
+      // _suspendedUntil and the suspension timer so wasNotSuspended fires once
+      // and the suspension dialog is shown exactly once.
+      setState(() => _seekingQuickGigs = false);
     } catch (_) {}
   }
 
@@ -860,7 +867,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                if (mounted) {
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                }
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.redAccent,
                 foregroundColor: Colors.white,
