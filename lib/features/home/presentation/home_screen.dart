@@ -22,6 +22,7 @@ import 'package:giggre_app/screens/app_contents/about_giggre.dart';
 import 'package:giggre_app/screens/giggre-updates.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
+import '../../../services/delete_acc_service.dart';
 import '../../auth/presentation/login_screen.dart';
 import '../../gig_host/presentation/gig_host_screen.dart';
 import '../../gig_worker/presentation/gig_worker_screen.dart';
@@ -42,6 +43,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _hasUnreadGigMessages = false;
   bool _hasUpdate = false;
   bool _updateDismissed = false;
+  bool _pendingDeletion = false;
+  DateTime? _scheduledDeleteAt;
   StreamSubscription? _roomsStreamSub; // support rooms-level sub
   final List<StreamSubscription> _roomSubs = []; // support message-level subs
   StreamSubscription? _gigRoomsStreamSub; // gig rooms-level sub
@@ -471,6 +474,126 @@ class _HomeScreenState extends State<HomeScreen> {
       uid,
       data?['userId'],
       data?['isVerified'],
+    );
+    if (data?['pendingDeletion'] == true) {
+      final ts = data?['scheduledDeleteAt'];
+      setState(() {
+        _pendingDeletion = true;
+        _scheduledDeleteAt = ts != null ? (ts as Timestamp).toDate() : null;
+      });
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) { if (mounted) _showPendingDeletionModal(); },
+      );
+    }
+  }
+
+  void _showPendingDeletionModal() {
+    final daysLeft = _scheduledDeleteAt != null
+        ? _scheduledDeleteAt!.difference(DateTime.now()).inDays + 1
+        : 30;
+    final dateStr = _scheduledDeleteAt != null
+        ? '${_scheduledDeleteAt!.day}/${_scheduledDeleteAt!.month}/${_scheduledDeleteAt!.year}'
+        : '';
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              color: Theme.of(ctx).cardColor,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Theme.of(ctx).dividerColor),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.red.withValues(alpha: 0.08),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.delete_forever_outlined,
+                        color: Colors.redAccent, size: 32),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Account Pending Deletion',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Theme.of(ctx).colorScheme.onSurface,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Your account is scheduled for permanent deletion in $daysLeft day${daysLeft == 1 ? '' : 's'}${dateStr.isNotEmpty ? ' (on $dateStr)' : ''}.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 14, color: Colors.grey, height: 1.5),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Cancel to restore full access, or sign out.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 13, color: Colors.grey, height: 1.5),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () async {
+                      await DeleteAccountService.cancelDeletion(ctx);
+                      if (ctx.mounted) {
+                        Navigator.pop(ctx);
+                        setState(() {
+                          _pendingDeletion = false;
+                          _scheduledDeleteAt = null;
+                        });
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF1B6CA8),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Cancel Deletion',
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    await FirebaseAuth.instance.signOut();
+                  },
+                  child: const Text('Sign Out',
+                      style: TextStyle(color: Colors.grey, fontSize: 14)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

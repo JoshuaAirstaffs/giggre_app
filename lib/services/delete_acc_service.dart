@@ -6,7 +6,6 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../main.dart';
 import '../core/theme/app_colors.dart';
 import '../features/auth/models/delete_request_model.dart';
-import '../features/auth/presentation/login_screen.dart';
 
 class DeleteAccountService {
   // ─────────────────────────────────────────────────────────────────────────────
@@ -57,6 +56,15 @@ class DeleteAccountService {
         'pendingDeletion': true,
         'scheduledDeleteAt': Timestamp.fromDate(scheduledAt),
       });
+
+      // Pop all pushed routes back to the root (AuthGate's home) before signing
+      // out — settings/profile screens are MaterialPageRoute pushes on top of
+      // the navigator stack, so AuthGate's rebuild to LoginScreen would be hidden
+      // behind them without this.
+      if (context.mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+      await FirebaseAuth.instance.signOut();
     } catch (e) {
       debugPrint('[DeleteAccountService] deleteAccount error: $e');
       if (context.mounted) {
@@ -65,18 +73,12 @@ class DeleteAccountService {
       return;
     }
 
-    // Navigate only after the write succeeds — all listeners are still alive.
-    if (context.mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (_) => false,
-      );
-    }
-
-    final ctx = navigatorKey.currentContext;
-    if (ctx != null) {
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(ctx).showSnackBar(
+    // signOut() triggers authStateChanges(null) — AuthGate rebuilds to LoginScreen.
+    // Show the snackbar after the frame so it renders on the LoginScreen.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = navigatorKey.currentContext;
+      if (ctx != null) {
+        ScaffoldMessenger.of(ctx).showSnackBar(
           SnackBar(
             content: const Row(children: [
               Icon(Icons.check_circle_outline, color: Colors.white),
@@ -89,12 +91,12 @@ class DeleteAccountService {
             ]),
             backgroundColor: const Color(0xFF1B6CA8),
             behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             duration: const Duration(seconds: 6),
           ),
         );
       }
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
