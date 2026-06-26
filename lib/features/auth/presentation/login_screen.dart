@@ -49,9 +49,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final data = userDoc.data();
 
-    // Same pendingDeletion guard as email login — let AuthGate handle routing.
-    if (data?['pendingDeletion'] == true) return;
-
     final bool needsProfile = !userDoc.exists ||
         (data?['phone'] == null || (data?['phone'] as String).isEmpty);
 
@@ -97,12 +94,6 @@ class _LoginScreenState extends State<LoginScreen> {
         final newId = await generateUserId();
         await userRef.update({'userId': newId});
       }
-
-      // If the account has a pending deletion request, don't navigate to the
-      // home screen. AuthGate will receive the authStateChanges event, call
-      // _doRestore(), detect pendingDeletion == true, and show the deletion
-      // screen automatically.
-      if (doc.data()?['pendingDeletion'] == true) return;
 
       if (!mounted) return;
 
