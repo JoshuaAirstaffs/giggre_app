@@ -7,7 +7,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:latlong2/latlong.dart' as ll;
 import 'package:http/http.dart' as http;
+import '../../../core/services/gms_availability.dart';
 import 'package:intl/intl.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
@@ -1685,6 +1688,9 @@ class _MapPickerScreen extends StatefulWidget {
 
 class _MapPickerScreenState extends State<_MapPickerScreen> {
   GoogleMapController? _googleMapController;
+  bool _useGoogleMaps = true;
+  final _osmController = fm.MapController();
+  bool _osmMapReady = false;
   final _searchCtrl = TextEditingController();
   LatLng? _picked;
   String _address = '';
@@ -1702,20 +1708,28 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       _picked = widget.initialPosition;
       _geocodePosition(widget.initialPosition!);
     }
+    GmsAvailability.isAvailable.then((v) {
+      if (mounted) setState(() => _useGoogleMaps = v);
+    });
   }
 
   @override
   void dispose() {
     _googleMapController?.dispose();
+    _osmController.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _recenterToMyLocation() async {
     if (_myLocation != null) {
-      _googleMapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
-      );
+      if (_useGoogleMaps) {
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
+        );
+      } else if (_osmMapReady) {
+        _osmController.move(ll.LatLng(_myLocation!.latitude, _myLocation!.longitude), 14.0);
+      }
       return;
     }
     try {
@@ -1733,9 +1747,13 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       );
       if (!mounted) return;
       setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));
-      _googleMapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
-      );
+      if (_useGoogleMaps) {
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
+        );
+      } else if (_osmMapReady) {
+        _osmController.move(ll.LatLng(_myLocation!.latitude, _myLocation!.longitude), 14.0);
+      }
     } catch (_) {}
   }
 
@@ -1768,9 +1786,11 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         _address = '';
         _searching = false;
       });
-      _googleMapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(point, 15.0),
-      );
+      if (_useGoogleMaps) {
+        _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(point, 15.0));
+      } else if (_osmMapReady) {
+        _osmController.move(ll.LatLng(point.latitude, point.longitude), 15.0);
+      }
       _geocodePosition(point);
     } catch (_) {
       if (!mounted) return;
@@ -1826,6 +1846,43 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     _geocodePosition(point);
   }
 
+  Widget _buildOsmMap() {
+    return fm.FlutterMap(
+      mapController: _osmController,
+      options: fm.MapOptions(
+        initialCenter: _picked != null
+            ? ll.LatLng(_picked!.latitude, _picked!.longitude)
+            : (widget.initialPosition != null
+                ? ll.LatLng(widget.initialPosition!.latitude, widget.initialPosition!.longitude)
+                : const ll.LatLng(14.5995, 120.9842)),
+        initialZoom: 14.0,
+        onMapReady: () {
+          if (mounted) setState(() => _osmMapReady = true);
+        },
+        onTap: (_, point) {
+          _onMapTap(LatLng(point.latitude, point.longitude));
+        },
+      ),
+      children: [
+        fm.TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.giggre.mobile',
+        ),
+        if (_picked != null)
+          fm.MarkerLayer(
+            markers: [
+              fm.Marker(
+                point: ll.LatLng(_picked!.latitude, _picked!.longitude),
+                width: 40,
+                height: 40,
+                child: const Icon(Icons.location_pin, color: Colors.red, size: 40),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
   void _confirm() {
     if (_picked == null) return;
     Navigator.pop(
@@ -1861,26 +1918,28 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       ),
       body: Stack(
         children: [
-          GoogleMap(
-            onMapCreated: (controller) => _googleMapController = controller,
-            initialCameraPosition: CameraPosition(
-              target: widget.initialPosition ?? _defaultCenter,
-              zoom: 14.0,
-            ),
-            myLocationEnabled: true,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-            onTap: _onMapTap,
-            markers: _picked != null
-                ? {
-                    Marker(
-                      markerId: const MarkerId('picked'),
-                      position: _picked!,
-                      icon: BitmapDescriptor.defaultMarker,
-                    ),
-                  }
-                : {},
-          ),
+          _useGoogleMaps
+              ? GoogleMap(
+                  onMapCreated: (controller) => _googleMapController = controller,
+                  initialCameraPosition: CameraPosition(
+                    target: widget.initialPosition ?? _defaultCenter,
+                    zoom: 14.0,
+                  ),
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: false,
+                  onTap: _onMapTap,
+                  markers: _picked != null
+                      ? {
+                          Marker(
+                            markerId: const MarkerId('picked'),
+                            position: _picked!,
+                            icon: BitmapDescriptor.defaultMarker,
+                          ),
+                        }
+                      : {},
+                )
+              : _buildOsmMap(),
           // ── Search bar ───────────────────────────────────────
           Positioned(
             top: 16,

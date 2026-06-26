@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "935744152330",
+    "project_id": "giggre-prod",
+    "storage_bucket": "giggre-prod.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:935744152330:android:906c6f70fa38c3e3ee10f3",
+        "android_client_info": {
+          "package_name": "com.giggre.mobile"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "935744152330-8d6f8pjehgouqmrnrnj0k2vlf0rutclj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCRLtNaXb6zZzN0v8y_qY-JA3qci5fzomQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "935744152330-8d6f8pjehgouqmrnrnj0k2vlf0rutclj.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "935744152330-q2b3f7birp3mt4397narp2b7rdj3cq4t.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.giggreApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

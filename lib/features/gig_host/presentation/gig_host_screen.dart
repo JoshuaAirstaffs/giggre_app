@@ -7,7 +7,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:latlong2/latlong.dart' as ll;
 import 'package:geolocator/geolocator.dart';
+import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../auth/presentation/login_screen.dart';
@@ -842,6 +845,9 @@ class _WorkerMapSection extends StatefulWidget {
 
 class _WorkerMapSectionState extends State<_WorkerMapSection> {
   GoogleMapController? _googleMapController;
+  bool _useGoogleMaps = true;
+  final _osmController = fm.MapController();
+  bool _osmMapReady = false;
   double _zoom = 12.0;
   LatLng? _myLocation;
   bool _mapInteractive = false;
@@ -852,14 +858,21 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   @override
   void initState() {
     super.initState();
-    _fetchAndCenterMap();
+    _initMap();
     _startWorkersSub();
+  }
+
+  Future<void> _initMap() async {
+    final hasGms = await GmsAvailability.isAvailable;
+    if (mounted) setState(() => _useGoogleMaps = hasGms);
+    _fetchAndCenterMap();
   }
 
   @override
   void dispose() {
     _workerSub?.cancel();
     _googleMapController?.dispose();
+    _osmController.dispose();
     super.dispose();
   }
 
@@ -880,9 +893,13 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
       if (!mounted) return;
       final loc = LatLng(pos.latitude, pos.longitude);
       setState(() => _myLocation = loc);
-      _googleMapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(loc, 14.0),
-      );
+      if (_useGoogleMaps) {
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(loc, 14.0),
+        );
+      } else if (_osmMapReady) {
+        _osmController.move(ll.LatLng(loc.latitude, loc.longitude), 14.0);
+      }
     } catch (_) {}
   }
 
@@ -985,6 +1002,100 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         onTap: ctx != null ? () => _showWorkerList(ctx, cluster.workers) : null,
       );
     }).toSet();
+  }
+
+  Widget _buildOsmMap() {
+    final ctx = _context;
+    final clusters = _buildClusters();
+    final osmMarkers = <fm.Marker>[];
+    for (final cluster in clusters) {
+      if (cluster.count == 1 && cluster.singleWorker != null) {
+        final worker = cluster.singleWorker!;
+        osmMarkers.add(fm.Marker(
+          point: ll.LatLng(cluster.center.latitude, cluster.center.longitude),
+          width: 32,
+          height: 32,
+          child: GestureDetector(
+            onTap: ctx != null ? () => _showWorkerSheet(ctx, worker) : null,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.lightBlue,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+              ),
+              child: const Icon(Icons.person_rounded, color: Colors.white, size: 16),
+            ),
+          ),
+        ));
+      } else {
+        osmMarkers.add(fm.Marker(
+          point: ll.LatLng(cluster.center.latitude, cluster.center.longitude),
+          width: 36,
+          height: 36,
+          child: GestureDetector(
+            onTap: ctx != null ? () => _showWorkerList(ctx, cluster.workers) : null,
+            child: Container(
+              decoration: BoxDecoration(
+                color: kAmber,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+              ),
+              child: Center(
+                child: Text(
+                  '${cluster.count}',
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ));
+      }
+    }
+    if (_myLocation != null) {
+      osmMarkers.add(fm.Marker(
+        point: ll.LatLng(_myLocation!.latitude, _myLocation!.longitude),
+        width: 28,
+        height: 28,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.cyan,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+          ),
+          child: const Icon(Icons.my_location_rounded, color: Colors.white, size: 14),
+        ),
+      ));
+    }
+    return fm.FlutterMap(
+      mapController: _osmController,
+      options: fm.MapOptions(
+        initialCenter: _myLocation != null
+            ? ll.LatLng(_myLocation!.latitude, _myLocation!.longitude)
+            : const ll.LatLng(14.5995, 120.9842),
+        initialZoom: _zoom,
+        onMapReady: () {
+          if (mounted) setState(() => _osmMapReady = true);
+        },
+        onPositionChanged: (camera, _) {
+          final newZoom = camera.zoom;
+          if ((newZoom - _zoom).abs() >= 0.3) setState(() => _zoom = newZoom);
+        },
+      ),
+      children: [
+        fm.TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.giggre.mobile',
+        ),
+        fm.MarkerLayer(markers: osmMarkers),
+      ],
+    );
   }
 
   Future<({int completedGigs, bool isFavorite})> _fetchWorkerSheetData(
@@ -1319,37 +1430,39 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: borderColor),
                 ),
-                child: GoogleMap(
-                  gestureRecognizers: _mapInteractive
-                      ? <Factory<OneSequenceGestureRecognizer>>{
-                          Factory<OneSequenceGestureRecognizer>(
-                            () => EagerGestureRecognizer(),
-                          ),
-                        }
-                      : const <Factory<OneSequenceGestureRecognizer>>{},
-                  onMapCreated: (controller) {
-                    _googleMapController = controller;
-                    if (_myLocation != null) {
-                      _googleMapController?.animateCamera(
-                        CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
-                      );
-                    }
-                  },
-                  initialCameraPosition: const CameraPosition(
-                    target: LatLng(14.5995, 120.9842),
-                    zoom: 12.0,
-                  ),
-                  myLocationEnabled: true,
-                  myLocationButtonEnabled: false,
-                  zoomControlsEnabled: false,
-                  markers: _buildMarkers(),
-                  onCameraMove: (position) {
-                    final newZoom = position.zoom;
-                    if ((newZoom - _zoom).abs() >= 0.3) {
-                      setState(() => _zoom = newZoom);
-                    }
-                  },
-                ),
+                child: _useGoogleMaps
+                    ? GoogleMap(
+                        gestureRecognizers: _mapInteractive
+                            ? <Factory<OneSequenceGestureRecognizer>>{
+                                Factory<OneSequenceGestureRecognizer>(
+                                  () => EagerGestureRecognizer(),
+                                ),
+                              }
+                            : const <Factory<OneSequenceGestureRecognizer>>{},
+                        onMapCreated: (controller) {
+                          _googleMapController = controller;
+                          if (_myLocation != null) {
+                            _googleMapController?.animateCamera(
+                              CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
+                            );
+                          }
+                        },
+                        initialCameraPosition: const CameraPosition(
+                          target: LatLng(14.5995, 120.9842),
+                          zoom: 12.0,
+                        ),
+                        myLocationEnabled: true,
+                        myLocationButtonEnabled: false,
+                        zoomControlsEnabled: false,
+                        markers: _buildMarkers(),
+                        onCameraMove: (position) {
+                          final newZoom = position.zoom;
+                          if ((newZoom - _zoom).abs() >= 0.3) {
+                            setState(() => _zoom = newZoom);
+                          }
+                        },
+                      )
+                    : _buildOsmMap(),
               ),
             ),
             // Tap-to-interact overlay

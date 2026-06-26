@@ -7,10 +7,13 @@ import 'package:geolocator/geolocator.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:giggre_app/features/chat/gig_chat_action.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:latlong2/latlong.dart' as ll;
 import 'package:http/http.dart' as http;
 import '../../../../core/theme/app_colors.dart';
 import 'gig_map_section.dart';
 import 'worker_payment_confirm_sheet.dart';
+import '../../../../core/services/gms_availability.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig progress steps
@@ -700,10 +703,22 @@ class _NavigatingSection extends StatefulWidget {
 
 class _NavigatingSectionState extends State<_NavigatingSection> {
   GoogleMapController? _googleMapController;
+  bool _useGoogleMaps = GmsAvailability.cachedIsAvailable;
+  final _osmController = fm.MapController();
+  bool _osmMapReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    GmsAvailability.isAvailable.then((v) {
+      if (mounted) setState(() => _useGoogleMaps = v);
+    });
+  }
 
   @override
   void dispose() {
     _googleMapController?.dispose();
+    _osmController.dispose();
     super.dispose();
   }
 
@@ -713,9 +728,16 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
     // Pan the camera when the worker location updates
     if (widget.workerLocation != null &&
         widget.workerLocation != oldWidget.workerLocation) {
-      _googleMapController?.animateCamera(
-        CameraUpdate.newLatLng(widget.workerLocation!),
-      );
+      if (_useGoogleMaps) {
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLng(widget.workerLocation!),
+        );
+      } else if (_osmMapReady) {
+        _osmController.move(
+          ll.LatLng(widget.workerLocation!.latitude, widget.workerLocation!.longitude),
+          _osmController.camera.zoom,
+        );
+      }
     }
   }
 
@@ -746,6 +768,73 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
     );
 
     return markers;
+  }
+
+  Widget _buildOsmMap() {
+    final gigPos = ll.LatLng(
+      widget.gig.position.latitude,
+      widget.gig.position.longitude,
+    );
+    final workerPos = widget.workerLocation != null
+        ? ll.LatLng(widget.workerLocation!.latitude, widget.workerLocation!.longitude)
+        : null;
+    final osmMarkers = <fm.Marker>[];
+    if (workerPos != null) {
+      osmMarkers.add(fm.Marker(
+        point: workerPos,
+        width: 28,
+        height: 28,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.lightBlue,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+          ),
+          child: const Icon(Icons.person_rounded, color: Colors.white, size: 14),
+        ),
+      ));
+    }
+    osmMarkers.add(fm.Marker(
+      point: gigPos,
+      width: 32,
+      height: 32,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.orange,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+        ),
+        child: const Icon(Icons.work_rounded, color: Colors.white, size: 16),
+      ),
+    ));
+    final routePoints = widget.routePoints
+        .map((p) => ll.LatLng(p.latitude, p.longitude))
+        .toList();
+    return fm.FlutterMap(
+      mapController: _osmController,
+      options: fm.MapOptions(
+        initialCenter: workerPos ?? gigPos,
+        initialZoom: 14.0,
+        onMapReady: () {
+          if (mounted) setState(() => _osmMapReady = true);
+        },
+      ),
+      children: [
+        fm.TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.giggre.mobile',
+        ),
+        if (routePoints.isNotEmpty)
+          fm.PolylineLayer(
+            polylines: [
+              fm.Polyline(points: routePoints, color: kBlue, strokeWidth: 4),
+            ],
+          ),
+        fm.MarkerLayer(markers: osmMarkers),
+      ],
+    );
   }
 
   Set<Polyline> _buildPolylines() {
@@ -787,20 +876,22 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: widget.divider),
             ),
-            child: GoogleMap(
-              onMapCreated: (controller) {
-                _googleMapController = controller;
-              },
-              initialCameraPosition: CameraPosition(
-                target: initialTarget,
-                zoom: 14.0,
-              ),
-              myLocationEnabled: true,
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
-              markers: _buildGoogleMarkers(),
-              polylines: _buildPolylines(),
-            ),
+            child: _useGoogleMaps
+                ? GoogleMap(
+                    onMapCreated: (controller) {
+                      _googleMapController = controller;
+                    },
+                    initialCameraPosition: CameraPosition(
+                      target: initialTarget,
+                      zoom: 14.0,
+                    ),
+                    myLocationEnabled: true,
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled: false,
+                    markers: _buildGoogleMarkers(),
+                    polylines: _buildPolylines(),
+                  )
+                : _buildOsmMap(),
           ),
         ),
         const SizedBox(height: 6),

@@ -49,6 +49,16 @@ android {
         }
     }
 
+    flavorDimensions += "env"
+    productFlavors {
+        create("dev") {
+            dimension = "env"
+        }
+        create("prod") {
+            dimension = "env"
+        }
+    }
+
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")

@@ -1,0 +1,44 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "giggre-prod",
+          "appId": "1:935744152330:android:906c6f70fa38c3e3ee10f3",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "giggre-prod",
+          "appId": "1:935744152330:ios:TODO_register_ios_in_giggre_prod",
+          "uploadDebugSymbols": false,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "macos": {
+        "default": {
+          "projectId": "giggre-prod",
+          "appId": "1:935744152330:ios:TODO_register_ios_in_giggre_prod",
+          "uploadDebugSymbols": false,
+          "fileOutput": "macos/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "giggre-prod",
+          "configurations": {
+            "android": "1:935744152330:android:906c6f70fa38c3e3ee10f3",
+            "ios": "1:935744152330:ios:TODO_register_ios_in_giggre_prod",
+            "macos": "1:935744152330:ios:TODO_register_ios_in_giggre_prod",
+            "web": "1:935744152330:web:27bb9238e5499026ee10f3",
+            "windows": "1:935744152330:web:27bb9238e5499026ee10f3"
+          }
+        }
+      }
+    }
+  }
+}

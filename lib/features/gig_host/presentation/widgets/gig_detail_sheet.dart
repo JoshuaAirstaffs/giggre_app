@@ -3,6 +3,9 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:latlong2/latlong.dart' as ll;
+import '../../../../core/services/gms_availability.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:giggre_app/features/chat/gig_chat_action.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -1111,6 +1114,17 @@ class _GigTrackingMap extends StatefulWidget {
 
 class _GigTrackingMapState extends State<_GigTrackingMap> {
   GoogleMapController? _googleMapController;
+  bool _useGoogleMaps = true;
+  final _osmController = fm.MapController();
+  bool _osmMapReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    GmsAvailability.isAvailable.then((v) {
+      if (mounted) setState(() => _useGoogleMaps = v);
+    });
+  }
 
   @override
   void didUpdateWidget(_GigTrackingMap oldWidget) {
@@ -1125,9 +1139,13 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
   void _animateToCenter() {
     final center = _computeCenter();
     final zoom = widget.workerLocation != null ? 14.0 : 15.0;
-    _googleMapController?.animateCamera(
-      CameraUpdate.newLatLngZoom(center, zoom),
-    );
+    if (_useGoogleMaps) {
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(center, zoom),
+      );
+    } else if (_osmMapReady) {
+      _osmController.move(ll.LatLng(center.latitude, center.longitude), zoom);
+    }
   }
 
   LatLng _computeCenter() {
@@ -1140,15 +1158,13 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
     return widget.gigLocation;
   }
 
-  Set<Marker> _buildMarkers() {
+  Set<Marker> _buildGoogleMarkers() {
     return {
-      // Gig location — amber/orange hue
       Marker(
         markerId: const MarkerId('gig_location'),
         position: widget.gigLocation,
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
       ),
-      // Worker live location — azure/blue hue
       if (widget.workerLocation != null)
         Marker(
           markerId: const MarkerId('worker_location'),
@@ -1158,9 +1174,63 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
     };
   }
 
+  Widget _buildOsmMap() {
+    final center = _computeCenter();
+    final zoom = widget.workerLocation != null ? 14.0 : 15.0;
+    final osmMarkers = <fm.Marker>[
+      fm.Marker(
+        point: ll.LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
+        width: 32,
+        height: 32,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.orange,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+          ),
+          child: const Icon(Icons.work_rounded, color: Colors.white, size: 16),
+        ),
+      ),
+      if (widget.workerLocation != null)
+        fm.Marker(
+          point: ll.LatLng(widget.workerLocation!.latitude, widget.workerLocation!.longitude),
+          width: 28,
+          height: 28,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.lightBlue,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+            ),
+            child: const Icon(Icons.person_rounded, color: Colors.white, size: 14),
+          ),
+        ),
+    ];
+    return fm.FlutterMap(
+      mapController: _osmController,
+      options: fm.MapOptions(
+        initialCenter: ll.LatLng(center.latitude, center.longitude),
+        initialZoom: zoom,
+        onMapReady: () {
+          if (mounted) setState(() => _osmMapReady = true);
+        },
+      ),
+      children: [
+        fm.TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.giggre.mobile',
+        ),
+        fm.MarkerLayer(markers: osmMarkers),
+      ],
+    );
+  }
+
   @override
   void dispose() {
     _googleMapController?.dispose();
+    _osmController.dispose();
     super.dispose();
   }
 
@@ -1172,26 +1242,37 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
 
     return Stack(
       children: [
-        GoogleMap(
-          onMapCreated: (controller) {
-            _googleMapController = controller;
-          },
-          initialCameraPosition: CameraPosition(
-            target: center,
-            zoom: initialZoom,
-          ),
-          myLocationEnabled: false,
-          myLocationButtonEnabled: false,
-          zoomControlsEnabled: false,
-          markers: _buildMarkers(),
-        ),
+        _useGoogleMaps
+            ? GoogleMap(
+                onMapCreated: (controller) {
+                  _googleMapController = controller;
+                },
+                initialCameraPosition: CameraPosition(
+                  target: center,
+                  zoom: initialZoom,
+                ),
+                myLocationEnabled: false,
+                myLocationButtonEnabled: false,
+                zoomControlsEnabled: false,
+                markers: _buildGoogleMarkers(),
+              )
+            : _buildOsmMap(),
         Positioned(
           bottom: 12,
           right: 12,
           child: GestureDetector(
-            onTap: () => _googleMapController?.animateCamera(
-              CameraUpdate.newLatLngZoom(widget.gigLocation, 15.0),
-            ),
+            onTap: () {
+              if (_useGoogleMaps) {
+                _googleMapController?.animateCamera(
+                  CameraUpdate.newLatLngZoom(widget.gigLocation, 15.0),
+                );
+              } else if (_osmMapReady) {
+                _osmController.move(
+                  ll.LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
+                  15.0,
+                );
+              }
+            },
             child: Container(
               width: 38,
               height: 38,
