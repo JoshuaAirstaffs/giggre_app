@@ -584,6 +584,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 TextButton(
                   onPressed: () async {
                     Navigator.pop(ctx);
+                    if (mounted) {
+                      context.read<CurrentUserProvider>().clearUser();
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (_) => const LoginScreen()),
+                        (route) => false,
+                      );
+                    }
                     await FirebaseAuth.instance.signOut();
                   },
                   child: const Text('Sign Out',
