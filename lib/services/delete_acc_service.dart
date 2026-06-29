@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:provider/provider.dart';
 import '../main.dart';
+import '../core/providers/current_user_provider.dart';
 import '../core/theme/app_colors.dart';
 import '../features/auth/models/delete_request_model.dart';
+import '../features/auth/presentation/login_screen.dart';
 
 class DeleteAccountService {
   // ─────────────────────────────────────────────────────────────────────────────
@@ -57,12 +60,12 @@ class DeleteAccountService {
         'scheduledDeleteAt': Timestamp.fromDate(scheduledAt),
       });
 
-      // Pop all pushed routes back to the root (AuthGate's home) before signing
-      // out — settings/profile screens are MaterialPageRoute pushes on top of
-      // the navigator stack, so AuthGate's rebuild to LoginScreen would be hidden
-      // behind them without this.
       if (context.mounted) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        context.read<CurrentUserProvider>().clearUser();
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
       }
       await FirebaseAuth.instance.signOut();
     } catch (e) {
