@@ -93,8 +93,17 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
         .doc(uid)
         .snapshots()
         .listen((snap) {
-      final status = snap.data()?['outgoingCall']?['status'];
-      if (status == 'declined' && mounted) {
+      if (!mounted || _isEnding) return;
+      final data = snap.data();
+      if (data?['outgoingCall']?['status'] == 'declined') {
+        _endCall();
+        return;
+      }
+      // End when all call data is gone and the call was already connected —
+      // means the other party ended the call and cleaned up Firestore.
+      final hasCallData =
+          data?['outgoingCall'] != null || data?['incomingCall'] != null;
+      if (!hasCallData && _remoteUserJoined) {
         _endCall();
       }
     });
@@ -193,24 +202,23 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
       final firestore = FirebaseFirestore.instance;
-
       final mySnap = await firestore.collection('users').doc(uid).get();
-      final targetId = mySnap.data()?['outgoingCall']?['targetId'] as String?;
+      final myData = mySnap.data();
+      // Works for both caller (outgoingCall.targetId) and callee (incomingCall.callerId)
+      final targetId = myData?['outgoingCall']?['targetId'] as String?
+          ?? myData?['incomingCall']?['callerId'] as String?;
 
       final batch = firestore.batch();
-
       batch.update(
         firestore.collection('users').doc(uid),
-        {'outgoingCall': FieldValue.delete()},
+        {'outgoingCall': FieldValue.delete(), 'incomingCall': FieldValue.delete()},
       );
-
       if (targetId != null) {
         batch.update(
           firestore.collection('users').doc(targetId),
-          {'incomingCall': FieldValue.delete()},
+          {'outgoingCall': FieldValue.delete(), 'incomingCall': FieldValue.delete()},
         );
       }
-
       await batch.commit();
     }
 
