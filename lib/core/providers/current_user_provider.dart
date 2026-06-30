@@ -21,6 +21,7 @@ class CurrentUserProvider extends ChangeNotifier {
   StreamSubscription? _callSubscription;
   StreamSubscription? _chatRoomsSubscription;
   StreamSubscription? _supportRoomsSubscription;
+  StreamSubscription? _applicationsNotifSub;
   final Map<String, StreamSubscription> _chatMessageSubs = {};
   final Set<String> _supportRoomIds = {};
   Timestamp? _chatListenStart;
@@ -83,6 +84,14 @@ class CurrentUserProvider extends ChangeNotifier {
         importance: Importance.high,
       ),
     );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_applications',
+        'Gig Applications',
+        description: 'Notifications when a worker applies to your gig',
+        importance: Importance.max,
+      ),
+    );
 
     _notificationsInitialized = true;
   }
@@ -134,6 +143,7 @@ class CurrentUserProvider extends ChangeNotifier {
     _listenToTicketUpdates(uid);
     _listenToIncomingCall(uid);
     _listenToGigChatMessages(uid);
+    _listenToGigApplications(uid);
   }
 
   void clearUser() {
@@ -154,6 +164,8 @@ class CurrentUserProvider extends ChangeNotifier {
     _chatMessageSubs.clear();
     _supportRoomIds.clear();
     _chatListenStart = null;
+    _applicationsNotifSub?.cancel();
+    _applicationsNotifSub = null;
     _stopRingtone();
     _audioPlayer.dispose(); // ← clean up
     notifyListeners();
@@ -462,6 +474,54 @@ class CurrentUserProvider extends ChangeNotifier {
           priority: Priority.high,
         ),
         iOS: DarwinNotificationDetails(),
+      ),
+    );
+  }
+
+  // ── Gig-application listener (host side) ─────────────────────────────────
+
+  void _listenToGigApplications(String? uid) {
+    if (uid == null) return;
+    _applicationsNotifSub?.cancel();
+
+    final listenStart = Timestamp.now();
+
+    _applicationsNotifSub = FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .snapshots()
+        .listen(
+          (snap) {
+            for (final change in snap.docChanges) {
+              if (change.type != DocumentChangeType.added) continue;
+              final data = change.doc.data() ?? {};
+              if (data['category'] != 'new_applicant') continue;
+              final createdAt = data['createdAt'];
+              if (createdAt is Timestamp && createdAt.compareTo(listenStart) <= 0) continue;
+              final workerName = data['workerName'] as String? ?? 'Someone';
+              final gigTitle = data['gigTitle'] as String? ?? 'your gig';
+              _showApplicationNotification(workerName, gigTitle);
+            }
+          },
+          onError: (e) =>
+              debugPrint('[AppNotif] stream error: $e'),
+        );
+  }
+
+  Future<void> _showApplicationNotification(
+      String workerName, String gigTitle) async {
+    await _notifications.show(
+      ('$workerName$gigTitle').hashCode.abs() % 100000,
+      'New Application',
+      '$workerName applied to your gig "$gigTitle"',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'gig_applications',
+          'Gig Applications',
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(presentAlert: true, presentSound: true),
       ),
     );
   }

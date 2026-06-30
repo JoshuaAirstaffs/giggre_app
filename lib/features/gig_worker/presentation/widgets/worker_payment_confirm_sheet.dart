@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../../core/theme/app_colors.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  WorkerPaymentConfirmSheet — shown to worker when gig enters 'payment' status.
-//  Worker enters the 6-digit code shown by the host to confirm payment received.
-//  QR scanning is temporarily disabled until mobile_scanner supports
-//  arm64 iOS simulators (MLKit upstream limitation).
+//  Worker enters or scans the 6-digit code shown by the host.
 // ─────────────────────────────────────────────────────────────────────────────
 class WorkerPaymentConfirmSheet extends StatefulWidget {
   final String gigId;
@@ -64,6 +63,20 @@ class _WorkerPaymentConfirmSheetState
   void dispose() {
     _codeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _scanQrCode() async {
+    final code = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const _QrScannerScreen()),
+    );
+    if (code != null && mounted) {
+      setState(() {
+        _codeController.text = code;
+        _errorMsg = null;
+      });
+      _confirm(code);
+    }
   }
 
   Future<void> _confirm(String code) async {
@@ -219,17 +232,34 @@ class _WorkerPaymentConfirmSheetState
             const SizedBox(height: 24),
 
             // ── 6-digit code input ────────────────────────────────────────
-            Text(
-              'Enter Payment Code',
-              style: TextStyle(
-                color: onSurface,
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
+            Row(
+              children: [
+                Text(
+                  'Enter Payment Code',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _scanQrCode,
+                  icon: const Icon(Icons.qr_code_scanner_rounded,
+                      size: 18, color: green),
+                  label: const Text('Scan QR',
+                      style: TextStyle(color: green, fontSize: 13)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 6),
             Text(
-              'Ask the host for the 6-digit code displayed on their screen.',
+              'Scan the QR code or manually enter the 6-digit code from the host.',
               style: TextStyle(
                 color: kSub.withValues(alpha: 0.8),
                 fontSize: 12,
@@ -345,6 +375,97 @@ class _WorkerPaymentConfirmSheetState
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  QR Scanner Screen
+// ─────────────────────────────────────────────────────────────────────────────
+class _QrScannerScreen extends StatefulWidget {
+  const _QrScannerScreen();
+
+  @override
+  State<_QrScannerScreen> createState() => _QrScannerScreenState();
+}
+
+class _QrScannerScreenState extends State<_QrScannerScreen> {
+  final _controller = MobileScannerController();
+  bool _detected = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_detected) return;
+    for (final barcode in capture.barcodes) {
+      final value = barcode.rawValue ?? '';
+      if (RegExp(r'^\d{6}$').hasMatch(value)) {
+        _detected = true;
+        Navigator.pop(context, value);
+        return;
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('Scan Payment QR Code',
+            style: TextStyle(color: Colors.white, fontSize: 16)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flash_on_rounded, color: Colors.white),
+            onPressed: () => _controller.toggleTorch(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(controller: _controller, onDetect: _onDetect),
+          // Scan frame overlay
+          Center(
+            child: Container(
+              width: 220,
+              height: 220,
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFF22C55E), width: 3),
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+          // Hint text
+          Positioned(
+            bottom: 60,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Text(
+                  'Point camera at the host\'s QR code',
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

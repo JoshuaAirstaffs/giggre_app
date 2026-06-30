@@ -22,6 +22,7 @@ import '../services/quick_gig_matching_service.dart';
 import '../models/gig_template_model.dart';
 import 'widgets/gig_detail_sheet.dart';
 import 'widgets/admin_gig_config_sheet.dart';
+import 'widgets/notifications_sheet.dart';
 import 'host_gigs_screen.dart';
 
 class GigHostScreen extends StatefulWidget {
@@ -211,6 +212,44 @@ Future<void> _logout() async {
           ],
         ),
         actions: [
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('open_gigs')
+                .where('hostId', isEqualTo: uid)
+                .where('status', isEqualTo: 'open')
+                .snapshots(),
+            builder: (context, snap) {
+              final hasApplicants = snap.data?.docs.any((d) {
+                    final applicants = (d.data()
+                        as Map<String, dynamic>)['applicants'] as List?;
+                    return applicants != null && applicants.isNotEmpty;
+                  }) ??
+                  false;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    tooltip: 'Notifications',
+                    icon: const Icon(Icons.notifications_outlined, color: kSub),
+                    onPressed: () => NotificationsSheet.show(context),
+                  ),
+                  if (hasApplicants)
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Profile',
             icon: const Icon(Icons.account_circle_outlined, color: kSub),

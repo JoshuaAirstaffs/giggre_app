@@ -1270,6 +1270,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                 point: ll.LatLng(_picked!.latitude, _picked!.longitude),
                 width: 40,
                 height: 40,
+                alignment: Alignment.bottomCenter,
                 child: const Icon(Icons.location_pin, color: Colors.red, size: 40),
               ),
             ],
@@ -1552,6 +1553,12 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                                     const Text('Tap map to reposition pin',
                                         style: TextStyle(
                                             color: kSub, fontSize: 11)),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Lat: ${_picked!.latitude.toStringAsFixed(6)}  Lng: ${_picked!.longitude.toStringAsFixed(6)}',
+                                      style: const TextStyle(
+                                          color: kSub, fontSize: 10),
+                                    ),
                                   ],
                                 ),
                         ),

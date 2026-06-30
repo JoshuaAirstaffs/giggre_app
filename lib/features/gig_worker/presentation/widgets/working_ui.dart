@@ -10,6 +10,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
 import 'gig_map_section.dart';
 import 'worker_payment_confirm_sheet.dart';
@@ -41,6 +42,85 @@ const _stepIcons = [
   Icons.payment_rounded,
   Icons.verified_rounded,
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Route step model + helpers (used by _NavigatingSection)
+// ─────────────────────────────────────────────────────────────────────────────
+class _RouteStep {
+  final String instruction;
+  final IconData icon;
+  final double distanceM;
+  const _RouteStep({required this.instruction, required this.icon, required this.distanceM});
+}
+
+String _buildStepInstruction(Map<String, dynamic> step) {
+  final maneuver = step['maneuver'] as Map<String, dynamic>? ?? {};
+  final type     = maneuver['type'] as String? ?? '';
+  final modifier = maneuver['modifier'] as String? ?? '';
+  final name     = (step['name'] as String? ?? '').trim();
+  final onto     = name.isNotEmpty ? ' onto $name' : '';
+  switch (type) {
+    case 'depart':    return 'Head out${onto.isNotEmpty ? onto : ''}';
+    case 'arrive':    return 'Arrive at destination';
+    case 'turn':      return 'Turn ${_stepDir(modifier)}$onto';
+    case 'new name':
+    case 'continue':  return 'Continue${onto.isEmpty ? ' straight' : onto}';
+    case 'merge':     return 'Merge ${_stepDir(modifier)}$onto';
+    case 'on ramp':   return 'Take the ramp ${_stepDir(modifier)}';
+    case 'off ramp':  return 'Take exit${onto.isNotEmpty ? onto : ''}';
+    case 'fork':      return 'Keep ${_stepDir(modifier)} at the fork';
+    case 'end of road': return 'Turn ${_stepDir(modifier)} at end of road';
+    case 'roundabout':
+    case 'rotary': {
+      final exit = maneuver['exit'] as int?;
+      return exit != null ? 'Take exit $exit at roundabout' : 'Enter the roundabout';
+    }
+    default: return name.isNotEmpty ? 'Continue on $name' : 'Continue';
+  }
+}
+
+String _stepDir(String modifier) {
+  switch (modifier) {
+    case 'uturn':       return 'around';
+    case 'sharp right': return 'sharp right';
+    case 'right':       return 'right';
+    case 'slight right':return 'slightly right';
+    case 'slight left': return 'slightly left';
+    case 'left':        return 'left';
+    case 'sharp left':  return 'sharp left';
+    default:            return 'straight';
+  }
+}
+
+IconData _iconForStepData(Map<String, dynamic> step) {
+  final maneuver = step['maneuver'] as Map<String, dynamic>? ?? {};
+  final type     = maneuver['type'] as String? ?? '';
+  final modifier = maneuver['modifier'] as String? ?? '';
+  switch (type) {
+    case 'depart':    return Icons.navigation_rounded;
+    case 'arrive':    return Icons.location_on_rounded;
+    case 'roundabout':
+    case 'rotary':    return Icons.roundabout_right_rounded;
+    case 'merge':     return Icons.merge_rounded;
+    case 'on ramp':
+    case 'off ramp':  return Icons.ramp_right_rounded;
+    default:
+      if (modifier.contains('left'))  return Icons.turn_left_rounded;
+      if (modifier.contains('right')) return Icons.turn_right_rounded;
+      return Icons.straight_rounded;
+  }
+}
+
+String _fmtDist(double meters) {
+  if (meters < 1000) return '${meters.round()} m';
+  return '${(meters / 1000).toStringAsFixed(1)} km';
+}
+
+String _fmtEta(int seconds) {
+  final m = seconds ~/ 60;
+  if (m < 60) return '$m min';
+  return '${m ~/ 60}h ${m % 60}m';
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Working UI — full-screen view shown when a quick gig is active
@@ -96,6 +176,9 @@ class _WorkingUIState extends State<WorkingUI> {
   // Actual road route
   List<LatLng> _routePoints = [];
   LatLng? _lastRouteFetch;
+  double? _routeDistanceM;
+  int? _routeEtaSeconds;
+  List<_RouteStep> _routeSteps = [];
 
   // Firestore live listener
   StreamSubscription? _gigSub;
@@ -195,6 +278,13 @@ class _WorkingUIState extends State<WorkingUI> {
         _checkGeofence(pos);
         // Re-fetch route only when navigating and moved >30 m from last fetch
         if (_step == _GigStep.navigating) {
+          // Persist location to Firestore so host can track worker in real-time
+          FirebaseFirestore.instance
+              .collection(widget.gigCollection)
+              .doc(widget.gig.id)
+              .update({'workerLocation': GeoPoint(pos.latitude, pos.longitude)})
+              .catchError((_) {});
+
           final gigPos = LatLng(
             widget.gig.position.latitude,
             widget.gig.position.longitude,
@@ -387,20 +477,41 @@ class _WorkingUIState extends State<WorkingUI> {
         'http://router.project-osrm.org/route/v1/driving/'
         '${from.longitude},${from.latitude};'
         '${to.longitude},${to.latitude}'
-        '?overview=full&geometries=polyline',
+        '?overview=full&geometries=polyline&steps=true',
       );
       final response = await http.get(uri);
       if (!mounted || response.statusCode != 200) return;
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final routes = data['routes'] as List?;
       if (routes == null || routes.isEmpty) return;
-      final geometry = routes[0]['geometry'] as String;
-      final decoded = PolylinePoints().decodePolyline(geometry);
+      final route   = routes[0] as Map<String, dynamic>;
+      final geometry = route['geometry'] as String;
+      final decoded  = PolylinePoints().decodePolyline(geometry);
+
+      final distM   = (route['distance'] as num?)?.toDouble();
+      final durS    = (route['duration'] as num?)?.toInt();
+
+      final steps = <_RouteStep>[];
+      final legs  = route['legs'] as List?;
+      if (legs != null && legs.isNotEmpty) {
+        final rawSteps = (legs[0] as Map<String, dynamic>)['steps'] as List? ?? [];
+        for (final s in rawSteps) {
+          final step  = s as Map<String, dynamic>;
+          final dist  = (step['distance'] as num?)?.toDouble() ?? 0;
+          steps.add(_RouteStep(
+            instruction: _buildStepInstruction(step),
+            icon: _iconForStepData(step),
+            distanceM: dist,
+          ));
+        }
+      }
+
       if (mounted) {
         setState(() {
-          _routePoints = decoded
-              .map((p) => LatLng(p.latitude, p.longitude))
-              .toList();
+          _routePoints    = decoded.map((p) => LatLng(p.latitude, p.longitude)).toList();
+          _routeDistanceM = distM;
+          _routeEtaSeconds = durS;
+          _routeSteps     = steps;
         });
       }
     } catch (_) {}
@@ -457,6 +568,9 @@ class _WorkingUIState extends State<WorkingUI> {
                         gig: widget.gig,
                         workerLocation: _workerLocation,
                         routePoints: _routePoints,
+                        routeDistanceM: _routeDistanceM,
+                        routeEtaSeconds: _routeEtaSeconds,
+                        routeSteps: _routeSteps,
                         divider: divider,
                       ),
                     if (_step == _GigStep.navigating && _arrivedPromptVisible) ...[
@@ -690,11 +804,17 @@ class _NavigatingSection extends StatefulWidget {
   final LatLng? workerLocation;
   final List<LatLng> routePoints;
   final Color divider;
+  final double? routeDistanceM;
+  final int? routeEtaSeconds;
+  final List<_RouteStep> routeSteps;
   const _NavigatingSection({
     required this.gig,
     required this.workerLocation,
     required this.routePoints,
     required this.divider,
+    this.routeDistanceM,
+    this.routeEtaSeconds,
+    this.routeSteps = const [],
   });
 
   @override
@@ -738,6 +858,17 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
           _osmController.camera.zoom,
         );
       }
+    }
+  }
+
+  Future<void> _openNavigation() async {
+    final dest = widget.gig.position;
+    final uri  = Uri.parse(
+      'geo:${dest.latitude},${dest.longitude}'
+      '?q=${dest.latitude},${dest.longitude}(Gig+Location)',
+    );
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -856,6 +987,9 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
       widget.gig.position.longitude,
     );
     final initialTarget = widget.workerLocation ?? gigPos;
+    final cardColor  = Theme.of(context).cardColor;
+    final onSurface  = Theme.of(context).colorScheme.onSurface;
+    final hasEta     = widget.routeDistanceM != null && widget.routeEtaSeconds != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -901,6 +1035,69 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
             style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 10),
           ),
         ),
+
+        // ── ETA / distance row — shown for all users once route is ready ──
+        if (hasEta) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: kBlue.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: kBlue.withValues(alpha: 0.2)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.route_rounded, color: kBlue, size: 18),
+                const SizedBox(width: 10),
+                Text(
+                  _fmtDist(widget.routeDistanceM!),
+                  style: const TextStyle(
+                    color: kBlue, fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(width: 16),
+                const Icon(Icons.access_time_rounded, color: kBlue, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  'ETA ${_fmtEta(widget.routeEtaSeconds!)}',
+                  style: const TextStyle(color: kBlue, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        // ── OSM-only: step-by-step directions + open navigation button ────
+        if (!_useGoogleMaps) ...[
+          if (widget.routeSteps.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _DirectionsCard(
+              steps: widget.routeSteps,
+              cardColor: cardColor,
+              onSurface: onSurface,
+              divider: widget.divider,
+            ),
+          ],
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton.icon(
+              onPressed: _openNavigation,
+              icon: const Icon(Icons.open_in_new_rounded, size: 18),
+              label: const Text(
+                'Open Navigation App',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kBlue,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1429,6 +1626,148 @@ class _PrimaryButton extends StatelessWidget {
           ),
         ),
       );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Directions card — collapsible step list shown on OSM devices
+// ─────────────────────────────────────────────────────────────────────────────
+class _DirectionsCard extends StatefulWidget {
+  final List<_RouteStep> steps;
+  final Color cardColor;
+  final Color onSurface;
+  final Color divider;
+  const _DirectionsCard({
+    required this.steps,
+    required this.cardColor,
+    required this.onSurface,
+    required this.divider,
+  });
+
+  @override
+  State<_DirectionsCard> createState() => _DirectionsCardState();
+}
+
+class _DirectionsCardState extends State<_DirectionsCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = _expanded ? widget.steps : widget.steps.take(3).toList();
+    return Container(
+      decoration: BoxDecoration(
+        color: widget.cardColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: widget.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          InkWell(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.turn_right_rounded, color: kBlue, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Turn-by-Turn Directions',
+                      style: TextStyle(
+                        color: widget.onSurface,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                    color: kSub, size: 20,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Divider(height: 0, thickness: 0.5, color: widget.divider),
+          // Steps
+          ...visible.asMap().entries.map((e) {
+            final i    = e.key;
+            final step = e.value;
+            final isLast = i == visible.length - 1;
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: kBlue.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(step.icon, color: kBlue, size: 16),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              step.instruction,
+                              style: TextStyle(
+                                color: widget.onSurface, fontSize: 13),
+                            ),
+                            if (step.distanceM > 0) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                _fmtDist(step.distanceM),
+                                style: const TextStyle(color: kSub, fontSize: 11),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!isLast)
+                  Divider(height: 0, thickness: 0.5,
+                      color: widget.divider, indent: 54),
+              ],
+            );
+          }),
+          // Show more / less
+          if (widget.steps.length > 3)
+            InkWell(
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: widget.divider, width: 0.5)),
+                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+                ),
+                child: Center(
+                  child: Text(
+                    _expanded
+                        ? 'Show less'
+                        : 'Show all ${widget.steps.length} steps',
+                    style: const TextStyle(
+                        color: kBlue, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -2,6 +2,12 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:latlong2/latlong.dart' as ll;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../../../../core/services/gms_availability.dart';
 import '../../../../core/theme/app_colors.dart';
 import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
@@ -262,6 +268,8 @@ class _GigProgressCard extends StatelessWidget {
     final isOfferedGig = gigCollection == 'offered_gigs';
     final isOpenGig = gigCollection == 'open_gigs';
     final isCancelPending = status == 'cancellation_requested';
+    final gigGeoPoint = data['location'] as GeoPoint?;
+    final workerGeoPoint = data['workerLocation'] as GeoPoint?;
 
     final steps = _steps;
     final stepLabels = _stepLabels;
@@ -451,6 +459,34 @@ class _GigProgressCard extends StatelessWidget {
             ),
           ),
 
+          // ── Worker live tracking map (navigating step only) ───
+          if (status == 'navigating' && gigGeoPoint != null) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                height: 180,
+                child: _WorkerTrackingMap(
+                  key: ValueKey('tracking_${doc.id}'),
+                  gigId: doc.id,
+                  gigCollection: gigCollection,
+                  gigLocation: gigGeoPoint,
+                  workerLocation: workerGeoPoint,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Center(
+              child: Text(
+                workerGeoPoint != null
+                    ? 'Live · Tap ⛶ to expand  ·  Blue = worker  ·  Red = destination'
+                    : 'Waiting for worker location...',
+                style: TextStyle(
+                    color: kSub.withValues(alpha: 0.7), fontSize: 10),
+              ),
+            ),
+          ],
+
           // ── Arrived notification ──────────────────────────────
           if (status == 'arrived') ...[
             const SizedBox(height: 10),
@@ -537,6 +573,354 @@ class _GigProgressCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Worker real-time tracking map — embedded preview in progress card.
+//  Tap ⛶ to open full-screen interactive map.
+//  Uses Google Maps on GMS devices, OSM on Huawei/non-GMS.
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkerTrackingMap extends StatefulWidget {
+  final String gigId;
+  final String gigCollection;
+  final GeoPoint gigLocation;
+  final GeoPoint? workerLocation;
+
+  const _WorkerTrackingMap({
+    super.key,
+    required this.gigId,
+    required this.gigCollection,
+    required this.gigLocation,
+    this.workerLocation,
+  });
+
+  @override
+  State<_WorkerTrackingMap> createState() => _WorkerTrackingMapState();
+}
+
+class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
+  bool _useGoogleMaps = GmsAvailability.cachedIsAvailable;
+  final _osmController = fm.MapController();
+  bool _osmReady = false;
+  GoogleMapController? _googleController;
+
+  @override
+  void initState() {
+    super.initState();
+    GmsAvailability.isAvailable.then((v) {
+      if (mounted) setState(() => _useGoogleMaps = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    _osmController.dispose();
+    _googleController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(_WorkerTrackingMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.workerLocation == null ||
+        widget.workerLocation == oldWidget.workerLocation) {
+      return;
+    }
+    final lat = widget.workerLocation!.latitude;
+    final lng = widget.workerLocation!.longitude;
+    if (_useGoogleMaps) {
+      _googleController?.animateCamera(CameraUpdate.newLatLng(LatLng(lat, lng)));
+    } else if (_osmReady) {
+      _osmController.move(ll.LatLng(lat, lng), _osmController.camera.zoom);
+    }
+  }
+
+  void _openFullScreen() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => _FullScreenTrackingMap(
+        gigId: widget.gigId,
+        gigCollection: widget.gigCollection,
+        gigLocation: widget.gigLocation,
+        initialWorkerLocation: widget.workerLocation,
+        useGoogleMaps: _useGoogleMaps,
+      ),
+    ));
+  }
+
+  Set<Marker> _googleMarkers() {
+    final markers = <Marker>{};
+    markers.add(Marker(
+      markerId: const MarkerId('gig'),
+      position: LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+    ));
+    if (widget.workerLocation != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('worker'),
+        position: LatLng(
+            widget.workerLocation!.latitude, widget.workerLocation!.longitude),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        anchor: const Offset(0.5, 0.5),
+      ));
+    }
+    return markers;
+  }
+
+  Widget _buildMap() {
+    final gigPos = ll.LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude);
+    final workerPos = widget.workerLocation != null
+        ? ll.LatLng(widget.workerLocation!.latitude, widget.workerLocation!.longitude)
+        : null;
+
+    if (_useGoogleMaps) {
+      return GoogleMap(
+        onMapCreated: (c) => _googleController = c,
+        initialCameraPosition: CameraPosition(
+          target: workerPos != null
+              ? LatLng(workerPos.latitude, workerPos.longitude)
+              : LatLng(gigPos.latitude, gigPos.longitude),
+          zoom: 14.0,
+        ),
+        markers: _googleMarkers(),
+        zoomControlsEnabled: false,
+        myLocationButtonEnabled: false,
+        // Claim all gestures so the parent ScrollView doesn't intercept
+        gestureRecognizers: {
+          Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+        },
+      );
+    }
+
+    return fm.FlutterMap(
+      mapController: _osmController,
+      options: fm.MapOptions(
+        initialCenter: workerPos ?? gigPos,
+        initialZoom: 14.0,
+        interactionOptions: const fm.InteractionOptions(
+          flags: fm.InteractiveFlag.pinchZoom |
+              fm.InteractiveFlag.doubleTapZoom |
+              fm.InteractiveFlag.drag,
+        ),
+        onMapReady: () {
+          if (mounted) setState(() => _osmReady = true);
+        },
+      ),
+      children: [
+        fm.TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.giggre.mobile',
+        ),
+        fm.MarkerLayer(markers: [
+          fm.Marker(
+            point: gigPos,
+            width: 32,
+            height: 40,
+            alignment: Alignment.bottomCenter,
+            child: const Icon(Icons.location_pin, color: Colors.red, size: 32),
+          ),
+          if (workerPos != null)
+            fm.Marker(
+              point: workerPos,
+              width: 28,
+              height: 28,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.lightBlue,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                ),
+                child: const Icon(Icons.person_rounded, color: Colors.white, size: 14),
+              ),
+            ),
+        ]),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        _buildMap(),
+        // Fullscreen button — top-right corner
+        Positioned(
+          top: 6,
+          right: 6,
+          child: Material(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: _openFullScreen,
+              child: const Padding(
+                padding: EdgeInsets.all(6),
+                child: Icon(Icons.fullscreen_rounded, color: Colors.white, size: 22),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Full-screen tracking map — opened when host taps the expand button.
+//  Has its own Firestore stream so it stays live even after opening.
+// ─────────────────────────────────────────────────────────────────────────────
+class _FullScreenTrackingMap extends StatefulWidget {
+  final String gigId;
+  final String gigCollection;
+  final GeoPoint gigLocation;
+  final GeoPoint? initialWorkerLocation;
+  final bool useGoogleMaps;
+
+  const _FullScreenTrackingMap({
+    required this.gigId,
+    required this.gigCollection,
+    required this.gigLocation,
+    this.initialWorkerLocation,
+    required this.useGoogleMaps,
+  });
+
+  @override
+  State<_FullScreenTrackingMap> createState() => _FullScreenTrackingMapState();
+}
+
+class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
+  final _osmController = fm.MapController();
+  GoogleMapController? _googleController;
+  GeoPoint? _workerLocation;
+  StreamSubscription? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _workerLocation = widget.initialWorkerLocation;
+    _sub = FirebaseFirestore.instance
+        .collection(widget.gigCollection)
+        .doc(widget.gigId)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted || !snap.exists) return;
+      final data = snap.data() as Map<String, dynamic>;
+      final newLoc = data['workerLocation'] as GeoPoint?;
+      if (newLoc == null) { return; }
+      if (newLoc.latitude == _workerLocation?.latitude &&
+          newLoc.longitude == _workerLocation?.longitude) { return; }
+      setState(() => _workerLocation = newLoc);
+      final lat = newLoc.latitude;
+      final lng = newLoc.longitude;
+      if (widget.useGoogleMaps) {
+        _googleController?.animateCamera(CameraUpdate.newLatLng(LatLng(lat, lng)));
+      } else {
+        _osmController.move(ll.LatLng(lat, lng), _osmController.camera.zoom);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _osmController.dispose();
+    _googleController?.dispose();
+    super.dispose();
+  }
+
+  Set<Marker> _googleMarkers() {
+    final markers = <Marker>{};
+    markers.add(Marker(
+      markerId: const MarkerId('gig'),
+      position: LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      infoWindow: const InfoWindow(title: 'Gig Location'),
+    ));
+    if (_workerLocation != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('worker'),
+        position: LatLng(_workerLocation!.latitude, _workerLocation!.longitude),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        infoWindow: const InfoWindow(title: 'Worker'),
+        anchor: const Offset(0.5, 0.5),
+      ));
+    }
+    return markers;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gigPosOsm = ll.LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude);
+    final workerPosOsm = _workerLocation != null
+        ? ll.LatLng(_workerLocation!.latitude, _workerLocation!.longitude)
+        : null;
+    final initialTarget = _workerLocation != null
+        ? LatLng(_workerLocation!.latitude, _workerLocation!.longitude)
+        : LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Worker Location', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              _workerLocation != null ? 'Live tracking active' : 'Waiting for worker...',
+              style: TextStyle(
+                fontSize: 11,
+                color: _workerLocation != null ? const Color(0xFF22C55E) : kSub,
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: widget.useGoogleMaps
+          ? GoogleMap(
+              onMapCreated: (c) => _googleController = c,
+              initialCameraPosition: CameraPosition(target: initialTarget, zoom: 15.0),
+              markers: _googleMarkers(),
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: true,
+            )
+          : fm.FlutterMap(
+              mapController: _osmController,
+              options: fm.MapOptions(
+                initialCenter: workerPosOsm ?? gigPosOsm,
+                initialZoom: 15.0,
+              ),
+              children: [
+                fm.TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.giggre.mobile',
+                ),
+                fm.MarkerLayer(markers: [
+                  fm.Marker(
+                    point: gigPosOsm,
+                    width: 36,
+                    height: 44,
+                    alignment: Alignment.bottomCenter,
+                    child: const Icon(Icons.location_pin, color: Colors.red, size: 36),
+                  ),
+                  if (workerPosOsm != null)
+                    fm.Marker(
+                      point: workerPosOsm,
+                      width: 36,
+                      height: 36,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.lightBlue,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
+                        ),
+                        child: const Icon(Icons.person_rounded, color: Colors.white, size: 18),
+                      ),
+                    ),
+                ]),
+              ],
+            ),
     );
   }
 }

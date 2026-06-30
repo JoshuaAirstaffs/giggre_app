@@ -294,20 +294,26 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
       }
     }
 
-    // Account notifications from admin (notifications collection)
-    const kAccountWindow = Duration(hours: 24);
+    // Account notifications from admin + applicant notifications
     for (final notif in _accountNotifs) {
       final ts = notif['createdAt'] as Timestamp?;
       if (ts == null) continue;
       final dt = ts.toDate().toLocal();
-      if (now.difference(dt) > kAccountWindow) continue;
       final category = notif['category'] as String? ?? '';
+      // New applicant notifications show for 48 h; all others 24 h
+      final window = category == 'new_applicant'
+          ? const Duration(hours: 48)
+          : const Duration(hours: 24);
+      if (now.difference(dt) > window) continue;
       final status = notif['verification_status'] as String? ?? '';
       final message = notif['message'] as String? ?? '';
 
       _ActivityType type;
       String title;
-      if (category == 'account_verification') {
+      if (category == 'new_applicant') {
+        type = _ActivityType.newApplicant;
+        title = 'New Application';
+      } else if (category == 'account_verification') {
         if (status == 'verified') {
           type = _ActivityType.verificationApproved;
           title = 'Account Verified';
@@ -330,7 +336,7 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
         title: title,
         body: message,
         timestamp: dt,
-        gigType: 'account',
+        gigType: category == 'new_applicant' ? 'open' : 'account',
       ));
     }
 
@@ -491,6 +497,7 @@ enum _ActivityType {
   verificationApproved,
   verificationRejected,
   accountNotification,
+  newApplicant,
 }
 
 class _ActivityItem {
@@ -545,6 +552,8 @@ class _ActivityTile extends StatelessWidget {
         return (icon: Icons.cancel_outlined, color: Colors.redAccent);
       case _ActivityType.accountNotification:
         return (icon: Icons.campaign_rounded, color: const Color(0xFF6366F1));
+      case _ActivityType.newApplicant:
+        return (icon: Icons.person_add_alt_1_rounded, color: kBlue);
     }
   }
 

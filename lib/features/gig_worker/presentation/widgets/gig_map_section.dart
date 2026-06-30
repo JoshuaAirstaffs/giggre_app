@@ -273,6 +273,18 @@ class _GigMapSectionState extends State<GigMapSection> {
             ]),
           });
 
+      // Notify the host — fire-and-forget so a failure doesn't block the apply flow
+      unawaited(FirebaseFirestore.instance.collection('notifications').add({
+        'userId': gig.hostId,
+        'category': 'new_applicant',
+        'message': '${widget.workerName} applied to your gig "${gig.title}"',
+        'workerName': widget.workerName,
+        'workerId': widget.uid,
+        'gigId': gig.id,
+        'gigTitle': gig.title,
+        'createdAt': FieldValue.serverTimestamp(),
+      }));
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

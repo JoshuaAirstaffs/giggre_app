@@ -4,7 +4,7 @@ description: "A new Flutter project."
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
-# The following defines the version and build number for your application.
+# The following defines the version and build number for your application.  
 # A version number is three numbers separated by dots, like 1.2.43
 # followed by an optional build number separated by a +.
 # Both the version and the builder number may be overridden in flutter
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.5.0+51
+version: 1.5.5+56
 
 
 environment:
@@ -57,14 +57,15 @@ dependencies:
   qr_flutter: ^4.1.0
   image_picker: ^1.1.2
   firebase_storage: ^12.3.3
-  # mobile_scanner: ^6.0.10  # disabled: MLKit has no arm64-simulator slice for iOS 26 yet
+  mobile_scanner: ^6.0.10
   file_picker: ^8.0.0
   device_info_plus: ^10.0.0
   google_api_availability: ^5.0.1
   package_info_plus: ^8.0.0
   in_app_update: ^4.2.3
   flutter_svg: ^2.0.10
-  flutter_launcher_icons: ^0.14.3  
+  flutter_launcher_icons: ^0.14.3
+  url_launcher: ^6.3.1
 
 flutter_icons:
   android: true
