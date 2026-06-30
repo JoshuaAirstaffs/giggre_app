@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/theme_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Worker Header — gradient banner with profile info, info rows, and edit CTA
+//  Worker Header — blue gradient band (mirrors Gig Host gold band)
 // ─────────────────────────────────────────────────────────────────────────────
 class WorkerHeader extends StatelessWidget {
   final String userId;
@@ -17,6 +18,8 @@ class WorkerHeader extends StatelessWidget {
   final bool isDark;
   final VoidCallback onEdit;
   final String isVerified;
+  final VoidCallback? onNotifications;
+  final VoidCallback? onLogout;
 
   const WorkerHeader({
     super.key,
@@ -31,17 +34,17 @@ class WorkerHeader extends StatelessWidget {
     required this.isDark,
     required this.onEdit,
     required this.isVerified,
+    this.onNotifications,
+    this.onLogout,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: isDark
-              ? [const Color(0xFF0A1628), const Color(0xFF0F2040)]
-              : [const Color(0xFF046BD2), const Color(0xFF1E88E5)],
+          colors: [kBlue, Color(0xFF034FA0)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -49,205 +52,186 @@ class WorkerHeader extends StatelessWidget {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+          padding: const EdgeInsets.fromLTRB(16, 12, 4, 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Navigation row ───────────────────────────────────────────
+              // ── Action row ─────────────────────────────────────────────────
               Row(
                 children: [
+                  // Left: back + "Gig Worker / Dashboard" label
                   GestureDetector(
                     onTap: () => Navigator.pop(context),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                          Icons.arrow_back_ios_new_rounded,
-                          color: Colors.white,
-                          size: 16),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            Icons.arrow_back_ios_new_rounded,
+                            color: Colors.white,
+                            size: 15,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Gig Worker',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              'Dashboard',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  const Text('My Profile',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold)),
                   const Spacer(),
-                  // ── Edit button ──────────────────────────────────────────
-                  GestureDetector(
-                    onTap: onEdit,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: kAmber.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                            color: kAmber.withValues(alpha: 0.4)),
+                  // Right: action icons (white)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (onNotifications != null)
+                        IconButton(
+                          tooltip: 'Notifications',
+                          icon: const Icon(
+                            Icons.notifications_outlined,
+                            color: Colors.white,
+                          ),
+                          onPressed: onNotifications,
+                          style: IconButton.styleFrom(
+                              foregroundColor: Colors.white),
+                        ),
+                      IconButton(
+                        tooltip: 'Edit Profile',
+                        icon: const Icon(
+                          Icons.edit_outlined,
+                          color: Colors.white,
+                        ),
+                        onPressed: onEdit,
+                        style: IconButton.styleFrom(
+                            foregroundColor: Colors.white),
                       ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.edit_outlined,
-                              color: kAmber, size: 13),
-                          SizedBox(width: 5),
-                          Text('Edit',
-                              style: TextStyle(
-                                  color: kAmber,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600)),
-                        ],
+                      ColorFiltered(
+                        colorFilter: const ColorFilter.mode(
+                          Colors.white,
+                          BlendMode.srcIn,
+                        ),
+                        child: const ThemeToggleButton(),
                       ),
-                    ),
+                      if (onLogout != null)
+                        IconButton(
+                          tooltip: 'Log Out',
+                          icon: const Icon(
+                            Icons.logout_rounded,
+                            color: Colors.white,
+                          ),
+                          onPressed: onLogout,
+                          style: IconButton.styleFrom(
+                              foregroundColor: Colors.white),
+                        ),
+                    ],
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-
-              // ── Avatar + identity ────────────────────────────────────────
+              const SizedBox(height: 14),
+              // ── Profile strip ───────────────────────────────────────────────
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  _WorkerAvatar(photoUrl: photoUrl, size: 72),
-                  const SizedBox(width: 16),
+                  Stack(
+                    children: [
+                      _WorkerAvatar(photoUrl: photoUrl, size: 50),
+                      if (isVerified == 'verified')
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            width: 17,
+                            height: 17,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2BB673),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: const Color(0xFF034FA0),
+                                width: 2,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.check_rounded,
+                              color: Colors.white,
+                              size: 10,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Text(
+                          name.isNotEmpty ? name : 'Worker',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
                         Row(
-                          spacing: 8,
                           children: [
+                            const Icon(
+                              Icons.star_rounded,
+                              color: kAmber,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 3),
                             Text(
-                              name.isNotEmpty ? name : 'Worker',
+                              rating.toStringAsFixed(1),
                               style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold),
-                            ),
-                            if (isVerified == 'verified')
-                              const Icon(
-                                Icons.verified,
-                                color: Colors.green,
-                                size: 20,
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
                               ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            ...List.generate(5, (i) {
-                              final full = i < rating.floor();
-                              final half = !full &&
-                                  i < rating &&
-                                  rating - i >= 0.5;
-                              return Icon(
-                                full
-                                    ? Icons.star_rounded
-                                    : half
-                                        ? Icons.star_half_rounded
-                                        : Icons.star_outline_rounded,
-                                color: kAmber,
-                                size: 15,
-                              );
-                            }),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                '${rating.toStringAsFixed(1)}  '
-                                '($ratingCount '
-                                '${ratingCount == 1 ? 'rating' : 'ratings'})',
+                            ),
+                            if (userId.isNotEmpty)
+                              Text(
+                                '  ·  ID $userId',
                                 style: TextStyle(
-                                    color:
-                                        Colors.white.withValues(alpha: 0.8),
-                                    fontSize: 12),
-                                overflow: TextOverflow.ellipsis,
+                                  color: Colors.white.withValues(alpha: 0.7),
+                                  fontSize: 12,
+                                ),
                               ),
-                            ),
                           ],
                         ),
-                        if (memberSince.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text('Member since $memberSince',
-                              style: TextStyle(
-                                  color:
-                                      Colors.white.withValues(alpha: 0.55),
-                                  fontSize: 11)),
-                        ],
                       ],
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-
-              // ── Info panel ───────────────────────────────────────────────
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.12)),
-                ),
-                child: Column(
-                  children: [
-                    _HeaderInfoRow(
-                        icon: Icons.email_outlined, value: email),
-                    if (phone.isNotEmpty) ...[
-                      Divider(
-                          color: Colors.white.withValues(alpha: 0.1),
-                          height: 16),
-                      _HeaderInfoRow(
-                          icon: Icons.phone_outlined, value: phone),
-                    ],
-                    if (userId.isNotEmpty) ...[
-                      Divider(
-                          color: Colors.white.withValues(alpha: 0.1),
-                          height: 16),
-                      _HeaderInfoRow(
-                          icon: Icons.badge_outlined,
-                          value: 'ID: $userId'),
-                    ],
-                  ],
-                ),
-              ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Info row inside the header panel
-// ─────────────────────────────────────────────────────────────────────────────
-class _HeaderInfoRow extends StatelessWidget {
-  final IconData icon;
-  final String value;
-  const _HeaderInfoRow({required this.icon, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon,
-            color: Colors.white.withValues(alpha: 0.55), size: 14),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
     );
   }
 }
@@ -288,12 +272,18 @@ class _DefaultWorkerAvatar extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: kAmber.withValues(alpha: 0.15),
+        color: Colors.white.withValues(alpha: 0.2),
         shape: BoxShape.circle,
-        border:
-            Border.all(color: Colors.white.withValues(alpha: 0.3), width: 2),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.3),
+          width: 1.5,
+        ),
       ),
-      child: Icon(Icons.person_rounded, color: kAmber, size: size * 0.5),
+      child: Icon(
+        Icons.person_rounded,
+        color: Colors.white,
+        size: size * 0.5,
+      ),
     );
   }
 }

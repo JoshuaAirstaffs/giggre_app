@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Earnings Card
-// ─────────────────────────────────────────────────────────────────────────────
 class EarningsCard extends StatelessWidget {
   final double totalEarnings;
   final double weeklyEarnings;
@@ -18,93 +15,84 @@ class EarningsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cardColor = Theme.of(context).cardColor;
-    final divider = Theme.of(context).dividerColor;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    const green = Color(0xFF22C55E);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _StatCard(
+            label: 'Total earned',
+            value: '₱${totalEarnings.toStringAsFixed(0)}',
+            valueColor: kGold,
+            subValue: '₱${weeklyEarnings.toStringAsFixed(0)} this week',
+            subValueColor: const Color(0xFF2BB673),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _StatCard(
+            label: 'Gigs completed',
+            value: '$completedGigs',
+            valueColor: kBlue,
+            subValue: 'All time',
+            subValueColor: kSub,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
+class _StatCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color valueColor;
+  final String subValue;
+  final Color subValueColor;
+
+  const _StatCard({
+    required this.label,
+    required this.value,
+    required this.valueColor,
+    required this.subValue,
+    required this.subValueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: cardColor,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: divider),
+        border: Border.all(color: Theme.of(context).dividerColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: green.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                    Icons.account_balance_wallet_rounded,
-                    color: green,
-                    size: 20),
-              ),
-              const SizedBox(width: 10),
-              Text('Earnings',
-                  style: TextStyle(
-                      color: onSurface,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold)),
-            ],
+          Text(
+            label,
+            style: const TextStyle(
+              color: kSub,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _EarningsStat(
-                  label: 'This Week',
-                  value: '₱${weeklyEarnings.toStringAsFixed(0)}',
-                  color: green,
-                ),
-              ),
-              Container(width: 1, height: 40, color: divider),
-              Expanded(
-                child: _EarningsStat(
-                  label: 'Total Earned',
-                  value: '₱${totalEarnings.toStringAsFixed(0)}',
-                  color: kAmber,
-                ),
-              ),
-              Container(width: 1, height: 40, color: divider),
-              Expanded(
-                child: _EarningsStat(
-                  label: 'Completed',
-                  value: '$completedGigs gigs',
-                  color: kBlue,
-                ),
-              ),
-            ],
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              color: valueColor,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subValue,
+            style: TextStyle(color: subValueColor, fontSize: 12),
           ),
         ],
       ),
     );
   }
-}
-
-class _EarningsStat extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  const _EarningsStat(
-      {required this.label, required this.value, required this.color});
-
-  @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          Text(value,
-              style: TextStyle(
-                  color: color,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold)),
-          const SizedBox(height: 3),
-          Text(label, style: const TextStyle(color: kSub, fontSize: 11)),
-        ],
-      );
 }

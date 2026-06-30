@@ -15,7 +15,6 @@ import '../../auth/presentation/login_screen.dart';
 import 'widgets/dispatch_offer_card.dart';
 import 'widgets/earnings_card.dart';
 import 'widgets/gig_map_section.dart';
-import 'widgets/quick_gig_power_button.dart';
 import 'widgets/toggles_card.dart';
 import 'widgets/worker_header.dart';
 import 'widgets/worker_widgets.dart';
@@ -1275,40 +1274,43 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                         isDark: isDark,
                         onEdit: _showEditPersonalInfo,
                         isVerified: _isVerified,
+                        onNotifications: () =>
+                            WorkerNotificationsSheet.show(context),
+                        onLogout: _confirmLogout,
                       ),
                     ),
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
                       sliver: SliverList(
                         delegate: SliverChildListDelegate([
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 16),
 
-                          // ── Power button ──────────────────────────────
-                          QuickGigPowerButton(
-                            active: _seekingQuickGigs,
-                            onChanged: _toggleQuickGigs,
+                          // ── Availability hero card ────────────────────
+                          _AvailabilityHeroCard(
+                            isOnline: _availableForGigs,
+                            onChanged: (v) {
+                              setState(() => _availableForGigs = v);
+                              _setToggle('availableForGigs', v);
+                            },
                             isVerified: _isVerified,
                           ),
                           const SizedBox(height: 16),
 
-                          // ── Earnings ──────────────────────────────────
+                          // ── Earnings (2-col) ──────────────────────────
                           EarningsCard(
                             totalEarnings: _totalEarnings,
                             weeklyEarnings: _weeklyEarnings,
                             completedGigs: _completedGigs,
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 20),
 
-                          // ── Toggles ───────────────────────────────────
-                          SectionLabel('Status & Preferences'),
+                          // ── Work preferences ──────────────────────────
+                          const SectionLabel('Work preferences'),
                           const SizedBox(height: 8),
                           TogglesCard(
-                            availableForGigs: _availableForGigs,
+                            seekingQuickGigs: _seekingQuickGigs,
                             autoAccept: _autoAccept,
-                            onAvailableChanged: (v) {
-                              setState(() => _availableForGigs = v);
-                              _setToggle('availableForGigs', v);
-                            },
+                            onQuickGigsChanged: _toggleQuickGigs,
                             onAutoAcceptChanged: (v) {
                               setState(() => _autoAccept = v);
                               _setToggle('autoAccept', v);
@@ -1329,19 +1331,24 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                           ),
                           const SizedBox(height: 20),
 
-                          // ── Toolchest ─────────────────────────────────
-                          SectionLabel('My Toolchest'),
-                          const SizedBox(height: 8),
-                          ToolchestCard(
-                            skills: _skills,
-                            onTap: () => ToolchestSheet.show(context, uid),
-                          ),
-                          const SizedBox(height: 20),
-
                           // ── Account ───────────────────────────────────
-                          SectionLabel('Account'),
+                          const SectionLabel('Account'),
                           const SizedBox(height: 8),
                           MenuCard(children: [
+                            MenuRow(
+                              icon: Icons.construction_rounded,
+                              iconColor: kGold,
+                              label: 'My Toolchest',
+                              subtitle: _skills.isNotEmpty
+                                  ? _skills.take(2).join(', ') +
+                                      (_skills.length > 2
+                                          ? ' +${_skills.length - 2} more'
+                                          : '')
+                                  : 'Add your skills & tools',
+                              badge: _skills.isNotEmpty ? _skills.length : null,
+                              onTap: () => ToolchestSheet.show(context, uid),
+                            ),
+                            const WorkerDivider(),
                             MenuRow(
                               icon: Icons.history_rounded,
                               iconColor: kBlue,
@@ -1356,7 +1363,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                             const WorkerDivider(),
                             MenuRow(
                               icon: Icons.star_rounded,
-                              iconColor: kAmber,
+                              iconColor: kGold,
                               label: 'Ratings & Reviews',
                               onTap: () => Navigator.push(
                                 context,
@@ -1374,10 +1381,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                   WorkerNotificationsSheet.show(context),
                             ),
                           ]),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 16),
 
                           // ── Settings ──────────────────────────────────
-                          SectionLabel('Settings'),
+                          const SectionLabel('Settings'),
                           const SizedBox(height: 8),
                           MenuCard(children: [
                             MenuRow(
@@ -1439,6 +1446,149 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             ),
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Availability hero card — green gradient, wired to existing handler
+// ─────────────────────────────────────────────────────────────────────────────
+class _AvailabilityHeroCard extends StatelessWidget {
+  final bool isOnline;
+  final ValueChanged<bool> onChanged;
+  final String isVerified;
+
+  const _AvailabilityHeroCard({
+    required this.isOnline,
+    required this.onChanged,
+    required this.isVerified,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF2BB673), Color(0xFF1D9E5E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color:
+                            isOnline ? Colors.white : Colors.white60,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isOnline ? "You're online" : "You're offline",
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Available for gigs',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isOnline
+                      ? 'You appear online to hosts'
+                      : 'You are hidden from hosts',
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: isOnline,
+            onChanged: (v) {
+              if (isVerified == 'verified') {
+                onChanged(v);
+              } else {
+                _showWorkerVerificationModal(context);
+              }
+            },
+            activeThumbColor: Colors.white,
+            activeTrackColor: Colors.white30,
+            inactiveThumbColor: Colors.white60,
+            inactiveTrackColor: Colors.white24,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+void _showWorkerVerificationModal(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: const EdgeInsets.all(24),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child:
+                const Icon(Icons.error_outline, color: Colors.red, size: 40),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Account not Verified',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your account needs to be verified before you can continue. '
+            'Please request verification from the admin.',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK',
+                  style: TextStyle(color: Colors.white)),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

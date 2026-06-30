@@ -101,12 +101,13 @@ class SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text(
-        text,
+        text.toUpperCase(),
         style: const TextStyle(
-            color: kSub,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.5),
+          color: kSub,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.8,
+        ),
       );
 }
 
@@ -132,6 +133,8 @@ class MenuRow extends StatelessWidget {
   final Color iconColor;
   final String label;
   final Color? labelColor;
+  final String? subtitle;
+  final int? badge;
   final VoidCallback onTap;
   final bool showArrow;
 
@@ -142,6 +145,8 @@ class MenuRow extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.labelColor,
+    this.subtitle,
+    this.badge,
     this.showArrow = true,
   });
 
@@ -152,26 +157,64 @@ class MenuRow extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
             Container(
-              width: 34,
-              height: 34,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.1),
+                color: iconColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Icon(icon, color: iconColor, size: 18),
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                    color: labelColor ?? onSurface,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          color: labelColor ?? onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (badge != null && badge! > 0) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: iconColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '$badge',
+                            style: TextStyle(
+                              color: iconColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (subtitle != null && subtitle!.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      style: const TextStyle(color: kSub, fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
               ),
             ),
             if (showArrow)

@@ -16,6 +16,7 @@ import 'package:giggre_app/screens/app_contents/terms_and_conditions.dart';
 import 'package:giggre_app/screens/chat/home_chat.dart';
 import 'package:provider/provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
+import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
 import 'package:giggre_app/screens/app_contents/about_giggre.dart';
@@ -45,10 +46,10 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _updateDismissed = false;
   bool _pendingDeletion = false;
   DateTime? _scheduledDeleteAt;
-  StreamSubscription? _roomsStreamSub; // support rooms-level sub
-  final List<StreamSubscription> _roomSubs = []; // support message-level subs
-  StreamSubscription? _gigRoomsStreamSub; // gig rooms-level sub
-  final List<StreamSubscription> _gigRoomSubs = []; // gig message-level subs
+  StreamSubscription? _roomsStreamSub;
+  final List<StreamSubscription> _roomSubs = [];
+  StreamSubscription? _gigRoomsStreamSub;
+  final List<StreamSubscription> _gigRoomSubs = [];
   List<Map<String, dynamic>> _updates = [];
 
   @override
@@ -56,7 +57,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadUser();
     _fetchUpdates();
-    // WidgetsBinding.instance.addPostFrameCallback((_) => _showBetaModal());
     _listenForUnreadMessages();
     _listenForUnreadGigMessages();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkAppUpdate());
@@ -120,11 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
-                    child: Icon(
-                      Icons.system_update_rounded,
-                      color: kBlue,
-                      size: 32,
-                    ),
+                    child: Icon(Icons.system_update_rounded, color: kBlue, size: 32),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -165,10 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: const Text(
                       'Update Now',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
@@ -178,10 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     Navigator.of(ctx, rootNavigator: true).pop();
                     if (mounted) setState(() => _updateDismissed = true);
                   },
-                  child: const Text(
-                    'Later',
-                    style: TextStyle(color: kSub, fontSize: 13),
-                  ),
+                  child: const Text('Later', style: TextStyle(color: kSub, fontSize: 13)),
                 ),
               ],
             ),
@@ -201,9 +191,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final items = response.docs.map((doc) {
         final data = doc.data();
-        // if (data['dateUpdated'] is Timestamp) {
-        //   data['dateUpdated'] = (data['dateUpdated'] as Timestamp).toDate();
-        // }
         if (data['dateCreated'] is Timestamp) {
           data['dateCreated'] = (data['dateCreated'] as Timestamp).toDate();
         }
@@ -219,9 +206,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return bDate.compareTo(aDate);
       });
 
-      setState(() {
-        _updates = items;
-      });
+      setState(() => _updates = items);
     } catch (e) {
       debugPrint('Error fetching updates: $e');
     }
@@ -238,7 +223,6 @@ class _HomeScreenState extends State<HomeScreen> {
         .snapshots()
         .listen(
           (roomsSnap) {
-            // Cancel old message subs before setting up new ones
             for (final sub in _roomSubs) sub.cancel();
             _roomSubs.clear();
 
@@ -264,12 +248,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     (hasUnread) {
                       roomUnread[i] = hasUnread;
                       final anyUnread = roomUnread.values.any((v) => v);
-                      if (mounted)
-                        setState(() => _hasUnreadMessages = anyUnread);
+                      if (mounted) setState(() => _hasUnreadMessages = anyUnread);
                       debugPrint('[Unread] Badge → $anyUnread');
                     },
-                    onError: (e) =>
-                        debugPrint('[HomeScreen] message stream error: $e'),
+                    onError: (e) => debugPrint('[HomeScreen] message stream error: $e'),
                   );
               _roomSubs.add(sub);
             }
@@ -281,8 +263,6 @@ class _HomeScreenState extends State<HomeScreen> {
         );
   }
 
-  // Mirrors _listenForUnreadMessages but for gig chats.
-  // Uses where('participants', arrayContains: uid) — no composite index needed.
   void _listenForUnreadGigMessages() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -308,8 +288,7 @@ class _HomeScreenState extends State<HomeScreen> {
               final participants =
                   (room.data()['participants'] as List<dynamic>?) ?? [];
               final otherUid =
-                  participants.firstWhere((p) => p != uid, orElse: () => '')
-                      as String;
+                  participants.firstWhere((p) => p != uid, orElse: () => '') as String;
 
               if (otherUid.isEmpty) continue;
 
@@ -326,9 +305,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     (hasUnread) {
                       roomUnread[i] = hasUnread;
                       final anyUnread = roomUnread.values.any((v) => v);
-                      if (mounted) {
-                        setState(() => _hasUnreadGigMessages = anyUnread);
-                      }
+                      if (mounted) setState(() => _hasUnreadGigMessages = anyUnread);
                       debugPrint('[Unread] Gig Badge → $anyUnread');
                     },
                     onError: (e) =>
@@ -379,19 +356,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
-                    child: Icon(
-                      Icons.science_outlined,
-                      color: kAmber,
-                      size: 32,
-                    ),
+                    child: Icon(Icons.science_outlined, color: kAmber, size: 32),
                   ),
                 ),
                 const SizedBox(height: 20),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
                     color: kAmber.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
@@ -439,10 +409,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: const Text(
                       'Got it, let\'s go!',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
@@ -457,10 +424,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadUser() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .get();
+    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
     final data = doc.data();
     if (!mounted) return;
     setState(() {
@@ -545,15 +509,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 Text(
                   'Your account is scheduled for permanent deletion in $daysLeft day${daysLeft == 1 ? '' : 's'}${dateStr.isNotEmpty ? ' (on $dateStr)' : ''}.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 14, color: Colors.grey, height: 1.5),
+                  style: const TextStyle(fontSize: 14, color: Colors.grey, height: 1.5),
                 ),
                 const SizedBox(height: 6),
                 const Text(
                   'Cancel to restore full access, or sign out.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 13, color: Colors.grey, height: 1.5),
+                  style: TextStyle(fontSize: 13, color: Colors.grey, height: 1.5),
                 ),
                 const SizedBox(height: 24),
                 SizedBox(
@@ -576,8 +538,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           borderRadius: BorderRadius.circular(12)),
                     ),
                     child: const Text('Cancel Deletion',
-                        style: TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600)),
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -639,11 +600,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: Colors.red.shade50,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.logout_rounded,
-                  color: Colors.redAccent,
-                  size: 22,
-                ),
+                child: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 22),
               ),
               const SizedBox(height: 14),
               Text(
@@ -676,10 +633,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                         onPressed: () => Navigator.pop(context, false),
-                        child: const Text(
-                          'Cancel',
-                          style: TextStyle(color: kSub, fontSize: 15),
-                        ),
+                        child: const Text('Cancel', style: TextStyle(color: kSub, fontSize: 15)),
                       ),
                     ),
                     const VerticalDivider(width: 0.5, thickness: 0.5),
@@ -715,9 +669,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (confirm == true) {
       _roomsStreamSub?.cancel();
-      for (final sub in _roomSubs) {
-        sub.cancel();
-      }
+      for (final sub in _roomSubs) sub.cancel();
       _roomSubs.clear();
       if (mounted) {
         context.read<CurrentUserProvider>().clearUser();
@@ -740,6 +692,21 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => _carouselRefreshKey++);
   }
 
+  void _openGiggreMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _GiggreMenu(
+        hasPendingUpdate: _hasUpdate && _updateDismissed,
+        onUpdate: _showUpdateModal,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final firstName = _userName.split(' ').first;
@@ -747,8 +714,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final themeProvider = context.read<ThemeProvider>();
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
-
-    //get current year
     final currentYear = DateTime.now().year;
 
     return Scaffold(
@@ -756,178 +721,141 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         backgroundColor: bgColor,
         elevation: 0,
+        scrolledUnderElevation: 0,
         automaticallyImplyLeading: false,
-        title: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: kBlue.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
+        titleSpacing: 20,
+        title: GestureDetector(
+          onTap: _openGiggreMenu,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Gold bolt logo
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: kGold.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Center(
+                  child: Icon(Icons.bolt_rounded, color: kGold, size: 22),
+                ),
               ),
-              child: const Center(
-                child: Icon(Icons.bolt, color: kAmber, size: 22),
-              ),
-            ),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: () {
-                showModalBottomSheet(
-                  context: context,
-                  backgroundColor: const Color(0xFF1E1E2C),
-                  isScrollControlled: true,
-                  shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(
-                      top: Radius.circular(20),
-                    ),
-                  ),
-                  builder: (_) => _GiggreMenu(
-                    hasPendingUpdate: _hasUpdate && _updateDismissed,
-                    onUpdate: _showUpdateModal,
-                  ),
-                );
-              },
-              child: Text(
-                'Giggre',
+              const SizedBox(width: 10),
+              Text(
+                'giggre',
                 style: TextStyle(
                   color: onSurface,
                   fontWeight: FontWeight.bold,
-                  fontSize: 18,
+                  fontSize: 20,
+                  letterSpacing: -0.3,
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
-          IconButton(
-            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-            icon: Icon(
-              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              color: kSub,
+          _IconSquareButton(
+            icon: isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+            onTap: () => themeProvider.toggle(),
+          ),
+          const SizedBox(width: 8),
+          _IconSquareButton(
+            icon: Icons.message_outlined,
+            dot: _hasUnreadMessages || _hasUnreadGigMessages,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const HomeChat()),
             ),
-            onPressed: () => themeProvider.toggle(),
           ),
-          IconButton(
-            tooltip: 'Messages',
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.message_outlined, color: kSub),
-                if (_hasUnreadMessages || _hasUnreadGigMessages)
-                  Positioned(
-                    top: -2,
-                    right: -2,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const HomeChat()),
-              );
-            },
+          const SizedBox(width: 8),
+          _IconSquareButton(
+            icon: Icons.logout_rounded,
+            onTap: _logout,
           ),
-          IconButton(
-            tooltip: 'Log Out',
-            icon: const Icon(Icons.logout_rounded, color: kSub),
-            onPressed: _logout,
-          ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 16),
         ],
       ),
       body: SafeArea(
         child: RefreshIndicator(
           key: _refreshKey,
           onRefresh: _refreshAll,
-          color: kBlue,
+          color: kGold,
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ── 2. Profile strip ──────────────────────────
                 Row(
                   children: [
                     CircleAvatar(
-                      radius: 21,
-                      backgroundColor: kBlue.withValues(alpha: 0.12),
+                      radius: 26,
+                      backgroundColor: kGold.withValues(alpha: 0.15),
                       backgroundImage: _photoUrl.isNotEmpty
                           ? CachedNetworkImageProvider(_photoUrl)
                           : null,
                       child: _photoUrl.isEmpty
-                          ? const Icon(
-                              Icons.account_circle_rounded,
-                              color: kBlue,
-                              size: 24,
-                            )
+                          ? const Icon(Icons.person_rounded, color: kGold, size: 28)
                           : null,
                     ),
-                    const SizedBox(width: 12),
-                    Text(
-                      firstName.isNotEmpty
-                          ? 'Hey, $firstName 👋'
-                          : 'Welcome back 👋',
-                      style: TextStyle(
-                        color: onSurface,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            firstName.isNotEmpty
+                                ? 'Hey, $firstName 👋'
+                                : 'Welcome back 👋',
+                            style: TextStyle(
+                              color: onSurface,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Text(
+                            'Choose a mode to get started',
+                            style: TextStyle(color: kSub, fontSize: 13),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 6),
-                const Text(
-                  'How do you want to use Giggre today?',
-                  style: TextStyle(color: kSub, fontSize: 14),
-                ),
+
+                // ── Update banner (preserved) ─────────────────
                 if (_hasUpdate) ...[
                   const SizedBox(height: 14),
                   GestureDetector(
                     onTap: _showUpdateModal,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
+                          horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
                         color: kBlue.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: kBlue.withValues(alpha: 0.25),
-                        ),
+                        border: Border.all(color: kBlue.withValues(alpha: 0.25)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(
-                            Icons.system_update_rounded,
-                            color: kBlue,
-                            size: 18,
-                          ),
+                          const Icon(Icons.system_update_rounded,
+                              color: kBlue, size: 18),
                           const SizedBox(width: 10),
                           const Expanded(
                             child: Text(
                               'A new version of Giggre is available!',
                               style: TextStyle(
-                                color: kBlue,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
+                                  color: kBlue,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500),
                             ),
                           ),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
+                                horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
                               color: kBlue,
                               borderRadius: BorderRadius.circular(20),
@@ -935,10 +863,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: const Text(
                               'Update',
                               style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ),
                         ],
@@ -946,30 +873,23 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ],
+
                 const SizedBox(height: 20),
+
+                // ── 3. Image carousel ─────────────────────────
                 _TestimonialCarousel(key: ValueKey(_carouselRefreshKey)),
-                const SizedBox(height: 28),
-                _RoleCard(
-                  role: 'worker',
-                  title: 'Gig Worker',
-                  subtitle: 'Find gigs, earn money, and grow your skills.',
-                  icon: Icons.work_outline_rounded,
-                  accentColor: kBlue,
-                  isSelected: _selectedRole == 'worker',
-                  onTap: () => _selectRole('worker'),
+
+                const SizedBox(height: 24),
+
+                // ── 4. Role segmented control ─────────────────
+                _RoleSegmentedControl(
+                  selectedRole: _selectedRole,
+                  onSelect: _selectRole,
                 ),
-                const SizedBox(height: 12),
-                _RoleCard(
-                  role: 'host',
-                  title: 'Gig Host',
-                  subtitle: 'Post gigs, find talent, and get things done.',
-                  icon: Icons.business_center_outlined,
-                  accentColor: kAmber,
-                  isSelected: _selectedRole == 'host',
-                  onTap: () => _selectRole('host'),
-                ),
+
+                // ── 5. Gold continue button ───────────────────
                 if (_selectedRole != null) ...[
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
                     height: 52,
@@ -981,26 +901,22 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => const GigHostScreen(),
-                                  ),
+                                      builder: (_) => const GigHostScreen()),
                                 );
                               } else {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => const GigWorkerScreen(),
-                                  ),
+                                      builder: (_) => const GigWorkerScreen()),
                                 );
                               }
                             },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _selectedRole == 'worker'
-                            ? kBlue
-                            : kAmber,
+                        backgroundColor: _selectedRole == 'worker' ? kBlue : kGold,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       ),
                       child: _saving
@@ -1008,204 +924,114 @@ class _HomeScreenState extends State<HomeScreen> {
                               width: 22,
                               height: 22,
                               child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
+                                  color: Colors.white, strokeWidth: 2),
                             )
-                          : Text(
-                              _selectedRole == 'worker'
-                                  ? 'Continue as Gig Worker'
-                                  : 'Continue as Gig Host',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _selectedRole == 'worker'
+                                      ? 'Continue as Gig Worker'
+                                      : 'Continue as Gig Host',
+                                  style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(width: 8),
+                                const Icon(Icons.arrow_forward_rounded,
+                                    size: 20),
+                              ],
                             ),
                     ),
                   ),
                 ],
-                const SizedBox(height: 20),
+
+                const SizedBox(height: 28),
+
+                // ── 6. Giggre Updates section ─────────────────
                 Row(
                   children: [
-                    Container(
-                      width: 4,
-                      height: 20,
-                      decoration: BoxDecoration(
-                        color: kAmber,
-                        borderRadius: BorderRadius.circular(2),
+                    Text(
+                      'Giggre Updates',
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(width: 18),
-                    Expanded(
-                      child: Text(
-                        'Giggre Updates',
-                        style: TextStyle(
-                          color: onSurface,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
+                    const Spacer(),
                     GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => GiggreUpdates(),
-                          ),
-                        );
-                      },
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => GiggreUpdates()),
+                      ),
                       child: const Text(
-                        "See All",
-                        style: TextStyle(color: kBlue, fontSize: 14),
+                        'See all',
+                        style: TextStyle(
+                            color: kGold,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                ..._updates
-                    .take(3)
-                    .map(
-                      (update) => GestureDetector(
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 16),
-                          child: UpdateCard(
-                            title: update['title'] as String,
-                            date: update['dateCreated'] as DateTime,
-                            category: update['category'] as String,
-                            description: update['body'] as String,
-                          ),
+                const SizedBox(height: 14),
+
+                ..._updates.take(3).map(
+                      (update) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: UpdateCard(
+                          title: update['title'] as String,
+                          date: update['dateCreated'] as DateTime,
+                          category: update['category'] as String,
+                          description: update['body'] as String,
                         ),
                       ),
                     ),
+
                 const SizedBox(height: 16),
+
+                // ── Footer ────────────────────────────────────
                 Container(
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: isDark ? Color(0xFF1E1E2C) : Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: Colors.grey.withValues(alpha: 0.3),
-                    ),
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Theme.of(context).dividerColor),
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Image.asset(
-                          'assets/images/logo.png',
-                          width: 94,
-                          height: 64,
-                        ),
-                        Text(
-                          "The fatest way to find gigs or hire workers near you.",
-                          style: const TextStyle(fontSize: 12, color: kSub),
-                        ),
-                        const SizedBox(height: 8),
-                        Divider(),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          spacing: 16,
-                          children: [
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        AboutGiggre() as Widget,
-                                  ),
-                                );
-                              },
-                              child: Text(
-                                "About",
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: kBlue,
-                                ),
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        TermsAndConditions() as Widget,
-                                  ),
-                                );
-                              },
-                              child: Text(
-                                "Term",
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: kBlue,
-                                ),
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        PrivacyPolicy() as Widget,
-                                  ),
-                                );
-                              },
-                              child: Text(
-                                "Privacy",
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: kBlue,
-                                ),
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => HelpFaq() as Widget,
-                                  ),
-                                );
-                              },
-                              child: Text(
-                                "Help/FAQ",
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: kBlue,
-                                ),
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => ContactUs() as Widget,
-                                  ),
-                                );
-                              },
-                              child: Text(
-                                "Contact Us",
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: kBlue,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        Text(
-                          "Copyright © $currentYear Giggre. All rights reserved.",
-                          style: const TextStyle(fontSize: 12, color: kSub),
-                        ),
-                      ],
-                    ),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Image.asset('assets/images/logo.png',
+                          width: 94, height: 64),
+                      const Text(
+                        'The fastest way to find gigs or hire workers near you.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: kSub),
+                      ),
+                      const SizedBox(height: 8),
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 16,
+                        runSpacing: 8,
+                        children: [
+                          _FooterLink('About', AboutGiggre()),
+                          _FooterLink('Terms', TermsAndConditions()),
+                          _FooterLink('Privacy', PrivacyPolicy()),
+                          _FooterLink('Help/FAQ', HelpFaq()),
+                          _FooterLink('Contact Us', ContactUs()),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'Copyright © $currentYear Giggre. All rights reserved.',
+                        style: const TextStyle(fontSize: 12, color: kSub),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -1217,13 +1043,214 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-//GIGGRE MENU
+// ─────────────────────────────────────────────
+//  Small rounded-square icon button (AppBar actions)
+// ─────────────────────────────────────────────
+class _IconSquareButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool dot;
+
+  const _IconSquareButton({
+    required this.icon,
+    required this.onTap,
+    this.dot = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Theme.of(context).dividerColor),
+        ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [
+            Icon(icon, color: kSub, size: 19),
+            if (dot)
+              Positioned(
+                top: -3,
+                right: -3,
+                child: Container(
+                  width: 9,
+                  height: 9,
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Theme.of(context).scaffoldBackgroundColor,
+                      width: 1.5,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Role segmented control
+// ─────────────────────────────────────────────
+class _RoleSegmentedControl extends StatelessWidget {
+  final String? selectedRole;
+  final ValueChanged<String> onSelect;
+
+  const _RoleSegmentedControl({
+    required this.selectedRole,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(15),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _RoleHalf(
+                  icon: Icons.work_outline_rounded,
+                  label: 'Gig Worker',
+                  subtitle: 'Find gigs & earn money',
+                  isSelected: selectedRole == 'worker',
+                  selectedColor: kBlue,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(15),
+                    bottomLeft: Radius.circular(15),
+                  ),
+                  onTap: () => onSelect('worker'),
+                ),
+              ),
+              Container(width: 1, color: borderColor),
+              Expanded(
+                child: _RoleHalf(
+                  icon: Icons.storefront_outlined,
+                  label: 'Gig Host',
+                  subtitle: 'Post gigs & find talent',
+                  isSelected: selectedRole == 'host',
+                  selectedColor: kGold,
+                  borderRadius: const BorderRadius.only(
+                    topRight: Radius.circular(15),
+                    bottomRight: Radius.circular(15),
+                  ),
+                  onTap: () => onSelect('host'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoleHalf extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final bool isSelected;
+  final Color selectedColor;
+  final BorderRadius borderRadius;
+  final VoidCallback onTap;
+
+  const _RoleHalf({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.isSelected,
+    required this.selectedColor,
+    required this.borderRadius,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor =
+        isSelected ? Colors.white : Theme.of(context).colorScheme.onSurface;
+    final subColor = isSelected ? Colors.white70 : kSub;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? selectedColor : selectedColor.withValues(alpha: 0),
+          borderRadius: borderRadius,
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: isSelected ? Colors.white : kSub, size: 26),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: textColor,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: subColor, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Footer link
+// ─────────────────────────────────────────────
+class _FooterLink extends StatelessWidget {
+  final String label;
+  final Widget screen;
+
+  const _FooterLink(this.label, this.screen);
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+          context, MaterialPageRoute(builder: (_) => screen)),
+      child: Text(label, style: const TextStyle(fontSize: 12, color: kBlue)),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Giggre menu (bottom sheet)
+// ─────────────────────────────────────────────
 class _GiggreMenu extends StatelessWidget {
   final bool hasPendingUpdate;
   final VoidCallback onUpdate;
 
   const _GiggreMenu({
-    super.key,
     this.hasPendingUpdate = false,
     required this.onUpdate,
   });
@@ -1281,9 +1308,7 @@ class _GiggreMenu extends StatelessWidget {
                             Text(
                               version,
                               style: TextStyle(
-                                color: isDark
-                                    ? Colors.white70
-                                    : Colors.black54,
+                                color: isDark ? Colors.white70 : Colors.black54,
                                 fontSize: 14,
                               ),
                             ),
@@ -1296,9 +1321,7 @@ class _GiggreMenu extends StatelessWidget {
                                 },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 4,
-                                  ),
+                                      horizontal: 12, vertical: 4),
                                   decoration: BoxDecoration(
                                     color: kBlue,
                                     borderRadius: BorderRadius.circular(20),
@@ -1306,19 +1329,16 @@ class _GiggreMenu extends StatelessWidget {
                                   child: const Text(
                                     'Update Available',
                                     style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold),
                                   ),
                                 ),
                               )
                             else
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
+                                    horizontal: 12, vertical: 4),
                                 decoration: BoxDecoration(
                                   color: Colors.green.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(20),
@@ -1326,10 +1346,9 @@ class _GiggreMenu extends StatelessWidget {
                                 child: const Text(
                                   'Latest',
                                   style: TextStyle(
-                                    color: Colors.green,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                      color: Colors.green,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600),
                                 ),
                               ),
                           ],
@@ -1338,7 +1357,7 @@ class _GiggreMenu extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      "The fastest way to find jobs or hire workers near you",
+                      'The fastest way to find jobs or hire workers near you',
                       style: TextStyle(
                         color: isDark ? Colors.white70 : Colors.black54,
                         fontSize: 10,
@@ -1361,7 +1380,7 @@ class _GiggreMenu extends StatelessWidget {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => item['screen'] as Widget,
+                              builder: (_) => item['screen'] as Widget,
                             ),
                           );
                         },
@@ -1377,24 +1396,21 @@ class _GiggreMenu extends StatelessWidget {
                                     color: iconBg,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: Icon(
-                                    item['icon'] as IconData,
-                                    color: kBlue,
-                                  ),
+                                  child: Icon(item['icon'] as IconData,
+                                      color: kBlue),
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
                                   item['title'] as String,
                                   style: TextStyle(
-                                    color: isDark ? Colors.white : Colors.black,
+                                    color:
+                                        isDark ? Colors.white : Colors.black,
                                   ),
                                 ),
                               ],
                             ),
-                            Icon(
-                              Icons.chevron_right,
-                              color: isDark ? Colors.white : Colors.black,
-                            ),
+                            Icon(Icons.chevron_right,
+                                color: isDark ? Colors.white : Colors.black),
                           ],
                         ),
                       );
@@ -1411,7 +1427,7 @@ class _GiggreMenu extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
-//  Testimonial Carousel
+//  Testimonial Carousel  (images from Firestore)
 // ─────────────────────────────────────────────
 class _CarouselItem {
   final String picture;
@@ -1424,54 +1440,6 @@ class _CarouselItem {
       picture: data['picture'] as String? ?? '',
       sortNumber: (data['sortNumber'] as num?)?.toInt() ?? 0,
     );
-  }
-}
-
-class _UpdateItem {
-  final String title;
-  final String body;
-  final String category;
-  final int sortNumber;
-  final DateTime? dateCreated;
-
-  const _UpdateItem({
-    required this.title,
-    required this.body,
-    required this.category,
-    required this.sortNumber,
-    this.dateCreated,
-  });
-
-  factory _UpdateItem.fromMap(Map<String, dynamic> data) {
-    return _UpdateItem(
-      title: data['title'] as String? ?? '',
-      body: data['body'] as String? ?? '',
-      category: data['category'] as String? ?? '',
-      sortNumber: (data['sortNumber'] as num?)?.toInt() ?? 0,
-      dateCreated: data['dateCreated'] != null
-          ? (data['dateCreated'] as Timestamp).toDate()
-          : null,
-    );
-  }
-
-  String get formattedDate {
-    if (dateCreated == null) return '';
-    return '${dateCreated!.month.toString().padLeft(2, '0')}/${dateCreated!.day.toString().padLeft(2, '0')}/${dateCreated!.year}';
-  }
-
-  IconData get icon {
-    switch (category.toLowerCase()) {
-      case 'announcement':
-        return Icons.campaign;
-      case 'feature':
-        return Icons.star;
-      case 'bug fix':
-        return Icons.bug_report;
-      case 'improvement':
-        return Icons.trending_up;
-      default:
-        return Icons.update;
-    }
   }
 }
 
@@ -1501,12 +1469,11 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
           .collection('items')
           .get();
 
-      final items =
-          snapshot.docs
-              .map((doc) => _CarouselItem.fromMap(doc.data()))
-              .where((item) => item.sortNumber != 0 && item.picture.isNotEmpty)
-              .toList()
-            ..sort((a, b) => a.sortNumber.compareTo(b.sortNumber));
+      final items = snapshot.docs
+          .map((doc) => _CarouselItem.fromMap(doc.data()))
+          .where((item) => item.sortNumber != 0 && item.picture.isNotEmpty)
+          .toList()
+        ..sort((a, b) => a.sortNumber.compareTo(b.sortNumber));
 
       if (mounted) {
         setState(() {
@@ -1527,9 +1494,9 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
         child: AspectRatio(
           aspectRatio: 16 / 9,
           child: Container(
-            color: kCard,
+            color: Theme.of(context).cardColor,
             child: const Center(
-              child: CircularProgressIndicator(color: kBlue, strokeWidth: 2),
+              child: CircularProgressIndicator(color: kGold, strokeWidth: 2),
             ),
           ),
         ),
@@ -1552,29 +1519,26 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
               autoPlayInterval: const Duration(seconds: 5),
               autoPlayAnimationDuration: const Duration(milliseconds: 600),
               autoPlayCurve: Curves.easeInOut,
-              onPageChanged: (index, _) => setState(() => _current = index),
+              onPageChanged: (index, _) =>
+                  setState(() => _current = index),
             ),
             itemBuilder: (context, index, _) {
               return _SlideItem(pictureUrl: _slides[index].picture);
             },
           ),
         ),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(_slides.length, (i) {
-            final active = i == _current;
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              width: active ? 20 : 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: active ? kBlue : kSub.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(3),
-              ),
-            );
-          }),
+        const SizedBox(height: 12),
+        AnimatedSmoothIndicator(
+          activeIndex: _current,
+          count: _slides.length,
+          effect: const ExpandingDotsEffect(
+            activeDotColor: kGold,
+            dotColor: Color(0x5994A3B8), // kSub @ 35% opacity
+            dotHeight: 6,
+            dotWidth: 6,
+            expansionFactor: 3.5,
+            spacing: 6,
+          ),
         ),
       ],
     );
@@ -1597,115 +1561,13 @@ class _SlideItem extends StatelessWidget {
           fit: BoxFit.cover,
           width: double.infinity,
           placeholder: (context, url) => Container(
-            color: kCard,
+            color: Theme.of(context).cardColor,
             child: const Center(
-              child: CircularProgressIndicator(color: kBlue, strokeWidth: 2),
+              child: CircularProgressIndicator(color: kGold, strokeWidth: 2),
             ),
           ),
-          errorWidget: (context, url, error) => Container(color: kCard),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-//  Role Card
-// ─────────────────────────────────────────────
-class _RoleCard extends StatelessWidget {
-  final String role;
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final Color accentColor;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _RoleCard({
-    required this.role,
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.accentColor,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cardColor = Theme.of(context).cardColor;
-    final borderColor = Theme.of(context).dividerColor;
-    final titleColor = Theme.of(context).colorScheme.onSurface;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: isSelected ? accentColor.withValues(alpha: 0.12) : cardColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected ? accentColor : borderColor,
-            width: isSelected ? 2 : 1,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: accentColor.withValues(alpha: 0.18),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : [],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: accentColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(icon, color: accentColor, size: 28),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: isSelected ? accentColor : titleColor,
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(color: kSub, fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            AnimatedOpacity(
-              opacity: isSelected ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 200),
-              child: Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  color: accentColor,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.check, color: Colors.white, size: 15),
-              ),
-            ),
-          ],
+          errorWidget: (context, url, error) =>
+              Container(color: Theme.of(context).cardColor),
         ),
       ),
     );

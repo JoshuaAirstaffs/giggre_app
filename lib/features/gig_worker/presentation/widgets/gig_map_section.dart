@@ -1189,14 +1189,14 @@ class _GigMapSectionState extends State<GigMapSection> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: kAmber.withValues(alpha: 0.12),
+                color: kGold.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: kAmber.withValues(alpha: 0.4)),
+                border: Border.all(color: kGold.withValues(alpha: 0.4)),
               ),
               child: Text(
                 '$total ${total == 1 ? 'Gig' : 'Gigs'}',
                 style: const TextStyle(
-                  color: kAmber,
+                  color: kGold,
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
                 ),
@@ -1207,7 +1207,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         const SizedBox(height: 12),
         Row(
           children: [
-            _LegendDot(color: kAmber, label: 'Quick'),
+            _LegendDot(color: kGold, label: 'Quick'),
             const SizedBox(width: 14),
             _LegendDot(color: kBlue, label: 'Open'),
             const SizedBox(width: 14),
@@ -1220,7 +1220,7 @@ class _GigMapSectionState extends State<GigMapSection> {
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
               child: Container(
-                height: 300,
+                height: 280,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: borderColor),

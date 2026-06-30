@@ -2,125 +2,146 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Toggles Card — Available for Gigs + Auto Accept switches
+//  TogglesCard — 2-column: Quick Gigs + Auto Accept
+//  Availability toggle lives in the hero card in gig_worker_screen.dart.
 // ─────────────────────────────────────────────────────────────────────────────
 class TogglesCard extends StatelessWidget {
-  final bool availableForGigs;
+  final bool seekingQuickGigs;
   final bool autoAccept;
-  final ValueChanged<bool> onAvailableChanged;
+  final ValueChanged<bool> onQuickGigsChanged;
   final ValueChanged<bool> onAutoAcceptChanged;
   final String isVerified;
+
   const TogglesCard({
     super.key,
-    required this.availableForGigs,
+    required this.seekingQuickGigs,
     required this.autoAccept,
-    required this.onAvailableChanged,
+    required this.onQuickGigsChanged,
     required this.onAutoAcceptChanged,
     required this.isVerified,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cardColor = Theme.of(context).cardColor;
-    final divider = Theme.of(context).dividerColor;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: divider),
-      ),
-      child: Column(
-        children: [
-          _ToggleRow(
-            icon: Icons.circle_rounded,
-            iconColor: availableForGigs ? const Color(0xFF22C55E) : kSub,
-            label: 'Available for Gigs',
-            subtitle: availableForGigs
-                ? 'You appear online to hosts'
-                : 'You are hidden from hosts',
-            value: availableForGigs,
-            activeColor: const Color(0xFF22C55E),
-            onChanged: onAvailableChanged,
-            isVerified: isVerified,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _ToggleCard(
+            icon: Icons.power_settings_new_rounded,
+            iconBg: kSub.withValues(alpha: 0.12),
+            iconColor: kSub,
+            label: 'Quick Gigs',
+            description: 'Go online to receive quick gig offers near you',
+            value: seekingQuickGigs,
+            activeColor: const Color(0xFF2BB673),
+            onChanged: (v) {
+              if (isVerified == 'verified') {
+                onQuickGigsChanged(v);
+              } else {
+                _showModal(context);
+              }
+            },
           ),
-          Divider(height: 1, color: divider, indent: 56),
-          _ToggleRow(
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _ToggleCard(
             icon: Icons.bolt_rounded,
-            iconColor: autoAccept ? kAmber : kSub,
+            iconBg: kGold.withValues(alpha: 0.12),
+            iconColor: kGold,
             label: 'Auto Accept',
-            subtitle: autoAccept
-                ? 'Gigs matching your skills are auto-accepted'
-                : 'You manually review each gig offer',
+            description: 'Gigs matching your skills are auto accepted',
             value: autoAccept,
-            activeColor: kAmber,
-            onChanged: onAutoAcceptChanged,
-            isVerified: isVerified,
+            activeColor: kGold,
+            onChanged: (v) {
+              if (isVerified == 'verified') {
+                onAutoAcceptChanged(v);
+              } else {
+                _showModal(context);
+              }
+            },
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
-class _ToggleRow extends StatelessWidget {
+class _ToggleCard extends StatelessWidget {
   final IconData icon;
+  final Color iconBg;
   final Color iconColor;
   final String label;
-  final String subtitle;
+  final String description;
   final bool value;
   final Color activeColor;
   final ValueChanged<bool> onChanged;
-  final String isVerified;
 
-  const _ToggleRow({
+  const _ToggleCard({
     required this.icon,
+    required this.iconBg,
     required this.iconColor,
     required this.label,
-    required this.subtitle,
+    required this.description,
     required this.value,
     required this.activeColor,
     required this.onChanged,
-    required this.isVerified,
   });
 
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: Icon(icon, color: iconColor, size: 18),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(icon, color: iconColor, size: 18),
+              ),
+              const Spacer(),
+              Transform.scale(
+                scale: 0.8,
+                child: Switch(
+                  value: value,
+                  onChanged: onChanged,
+                  activeThumbColor: activeColor,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    style: TextStyle(
-                        color: onSurface,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 2),
-                Text(subtitle,
-                    style: const TextStyle(color: kSub, fontSize: 12)),
-              ],
+          const SizedBox(height: 10),
+          Text(
+            label,
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          Switch(
-            value: value,
-            onChanged: isVerified == 'verified' ? onChanged : (value) => _showModal(context),
-            activeThumbColor: activeColor,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          const SizedBox(height: 4),
+          Text(
+            description,
+            style: const TextStyle(color: kSub, fontSize: 11),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -128,9 +149,10 @@ class _ToggleRow extends StatelessWidget {
   }
 }
 
-void _showModal(
-  BuildContext context, 
-) {
+// ─────────────────────────────────────────────────────────────────────────────
+//  Verification required dialog (preserved from original)
+// ─────────────────────────────────────────────────────────────────────────────
+void _showModal(BuildContext context) {
   showDialog(
     context: context,
     builder: (_) => AlertDialog(
@@ -142,24 +164,21 @@ void _showModal(
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: ( Colors.red).withValues(alpha: 0.1),
+              color: Colors.red.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              Icons.error_outline,
-              color: Colors.red,
-              size: 40,
-            ),
+            child: const Icon(Icons.error_outline, color: Colors.red, size: 40),
           ),
           const SizedBox(height: 16),
-          Text(
+          const Text(
             'Account not Verified',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           Text(
-            'Your account needs to be verified before you can continue. Please request verification from the admin.',
+            'Your account needs to be verified before you can continue. '
+            'Please request verification from the admin.',
             style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
             textAlign: TextAlign.center,
           ),
@@ -168,14 +187,14 @@ void _showModal(
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor:  Colors.red,
+                backgroundColor: Colors.red,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
+                    borderRadius: BorderRadius.circular(10)),
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK', style: TextStyle(color: Colors.white)),
+              child:
+                  const Text('OK', style: TextStyle(color: Colors.white)),
             ),
           ),
         ],

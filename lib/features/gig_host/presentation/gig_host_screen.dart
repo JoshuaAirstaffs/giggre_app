@@ -18,9 +18,7 @@ import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
 import 'gig_host_profile_screen.dart';
-import '../services/quick_gig_matching_service.dart';
 import '../models/gig_template_model.dart';
-import 'widgets/gig_detail_sheet.dart';
 import 'widgets/admin_gig_config_sheet.dart';
 import 'widgets/notifications_sheet.dart';
 import 'host_gigs_screen.dart';
@@ -161,290 +159,511 @@ Future<void> _logout() async {
   Widget build(BuildContext context) {
     final firstName = _userName.split(' ').first;
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final bgColor = Theme.of(context).scaffoldBackgroundColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
     return Scaffold(
-      backgroundColor: bgColor,
-      appBar: AppBar(
-        backgroundColor: bgColor,
-        elevation: 0,
-        titleSpacing: 0,
-        leading: IconButton(
-          tooltip: 'Switch Role',
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: kSub, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                color: kAmber.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
-              ),
-              child: const Center(
-                child: Icon(Icons.business_center_outlined,
-                    color: kAmber, size: 16),
-              ),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: CustomScrollView(
+        slivers: [
+          // ── Gold header band + overlapping stat cards ──────────
+          SliverToBoxAdapter(
+            child: _HostHeader(
+              firstName: firstName,
+              photoUrl: _photoUrl,
+              uid: uid,
+              onProfile: _showProfile,
+              onTemplates: _showTemplates,
+              onLogout: _logout,
             ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Gig Host',
-                      overflow: TextOverflow.ellipsis,
+          ),
+
+          // ── Body content ──────────────────────────────────────
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                // ── Post a Gig ─────────────────────────────────
+                const _HostSectionLabel('Post a gig'),
+                const SizedBox(height: 10),
+                _FullWidthGigCard(
+                  title: 'Quick Gig',
+                  subtitle: 'Simple tasks, no skills required',
+                  icon: Icons.bolt_rounded,
+                  accentColor: kGold,
+                  onTap: () {
+                    if (_isVerified == 'verified') {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              PostQuickGigScreen(hostName: _userName),
+                        ),
+                      );
+                    } else {
+                      _showModal(context);
+                    }
+                  },
+                ),
+                const SizedBox(height: 10),
+                _FullWidthGigCard(
+                  title: 'Open Gig',
+                  subtitle: 'Skilled tasks for qualified workers',
+                  icon: Icons.workspace_premium_outlined,
+                  accentColor: kBlue,
+                  onTap: () {
+                    if (_isVerified == 'verified') {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              PostOpenGigScreen(hostName: _userName),
+                        ),
+                      );
+                    } else {
+                      _showModal(context);
+                    }
+                  },
+                ),
+                const SizedBox(height: 10),
+                _FullWidthGigCard(
+                  title: 'Offered Gig',
+                  subtitle: 'Direct offers to specific workers you trust',
+                  icon: Icons.send_rounded,
+                  accentColor: const Color(0xFF8B5CF6),
+                  onTap: () {
+                    if (_isVerified == 'verified') {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              PostOfferedGigScreen(hostName: _userName),
+                        ),
+                      );
+                    } else {
+                      _showModal(context);
+                    }
+                  },
+                ),
+                const SizedBox(height: 24),
+
+                // ── Workers Near You ───────────────────────────
+                _WorkerMapSection(hostName: _userName),
+                const SizedBox(height: 24),
+
+                // ── Your Gigs ──────────────────────────────────
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Your Gigs',
                       style: TextStyle(
-                          color: onSurface,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14)),
-                  const Text('Dashboard',
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: kSub, fontSize: 10)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('open_gigs')
-                .where('hostId', isEqualTo: uid)
-                .where('status', isEqualTo: 'open')
-                .snapshots(),
-            builder: (context, snap) {
-              final hasApplicants = snap.data?.docs.any((d) {
-                    final applicants = (d.data()
-                        as Map<String, dynamic>)['applicants'] as List?;
-                    return applicants != null && applicants.isNotEmpty;
-                  }) ??
-                  false;
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  IconButton(
-                    tooltip: 'Notifications',
-                    icon: const Icon(Icons.notifications_outlined, color: kSub),
-                    onPressed: () => NotificationsSheet.show(context),
-                  ),
-                  if (hasApplicants)
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
+                        color: onSurface,
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => HostGigsScreen(uid: uid)),
+                      ),
+                      child: const Text(
+                        'See all',
+                        style: TextStyle(
+                          color: kGold,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
-                ],
-              );
-            },
-          ),
-          IconButton(
-            tooltip: 'Profile',
-            icon: const Icon(Icons.account_circle_outlined, color: kSub),
-            onPressed: _showProfile,
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'More',
-            icon: const Icon(Icons.more_vert_rounded, color: kSub),
-            color: Theme.of(context).cardColor,
-            onSelected: (val) {
-              if (val == 'templates') _showTemplates();
-              if (val == 'config') AdminGigConfigSheet.show(context);
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
-                value: 'templates',
-                child: Row(
-                  children: [
-                    Icon(Icons.bookmark_add_outlined, size: 16, color: kSub),
-                    SizedBox(width: 10),
-                    Text('Saved Templates', style: TextStyle(fontSize: 13)),
                   ],
                 ),
-              ),
-              PopupMenuItem(
-                value: 'config',
-                child: Row(
-                  children: [
-                    Icon(Icons.tune_rounded, size: 16, color: kSub),
-                    SizedBox(width: 10),
-                    Text('Gig Config', style: TextStyle(fontSize: 13)),
-                  ],
-                ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                _GigPreviewList(uid: uid),
+              ]),
+            ),
           ),
-          const ThemeToggleButton(),
-          IconButton(
-            tooltip: 'Log Out',
-            icon: const Icon(Icons.logout_rounded, color: kSub),
-            onPressed: _logout,
-          ),
-          const SizedBox(width: 4),
         ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Greeting ──────────────────────────────────────
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 21,
-                    backgroundColor: kAmber.withValues(alpha: 0.15),
-                    backgroundImage: _photoUrl.isNotEmpty
-                        ? CachedNetworkImageProvider(_photoUrl)
-                        : null,
-                    child: _photoUrl.isEmpty
-                        ? const Icon(Icons.account_circle_rounded,
-                            color: kAmber, size: 24)
-                        : null,
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    firstName.isNotEmpty ? 'Hey, $firstName 👋' : 'Welcome, Host!',
-                    style: TextStyle(
-                        color: onSurface,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              const Text('Manage your gigs and find workers.',
-                  style: TextStyle(color: kSub, fontSize: 13)),
-              const SizedBox(height: 24),
+    );
+  }
+}
 
-              // ── Stats ─────────────────────────────────────────
-              _StatsRow(uid: uid),
-              const SizedBox(height: 28),
+// ─────────────────────────────────────────────────────────────────────────────
+//  Gold header band
+// ─────────────────────────────────────────────────────────────────────────────
+class _HostHeader extends StatelessWidget {
+  final String firstName;
+  final String photoUrl;
+  final String uid;
+  final VoidCallback onProfile;
+  final VoidCallback onTemplates;
+  final VoidCallback onLogout;
 
-              // ── Workers Map ───────────────────────────────────
-              _WorkerMapSection(hostName: _userName),
-              const SizedBox(height: 28),
+  const _HostHeader({
+    required this.firstName,
+    required this.photoUrl,
+    required this.uid,
+    required this.onProfile,
+    required this.onTemplates,
+    required this.onLogout,
+  });
 
-              // ── Post a Gig ────────────────────────────────────
-              Text('Post a Gig',
-                  style: TextStyle(
-                      color: onSurface,
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              _GigTypeCard(
-                title: 'Quick Gig',
-                subtitle: 'Simple tasks — no skills required',
-                example: 'e.g. Dishwashing, Cleaning, Delivery',
-                icon: Icons.flash_on_rounded,
-                accentColor: kAmber,
-                badge: 'AVAILABLE',
-                badgeColor: kAmber,
-                onTap: () {
-                  if (_isVerified == 'verified') {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PostQuickGigScreen(hostName: _userName),
-                      ),
-                    );
-                  } else {
-                    _showModal(context);
-                  }
-                },
-              ),
-              const SizedBox(height: 10),
-              _GigTypeCard(
-                title: 'Open Gig',
-                subtitle: 'Skilled tasks for qualified workers',
-                example: 'e.g. Plumbing, Web Dev, Accounting',
-                icon: Icons.workspace_premium_outlined,
-                accentColor: kBlue,
-                badge: 'AVAILABLE',
-                badgeColor: kBlue,
-                onTap: () {
-                  if (_isVerified == 'verified') {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PostOpenGigScreen(hostName: _userName),
-                      ),
-                    );
-                  } else {
-                    _showModal(context);
-                  }
-                },
-              ),
-              const SizedBox(height: 10),
-              _GigTypeCard(
-                title: 'Offered Gig',
-                subtitle: 'Direct offers to specific workers',
-                example: 'e.g. Invite someone you trust',
-                icon: Icons.send_rounded,
-                accentColor: const Color(0xFF8B5CF6),
-                badge: 'AVAILABLE',
-                badgeColor: const Color(0xFF8B5CF6),
-                onTap: () {
-                  if (_isVerified == 'verified') {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PostOfferedGigScreen(hostName: _userName),
-                      ),
-                    );
-                  } else {
-                    _showModal(context);
-                  }
-                },
-              ),
-              const SizedBox(height: 28),
-
-              // ── Recent Gigs ───────────────────────────────────
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Your Gigs',
-                      style: TextStyle(
-                          color: onSurface,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold)),
-                  GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => HostGigsScreen(uid: uid)),
-                    ),
-                    child: const Text(
-                      'See All',
-                      style: TextStyle(
-                          color: kAmber,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _GigPreviewList(uid: uid),
-            ],
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Gold gradient band
+        Container(
+          width: double.infinity,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [kGold, Color(0xFFD88810)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
           ),
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 4, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Action row ──────────────────────────────
+                  Row(
+                    children: [
+                      // Left: back + "Gig Host / Dashboard" label
+                      GestureDetector(
+                        onTap: () => Navigator.pop(context),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(
+                                Icons.arrow_back_ios_new_rounded,
+                                color: Colors.white,
+                                size: 15,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            const Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Gig Host',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  'Dashboard',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Spacer(),
+                      // Right: action icons (white)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Bell with unread dot
+                          StreamBuilder<QuerySnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('open_gigs')
+                                .where('hostId', isEqualTo: uid)
+                                .where('status', isEqualTo: 'open')
+                                .snapshots(),
+                            builder: (context, snap) {
+                              final hasApplicants =
+                                  snap.data?.docs.any((d) {
+                                        final applicants = (d.data()
+                                                as Map<String, dynamic>)[
+                                            'applicants'] as List?;
+                                        return applicants != null &&
+                                            applicants.isNotEmpty;
+                                      }) ??
+                                      false;
+                              return Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Notifications',
+                                    icon: const Icon(
+                                      Icons.notifications_outlined,
+                                      color: Colors.white,
+                                    ),
+                                    onPressed: () =>
+                                        NotificationsSheet.show(context),
+                                    style: IconButton.styleFrom(
+                                      foregroundColor: Colors.white,
+                                    ),
+                                  ),
+                                  if (hasApplicants)
+                                    Positioned(
+                                      top: 8,
+                                      right: 8,
+                                      child: Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: const BoxDecoration(
+                                          color: Colors.red,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
+                          ),
+                          // Profile
+                          IconButton(
+                            tooltip: 'Profile',
+                            icon: const Icon(
+                              Icons.account_circle_outlined,
+                              color: Colors.white,
+                            ),
+                            onPressed: onProfile,
+                            style: IconButton.styleFrom(
+                                foregroundColor: Colors.white),
+                          ),
+                          // More menu (templates + gig config)
+                          PopupMenuButton<String>(
+                            tooltip: 'More',
+                            icon: const Icon(
+                              Icons.more_vert_rounded,
+                              color: Colors.white,
+                            ),
+                            color: Theme.of(context).cardColor,
+                            onSelected: (val) {
+                              if (val == 'templates') onTemplates();
+                              if (val == 'config') {
+                                AdminGigConfigSheet.show(context);
+                              }
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'templates',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.bookmark_add_outlined,
+                                        size: 16, color: kSub),
+                                    SizedBox(width: 10),
+                                    Text('Saved Templates',
+                                        style: TextStyle(fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'config',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.tune_rounded,
+                                        size: 16, color: kSub),
+                                    SizedBox(width: 10),
+                                    Text('Gig Config',
+                                        style: TextStyle(fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          // Theme toggle (white-tinted)
+                          ColorFiltered(
+                            colorFilter: const ColorFilter.mode(
+                              Colors.white,
+                              BlendMode.srcIn,
+                            ),
+                            child: const ThemeToggleButton(),
+                          ),
+                          // Logout
+                          IconButton(
+                            tooltip: 'Log Out',
+                            icon: const Icon(
+                              Icons.logout_rounded,
+                              color: Colors.white,
+                            ),
+                            onPressed: onLogout,
+                            style: IconButton.styleFrom(
+                                foregroundColor: Colors.white),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  // ── Profile strip ────────────────────────────
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 22,
+                        backgroundColor: Colors.white.withValues(alpha: 0.22),
+                        backgroundImage: photoUrl.isNotEmpty
+                            ? CachedNetworkImageProvider(photoUrl)
+                            : null,
+                        child: photoUrl.isEmpty
+                            ? const Icon(
+                                Icons.account_circle_rounded,
+                                color: Colors.white,
+                                size: 26,
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              firstName.isNotEmpty
+                                  ? 'Hey, $firstName 👋'
+                                  : 'Welcome, Host!',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const Text(
+                              'Manage your gigs and find workers',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // Stat cards directly below the gold band — full width, equal sizing
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          child: _StatsRow(uid: uid),
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Full-Width Gig Card — horizontal icon + text + chevron
+// ─────────────────────────────────────────────────────────────────────────────
+class _FullWidthGigCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color accentColor;
+  final VoidCallback? onTap;
+
+  const _FullWidthGigCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.accentColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: accentColor.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: accentColor.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: accentColor, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: onSurface,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(color: kSub, fontSize: 12),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: accentColor.withValues(alpha: 0.6),
+              size: 16,
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Muted uppercase section label
+// ─────────────────────────────────────────────────────────────────────────────
+class _HostSectionLabel extends StatelessWidget {
+  final String text;
+  const _HostSectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text.toUpperCase(),
+        style: const TextStyle(
+          color: kSub,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.8,
+        ),
+      );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -513,14 +732,17 @@ class _StatsRowState extends State<_StatsRow> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _StatCard(label: 'Posted', value: _total, color: kAmber),
-        const SizedBox(width: 10),
-        _StatCard(label: 'Active', value: _active, color: const Color(0xFF22C55E)),
-        const SizedBox(width: 10),
-        _StatCard(label: 'Done', value: _done, color: kBlue),
-      ],
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: _StatCard(label: 'Posted', value: _total, color: kAmber)),
+          const SizedBox(width: 10),
+          Expanded(child: _StatCard(label: 'Active', value: _active, color: const Color(0xFF22C55E))),
+          const SizedBox(width: 10),
+          Expanded(child: _StatCard(label: 'Done', value: _done, color: kBlue)),
+        ],
+      ),
     );
   }
 }
@@ -534,28 +756,27 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Theme.of(context).dividerColor),
-        ),
-        child: Column(
-          children: [
-            Text(
-              '$value',
-              style: TextStyle(
-                  color: color,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            Text(label,
-                style: const TextStyle(color: kSub, fontSize: 12)),
-          ],
-        ),
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '$value',
+            style: TextStyle(
+                color: color,
+                fontSize: 22,
+                fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(label,
+              style: const TextStyle(color: kSub, fontSize: 12)),
+        ],
       ),
     );
   }
