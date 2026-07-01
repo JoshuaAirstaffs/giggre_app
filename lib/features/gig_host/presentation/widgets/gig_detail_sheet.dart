@@ -1,9 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show Factory;
+import 'package:flutter/gestures.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:flutter_polyline_points/flutter_polyline_points.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' as ll;
 import '../../../../core/services/gms_availability.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
@@ -34,10 +40,7 @@ class GigDetailSheet extends StatefulWidget {
 
 class _GigDetailSheetState extends State<GigDetailSheet> {
   Map<String, dynamic>? _data;
-  LatLng? _workerLocation;
   StreamSubscription? _gigSub;
-  StreamSubscription? _workerSub;
-  String? _trackedWorkerId;
   bool _cancelledHandled = false;
 
   String get _collection {
@@ -88,42 +91,12 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             });
             return;
           }
-          // Watch worker location when a worker is assigned
-          final wid =
-              data['workerId'] as String? ??
-              data['assignedWorkerId'] as String?;
-          if (wid != null && wid.isNotEmpty && wid != _trackedWorkerId) {
-            _trackedWorkerId = wid;
-            _startWorkerStream(wid);
-          }
         }, onError: (e) => debugPrint('[GigDetailSheet] gig stream error: $e'));
-  }
-
-  void _startWorkerStream(String uid) {
-    _workerSub?.cancel();
-    _workerSub = FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .snapshots()
-        .listen(
-          (snap) {
-            if (!mounted) return;
-            final geo = snap.data()?['location'] as GeoPoint?;
-            if (geo != null) {
-              setState(
-                () => _workerLocation = LatLng(geo.latitude, geo.longitude),
-              );
-            }
-          },
-          onError: (e) =>
-              debugPrint('[GigDetailSheet] worker stream error: $e'),
-        );
   }
 
   @override
   void dispose() {
     _gigSub?.cancel();
-    _workerSub?.cancel();
     super.dispose();
   }
 
@@ -384,19 +357,24 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 54, height: 54,
+                width: 54,
+                height: 54,
                 decoration: BoxDecoration(
                   color: const Color(0xFF22C55E).withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.person_rounded,
-                    color: Color(0xFF22C55E), size: 24),
+                child: const Icon(
+                  Icons.person_rounded,
+                  color: Color(0xFF22C55E),
+                  size: 24,
+                ),
               ),
               const SizedBox(height: 14),
               Text(
                 'Assign $workerName?',
                 style: TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.w600,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
                   color: Theme.of(ctx).colorScheme.onSurface,
                 ),
               ),
@@ -417,12 +395,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: const RoundedRectangleBorder(
                             borderRadius: BorderRadius.only(
-                                bottomLeft: Radius.circular(20)),
+                              bottomLeft: Radius.circular(20),
+                            ),
                           ),
                         ),
                         onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Cancel',
-                            style: TextStyle(color: kSub, fontSize: 15)),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(color: kSub, fontSize: 15),
+                        ),
                       ),
                     ),
                     const VerticalDivider(width: 0.5, thickness: 0.5),
@@ -432,15 +413,19 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: const RoundedRectangleBorder(
                             borderRadius: BorderRadius.only(
-                                bottomRight: Radius.circular(20)),
+                              bottomRight: Radius.circular(20),
+                            ),
                           ),
                         ),
                         onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Assign',
-                            style: TextStyle(
-                                color: Color(0xFF22C55E),
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600)),
+                        child: const Text(
+                          'Assign',
+                          style: TextStyle(
+                            color: Color(0xFF22C55E),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -456,12 +441,12 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         .collection(_collection)
         .doc(widget.gigId)
         .update({
-      'workerId': applicant['workerId'],
-      'assignedWorkerId': applicant['workerId'],
-      'assignedWorkerName': workerName,
-      'status': 'navigating',
-      'selectedAt': FieldValue.serverTimestamp(),
-    });
+          'workerId': applicant['workerId'],
+          'assignedWorkerId': applicant['workerId'],
+          'assignedWorkerName': workerName,
+          'status': 'navigating',
+          'selectedAt': FieldValue.serverTimestamp(),
+        });
   }
 
   Widget _buildApplicantsSection(List<Map<String, dynamic>> applicants) {
@@ -477,7 +462,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             Text(
               'Applicants',
               style: TextStyle(
-                color: onSurface, fontSize: 14, fontWeight: FontWeight.bold),
+                color: onSurface,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(width: 8),
             Container(
@@ -490,7 +478,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               child: Text(
                 '${applicants.length}',
                 style: const TextStyle(
-                    color: kBlue, fontSize: 11, fontWeight: FontWeight.bold),
+                  color: kBlue,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -511,8 +502,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               children: [
                 Icon(Icons.people_outline_rounded, color: kSub, size: 28),
                 SizedBox(height: 8),
-                Text('No applicants yet',
-                    style: TextStyle(color: kSub, fontSize: 13)),
+                Text(
+                  'No applicants yet',
+                  style: TextStyle(color: kSub, fontSize: 13),
+                ),
               ],
             ),
           )
@@ -538,13 +531,17 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       child: Row(
                         children: [
                           Container(
-                            width: 36, height: 36,
+                            width: 36,
+                            height: 36,
                             decoration: BoxDecoration(
                               color: kBlue.withValues(alpha: 0.12),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.person_rounded,
-                                color: kBlue, size: 18),
+                            child: const Icon(
+                              Icons.person_rounded,
+                              color: kBlue,
+                              size: 18,
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -566,14 +563,19 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                                 foregroundColor: Colors.white,
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 16),
+                                  horizontal: 16,
+                                ),
                                 shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10)),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
                               ),
-                              child: const Text('Select',
-                                  style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold)),
+                              child: const Text(
+                                'Select',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -581,8 +583,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     ),
                     if (!isLast)
                       Divider(
-                        height: 0.5, thickness: 0.5,
-                        indent: 16, endIndent: 16,
+                        height: 0.5,
+                        thickness: 0.5,
+                        indent: 16,
+                        endIndent: 16,
                         color: Theme.of(context).dividerColor,
                       ),
                   ],
@@ -629,6 +633,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         final geo = data['location'] as GeoPoint?;
         final gigLocation = geo != null
             ? LatLng(geo.latitude, geo.longitude)
+            : null;
+        final workerGeo = data['workerLocation'] as GeoPoint?;
+        final workerLocation = workerGeo != null
+            ? LatLng(workerGeo.latitude, workerGeo.longitude)
             : null;
         final workerName =
             data['assignedWorkerName'] as String? ??
@@ -724,13 +732,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     height: 220,
                     child: _GigTrackingMap(
                       gigLocation: gigLocation,
-                      workerLocation: (isActive && _workerLocation != null)
-                          ? _workerLocation
+                      workerLocation: (isActive && workerLocation != null)
+                          ? workerLocation
                           : null,
+                      workerId: workerId.isNotEmpty ? workerId : null,
+                      workerName: workerName.isNotEmpty ? workerName : 'Worker',
                     ),
                   ),
                 ),
-                if (isActive && _workerLocation != null)
+                if (isActive && workerLocation != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Row(
@@ -759,7 +769,8 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 _buildApplicantsSection(
                   List<Map<String, dynamic>>.from(
                     (data['applicants'] as List<dynamic>? ?? [])
-                        .cast<Map<String, dynamic>>()),
+                        .cast<Map<String, dynamic>>(),
+                  ),
                 ),
                 const SizedBox(height: 16),
               ],
@@ -1105,8 +1116,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
 class _GigTrackingMap extends StatefulWidget {
   final LatLng gigLocation;
   final LatLng? workerLocation;
+  final String? workerId;
+  final String workerName;
 
-  const _GigTrackingMap({required this.gigLocation, this.workerLocation});
+  const _GigTrackingMap({
+    required this.gigLocation,
+    this.workerLocation,
+    this.workerId,
+    this.workerName = 'Worker',
+  });
 
   @override
   State<_GigTrackingMap> createState() => _GigTrackingMapState();
@@ -1117,6 +1135,11 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();
   bool _osmMapReady = false;
+  List<LatLng> _routePoints = [];
+  List<ll.LatLng> _routePointsOsm = [];
+  BitmapDescriptor? _workerIcon;
+  String? _workerPhotoUrl;
+  String? _iconBuiltForWorkerId;
 
   @override
   void initState() {
@@ -1124,6 +1147,10 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
     GmsAvailability.isAvailable.then((v) {
       if (mounted) setState(() => _useGoogleMaps = v);
     });
+    if (widget.workerLocation != null) {
+      _fetchRoute();
+    }
+    _loadWorkerIcon();
   }
 
   @override
@@ -1133,6 +1160,154 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
     if (oldWidget.workerLocation != widget.workerLocation ||
         oldWidget.gigLocation != widget.gigLocation) {
       _animateToCenter();
+    }
+    if (widget.workerLocation != null &&
+        widget.workerLocation != oldWidget.workerLocation) {
+      _fetchRoute();
+    }
+    if (widget.workerId != oldWidget.workerId) {
+      _loadWorkerIcon();
+    }
+  }
+
+  Future<void> _loadWorkerIcon() async {
+    final wid = widget.workerId;
+    if (wid == null || wid.isEmpty) return;
+    if (_iconBuiltForWorkerId == wid) return;
+    _iconBuiltForWorkerId = wid;
+    String? photoUrl;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(wid)
+          .get();
+      photoUrl = snap.data()?['photoUrl'] as String?;
+    } catch (_) {}
+    final icon = await _buildAvatarMarker(photoUrl, widget.workerName);
+    if (mounted && widget.workerId == wid) {
+      setState(() {
+        _workerPhotoUrl = photoUrl;
+        _workerIcon = icon;
+      });
+    }
+  }
+
+  Future<BitmapDescriptor> _buildAvatarMarker(
+    String? photoUrl,
+    String name,
+  ) async {
+    const size = 40.0;
+    const border = 5.0;
+    const radius = size / 2 - border;
+    const center = Offset(size / 2, size / 2);
+
+    ui.Image? photo;
+    if (photoUrl != null && photoUrl.isNotEmpty) {
+      try {
+        final res = await http.get(Uri.parse(photoUrl));
+        if (res.statusCode == 200) {
+          final codec = await ui.instantiateImageCodec(
+            res.bodyBytes,
+            targetWidth: size.toInt(),
+          );
+          final frame = await codec.getNextFrame();
+          photo = frame.image;
+        }
+      } catch (_) {}
+    }
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    // White ring backdrop
+    canvas.drawCircle(center, size / 2, Paint()..color = Colors.white);
+
+    if (photo != null) {
+      canvas.save();
+      canvas.clipPath(
+        Path()..addOval(Rect.fromCircle(center: center, radius: radius)),
+      );
+      paintImage(
+        canvas: canvas,
+        rect: Rect.fromCircle(center: center, radius: radius),
+        image: photo,
+        fit: BoxFit.cover,
+      );
+      canvas.restore();
+    } else {
+      canvas.drawCircle(center, radius, Paint()..color = kBlue);
+      final initial = name.trim().isNotEmpty
+          ? name.trim()[0].toUpperCase()
+          : '?';
+      final pb =
+          ui.ParagraphBuilder(
+              ui.ParagraphStyle(
+                textAlign: TextAlign.center,
+                fontWeight: FontWeight.bold,
+                fontSize: radius,
+              ),
+            )
+            ..pushStyle(
+              ui.TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: radius,
+              ),
+            )
+            ..addText(initial);
+      final paragraph = pb.build()
+        ..layout(const ui.ParagraphConstraints(width: size));
+      canvas.drawParagraph(
+        paragraph,
+        Offset(0, center.dy - paragraph.height / 2),
+      );
+    }
+
+    final picture = recorder.endRecording();
+    final img = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(byteData!.buffer.asUint8List());
+  }
+
+  Future<void> _fetchRoute({int attempt = 0}) async {
+    final worker = widget.workerLocation;
+    if (worker == null) return;
+    final gig = widget.gigLocation;
+    try {
+      final url = Uri.parse(
+        'http://router.project-osrm.org/route/v1/driving/'
+        '${worker.longitude},${worker.latitude};${gig.longitude},${gig.latitude}'
+        '?overview=full&geometries=polyline',
+      );
+      final res = await http.get(url);
+      if (!mounted || res.statusCode != 200) {
+        if (attempt < 3) {
+          await Future.delayed(const Duration(seconds: 5));
+          if (mounted) _fetchRoute(attempt: attempt + 1);
+        }
+        return;
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final routes = body['routes'] as List<dynamic>?;
+      if (routes == null || routes.isEmpty) return;
+      final geometry =
+          (routes[0] as Map<String, dynamic>)['geometry'] as String;
+      final decoded = PolylinePoints()
+          .decodePolyline(geometry)
+          .map((p) => LatLng(p.latitude, p.longitude))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _routePoints = decoded;
+        _routePointsOsm = decoded
+            .map((p) => ll.LatLng(p.latitude, p.longitude))
+            .toList();
+      });
+    } catch (_) {
+      if (attempt < 3) {
+        await Future.delayed(const Duration(seconds: 5));
+        if (mounted) _fetchRoute(attempt: attempt + 1);
+      }
     }
   }
 
@@ -1169,7 +1344,10 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
         Marker(
           markerId: const MarkerId('worker_location'),
           position: widget.workerLocation!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          icon:
+              _workerIcon ??
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          anchor: const Offset(0.5, 0.5),
         ),
     };
   }
@@ -1179,7 +1357,10 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
     final zoom = widget.workerLocation != null ? 14.0 : 15.0;
     final osmMarkers = <fm.Marker>[
       fm.Marker(
-        point: ll.LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
+        point: ll.LatLng(
+          widget.gigLocation.latitude,
+          widget.gigLocation.longitude,
+        ),
         width: 32,
         height: 32,
         child: Container(
@@ -1194,17 +1375,15 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
       ),
       if (widget.workerLocation != null)
         fm.Marker(
-          point: ll.LatLng(widget.workerLocation!.latitude, widget.workerLocation!.longitude),
-          width: 28,
-          height: 28,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.lightBlue,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-            ),
-            child: const Icon(Icons.person_rounded, color: Colors.white, size: 14),
+          point: ll.LatLng(
+            widget.workerLocation!.latitude,
+            widget.workerLocation!.longitude,
+          ),
+          width: 34,
+          height: 34,
+          child: _WorkerPinAvatar(
+            photoUrl: _workerPhotoUrl,
+            name: widget.workerName,
           ),
         ),
     ];
@@ -1213,6 +1392,13 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
       options: fm.MapOptions(
         initialCenter: ll.LatLng(center.latitude, center.longitude),
         initialZoom: zoom,
+        interactionOptions: const fm.InteractionOptions(
+          flags:
+              fm.InteractiveFlag.pinchZoom |
+              fm.InteractiveFlag.doubleTapZoom |
+              fm.InteractiveFlag.drag |
+              fm.InteractiveFlag.flingAnimation,
+        ),
         onMapReady: () {
           if (mounted) setState(() => _osmMapReady = true);
         },
@@ -1222,6 +1408,16 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.giggre.mobile',
         ),
+        if (_routePointsOsm.isNotEmpty)
+          fm.PolylineLayer(
+            polylines: [
+              fm.Polyline(
+                points: _routePointsOsm,
+                color: kBlue,
+                strokeWidth: 4,
+              ),
+            ],
+          ),
         fm.MarkerLayer(markers: osmMarkers),
       ],
     );
@@ -1255,6 +1451,21 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
                 myLocationButtonEnabled: false,
                 zoomControlsEnabled: false,
                 markers: _buildGoogleMarkers(),
+                polylines: _routePoints.isNotEmpty
+                    ? {
+                        Polyline(
+                          polylineId: const PolylineId('route'),
+                          points: _routePoints,
+                          color: kBlue,
+                          width: 4,
+                        ),
+                      }
+                    : {},
+                gestureRecognizers: {
+                  Factory<OneSequenceGestureRecognizer>(
+                    () => EagerGestureRecognizer(),
+                  ),
+                },
               )
             : _buildOsmMap(),
         Positioned(
@@ -1268,7 +1479,10 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
                 );
               } else if (_osmMapReady) {
                 _osmController.move(
-                  ll.LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
+                  ll.LatLng(
+                    widget.gigLocation.latitude,
+                    widget.gigLocation.longitude,
+                  ),
                   15.0,
                 );
               }
@@ -1296,6 +1510,52 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Worker avatar pin (OSM) — profile photo, falls back to name initial
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkerPinAvatar extends StatelessWidget {
+  final String? photoUrl;
+  final String name;
+
+  const _WorkerPinAvatar({this.photoUrl, required this.name});
+
+  Widget _initialsFallback() {
+    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+    return Container(
+      color: kBlue,
+      alignment: Alignment.center,
+      child: Text(
+        initial,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 14,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2.5),
+        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+      ),
+      child: ClipOval(
+        child: (photoUrl != null && photoUrl!.isNotEmpty)
+            ? Image.network(
+                photoUrl!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => _initialsFallback(),
+              )
+            : _initialsFallback(),
+      ),
     );
   }
 }

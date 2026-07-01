@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:flutter_polyline_points/flutter_polyline_points.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../../core/services/gms_availability.dart';
@@ -462,6 +466,30 @@ class _GigProgressCard extends StatelessWidget {
           // ── Worker live tracking map (navigating step only) ───
           if (status == 'navigating' && gigGeoPoint != null) ...[
             const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: kBlue.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: kBlue.withValues(alpha: 0.25)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.directions_rounded, color: kBlue, size: 16),
+                  const SizedBox(width: 8),
+                  Text(
+                    workerGeoPoint != null
+                        ? 'Worker is on the way'
+                        : 'Waiting for worker location…',
+                    style: const TextStyle(
+                        color: kBlue,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: SizedBox(
@@ -479,7 +507,7 @@ class _GigProgressCard extends StatelessWidget {
             Center(
               child: Text(
                 workerGeoPoint != null
-                    ? 'Live · Tap ⛶ to expand  ·  Blue = worker  ·  Red = destination'
+                    ? 'Live · Tap ⛶ to expand · Blue line = route'
                     : 'Waiting for worker location...',
                 style: TextStyle(
                     color: kSub.withValues(alpha: 0.7), fontSize: 10),
@@ -605,6 +633,11 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
   final _osmController = fm.MapController();
   bool _osmReady = false;
   GoogleMapController? _googleController;
+  List<LatLng> _routePoints = [];
+  List<ll.LatLng> _routePointsOsm = [];
+  int _routeDistanceM = 0;
+  int _routeEtaSeconds = 0;
+  final Map<String, BitmapDescriptor> _icons = {};
 
   @override
   void initState() {
@@ -612,6 +645,10 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
     GmsAvailability.isAvailable.then((v) {
       if (mounted) setState(() => _useGoogleMaps = v);
     });
+    _loadIcons();
+    if (widget.workerLocation != null) {
+      _fetchRoute();
+    }
   }
 
   @override
@@ -635,6 +672,93 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
     } else if (_osmReady) {
       _osmController.move(ll.LatLng(lat, lng), _osmController.camera.zoom);
     }
+    _fetchRoute();
+  }
+
+  Future<BitmapDescriptor> _makeIcon(Color color) async {
+    const px = 20.0;
+    const r = 8.0;
+    const cx = px / 2, cy = px / 2;
+    final rec = ui.PictureRecorder();
+    final can = Canvas(rec);
+    can.drawCircle(const Offset(cx, cy), r, Paint()..color = color);
+    can.drawCircle(const Offset(cx, cy), r,
+        Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5);
+    final img = await rec.endRecording().toImage(px.toInt(), px.toInt());
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
+  }
+
+  Future<void> _loadIcons() async {
+    try {
+      final results = await Future.wait([_makeIcon(kBlue), _makeIcon(kAmber)]);
+      _icons['worker'] = results[0];
+      _icons['gig'] = results[1];
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  Future<void> _fetchRoute({int attempt = 0}) async {
+    if (widget.workerLocation == null) return;
+    final wLat = widget.workerLocation!.latitude;
+    final wLng = widget.workerLocation!.longitude;
+    final gLat = widget.gigLocation.latitude;
+    final gLng = widget.gigLocation.longitude;
+    try {
+      final url = Uri.parse(
+          'http://router.project-osrm.org/route/v1/driving/$wLng,$wLat;$gLng,$gLat?overview=full&geometries=polyline');
+      final res = await http.get(url);
+      if (!mounted || res.statusCode != 200) {
+        if (attempt < 3) {
+          await Future.delayed(const Duration(seconds: 5));
+          if (mounted) _fetchRoute(attempt: attempt + 1);
+        }
+        return;
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final routes = body['routes'] as List<dynamic>?;
+      if (routes == null || routes.isEmpty) return;
+      final route = routes[0] as Map<String, dynamic>;
+      final distM = ((route['distance'] as num?) ?? 0).round();
+      final durS = ((route['duration'] as num?) ?? 0).round();
+      final geometry = route['geometry'] as String;
+      final decoded = PolylinePoints()
+          .decodePolyline(geometry)
+          .map((p) => LatLng(p.latitude, p.longitude))
+          .toList();
+      final decodedOsm =
+          decoded.map((p) => ll.LatLng(p.latitude, p.longitude)).toList();
+      if (mounted) {
+        setState(() {
+          _routePoints = decoded;
+          _routePointsOsm = decodedOsm;
+          _routeDistanceM = distM;
+          _routeEtaSeconds = durS;
+        });
+      }
+    } catch (_) {
+      if (attempt < 3) {
+        await Future.delayed(const Duration(seconds: 5));
+        if (mounted) _fetchRoute(attempt: attempt + 1);
+      }
+    }
+  }
+
+  String _fmtDist(int m) {
+    if (m < 1000) return '${m}m';
+    return '${(m / 1000).toStringAsFixed(1)}km';
+  }
+
+  String _fmtEta(int s) {
+    if (s < 60) return '< 1 min';
+    final m = (s / 60).round();
+    if (m < 60) return '$m min';
+    final h = m ~/ 60;
+    final rem = m % 60;
+    return '$h h $rem min';
   }
 
   void _openFullScreen() {
@@ -654,14 +778,16 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
     markers.add(Marker(
       markerId: const MarkerId('gig'),
       position: LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
-      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      icon: _icons['gig'] ??
+          BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
     ));
     if (widget.workerLocation != null) {
       markers.add(Marker(
         markerId: const MarkerId('worker'),
         position: LatLng(
             widget.workerLocation!.latitude, widget.workerLocation!.longitude),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        icon: _icons['worker'] ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
         anchor: const Offset(0.5, 0.5),
       ));
     }
@@ -684,9 +810,18 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
           zoom: 14.0,
         ),
         markers: _googleMarkers(),
+        polylines: _routePoints.isNotEmpty
+            ? {
+                Polyline(
+                  polylineId: const PolylineId('route'),
+                  points: _routePoints,
+                  color: kBlue,
+                  width: 4,
+                ),
+              }
+            : {},
         zoomControlsEnabled: false,
         myLocationButtonEnabled: false,
-        // Claim all gestures so the parent ScrollView doesn't intercept
         gestureRecognizers: {
           Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
         },
@@ -712,27 +847,40 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.giggre.mobile',
         ),
+        if (_routePointsOsm.isNotEmpty)
+          fm.PolylineLayer(
+            polylines: [
+              fm.Polyline(
+                points: _routePointsOsm,
+                color: kBlue,
+                strokeWidth: 4,
+              ),
+            ],
+          ),
         fm.MarkerLayer(markers: [
           fm.Marker(
             point: gigPos,
-            width: 32,
-            height: 40,
-            alignment: Alignment.bottomCenter,
-            child: const Icon(Icons.location_pin, color: Colors.red, size: 32),
+            width: 20,
+            height: 20,
+            child: Container(
+              decoration: BoxDecoration(
+                color: kAmber,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 1.5),
+              ),
+            ),
           ),
           if (workerPos != null)
             fm.Marker(
               point: workerPos,
-              width: 28,
-              height: 28,
+              width: 20,
+              height: 20,
               child: Container(
                 decoration: BoxDecoration(
-                  color: Colors.lightBlue,
+                  color: kBlue,
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                  border: Border.all(color: Colors.white, width: 1.5),
                 ),
-                child: const Icon(Icons.person_rounded, color: Colors.white, size: 14),
               ),
             ),
         ]),
@@ -745,6 +893,26 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
     return Stack(
       children: [
         _buildMap(),
+        // ETA chip — bottom-left
+        if (_routeEtaSeconds > 0)
+          Positioned(
+            bottom: 6,
+            left: 6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${_fmtEta(_routeEtaSeconds)}  ·  ${_fmtDist(_routeDistanceM)}',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
         // Fullscreen button — top-right corner
         Positioned(
           top: 6,
@@ -795,11 +963,18 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
   GoogleMapController? _googleController;
   GeoPoint? _workerLocation;
   StreamSubscription? _sub;
+  List<LatLng> _routePoints = [];
+  List<ll.LatLng> _routePointsOsm = [];
+  int _routeDistanceM = 0;
+  int _routeEtaSeconds = 0;
+  final Map<String, BitmapDescriptor> _icons = {};
 
   @override
   void initState() {
     super.initState();
     _workerLocation = widget.initialWorkerLocation;
+    _loadIcons();
+    if (_workerLocation != null) _fetchRoute();
     _sub = FirebaseFirestore.instance
         .collection(widget.gigCollection)
         .doc(widget.gigId)
@@ -808,7 +983,7 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
       if (!mounted || !snap.exists) return;
       final data = snap.data() as Map<String, dynamic>;
       final newLoc = data['workerLocation'] as GeoPoint?;
-      if (newLoc == null) { return; }
+      if (newLoc == null) return;
       if (newLoc.latitude == _workerLocation?.latitude &&
           newLoc.longitude == _workerLocation?.longitude) { return; }
       setState(() => _workerLocation = newLoc);
@@ -819,6 +994,7 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
       } else {
         _osmController.move(ll.LatLng(lat, lng), _osmController.camera.zoom);
       }
+      _fetchRoute();
     });
   }
 
@@ -830,20 +1006,106 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
     super.dispose();
   }
 
+  Future<BitmapDescriptor> _makeIcon(Color color) async {
+    const px = 20.0;
+    const r = 8.0;
+    const cx = px / 2, cy = px / 2;
+    final rec = ui.PictureRecorder();
+    final can = Canvas(rec);
+    can.drawCircle(const Offset(cx, cy), r, Paint()..color = color);
+    can.drawCircle(const Offset(cx, cy), r,
+        Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5);
+    final img = await rec.endRecording().toImage(px.toInt(), px.toInt());
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
+  }
+
+  Future<void> _loadIcons() async {
+    try {
+      final results = await Future.wait([_makeIcon(kBlue), _makeIcon(kAmber)]);
+      _icons['worker'] = results[0];
+      _icons['gig'] = results[1];
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  Future<void> _fetchRoute({int attempt = 0}) async {
+    if (_workerLocation == null) return;
+    final wLat = _workerLocation!.latitude;
+    final wLng = _workerLocation!.longitude;
+    final gLat = widget.gigLocation.latitude;
+    final gLng = widget.gigLocation.longitude;
+    try {
+      final url = Uri.parse(
+          'http://router.project-osrm.org/route/v1/driving/$wLng,$wLat;$gLng,$gLat?overview=full&geometries=polyline');
+      final res = await http.get(url);
+      if (!mounted || res.statusCode != 200) {
+        if (attempt < 3) {
+          await Future.delayed(const Duration(seconds: 5));
+          if (mounted) _fetchRoute(attempt: attempt + 1);
+        }
+        return;
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final routes = body['routes'] as List<dynamic>?;
+      if (routes == null || routes.isEmpty) return;
+      final route = routes[0] as Map<String, dynamic>;
+      final distM = ((route['distance'] as num?) ?? 0).round();
+      final durS = ((route['duration'] as num?) ?? 0).round();
+      final geometry = route['geometry'] as String;
+      final decoded = PolylinePoints()
+          .decodePolyline(geometry)
+          .map((p) => LatLng(p.latitude, p.longitude))
+          .toList();
+      final decodedOsm =
+          decoded.map((p) => ll.LatLng(p.latitude, p.longitude)).toList();
+      if (mounted) {
+        setState(() {
+          _routePoints = decoded;
+          _routePointsOsm = decodedOsm;
+          _routeDistanceM = distM;
+          _routeEtaSeconds = durS;
+        });
+      }
+    } catch (_) {
+      if (attempt < 3) {
+        await Future.delayed(const Duration(seconds: 5));
+        if (mounted) _fetchRoute(attempt: attempt + 1);
+      }
+    }
+  }
+
+  String _fmtDist(int m) {
+    if (m < 1000) return '${m}m';
+    return '${(m / 1000).toStringAsFixed(1)}km';
+  }
+
+  String _fmtEta(int s) {
+    if (s < 60) return '< 1 min';
+    final m = (s / 60).round();
+    if (m < 60) return '$m min';
+    final h = m ~/ 60;
+    final rem = m % 60;
+    return '$h h $rem min';
+  }
+
   Set<Marker> _googleMarkers() {
     final markers = <Marker>{};
     markers.add(Marker(
       markerId: const MarkerId('gig'),
       position: LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
-      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-      infoWindow: const InfoWindow(title: 'Gig Location'),
+      icon: _icons['gig'] ??
+          BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
     ));
     if (_workerLocation != null) {
       markers.add(Marker(
         markerId: const MarkerId('worker'),
         position: LatLng(_workerLocation!.latitude, _workerLocation!.longitude),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-        infoWindow: const InfoWindow(title: 'Worker'),
+        icon: _icons['worker'] ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
         anchor: const Offset(0.5, 0.5),
       ));
     }
@@ -862,65 +1124,105 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
 
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: kBlue,
+        foregroundColor: Colors.white,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Worker Location', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const Text('Worker is on the way',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white)),
             Text(
-              _workerLocation != null ? 'Live tracking active' : 'Waiting for worker...',
+              _routeEtaSeconds > 0
+                  ? '${_fmtEta(_routeEtaSeconds)}  ·  ${_fmtDist(_routeDistanceM)}'
+                  : (_workerLocation != null
+                      ? 'Live tracking active'
+                      : 'Waiting for worker...'),
               style: TextStyle(
                 fontSize: 11,
-                color: _workerLocation != null ? const Color(0xFF22C55E) : kSub,
+                color: Colors.white.withValues(alpha: 0.85),
               ),
             ),
           ],
         ),
       ),
-      body: widget.useGoogleMaps
-          ? GoogleMap(
-              onMapCreated: (c) => _googleController = c,
-              initialCameraPosition: CameraPosition(target: initialTarget, zoom: 15.0),
-              markers: _googleMarkers(),
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: true,
-            )
-          : fm.FlutterMap(
-              mapController: _osmController,
-              options: fm.MapOptions(
-                initialCenter: workerPosOsm ?? gigPosOsm,
-                initialZoom: 15.0,
-              ),
-              children: [
-                fm.TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.giggre.mobile',
-                ),
-                fm.MarkerLayer(markers: [
-                  fm.Marker(
-                    point: gigPosOsm,
-                    width: 36,
-                    height: 44,
-                    alignment: Alignment.bottomCenter,
-                    child: const Icon(Icons.location_pin, color: Colors.red, size: 36),
+      body: Stack(
+        children: [
+          widget.useGoogleMaps
+              ? GoogleMap(
+                  onMapCreated: (c) => _googleController = c,
+                  initialCameraPosition:
+                      CameraPosition(target: initialTarget, zoom: 15.0),
+                  markers: _googleMarkers(),
+                  polylines: _routePoints.isNotEmpty
+                      ? {
+                          Polyline(
+                            polylineId: const PolylineId('route'),
+                            points: _routePoints,
+                            color: kBlue,
+                            width: 5,
+                          ),
+                        }
+                      : {},
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: true,
+                )
+              : fm.FlutterMap(
+                  mapController: _osmController,
+                  options: fm.MapOptions(
+                    initialCenter: workerPosOsm ?? gigPosOsm,
+                    initialZoom: 15.0,
                   ),
-                  if (workerPosOsm != null)
-                    fm.Marker(
-                      point: workerPosOsm,
-                      width: 36,
-                      height: 36,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.lightBlue,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 3),
-                          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
-                        ),
-                        child: const Icon(Icons.person_rounded, color: Colors.white, size: 18),
-                      ),
+                  children: [
+                    fm.TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.giggre.mobile',
                     ),
-                ]),
-              ],
-            ),
+                    if (_routePointsOsm.isNotEmpty)
+                      fm.PolylineLayer(
+                        polylines: [
+                          fm.Polyline(
+                            points: _routePointsOsm,
+                            color: kBlue,
+                            strokeWidth: 5,
+                          ),
+                        ],
+                      ),
+                    fm.MarkerLayer(markers: [
+                      fm.Marker(
+                        point: gigPosOsm,
+                        width: 20,
+                        height: 20,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: kAmber,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                          ),
+                        ),
+                      ),
+                      if (workerPosOsm != null)
+                        fm.Marker(
+                          point: workerPosOsm,
+                          width: 20,
+                          height: 20,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: kBlue,
+                              shape: BoxShape.circle,
+                              border:
+                                  Border.all(color: Colors.white, width: 1.5),
+                            ),
+                          ),
+                        ),
+                    ]),
+                  ],
+                ),
+        ],
+      ),
     );
   }
 }

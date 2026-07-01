@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
@@ -33,7 +36,7 @@ _GigStep _stepFromStatus(String s) {
   }
 }
 
-const _stepLabels = ['Navigating', 'Arrived', 'Working', 'Done', 'Payment', 'Completed'];
+const _stepLabels = ['On the way', 'Arrived', 'Working', 'Done', 'Payment', 'Completed'];
 const _stepIcons = [
   Icons.directions_rounded,
   Icons.location_on_rounded,
@@ -827,9 +830,39 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
   final _osmController = fm.MapController();
   bool _osmMapReady = false;
 
+  final Map<String, BitmapDescriptor> _icons = {};
+
+  Future<BitmapDescriptor> _makeIcon(Color color) async {
+    const px = 20.0;
+    const r = 8.0;
+    const cx = px / 2, cy = px / 2;
+    final rec = ui.PictureRecorder();
+    final can = Canvas(rec);
+    can.drawCircle(const Offset(cx, cy), r, Paint()..color = color);
+    can.drawCircle(
+      const Offset(cx, cy),
+      r,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+    final img = await rec.endRecording().toImage(px.toInt(), px.toInt());
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
+  }
+
+  Future<void> _loadIcons() async {
+    try {
+      _icons['gig'] = await _makeIcon(kAmber);
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadIcons();
     GmsAvailability.isAvailable.then((v) {
       if (mounted) setState(() => _useGoogleMaps = v);
     });
@@ -873,32 +906,20 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
   }
 
   Set<Marker> _buildGoogleMarkers() {
-    final markers = <Marker>{};
-
-    if (widget.workerLocation != null) {
-      markers.add(
-        Marker(
-          markerId: const MarkerId('worker'),
-          position: widget.workerLocation!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          anchor: const Offset(0.5, 0.5),
-        ),
-      );
-    }
-
+    // Worker location is shown by the native blue dot (myLocationEnabled: true).
+    // Only the gig destination needs a custom pin.
     final gigPos = LatLng(
       widget.gig.position.latitude,
       widget.gig.position.longitude,
     );
-    markers.add(
+    return {
       Marker(
         markerId: const MarkerId('gig'),
         position: gigPos,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+        icon: _icons['gig'] ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
       ),
-    );
-
-    return markers;
+    };
   }
 
   Widget _buildOsmMap() {
@@ -951,6 +972,11 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
         onMapReady: () {
           if (mounted) setState(() => _osmMapReady = true);
         },
+        interactionOptions: const fm.InteractionOptions(
+          flags: fm.InteractiveFlag.pinchZoom |
+              fm.InteractiveFlag.doubleTapZoom |
+              fm.InteractiveFlag.drag,
+        ),
       ),
       children: [
         fm.TileLayer(
@@ -997,7 +1023,7 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
         _StatusBanner(
           icon: Icons.directions_rounded,
           color: kBlue,
-          title: 'Navigating to Gig',
+          title: 'On the way to Gig',
           subtitle:
               'Head to the gig location. Auto-detecting arrival within 40 m.',
         ),
@@ -1014,6 +1040,11 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
                 ? GoogleMap(
                     onMapCreated: (controller) {
                       _googleMapController = controller;
+                      if (widget.workerLocation != null) {
+                        controller.animateCamera(
+                          CameraUpdate.newLatLngZoom(widget.workerLocation!, 16.0),
+                        );
+                      }
                     },
                     initialCameraPosition: CameraPosition(
                       target: initialTarget,
@@ -1024,6 +1055,10 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
                     zoomControlsEnabled: false,
                     markers: _buildGoogleMarkers(),
                     polylines: _buildPolylines(),
+                    gestureRecognizers: {
+                      Factory<OneSequenceGestureRecognizer>(
+                          () => EagerGestureRecognizer()),
+                    },
                   )
                 : _buildOsmMap(),
           ),
@@ -1273,7 +1308,7 @@ class _GigInfoCard extends StatelessWidget {
     const amberBg = Color(0xFFFEF3C7);
     switch (step) {
       case _GigStep.navigating:
-        return ('Navigating', kBlue, blueBg);
+        return ('On the way', kBlue, blueBg);
       case _GigStep.arrived:
         return ('Arrived', green, greenBg);
       case _GigStep.working:

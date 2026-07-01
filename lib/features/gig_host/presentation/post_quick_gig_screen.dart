@@ -125,14 +125,19 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body) as Map<String, dynamic>;
           final addrObj = data['address'] as Map<String, dynamic>?;
-          if (addrObj != null) {
-            final parts = [
-              addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
-              addrObj['suburb'] ?? addrObj['neighbourhood'],
-              addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
-              addrObj['state'],
-            ].whereType<String>().where((s) => s.isNotEmpty).toList();
-            if (parts.isNotEmpty) address = parts.join(', ');
+          final displayName = data['display_name'] as String?;
+          final parts = addrObj != null
+              ? [
+                  addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
+                  addrObj['suburb'] ?? addrObj['neighbourhood'],
+                  addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
+                  addrObj['state'],
+                ].whereType<String>().where((s) => s.isNotEmpty).toList()
+              : <String>[];
+          if (parts.isNotEmpty) {
+            address = parts.join(', ');
+          } else if (displayName != null && displayName.isNotEmpty) {
+            address = displayName;
           }
         }
         if (mounted) {
@@ -1063,14 +1068,19 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final addrObj = data['address'] as Map<String, dynamic>?;
-        if (addrObj != null) {
-          final parts = [
-            addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
-            addrObj['suburb'] ?? addrObj['neighbourhood'],
-            addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
-            addrObj['state'],
-          ].whereType<String>().where((s) => s.isNotEmpty).toList();
-          if (parts.isNotEmpty) address = parts.join(', ');
+        final displayName = data['display_name'] as String?;
+        final parts = addrObj != null
+            ? [
+                addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
+                addrObj['suburb'] ?? addrObj['neighbourhood'],
+                addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
+                addrObj['state'],
+              ].whereType<String>().where((s) => s.isNotEmpty).toList()
+            : <String>[];
+        if (parts.isNotEmpty) {
+          address = parts.join(', ');
+        } else if (displayName != null && displayName.isNotEmpty) {
+          address = displayName;
         }
       }
       setState(() {

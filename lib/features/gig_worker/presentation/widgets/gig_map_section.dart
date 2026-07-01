@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -70,6 +71,7 @@ class GigMapSection extends StatefulWidget {
   final ValueChanged<GigMarkerData>? onOpenGigApplied;
   final String isVerified;
   final List<String> workerSkills;
+  final bool fullScreen;
 
   const GigMapSection({
     super.key,
@@ -80,6 +82,7 @@ class GigMapSection extends StatefulWidget {
     this.onOpenGigApplied,
     required this.isVerified,
     this.workerSkills = const [],
+    this.fullScreen = false,
   });
 
   @override
@@ -105,9 +108,95 @@ class _GigMapSectionState extends State<GigMapSection> {
   StreamSubscription? _quickSub;
   late StreamSubscription _openSub, _offeredSub;
 
+  // ── Custom marker icon cache ─────────────────────────────────────────────
+  final Map<String, BitmapDescriptor> _icons = {};
+
+  Future<BitmapDescriptor> _makeMarkerIcon(Color color, {String? label}) async {
+    const px = 20.0;
+    const r = 8.0;
+    const cx = px / 2;
+    const cy = px / 2;
+
+    final rec = ui.PictureRecorder();
+    final can = Canvas(rec);
+
+    // Fill
+    can.drawCircle(const Offset(cx, cy), r, Paint()..color = color);
+    // White border
+    can.drawCircle(
+      const Offset(cx, cy),
+      r,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+
+    if (label != null) {
+      final fs = label.length <= 2 ? 7.0 : 5.5;
+      final pb = ui.ParagraphBuilder(
+        ui.ParagraphStyle(
+          textAlign: TextAlign.center,
+          fontSize: fs,
+          fontWeight: FontWeight.bold,
+        ),
+      )
+        ..pushStyle(ui.TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: fs,
+        ))
+        ..addText(label);
+      final para = pb.build()
+        ..layout(const ui.ParagraphConstraints(width: px));
+      can.drawParagraph(para, Offset(0, cy - para.height / 2));
+    }
+
+    final img = await rec.endRecording().toImage(px.toInt(), px.toInt());
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
+  }
+
+  Future<void> _loadBaseIcons() async {
+    try {
+      final results = await Future.wait([
+        _makeMarkerIcon(kAmber),
+        _makeMarkerIcon(kBlue),
+        _makeMarkerIcon(const Color(0xFF8B5CF6)),
+        _makeMarkerIcon(const Color(0xFF22D3EE)),
+        _makeMarkerIcon(const Color(0xFFF97316), label: '…'),
+      ]);
+      _icons['quick']    = results[0];
+      _icons['open']     = results[1];
+      _icons['offered']  = results[2];
+      _icons['location'] = results[3];
+      _icons['cluster_default'] = results[4];
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('[GigMap] icon load error: $e');
+    }
+  }
+
+  BitmapDescriptor _gigIcon(String type) =>
+      _icons[type] ?? BitmapDescriptor.defaultMarkerWithHue(_hueForType(type));
+
+  BitmapDescriptor _resolveClusterIcon(int count) {
+    final key = 'cluster_$count';
+    if (_icons.containsKey(key)) return _icons[key]!;
+    final label = count > 99 ? '99+' : '$count';
+    _makeMarkerIcon(const Color(0xFFF97316), label: label).then((icon) {
+      _icons[key] = icon;
+      if (mounted) setState(() {});
+    });
+    return _icons['cluster_default'] ??
+        BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
+  }
+
   @override
   void initState() {
     super.initState();
+    _mapInteractive = widget.fullScreen;
+    _loadBaseIcons();
     final db = FirebaseFirestore.instance;
     _startOpenSub(db);
     _startOfferedSub(db);
@@ -408,9 +497,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         return Marker(
           markerId: MarkerId(singleGig.id),
           position: cluster.center,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            _hueForType(singleGig.gigType),
-          ),
+          icon: _gigIcon(singleGig.gigType),
           onTap: () {
             final ctx = _context;
             if (ctx != null) _showGigSheet(ctx, singleGig);
@@ -423,8 +510,7 @@ class _GigMapSectionState extends State<GigMapSection> {
           'cluster_${cluster.center.latitude}_${cluster.center.longitude}',
         ),
         position: cluster.center,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-        infoWindow: InfoWindow(title: '${cluster.count} gigs'),
+        icon: _resolveClusterIcon(cluster.count),
         onTap: () {
           final ctx = _context;
           if (ctx != null) _showClusterSheet(ctx, cluster.gigs);
@@ -437,10 +523,13 @@ class _GigMapSectionState extends State<GigMapSection> {
         Marker(
           markerId: const MarkerId('my_location'),
           position: _myLocation!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan),
-          infoWindow: InfoWindow(title: widget.workerName.isNotEmpty
-              ? widget.workerName
-              : 'Your Location'),
+          icon: _icons['location'] ??
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan),
+          infoWindow: InfoWindow(
+            title: widget.workerName.isNotEmpty
+                ? widget.workerName
+                : 'Your Location',
+          ),
           zIndex: 10,
         ),
       );
@@ -1143,6 +1232,8 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   Widget build(BuildContext context) {
     _context = context;
+    if (widget.fullScreen) return _buildFullScreenLayout(context);
+
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final borderColor = Theme.of(context).dividerColor;
     final total = _allGigs.length;
@@ -1369,6 +1460,51 @@ class _GigMapSectionState extends State<GigMapSection> {
                 ),
               ),
             ),
+            // Fullscreen expand button
+            Positioned(
+              bottom: 12,
+              left: 12,
+              child: GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    fullscreenDialog: true,
+                    builder: (_) => Scaffold(
+                      body: GigMapSection(
+                        fullScreen: true,
+                        uid: widget.uid,
+                        workerName: widget.workerName,
+                        seekingQuickGigs: widget.seekingQuickGigs,
+                        onQuickGigStarted: widget.onQuickGigStarted,
+                        onOpenGigApplied: widget.onOpenGigApplied,
+                        isVerified: widget.isVerified,
+                        workerSkills: widget.workerSkills,
+                      ),
+                    ),
+                  ),
+                ),
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.fullscreen_rounded,
+                    size: 20,
+                    color: kBlue,
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 8),
@@ -1376,6 +1512,204 @@ class _GigMapSectionState extends State<GigMapSection> {
           child: Text(
             'Zoom in to see individual gigs · Tap a pin for details',
             style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 11),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFullScreenLayout(BuildContext ctx) {
+    final total = _allGigs.length;
+    final offeredCount = _offeredGigs.length;
+    final topPad = MediaQuery.of(ctx).padding.top;
+    final bottomPad = MediaQuery.of(ctx).padding.bottom;
+
+    return Stack(
+      children: [
+        // Map fills entire scaffold body
+        Positioned.fill(
+          child: _useGoogleMaps
+              ? GoogleMap(
+                  gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                    Factory<OneSequenceGestureRecognizer>(
+                      () => EagerGestureRecognizer(),
+                    ),
+                  },
+                  onMapCreated: (c) {
+                    _googleMapController = c;
+                    if (_myLocation != null) {
+                      c.animateCamera(
+                          CameraUpdate.newLatLngZoom(_myLocation!, 14.0));
+                    }
+                  },
+                  initialCameraPosition: const CameraPosition(
+                    target: LatLng(14.5995, 120.9842),
+                    zoom: 12.0,
+                  ),
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: false,
+                  markers: Set<Marker>.from(_buildGoogleMarkers()),
+                  onCameraMove: (pos) {
+                    if ((pos.zoom - _zoom).abs() >= 0.3) {
+                      setState(() => _zoom = pos.zoom);
+                    }
+                  },
+                )
+              : _buildOsmMap(),
+        ),
+
+        // Top bar: close + title + count pill
+        Positioned(
+          top: topPad + 8,
+          left: 12,
+          right: 12,
+          child: Row(
+            children: [
+              // Close button
+              GestureDetector(
+                onTap: () => Navigator.pop(ctx),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Theme.of(ctx).cardColor,
+                    shape: BoxShape.circle,
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black26, blurRadius: 6),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: kSub,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Title pill
+              Expanded(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(ctx).cardColor.withValues(alpha: 0.93),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black26, blurRadius: 6),
+                    ],
+                  ),
+                  child: const Text(
+                    'Gigs Near You',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Total count pill
+              if (offeredCount > 0)
+                Container(
+                  margin: const EdgeInsets.only(right: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black26, blurRadius: 6),
+                    ],
+                  ),
+                  child: Text(
+                    '$offeredCount Offered',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: kGold.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black26, blurRadius: 6),
+                  ],
+                ),
+                child: Text(
+                  '$total ${total == 1 ? 'Gig' : 'Gigs'}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Legend (bottom-left)
+        Positioned(
+          bottom: bottomPad + 20,
+          left: 12,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Theme.of(ctx).cardColor.withValues(alpha: 0.93),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: const [
+                BoxShadow(color: Colors.black26, blurRadius: 6),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const _LegendDot(color: kGold, label: 'Quick'),
+                const SizedBox(height: 6),
+                const _LegendDot(color: kBlue, label: 'Open'),
+                if (offeredCount > 0) ...[
+                  const SizedBox(height: 6),
+                  const _LegendDot(
+                    color: Color(0xFF8B5CF6),
+                    label: 'Offered to me',
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+
+        // Recenter button (bottom-right)
+        Positioned(
+          bottom: bottomPad + 20,
+          right: 12,
+          child: GestureDetector(
+            onTap: _fetchAndCenterMap,
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: Theme.of(ctx).cardColor,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.my_location_rounded,
+                size: 20,
+                color: _myLocation != null ? kBlue : kSub,
+              ),
+            ),
           ),
         ),
       ],
