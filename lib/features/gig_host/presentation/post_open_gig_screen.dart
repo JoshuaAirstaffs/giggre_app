@@ -143,7 +143,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         final res = await http.get(
           uri,
           headers: {'User-Agent': 'giggre_app/1.0'},
-        );
+        ).timeout(const Duration(seconds: 10));
         if (!mounted) return;
         String address = 'GPS location ready';
         if (res.statusCode == 200) {
@@ -1142,8 +1142,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) return;
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
       );
       if (!mounted) return;
       setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));

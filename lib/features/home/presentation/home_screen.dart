@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:in_app_update/in_app_update.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -51,6 +52,10 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _gigRoomsStreamSub;
   final List<StreamSubscription> _gigRoomSubs = [];
   List<Map<String, dynamic>> _updates = [];
+  bool _locationServiceEnabled = true;
+  StreamSubscription<ServiceStatus>? _locationServiceSub;
+  bool _internetAvailable = true;
+  Timer? _internetCheckTimer;
 
   @override
   void initState() {
@@ -59,11 +64,40 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchUpdates();
     _listenForUnreadMessages();
     _listenForUnreadGigMessages();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkAppUpdate());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAppUpdate();
+      _initLocationServiceListener();
+      _checkInternet();
+      _internetCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkInternet());
+    });
+  }
+
+  Future<void> _initLocationServiceListener() async {
+    if (kIsWeb || !Platform.isAndroid && !Platform.isIOS) return;
+    final enabled = await Geolocator.isLocationServiceEnabled();
+    if (mounted) setState(() => _locationServiceEnabled = enabled);
+    _locationServiceSub = Geolocator.getServiceStatusStream().listen((status) {
+      if (!mounted) return;
+      setState(() => _locationServiceEnabled = status == ServiceStatus.enabled);
+    });
+  }
+
+  Future<void> _checkInternet() async {
+    if (kIsWeb) return;
+    try {
+      final result = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(seconds: 5));
+      final ok = result.isNotEmpty && result.first.rawAddress.isNotEmpty;
+      if (mounted) setState(() => _internetAvailable = ok);
+    } catch (_) {
+      if (mounted) setState(() => _internetAvailable = false);
+    }
   }
 
   @override
   void dispose() {
+    _internetCheckTimer?.cancel();
+    _locationServiceSub?.cancel();
     _roomsStreamSub?.cancel();
     for (final sub in _roomSubs) sub.cancel();
     _gigRoomsStreamSub?.cancel();
@@ -718,6 +752,56 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: bgColor,
+      bottomSheet: !_locationServiceEnabled
+          ? SafeArea(
+              child: Container(
+                width: double.infinity,
+                color: Colors.orange.shade700,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_off_rounded, color: Colors.white, size: 20),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Location is turned off. Enable it to find nearby gigs.',
+                        style: TextStyle(color: Colors.white, fontSize: 13),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Geolocator.openLocationSettings(),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Enable', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : !_internetAvailable
+              ? SafeArea(
+                  child: Container(
+                    width: double.infinity,
+                    color: Colors.red.shade700,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.wifi_off_rounded, color: Colors.white, size: 20),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'No internet connection. Some features may not work.',
+                            style: TextStyle(color: Colors.white, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : null,
       appBar: AppBar(
         backgroundColor: bgColor,
         elevation: 0,

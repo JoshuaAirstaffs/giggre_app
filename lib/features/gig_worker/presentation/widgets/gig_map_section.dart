@@ -213,18 +213,37 @@ class _GigMapSectionState extends State<GigMapSection> {
   Future<void> _fetchAndCenterMap() async {
     try {
       bool enabled = await Geolocator.isLocationServiceEnabled();
-      if (!enabled) return;
+      if (!enabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: const Text('Location is off. Enable GPS to center the map on you.'),
+            action: SnackBarAction(label: 'Enable', onPressed: () => Geolocator.openLocationSettings()),
+          ));
+        }
+        return;
+      }
       LocationPermission perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(perm == LocationPermission.deniedForever
+                ? 'Location permanently denied. Enable it in app settings.'
+                : 'Location permission denied.'),
+            action: perm == LocationPermission.deniedForever
+                ? SnackBarAction(label: 'Settings', onPressed: () => Geolocator.openAppSettings())
+                : null,
+          ));
+        }
         return;
       }
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
         ),
       );
       if (!mounted) return;
@@ -237,7 +256,13 @@ class _GigMapSectionState extends State<GigMapSection> {
       } else if (_osmMapReady) {
         _osmController.move(ll.LatLng(loc.latitude, loc.longitude), 14.0);
       }
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not get your location.')),
+        );
+      }
+    }
   }
 
   @override

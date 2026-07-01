@@ -196,7 +196,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
       String address = 'GPS location ready';
       try {
-        final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
+        final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude)
+            .timeout(const Duration(seconds: 10));
         if (placemarks.isNotEmpty) {
           final p = placemarks.first;
           final parts = [
@@ -1746,8 +1747,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) return;
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
       );
       if (!mounted) return;
       setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));

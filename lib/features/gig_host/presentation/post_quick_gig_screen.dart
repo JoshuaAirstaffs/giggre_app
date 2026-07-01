@@ -120,7 +120,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           'https://nominatim.openstreetmap.org/reverse'
           '?lat=${pos.latitude}&lon=${pos.longitude}&format=json',
         );
-        final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
+        final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'}).timeout(const Duration(seconds: 10));
         String address = 'GPS location ready';
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -995,8 +995,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) return;
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
       );
       if (!mounted) return;
       setState(() => _myLocation = LatLng(pos.latitude, pos.longitude));

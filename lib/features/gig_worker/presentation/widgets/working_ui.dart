@@ -186,6 +186,10 @@ class _WorkingUIState extends State<WorkingUI> {
   // Firestore live listener
   StreamSubscription? _gigSub;
 
+  // Location status
+  String? _locationWarning;
+  StreamSubscription<ServiceStatus>? _locationServiceSub;
+
   @override
   void initState() {
     super.initState();
@@ -262,13 +266,34 @@ class _WorkingUIState extends State<WorkingUI> {
   Future<void> _startLocation() async {
     try {
       bool enabled = await Geolocator.isLocationServiceEnabled();
-      if (!enabled) return;
+      if (!enabled) {
+        if (mounted) setState(() => _locationWarning = 'Location is turned off. Tracking is paused.');
+        _locationServiceSub?.cancel();
+        _locationServiceSub = Geolocator.getServiceStatusStream().listen((status) {
+          if (!mounted) return;
+          if (status == ServiceStatus.enabled) {
+            _locationServiceSub?.cancel();
+            _locationServiceSub = null;
+            setState(() => _locationWarning = null);
+            _startLocation();
+          }
+        });
+        return;
+      }
       LocationPermission perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) { return; }
+          perm == LocationPermission.deniedForever) {
+        if (mounted) {
+          setState(() => _locationWarning = perm == LocationPermission.deniedForever
+              ? 'Location permanently denied. Enable in app settings.'
+              : 'Location permission denied. Tracking is paused.');
+        }
+        return;
+      }
+      if (mounted) setState(() => _locationWarning = null);
       _locationSub = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -302,8 +327,22 @@ class _WorkingUIState extends State<WorkingUI> {
             _fetchRoute(loc, gigPos);
           }
         }
-      }, onError: (e) => debugPrint('[WorkingUI] location stream error: $e'));
-    } catch (_) {}
+      }, onError: (e) {
+        debugPrint('[WorkingUI] location stream error: $e');
+        if (!mounted) return;
+        if (e is LocationServiceDisabledException) {
+          setState(() => _locationWarning = 'Location turned off. Tracking is paused.');
+          _startLocation();
+        } else if (e is PermissionDefinitionsNotFoundException) {
+          setState(() => _locationWarning = 'Location permission revoked. Tracking is paused.');
+        } else {
+          setState(() => _locationWarning = 'Location error. Tracking may be interrupted.');
+        }
+      });
+    } catch (e) {
+      debugPrint('[WorkingUI] _startLocation error: $e');
+      if (mounted) setState(() => _locationWarning = 'Could not start location tracking.');
+    }
   }
 
   void _checkGeofence(Position pos) {
@@ -482,7 +521,7 @@ class _WorkingUIState extends State<WorkingUI> {
         '${to.longitude},${to.latitude}'
         '?overview=full&geometries=polyline&steps=true',
       );
-      final response = await http.get(uri);
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
       if (!mounted || response.statusCode != 200) return;
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final routes = data['routes'] as List?;
@@ -525,6 +564,7 @@ class _WorkingUIState extends State<WorkingUI> {
     _timer.cancel();
     _stopwatch.stop();
     _locationSub?.cancel();
+    _locationServiceSub?.cancel();
     _gigSub?.cancel();
     super.dispose();
   }
@@ -555,6 +595,36 @@ class _WorkingUIState extends State<WorkingUI> {
           children: [
             // ── Progress stepper ───────────────────────────────────────
             _ProgressStepper(currentIndex: stepIndex, isDark: isDark),
+
+            // ── Location warning ───────────────────────────────────────
+            if (_locationWarning != null)
+              Container(
+                width: double.infinity,
+                color: Colors.orange.shade700,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_off_rounded, color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _locationWarning!,
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ),
+                    if (_locationWarning!.contains('settings'))
+                      TextButton(
+                        onPressed: () => Geolocator.openAppSettings(),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text('Settings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      ),
+                  ],
+                ),
+              ),
 
             // ── Scrollable body ────────────────────────────────────────
             Expanded(
