@@ -45,7 +45,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _hasUpdate = false;
   bool _updateDismissed = false;
   bool _pendingDeletion = false;
-  DateTime? _scheduledDeleteAt;
+  String _deletionStatus = 'pending_deletion';
   StreamSubscription? _roomsStreamSub;
   final List<StreamSubscription> _roomSubs = [];
   StreamSubscription? _gigRoomsStreamSub;
@@ -440,10 +440,19 @@ class _HomeScreenState extends State<HomeScreen> {
       data?['isVerified'],
     );
     if (data?['pendingDeletion'] == true) {
-      final ts = data?['scheduledDeleteAt'];
+      final reqSnap = await FirebaseFirestore.instance
+          .collection('account_delete_requests')
+          .where('userId', isEqualTo: uid)
+          .where('status', whereIn: ['pending_deletion', 'approved'])
+          .limit(1)
+          .get();
+      final status = reqSnap.docs.isNotEmpty
+          ? reqSnap.docs.first['status'] as String
+          : 'pending_deletion';
+      if (!mounted) return;
       setState(() {
         _pendingDeletion = true;
-        _scheduledDeleteAt = ts != null ? (ts as Timestamp).toDate() : null;
+        _deletionStatus = status;
       });
       WidgetsBinding.instance.addPostFrameCallback(
         (_) { if (mounted) _showPendingDeletionModal(); },
@@ -452,12 +461,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showPendingDeletionModal() {
-    final daysLeft = _scheduledDeleteAt != null
-        ? _scheduledDeleteAt!.difference(DateTime.now()).inDays + 1
-        : 30;
-    final dateStr = _scheduledDeleteAt != null
-        ? '${_scheduledDeleteAt!.day}/${_scheduledDeleteAt!.month}/${_scheduledDeleteAt!.year}'
-        : '';
+    final isApproved = _deletionStatus == 'approved';
 
     showDialog(
       context: context,
@@ -497,7 +501,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  'Account Pending Deletion',
+                  isApproved ? 'Account Deletion Approved' : 'Account Pending Deletion',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Theme.of(ctx).colorScheme.onSurface,
@@ -507,15 +511,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Your account is scheduled for permanent deletion in $daysLeft day${daysLeft == 1 ? '' : 's'}${dateStr.isNotEmpty ? ' (on $dateStr)' : ''}.',
+                  isApproved
+                      ? 'Your account deletion request has been approved by the admin. The deletion process will be completed after 30 days from the date you submitted your request. After completion, your profile and account details cannot be restored. Your account will be permanently deactivated, and your identity will be anonymized in shared gig records and other related history data.'
+                      : 'Your account deletion request is pending admin review. Once approved, the deletion process will be completed after 30 days from the date you submitted your request. You can cancel this request at any time to restore full access.',
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 14, color: Colors.grey, height: 1.5),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Cancel to restore full access, or sign out.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, color: Colors.grey, height: 1.5),
                 ),
                 const SizedBox(height: 24),
                 SizedBox(
@@ -527,7 +527,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         Navigator.pop(ctx);
                         setState(() {
                           _pendingDeletion = false;
-                          _scheduledDeleteAt = null;
+                          _deletionStatus = 'pending_deletion';
                         });
                       }
                     },

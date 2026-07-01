@@ -59,6 +59,7 @@ class _AuthGateState extends State<AuthGate> {
   bool _restoringSession = FirebaseAuth.instance.currentUser != null;
   bool _pendingDeletion = false;
   DateTime? _scheduledDeleteAt;
+  String _deletionStatus = 'pending_deletion';
   String? _accountError;
   // Set when Firestore is unreachable during restore — shows a retry screen
   // instead of opening the app without completing the pendingDeletion check.
@@ -92,12 +93,22 @@ class _AuthGateState extends State<AuthGate> {
 
         if (data['pendingDeletion'] == true) {
           final ts = data['scheduledDeleteAt'];
+          final reqSnap = await FirebaseFirestore.instance
+              .collection('account_delete_requests')
+              .where('userId', isEqualTo: user.uid)
+              .where('status', whereIn: ['pending_deletion', 'approved'])
+              .limit(1)
+              .get();
+          final status = reqSnap.docs.isNotEmpty
+              ? reqSnap.docs.first['status'] as String
+              : 'pending_deletion';
           if (mounted) {
             setState(() {
               _pendingDeletion = true;
               _scheduledDeleteAt = ts != null
                   ? (ts as Timestamp).toDate()
                   : null;
+              _deletionStatus = status;
               _restoredForUid = user.uid;
             });
           }
@@ -179,9 +190,11 @@ class _AuthGateState extends State<AuthGate> {
         if (_pendingDeletion) {
           return _PendingDeletionScreen(
             scheduledDeleteAt: _scheduledDeleteAt,
+            deletionStatus: _deletionStatus,
             onCancelled: () => setState(() {
               _pendingDeletion = false;
               _scheduledDeleteAt = null;
+              _deletionStatus = 'pending_deletion';
             }),
           );
         }
@@ -212,21 +225,18 @@ class _AuthGateState extends State<AuthGate> {
 
 class _PendingDeletionScreen extends StatelessWidget {
   final DateTime? scheduledDeleteAt;
+  final String deletionStatus;
   final VoidCallback onCancelled;
 
   const _PendingDeletionScreen({
     required this.scheduledDeleteAt,
+    required this.deletionStatus,
     required this.onCancelled,
   });
 
   @override
   Widget build(BuildContext context) {
-    final daysLeft = scheduledDeleteAt != null
-        ? scheduledDeleteAt!.difference(DateTime.now()).inDays + 1
-        : 30;
-    final dateStr = scheduledDeleteAt != null
-        ? '${scheduledDeleteAt!.day}/${scheduledDeleteAt!.month}/${scheduledDeleteAt!.year}'
-        : '';
+    final isApproved = deletionStatus == 'approved';
 
     return Scaffold(
       body: SafeArea(
@@ -248,25 +258,21 @@ class _PendingDeletionScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 24),
-              const Text(
-                'Account Pending Deletion',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              Text(
+                isApproved ? 'Account Deletion Approved' : 'Account Pending Deletion',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 12),
               Text(
-                'Your account is scheduled for permanent deletion in $daysLeft day${daysLeft == 1 ? '' : 's'}${dateStr.isNotEmpty ? ' (on $dateStr)' : ''}.',
+                isApproved
+                    ? 'Your account deletion request has been approved by the admin. The deletion process will be completed after 30 days from the date you submitted your request. After completion, your profile and account details cannot be restored. Your account will be permanently deactivated, and your identity will be anonymized in shared gig records and other related history data.'
+                    : 'Your account deletion request is pending admin review. Once approved, the deletion process will be completed after 30 days from the date you submitted your request. You can cancel this request at any time to restore full access.',
                 style: const TextStyle(
                   fontSize: 14,
                   color: Colors.grey,
                   height: 1.5,
                 ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'You can cancel this request to restore full access to your account.',
-                style: TextStyle(fontSize: 14, color: Colors.grey, height: 1.5),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 32),

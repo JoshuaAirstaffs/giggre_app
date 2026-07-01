@@ -37,6 +37,10 @@ class DeleteAccountService {
     final reauthed = await _reAuthenticate(context, user, signInMethod);
     if (!reauthed || !context.mounted) return;
 
+    final reasonResult = await _showReasonDialog(context);
+    if (reasonResult == null || !context.mounted) return;
+    final reason = reasonResult.isEmpty ? null : reasonResult;
+
     // Write to Firestore BEFORE navigating so active screen listeners are still
     // mounted during the write — prevents dependents.isEmpty assertion errors.
     try {
@@ -53,6 +57,7 @@ class DeleteAccountService {
         requestedAt: now,
         deletionScheduledAt: scheduledAt,
         status: 'pending_deletion',
+        reason: reason,
       ).toMap());
 
       await db.collection('users').doc(user.uid).update({
@@ -115,7 +120,7 @@ class DeleteAccountService {
       final snap = await db
           .collection('account_delete_requests')
           .where('userId', isEqualTo: user.uid)
-          .where('status', isEqualTo: 'pending_deletion')
+          .where('status', whereIn: ['pending_deletion', 'approved'])
           .limit(1)
           .get();
 
@@ -158,6 +163,137 @@ class DeleteAccountService {
   //  Dialogs & re-authentication (unchanged)
   // ─────────────────────────────────────────────────────────────────────────────
 
+  static const _kPresetReasons = [
+    'I no longer use the app',
+    'Privacy concerns',
+    'Found a better alternative',
+    'Too many notifications',
+    'Technical issues',
+    'Other',
+  ];
+
+  // Returns:
+  //   null   → user cancelled (abort deletion)
+  //   ''     → user skipped (no reason provided)
+  //   String → user's selected/entered reason
+  static Future<String?> _showReasonDialog(BuildContext context) async {
+    String? selected;
+    final otherController = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          backgroundColor: Theme.of(ctx).cardColor,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+          contentPadding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
+          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          title: Text(
+            'Why are you leaving?',
+            style: TextStyle(
+              color: Theme.of(ctx).colorScheme.onSurface,
+              fontWeight: FontWeight.w700,
+              fontSize: 17,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'Optional — helps us improve.',
+                  style: TextStyle(color: kSub, fontSize: 13),
+                ),
+              ),
+              const SizedBox(height: 8),
+              RadioGroup<String>(
+                groupValue: selected,
+                onChanged: (v) => setState(() => selected = v),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: _kPresetReasons
+                      .map((reason) => RadioListTile<String>(
+                            dense: true,
+                            value: reason,
+                            title: Text(reason,
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    color:
+                                        Theme.of(ctx).colorScheme.onSurface)),
+                          ))
+                      .toList(),
+                ),
+              ),
+              if (selected == 'Other')
+                Padding(
+                  padding:
+                      const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: TextField(
+                    controller: otherController,
+                    autofocus: true,
+                    maxLines: 2,
+                    style: TextStyle(
+                        color: Theme.of(ctx).colorScheme.onSurface,
+                        fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: 'Tell us more…',
+                      hintStyle:
+                          const TextStyle(color: kSub, fontSize: 14),
+                      filled: true,
+                      fillColor: Theme.of(ctx).scaffoldBackgroundColor,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: kBorder),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: kBorder),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: kBlue),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancel', style: TextStyle(color: kSub)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, ''),
+              child: const Text('Skip', style: TextStyle(color: kSub)),
+            ),
+            TextButton(
+              onPressed: () {
+                final reason = selected == 'Other'
+                    ? otherController.text.trim()
+                    : selected ?? '';
+                Navigator.pop(ctx, reason);
+              },
+              child: const Text(
+                'Continue',
+                style: TextStyle(
+                    color: Colors.redAccent, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    otherController.dispose();
+    return result;
+  }
+
   static Future<bool> _showWarningDialog(BuildContext context) async {
     return await showDialog<bool>(
           context: context,
@@ -196,17 +332,17 @@ class DeleteAccountService {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Your account will be scheduled for permanent deletion in 30 days. During this period you can log back in to cancel the request.',
+                  'Your account deletion request will be submitted for admin review and approval. Once approved, your account will be scheduled for deletion.',
                   style: TextStyle(color: kSub, height: 1.5, fontSize: 14),
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  'After 30 days, your profile, uploaded files, skill requests, and support history will be permanently erased. Your identity will be anonymized on shared gig records.',
+                  'The deletion process will be completed after 30 days from the date you submitted your request. After completion, your profile and account details cannot be restored.',
                   style: TextStyle(color: kSub, height: 1.5, fontSize: 13),
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  'Permanent deletion cannot be undone after the 30-day window.',
+                  'Your account will be permanently deactivated, and your identity will be anonymized in shared gig records and other related history data.',
                   style: TextStyle(
                     color: Colors.redAccent,
                     fontWeight: FontWeight.w600,
