@@ -223,7 +223,9 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
       _activeGigs = activeGigsCount;
       _completedGigs = completedCount;
       _totalSpent = totalSpentAmt;
-      _completionRate = (completedCount / gigsPostedCount) * 100;
+      _completionRate = gigsPostedCount > 0
+          ? (completedCount / gigsPostedCount) * 100
+          : 0;
     });
   }
 
