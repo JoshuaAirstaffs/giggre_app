@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -125,15 +126,17 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body) as Map<String, dynamic>;
           final addrObj = data['address'] as Map<String, dynamic>?;
+          final placeName = data['name'] as String?;
           final displayName = data['display_name'] as String?;
-          final parts = addrObj != null
-              ? [
-                  addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
-                  addrObj['suburb'] ?? addrObj['neighbourhood'],
-                  addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
-                  addrObj['state'],
-                ].whereType<String>().where((s) => s.isNotEmpty).toList()
-              : <String>[];
+          final parts = [
+            if (placeName != null && placeName.isNotEmpty) placeName,
+            if (addrObj != null) ...[
+              addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
+              addrObj['suburb'] ?? addrObj['neighbourhood'],
+              addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
+              addrObj['state'],
+            ],
+          ].whereType<String>().where((s) => s.isNotEmpty).toList();
           if (parts.isNotEmpty) {
             address = parts.join(', ');
           } else if (displayName != null && displayName.isNotEmpty) {
@@ -945,22 +948,26 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   final _osmController = fm.MapController();
   bool _osmMapReady = false;
   final _searchCtrl = TextEditingController();
-  LatLng? _picked;
+  late LatLng _picked;
   String _address = '';
   bool _geocoding = false;
   bool _searching = false;
   String? _searchError;
   LatLng? _myLocation;
+  int _geocodeRequestId = 0;
+  Timer? _debounce;
+  // Skips the geocode that would otherwise fire immediately after the
+  // explicit initState() lookup, or after a search/recenter jump that
+  // already has (or doesn't need) its own address.
+  bool _suppressNextGeocode = false;
 
   static final _defaultCenter = LatLng(14.5995, 120.9842);
 
   @override
   void initState() {
     super.initState();
-    if (widget.initialPosition != null) {
-      _picked = widget.initialPosition;
-      _geocodePosition(widget.initialPosition!);
-    }
+    _picked = widget.initialPosition ?? _defaultCenter;
+    _geocodePosition(_picked);
     GmsAvailability.isAvailable.then((v) {
       if (mounted) setState(() => _useGoogleMaps = v);
     });
@@ -968,6 +975,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _googleMapController?.dispose();
     _osmController.dispose();
     _searchCtrl.dispose();
@@ -1012,6 +1020,27 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     } catch (_) {}
   }
 
+  // Builds a clean short address from a Nominatim result, preferring the
+  // specific place name over the raw display_name blob. Returns '' if the
+  // result carries no usable naming at all.
+  String _formatNominatimResult(Map<String, dynamic> data) {
+    final addrObj = data['address'] as Map<String, dynamic>?;
+    final placeName = data['name'] as String?;
+    final displayName = data['display_name'] as String?;
+    final parts = [
+      if (placeName != null && placeName.isNotEmpty) placeName,
+      if (addrObj != null) ...[
+        addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
+        addrObj['suburb'] ?? addrObj['neighbourhood'],
+        addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
+        addrObj['state'],
+      ],
+    ].whereType<String>().where((s) => s.isNotEmpty).toList();
+    if (parts.isNotEmpty) return parts.join(', ');
+    if (displayName != null && displayName.isNotEmpty) return displayName;
+    return '';
+  }
+
   Future<void> _searchAddress() async {
     final query = _searchCtrl.text.trim();
     if (query.isEmpty) return;
@@ -1021,8 +1050,14 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       _searchError = null;
     });
     try {
-      final uri = Uri.parse('https://nominatim.openstreetmap.org/search')
-          .replace(queryParameters: {'q': query, 'format': 'json', 'limit': '1'});
+      final uri = Uri.parse('https://nominatim.openstreetmap.org/search').replace(
+        queryParameters: {
+          'q': query,
+          'format': 'json',
+          'limit': '1',
+          'addressdetails': '1',
+        },
+      );
       final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
       if (!mounted) return;
       final data = jsonDecode(res.body) as List;
@@ -1033,20 +1068,25 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         });
         return;
       }
-      final lat = double.parse(data[0]['lat'] as String);
-      final lon = double.parse(data[0]['lon'] as String);
+      final result = data[0] as Map<String, dynamic>;
+      final lat = double.parse(result['lat'] as String);
+      final lon = double.parse(result['lon'] as String);
       final point = LatLng(lat, lon);
+      // The search result already carries a reliable address — use it
+      // directly instead of depending on a second reverse-geocode call
+      // that can independently fail and mask a perfectly good result.
+      final formatted = _formatNominatimResult(result);
+      _suppressNextGeocode = true;
       setState(() {
         _picked = point;
-        _address = '';
+        _address = formatted.isNotEmpty ? formatted : query;
         _searching = false;
       });
       if (_useGoogleMaps) {
-        _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(point, 15.0));
+        _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(point, 16.0));
       } else if (_osmMapReady) {
-        _osmController.move(ll.LatLng(point.latitude, point.longitude), 15.0);
+        _osmController.move(ll.LatLng(point.latitude, point.longitude), 16.0);
       }
-      _geocodePosition(point);
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -1058,39 +1098,28 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
 
   Future<void> _geocodePosition(LatLng pos) async {
     if (!mounted) return;
+    final requestId = ++_geocodeRequestId;
     setState(() => _geocoding = true);
     try {
       final uri = Uri.parse(
         'https://nominatim.openstreetmap.org/reverse'
-        '?lat=${pos.latitude}&lon=${pos.longitude}&format=json',
+        '?lat=${pos.latitude}&lon=${pos.longitude}&format=json&zoom=18&addressdetails=1',
       );
       final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
-      if (!mounted) return;
+      if (!mounted || requestId != _geocodeRequestId) return;
       String address = 'Selected location';
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
-        final addrObj = data['address'] as Map<String, dynamic>?;
-        final displayName = data['display_name'] as String?;
-        final parts = addrObj != null
-            ? [
-                addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
-                addrObj['suburb'] ?? addrObj['neighbourhood'],
-                addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
-                addrObj['state'],
-              ].whereType<String>().where((s) => s.isNotEmpty).toList()
-            : <String>[];
-        if (parts.isNotEmpty) {
-          address = parts.join(', ');
-        } else if (displayName != null && displayName.isNotEmpty) {
-          address = displayName;
-        }
+        final formatted = _formatNominatimResult(data);
+        if (formatted.isNotEmpty) address = formatted;
       }
+      if (requestId != _geocodeRequestId) return;
       setState(() {
         _address = address;
         _geocoding = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || requestId != _geocodeRequestId) return;
       setState(() {
         _address = 'Could not get address';
         _geocoding = false;
@@ -1098,29 +1127,43 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     }
   }
 
-  void _onMapTap(LatLng point) {
-    setState(() {
-      _picked = point;
-      _address = '';
+  // Called continuously while the map is being dragged — the pin is fixed
+  // at screen-center, so whatever's under it is always the current pick.
+  void _onCameraMoved(LatLng center) {
+    setState(() => _picked = center);
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 600), () {
+      if (_suppressNextGeocode) {
+        _suppressNextGeocode = false;
+        return;
+      }
+      _geocodePosition(_picked);
     });
-    _geocodePosition(point);
+  }
+
+  // Google Maps reports when the camera has settled — resolve immediately
+  // instead of waiting out the debounce window.
+  void _onCameraIdle() {
+    _debounce?.cancel();
+    if (_suppressNextGeocode) {
+      _suppressNextGeocode = false;
+      return;
+    }
+    _geocodePosition(_picked);
   }
 
   Widget _buildOsmMap() {
     return fm.FlutterMap(
       mapController: _osmController,
       options: fm.MapOptions(
-        initialCenter: _picked != null
-            ? ll.LatLng(_picked!.latitude, _picked!.longitude)
-            : (widget.initialPosition != null
-                ? ll.LatLng(widget.initialPosition!.latitude, widget.initialPosition!.longitude)
-                : const ll.LatLng(14.5995, 120.9842)),
-        initialZoom: 14.0,
+        initialCenter: ll.LatLng(_picked.latitude, _picked.longitude),
+        initialZoom: 16.0,
         onMapReady: () {
           if (mounted) setState(() => _osmMapReady = true);
         },
-        onTap: (_, point) {
-          _onMapTap(LatLng(point.latitude, point.longitude));
+        onPositionChanged: (camera, hasGesture) {
+          if (!hasGesture) return;
+          _onCameraMoved(LatLng(camera.center.latitude, camera.center.longitude));
         },
       ),
       children: [
@@ -1128,28 +1171,15 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.giggre.mobile',
         ),
-        if (_picked != null)
-          fm.MarkerLayer(
-            markers: [
-              fm.Marker(
-                point: ll.LatLng(_picked!.latitude, _picked!.longitude),
-                width: 40,
-                height: 40,
-                alignment: Alignment.bottomCenter,
-                child: const Icon(Icons.location_pin, color: Colors.red, size: 40),
-              ),
-            ],
-          ),
       ],
     );
   }
 
   void _confirm() {
-    if (_picked == null) return;
     Navigator.pop(
       context,
       _PickedLocation(
-        position: _picked!,
+        position: _picked,
         address: _address.isNotEmpty ? _address : 'Selected location',
       ),
     );
@@ -1186,24 +1216,36 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
               ? GoogleMap(
                   onMapCreated: (controller) => _googleMapController = controller,
                   initialCameraPosition: CameraPosition(
-                    target: widget.initialPosition ?? _defaultCenter,
-                    zoom: 14.0,
+                    target: _picked,
+                    zoom: 16.0,
                   ),
                   myLocationEnabled: true,
                   myLocationButtonEnabled: false,
                   zoomControlsEnabled: false,
-                  onTap: _onMapTap,
-                  markers: _picked != null
-                      ? {
-                          Marker(
-                            markerId: const MarkerId('picked'),
-                            position: _picked!,
-                            icon: BitmapDescriptor.defaultMarker,
-                          ),
-                        }
-                      : {},
+                  onCameraMove: (position) => _onCameraMoved(position.target),
+                  onCameraIdle: _onCameraIdle,
                 )
               : _buildOsmMap(),
+
+          // ── Fixed center pin — drag the map underneath it to place it
+          // precisely; far more accurate than tapping, especially when
+          // zoomed out. ──────────────────────────────────────────────
+          IgnorePointer(
+            child: Align(
+              alignment: Alignment.center,
+              child: Transform.translate(
+                offset: const Offset(0, -20),
+                child: const Icon(
+                  Icons.location_pin,
+                  color: Colors.red,
+                  size: 44,
+                  shadows: [
+                    Shadow(color: Colors.black45, blurRadius: 6, offset: Offset(0, 2)),
+                  ],
+                ),
+              ),
+            ),
+          ),
 
           // ── Search bar ───────────────────────────────────────
           Positioned(
@@ -1277,54 +1319,6 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
             ),
           ),
 
-          // ── Hint banner (no pin yet) ──────────────────────────
-          if (_picked == null)
-            Positioned(
-              top: 90,
-              left: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: cardColor.withValues(alpha: 0.96),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: borderColor),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: kAmber.withValues(alpha: 0.15),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.touch_app_rounded,
-                          color: kAmber, size: 18),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Tap anywhere on the map to drop a pin at the gig location',
-                        style: TextStyle(
-                            color: onSurface,
-                            fontSize: 13,
-                            height: 1.4),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
           // ── Recenter button ───────────────────────────────────
           Positioned(
             bottom: 100,
@@ -1354,9 +1348,8 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
             ),
           ),
 
-          // ── Confirm card (pin placed) ─────────────────────────
-          if (_picked != null)
-            Positioned(
+          // ── Confirm card ───────────────────────────────────────
+          Positioned(
               bottom: 0,
               left: 0,
               right: 0,
@@ -1436,13 +1429,13 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                                     ),
                                     const SizedBox(height: 2),
                                     const Text(
-                                        'Tap map to reposition pin',
+                                        'Drag the map to fine-tune the pin',
                                         style: TextStyle(
                                             color: kSub,
                                             fontSize: 11)),
                                     const SizedBox(height: 4),
                                     Text(
-                                      'Lat: ${_picked!.latitude.toStringAsFixed(6)}  Lng: ${_picked!.longitude.toStringAsFixed(6)}',
+                                      'Lat: ${_picked.latitude.toStringAsFixed(6)}  Lng: ${_picked.longitude.toStringAsFixed(6)}',
                                       style: const TextStyle(
                                           color: kSub, fontSize: 10),
                                     ),

@@ -522,64 +522,17 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               children: applicants.asMap().entries.map((entry) {
                 final i = entry.key;
                 final applicant = entry.value;
+                final workerId = applicant['workerId'] as String? ?? '';
                 final name = applicant['workerName'] as String? ?? 'Worker';
                 final isLast = i == applicants.length - 1;
                 return Column(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: kBlue.withValues(alpha: 0.12),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.person_rounded,
-                              color: kBlue,
-                              size: 18,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              name,
-                              style: TextStyle(
-                                color: onSurface,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          SizedBox(
-                            height: 34,
-                            child: ElevatedButton(
-                              onPressed: () => _selectWorker(applicant),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: green,
-                                foregroundColor: Colors.white,
-                                elevation: 0,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                              child: const Text(
-                                'Select',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                    _ApplicantTile(
+                      key: ValueKey('applicant_$workerId'),
+                      workerId: workerId,
+                      workerName: name,
+                      accentColor: green,
+                      onSelect: () => _selectWorker(applicant),
                     ),
                     if (!isLast)
                       Divider(
@@ -642,7 +595,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             data['assignedWorkerName'] as String? ??
             data['workerName'] as String? ??
             '';
-        final workerId = data['assignedWorkerId'] as String? ?? '';
+        final workerId =
+            data['assignedWorkerId'] as String? ??
+            data['workerId'] as String? ??
+            '';
         final isActive = _activeStatuses.contains(status);
         final isTaskComplete = status == 'task_complete';
         const green = Color(0xFF22C55E);
@@ -946,33 +902,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                         label: address,
                       ),
                     ],
-                    if (workerName.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _DetailRow(
-                              icon: Icons.person_outline_rounded,
-                              label: workerName,
-                              iconColor: kBlue,
-                            ),
-                          ),
-                          CallUserAction(
-                            callType: CallType.voice,
-                            targetUserId: workerId,
-                            targetUserName: workerName,
-                          ),
-                          CallUserAction(
-                            callType: CallType.video,
-                            targetUserId: workerId,
-                            targetUserName: workerName,
-                          ),
-                          GigChatAction(
-                            gigId: widget.gigId,
-                            targetUserId: workerId,
-                            targetUserName: workerName,
-                          ),
-                        ],
+                    if (workerName.isNotEmpty && workerId.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Divider(height: 0.5, color: Theme.of(context).dividerColor),
+                      const SizedBox(height: 12),
+                      _WorkerProfileCard(
+                        key: ValueKey('worker_$workerId'),
+                        gigId: widget.gigId,
+                        workerId: workerId,
+                        workerName: workerName,
                       ),
                     ],
                   ],
@@ -1723,6 +1661,401 @@ class _DetailRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// Counts a worker's completed gigs across all three gig collections.
+// quick_gigs/open_gigs store the worker under `assignedWorkerId`; offered_gigs
+// stores it under `workerId` — see the field-name note on GigDetailSheet's
+// `workerId` lookup above.
+Future<int> _fetchWorkerCompletedCount(String workerId) async {
+  final db = FirebaseFirestore.instance;
+  final snaps = await Future.wait([
+    db
+        .collection('quick_gigs')
+        .where('assignedWorkerId', isEqualTo: workerId)
+        .where('status', isEqualTo: 'completed')
+        .get(),
+    db
+        .collection('open_gigs')
+        .where('assignedWorkerId', isEqualTo: workerId)
+        .where('status', isEqualTo: 'completed')
+        .get(),
+    db
+        .collection('offered_gigs')
+        .where('workerId', isEqualTo: workerId)
+        .where('status', isEqualTo: 'completed')
+        .get(),
+  ]);
+  return snaps.fold<int>(0, (total, snap) => total + snap.docs.length);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Worker profile card — photo/initials avatar, rating, completed gigs
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkerProfileCard extends StatefulWidget {
+  final String gigId;
+  final String workerId;
+  final String workerName;
+
+  const _WorkerProfileCard({
+    super.key,
+    required this.gigId,
+    required this.workerId,
+    required this.workerName,
+  });
+
+  @override
+  State<_WorkerProfileCard> createState() => _WorkerProfileCardState();
+}
+
+class _WorkerProfileCardState extends State<_WorkerProfileCard> {
+  String? _photoUrl;
+  double _rating = 5.0;
+  int _ratingCount = 0;
+  int _completedGigs = 0;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(_WorkerProfileCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.workerId != widget.workerId) _load();
+  }
+
+  Future<void> _load() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+    try {
+      final results = await Future.wait([
+        FirebaseFirestore.instance.collection('users').doc(widget.workerId).get(),
+        _fetchWorkerCompletedCount(widget.workerId),
+      ]);
+      if (!mounted) return;
+      final userSnap = results[0] as DocumentSnapshot<Map<String, dynamic>>;
+      final completed = results[1] as int;
+      final data = userSnap.data();
+      setState(() {
+        _photoUrl = data?['photoUrl'] as String?;
+        _rating = (data?['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
+        _ratingCount = (data?['ratingCount'] as num?)?.toInt() ?? 0;
+        _completedGigs = completed;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('[WorkerProfileCard] load error: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        _ProfileAvatar(photoUrl: _photoUrl, name: widget.workerName, size: 46),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.workerName,
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              if (_loading)
+                const SizedBox(
+                  height: 12,
+                  width: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: kAmber,
+                  ),
+                )
+              else
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 10,
+                  runSpacing: 2,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.star_rounded, color: kAmber, size: 14),
+                        const SizedBox(width: 2),
+                        Text(
+                          _rating.toStringAsFixed(1),
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          ' ($_ratingCount)',
+                          style: const TextStyle(color: kSub, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.task_alt_rounded,
+                            color: Color(0xFF22C55E), size: 13),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$_completedGigs completed',
+                          style: const TextStyle(color: kSub, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+        CallUserAction(
+          callType: CallType.voice,
+          targetUserId: widget.workerId,
+          targetUserName: widget.workerName,
+        ),
+        CallUserAction(
+          callType: CallType.video,
+          targetUserId: widget.workerId,
+          targetUserName: widget.workerName,
+        ),
+        GigChatAction(
+          gigId: widget.gigId,
+          targetUserId: widget.workerId,
+          targetUserName: widget.workerName,
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Profile avatar — worker's photo, falls back to their name's initial
+// ─────────────────────────────────────────────────────────────────────────────
+class _ProfileAvatar extends StatelessWidget {
+  final String? photoUrl;
+  final String name;
+  final double size;
+
+  const _ProfileAvatar({
+    required this.photoUrl,
+    required this.name,
+    required this.size,
+  });
+
+  Widget _initialsFallback() {
+    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+    return Container(
+      decoration: const BoxDecoration(color: kBlue, shape: BoxShape.circle),
+      alignment: Alignment.center,
+      child: Text(
+        initial,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: size * 0.4,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = photoUrl;
+    return ClipOval(
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: (url != null && url.isNotEmpty)
+            ? Image.network(
+                url,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => _initialsFallback(),
+              )
+            : _initialsFallback(),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Applicant tile — shown in the Applicants list before a worker is chosen.
+//  Surfaces rating + completed-gigs so the host can compare candidates.
+// ─────────────────────────────────────────────────────────────────────────────
+class _ApplicantTile extends StatefulWidget {
+  final String workerId;
+  final String workerName;
+  final Color accentColor;
+  final VoidCallback onSelect;
+
+  const _ApplicantTile({
+    super.key,
+    required this.workerId,
+    required this.workerName,
+    required this.accentColor,
+    required this.onSelect,
+  });
+
+  @override
+  State<_ApplicantTile> createState() => _ApplicantTileState();
+}
+
+class _ApplicantTileState extends State<_ApplicantTile> {
+  String? _photoUrl;
+  double _rating = 5.0;
+  int _ratingCount = 0;
+  int _completedGigs = 0;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (widget.workerId.isEmpty) {
+      setState(() => _loading = false);
+      return;
+    }
+    try {
+      final results = await Future.wait([
+        FirebaseFirestore.instance.collection('users').doc(widget.workerId).get(),
+        _fetchWorkerCompletedCount(widget.workerId),
+      ]);
+      if (!mounted) return;
+      final userSnap = results[0] as DocumentSnapshot<Map<String, dynamic>>;
+      final completed = results[1] as int;
+      final data = userSnap.data();
+      setState(() {
+        _photoUrl = data?['photoUrl'] as String?;
+        _rating = (data?['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
+        _ratingCount = (data?['ratingCount'] as num?)?.toInt() ?? 0;
+        _completedGigs = completed;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('[ApplicantTile] load error: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+      child: Row(
+        children: [
+          _ProfileAvatar(photoUrl: _photoUrl, name: widget.workerName, size: 40),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.workerName,
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 3),
+                if (_loading)
+                  const SizedBox(
+                    height: 11,
+                    width: 11,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: kAmber,
+                    ),
+                  )
+                else
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 10,
+                    runSpacing: 2,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.star_rounded, color: kAmber, size: 13),
+                          const SizedBox(width: 2),
+                          Text(
+                            _rating.toStringAsFixed(1),
+                            style: TextStyle(
+                              color: onSurface,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            ' ($_ratingCount)',
+                            style: const TextStyle(color: kSub, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.task_alt_rounded,
+                              color: Color(0xFF22C55E), size: 12),
+                          const SizedBox(width: 3),
+                          Text(
+                            '$_completedGigs completed',
+                            style: const TextStyle(color: kSub, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            height: 34,
+            child: ElevatedButton(
+              onPressed: widget.onSelect,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: widget.accentColor,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text(
+                'Select',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

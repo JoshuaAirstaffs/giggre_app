@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:giggre_app/features/call/incoming_call_screen.dart';
 import 'package:giggre_app/features/call/incoming_video_call_screen.dart';
+import 'package:giggre_app/features/gig_host/presentation/widgets/gig_detail_sheet.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
 
 class CurrentUserProvider extends ChangeNotifier {
@@ -27,6 +28,7 @@ class CurrentUserProvider extends ChangeNotifier {
   Timestamp? _chatListenStart;
 
   final _audioPlayer = AudioPlayer(); // ← new
+  final _appNotifPlayer = AudioPlayer();
 
   static final _notifications = FlutterLocalNotificationsPlugin();
   static bool _notificationsInitialized = false;
@@ -86,10 +88,13 @@ class CurrentUserProvider extends ChangeNotifier {
     );
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
-        'gig_applications',
+        'gig_applications_v2',
         'Gig Applications',
         description: 'Notifications when a worker applies to your gig',
         importance: Importance.max,
+        // Sound is played manually via gig_sound.mp3 in
+        // _showApplicationNotification, so the channel itself stays silent.
+        playSound: false,
       ),
     );
 
@@ -101,13 +106,28 @@ class CurrentUserProvider extends ChangeNotifier {
     if (payload == null) return;
     try {
       final data = jsonDecode(payload) as Map<String, dynamic>;
+      final context = navigatorKey?.currentContext;
+      if (context == null) return;
+
+      if (data['type'] == 'new_applicant') {
+        final gigId = data['gigId'] as String? ?? '';
+        if (gigId.isEmpty) return;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => GigDetailSheet(gigId: gigId, gigType: 'open'),
+          );
+        });
+        return;
+      }
+
       final roomId = data['roomId'] as String? ?? '';
       final gigId = data['gigId'] as String? ?? '';
       final peerUid = data['peerUid'] as String? ?? '';
       final peerName = data['peerName'] as String? ?? 'Chat';
       if (roomId.isEmpty) return;
-      final context = navigatorKey?.currentContext;
-      if (context == null) return;
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -168,6 +188,7 @@ class CurrentUserProvider extends ChangeNotifier {
     _applicationsNotifSub = null;
     _stopRingtone();
     _audioPlayer.dispose(); // ← clean up
+    _appNotifPlayer.dispose();
     notifyListeners();
   }
 
@@ -500,7 +521,8 @@ class CurrentUserProvider extends ChangeNotifier {
               if (createdAt is Timestamp && createdAt.compareTo(listenStart) <= 0) continue;
               final workerName = data['workerName'] as String? ?? 'Someone';
               final gigTitle = data['gigTitle'] as String? ?? 'your gig';
-              _showApplicationNotification(workerName, gigTitle);
+              final gigId = data['gigId'] as String? ?? '';
+              _showApplicationNotification(workerName, gigTitle, gigId);
             }
           },
           onError: (e) =>
@@ -509,21 +531,30 @@ class CurrentUserProvider extends ChangeNotifier {
   }
 
   Future<void> _showApplicationNotification(
-      String workerName, String gigTitle) async {
-    await _notifications.show(
-      ('$workerName$gigTitle').hashCode.abs() % 100000,
-      'New Application',
-      '$workerName applied to your gig "$gigTitle"',
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'gig_applications',
-          'Gig Applications',
-          importance: Importance.max,
-          priority: Priority.high,
+      String workerName, String gigTitle, String gigId) async {
+    final payload = jsonEncode({
+      'type': 'new_applicant',
+      'gigId': gigId,
+    });
+    await Future.wait([
+      _notifications.show(
+        ('$workerName$gigTitle').hashCode.abs() % 100000,
+        'New Application',
+        'A worker applied to your gig — $workerName wants "$gigTitle"',
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'gig_applications_v2',
+            'Gig Applications',
+            importance: Importance.max,
+            priority: Priority.high,
+            playSound: false,
+          ),
+          iOS: DarwinNotificationDetails(presentAlert: true, presentSound: false),
         ),
-        iOS: DarwinNotificationDetails(presentAlert: true, presentSound: true),
+        payload: payload,
       ),
-    );
+      _appNotifPlayer.play(AssetSource('sounds/gig_sound.mp3')),
+    ]);
   }
 
   static Future<void> showGigAssignedNotification(

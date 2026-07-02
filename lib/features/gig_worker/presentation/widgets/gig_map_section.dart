@@ -46,6 +46,8 @@ class GigMarkerData {
   });
 }
 
+enum _SkillFilter { all, mySkills, specific }
+
 class _GigCluster {
   final LatLng center;
   final int count;
@@ -107,6 +109,26 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   StreamSubscription? _quickSub;
   late StreamSubscription _openSub, _offeredSub;
+
+  // ── Filters ──────────────────────────────────────────────────────────────
+  _SkillFilter _skillFilter = _SkillFilter.all;
+  String? _specificSkill;
+  double? _radiusKm; // null = no radius limit
+  List<String> _allSkillNames = [];
+
+  // ── Fetch full skill list from Firestore /skills (used by Specific Skill filter)
+  Future<void> _fetchAllSkills() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('skills').get();
+      final names = snap.docs
+          .where((d) => d.id != '_counter')
+          .map((d) => (d.data()['name'] as String?) ?? d.id)
+          .where((s) => s.isNotEmpty)
+          .toList()
+        ..sort();
+      if (mounted) setState(() => _allSkillNames = names);
+    } catch (_) {}
+  }
 
   // ── Custom marker icon cache ─────────────────────────────────────────────
   final Map<String, BitmapDescriptor> _icons = {};
@@ -197,6 +219,7 @@ class _GigMapSectionState extends State<GigMapSection> {
     super.initState();
     _mapInteractive = widget.fullScreen;
     _loadBaseIcons();
+    _fetchAllSkills();
     final db = FirebaseFirestore.instance;
     _startOpenSub(db);
     _startOfferedSub(db);
@@ -463,11 +486,57 @@ class _GigMapSectionState extends State<GigMapSection> {
     );
   }
 
-  List<GigMarkerData> get _allGigs => [
+  List<GigMarkerData> get _unfilteredGigs => [
     ..._quickGigs,
     ..._openGigs,
     ..._offeredGigs,
   ];
+
+  bool _matchesSkill(String skill, String other) =>
+      skill.toLowerCase().trim() == other.toLowerCase().trim();
+
+  List<GigMarkerData> get _allGigs {
+    var gigs = _unfilteredGigs;
+
+    switch (_skillFilter) {
+      case _SkillFilter.all:
+        break;
+      case _SkillFilter.mySkills:
+        gigs = gigs
+            .where((g) =>
+                g.requiredSkills.isEmpty ||
+                g.requiredSkills.any((s) => widget.workerSkills
+                    .any((ws) => _matchesSkill(ws, s))))
+            .toList();
+      case _SkillFilter.specific:
+        final skill = _specificSkill;
+        if (skill != null) {
+          gigs = gigs
+              .where((g) =>
+                  g.requiredSkills.any((s) => _matchesSkill(s, skill)))
+              .toList();
+        }
+    }
+
+    final radiusKm = _radiusKm;
+    final myLoc = _myLocation;
+    if (radiusKm != null && myLoc != null) {
+      gigs = gigs.where((g) {
+        final distM = Geolocator.distanceBetween(
+          myLoc.latitude,
+          myLoc.longitude,
+          g.position.latitude,
+          g.position.longitude,
+        );
+        return distM <= radiusKm * 1000;
+      }).toList();
+    }
+
+    return gigs;
+  }
+
+  bool get _hasActiveFilter =>
+      _skillFilter != _SkillFilter.all || _radiusKm != null;
 
   static double _gridSize(double zoom) {
     if (zoom < 10) return 0.15;
@@ -1254,6 +1323,257 @@ class _GigMapSectionState extends State<GigMapSection> {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Filter sheet — skill + radius
+  // ─────────────────────────────────────────────────────────────────────────
+  static const List<double?> _radiusOptions = [null, 1, 5, 10, 50, 100];
+
+  void _showFilterSheet(BuildContext context) {
+    final skills = _allSkillNames;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final cardColor = Theme.of(ctx).cardColor;
+        final onSurface = Theme.of(ctx).colorScheme.onSurface;
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            Widget sectionTitle(String text) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    text,
+                    style: TextStyle(
+                      color: onSurface,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                );
+
+            Widget choiceChip({
+              required String label,
+              required bool selected,
+              required VoidCallback onTap,
+            }) {
+              return GestureDetector(
+                onTap: onTap,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? kAmber.withValues(alpha: 0.15)
+                        : (isDark
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : Colors.black.withValues(alpha: 0.04)),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: selected
+                          ? kAmber
+                          : Theme.of(ctx).dividerColor,
+                    ),
+                  ),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: selected ? kAmber : onSurface,
+                      fontSize: 12,
+                      fontWeight:
+                          selected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            return Container(
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.tune_rounded, color: kAmber, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Filter Gigs',
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () {
+                            setSheetState(() {
+                              _skillFilter = _SkillFilter.all;
+                              _specificSkill = null;
+                              _radiusKm = null;
+                            });
+                            setState(() {
+                              _skillFilter = _SkillFilter.all;
+                              _specificSkill = null;
+                              _radiusKm = null;
+                            });
+                          },
+                          child: const Text('Reset',
+                              style: TextStyle(color: kSub, fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    sectionTitle('Show gigs'),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        choiceChip(
+                          label: 'All Gigs',
+                          selected: _skillFilter == _SkillFilter.all,
+                          onTap: () {
+                            setSheetState(() => _skillFilter = _SkillFilter.all);
+                            setState(() => _skillFilter = _SkillFilter.all);
+                          },
+                        ),
+                        choiceChip(
+                          label: 'Matches My Skills',
+                          selected: _skillFilter == _SkillFilter.mySkills,
+                          onTap: () {
+                            setSheetState(
+                                () => _skillFilter = _SkillFilter.mySkills);
+                            setState(
+                                () => _skillFilter = _SkillFilter.mySkills);
+                          },
+                        ),
+                        choiceChip(
+                          label: 'Specific Skill',
+                          selected: _skillFilter == _SkillFilter.specific,
+                          onTap: skills.isEmpty
+                              ? () {}
+                              : () {
+                                  setSheetState(() {
+                                    _skillFilter = _SkillFilter.specific;
+                                    _specificSkill ??= skills.first;
+                                  });
+                                  setState(() {
+                                    _skillFilter = _SkillFilter.specific;
+                                    _specificSkill ??= skills.first;
+                                  });
+                                },
+                        ),
+                      ],
+                    ),
+                    if (_skillFilter == _SkillFilter.specific) ...[
+                      const SizedBox(height: 12),
+                      if (skills.isEmpty)
+                        const Text(
+                          'Loading skills…',
+                          style: TextStyle(color: kSub, fontSize: 12),
+                        )
+                      else
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.black.withValues(alpha: 0.04),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Theme.of(ctx).dividerColor),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: skills.contains(_specificSkill)
+                                  ? _specificSkill
+                                  : skills.first,
+                              isExpanded: true,
+                              icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                                  color: kSub),
+                              style: TextStyle(
+                                color: onSurface,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              dropdownColor: cardColor,
+                              borderRadius: BorderRadius.circular(12),
+                              items: skills
+                                  .map((s) => DropdownMenuItem(
+                                        value: s,
+                                        child: Text(s),
+                                      ))
+                                  .toList(),
+                              onChanged: (s) {
+                                if (s == null) return;
+                                setSheetState(() => _specificSkill = s);
+                                setState(() => _specificSkill = s);
+                              },
+                            ),
+                          ),
+                        ),
+                    ],
+                    const SizedBox(height: 18),
+                    sectionTitle('Distance'),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _radiusOptions.map((r) {
+                        final label = r == null ? 'Any' : '${r.toStringAsFixed(0)} km';
+                        return choiceChip(
+                          label: label,
+                          selected: _radiusKm == r,
+                          onTap: () {
+                            setSheetState(() => _radiusKm = r);
+                            setState(() => _radiusKm = r);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    if (_radiusKm != null && _myLocation == null) ...[
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Your location isn\'t available yet — distance filter will apply once located.',
+                        style: TextStyle(color: kSub, fontSize: 11),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 46,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kAmber,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text('Done',
+                            style: TextStyle(
+                                fontSize: 14, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     _context = context;
@@ -1315,6 +1635,29 @@ class _GigMapSectionState extends State<GigMapSection> {
                   color: kGold,
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _showFilterSheet(context),
+              child: Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: _hasActiveFilter
+                      ? kAmber.withValues(alpha: 0.15)
+                      : borderColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: _hasActiveFilter
+                        ? kAmber.withValues(alpha: 0.6)
+                        : borderColor,
+                  ),
+                ),
+                child: Icon(
+                  Icons.tune_rounded,
+                  size: 16,
+                  color: _hasActiveFilter ? kAmber : onSurface,
                 ),
               ),
             ),
@@ -1670,6 +2013,27 @@ class _GigMapSectionState extends State<GigMapSection> {
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
                     fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => _showFilterSheet(ctx),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _hasActiveFilter
+                        ? kAmber.withValues(alpha: 0.92)
+                        : Theme.of(ctx).cardColor.withValues(alpha: 0.93),
+                    shape: BoxShape.circle,
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black26, blurRadius: 6),
+                    ],
+                  ),
+                  child: Icon(
+                    Icons.tune_rounded,
+                    size: 18,
+                    color: _hasActiveFilter ? Colors.white : kSub,
                   ),
                 ),
               ),

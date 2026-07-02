@@ -159,7 +159,14 @@ service cloud.firestore {
       allow list: if isAuth() && (
         resource.data.userId == request.auth.uid || isAdmin()
       );
-      allow create, update, delete: if isAdmin();
+      // Workers notify a gig's host when they apply — restricted to that one
+      // category, and the caller can only claim their own worker identity.
+      allow create: if isAdmin() || (
+        isAuth() &&
+        request.resource.data.category == 'new_applicant' &&
+        request.resource.data.workerId == request.auth.uid
+      );
+      allow update, delete: if isAdmin();
     }
 
     // ─── App Content (public read) ─────────────────────────────
