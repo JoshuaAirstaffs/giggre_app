@@ -161,7 +161,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         if (existingQuery.docs.isEmpty) {
           if (mounted) {
-            Navigator.pushReplacement(
+            Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (_) => CompleteProfileScreen.pendingGoogleAccount(

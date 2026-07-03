@@ -923,7 +923,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       // connection or back out before finishing (e.g. email turns out to
       // already be registered).
       if (!mounted) return;
-      Navigator.pushReplacement(
+      Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => CompleteProfileScreen.pendingGoogleAccount(
