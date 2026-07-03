@@ -11,7 +11,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:http/http.dart' as http;
+import 'package:audioplayers/audioplayers.dart';
 import '../../../core/services/gms_availability.dart';
+import '../../../core/utils/country_check.dart';
 import 'package:intl/intl.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
@@ -52,6 +54,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   bool _useMapLocation = false;
 
   bool _posting = false;
+  final _errorPlayer = AudioPlayer();
 
   @override
   void initState() {
@@ -70,6 +73,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     _titleCtrl.dispose();
     _descCtrl.dispose();
     _budgetCtrl.dispose();
+    _errorPlayer.dispose();
     super.dispose();
   }
 
@@ -243,6 +247,21 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 
     setState(() => _posting = true);
     try {
+      if (_useMapLocation && _mapPosition != null && _gpsPosition != null) {
+        final outside = await isDifferentCountry(
+          lat: _mapPosition!.latitude,
+          lng: _mapPosition!.longitude,
+          otherLat: _gpsPosition!.latitude,
+          otherLng: _gpsPosition!.longitude,
+        );
+        if (outside) {
+          if (!mounted) return;
+          setState(() => _posting = false);
+          _showCountryMismatchDialog();
+          return;
+        }
+      }
+
       final uid = FirebaseAuth.instance.currentUser!.uid;
 
       final GeoPoint geoPoint = _useMapLocation && _mapPosition != null
@@ -300,6 +319,55 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         backgroundColor: Theme.of(context).cardColor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  void _showCountryMismatchDialog() {
+    _errorPlayer.play(AssetSource('sounds/error-sound.mp3'));
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        contentPadding: const EdgeInsets.all(24),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.public_off_rounded, color: Colors.red, size: 40),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Location Outside Your Country',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'You can only post gigs within your own country. Please pick a location closer to you.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK', style: TextStyle(color: Colors.white)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

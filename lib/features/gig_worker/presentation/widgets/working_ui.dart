@@ -173,7 +173,6 @@ class _WorkingUIState extends State<WorkingUI> {
   // Worker location tracking
   LatLng? _workerLocation;
   StreamSubscription<Position>? _locationSub;
-  bool _geofenceTriggered = false;
   static const _arrivedThresholdMeters = 40.0;
 
   // Actual road route
@@ -346,14 +345,16 @@ class _WorkingUIState extends State<WorkingUI> {
   }
 
   void _checkGeofence(Position pos) {
-    if (_geofenceTriggered || _step != _GigStep.navigating) return;
+    if (_step != _GigStep.navigating) return;
     final dist = Geolocator.distanceBetween(
       pos.latitude, pos.longitude,
       widget.gig.position.latitude, widget.gig.position.longitude,
     );
-    if (dist <= _arrivedThresholdMeters) {
-      _geofenceTriggered = true;
-      setState(() => _arrivedPromptVisible = true);
+    final withinRange = dist <= _arrivedThresholdMeters;
+    // Reactive, not a one-shot latch — walking back out of range hides the
+    // prompt again, and walking back in shows it again.
+    if (withinRange != _arrivedPromptVisible) {
+      setState(() => _arrivedPromptVisible = withinRange);
     }
   }
 

@@ -10,6 +10,7 @@ import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/services/gms_availability.dart';
+import '../../../../core/utils/country_check.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data models
@@ -47,6 +48,11 @@ class GigMarkerData {
 }
 
 enum _SkillFilter { all, mySkills, specific }
+
+// Rounds a coordinate to a ~1km grid so nearby gigs share one reverse-geocode
+// lookup instead of firing one per gig.
+String _countryCacheKey(double lat, double lng) =>
+    '${(lat * 100).round()},${(lng * 100).round()}';
 
 class _GigCluster {
   final LatLng center;
@@ -109,6 +115,13 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   StreamSubscription? _quickSub;
   late StreamSubscription _openSub, _offeredSub;
+
+  // ── Country matching (only show gigs in the worker's own country) ─────────
+  String? _myCountryCode;
+  final Map<String, String> _countryCodeCache = {};
+  final Set<String> _resolvingCountryKeys = {};
+  final List<GigMarkerData> _pendingCountryQueue = [];
+  bool _isResolvingCountries = false;
 
   // ── Filters ──────────────────────────────────────────────────────────────
   _SkillFilter _skillFilter = _SkillFilter.all;
@@ -272,6 +285,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       if (!mounted) return;
       final loc = LatLng(pos.latitude, pos.longitude);
       setState(() => _myLocation = loc);
+      _resolveMyCountry(loc);
       if (_useGoogleMaps) {
         _googleMapController?.animateCamera(
           CameraUpdate.newLatLngZoom(loc, 14.0),
@@ -285,6 +299,71 @@ class _GigMapSectionState extends State<GigMapSection> {
           const SnackBar(content: Text('Could not get your location.')),
         );
       }
+    }
+  }
+
+  // Reverse-geocodes the worker's own position to find which country they're
+  // in, so the map can hide gigs posted from elsewhere. Retries a few times
+  // with backoff since this single lookup gates the entire filter — if it
+  // never resolves, no country filtering happens at all.
+  Future<void> _resolveMyCountry(LatLng loc) async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await Future.delayed(Duration(seconds: attempt * 2));
+      final code = await countryCodeFromCoordinates(loc.latitude, loc.longitude);
+      if (!mounted) return;
+      if (code != null) {
+        debugPrint('[GigMap] resolved worker country: $code (from ${loc.latitude}, ${loc.longitude})');
+        setState(() => _myCountryCode = code);
+        return;
+      }
+    }
+    debugPrint('[GigMap] could not resolve worker\'s own country after retries');
+  }
+
+  // Queues gigs whose country isn't cached yet (grouped by a ~1km grid key so
+  // nearby gigs share one lookup) onto a single shared queue, drained one at
+  // a time to stay within Nominatim's rate limit regardless of how many of
+  // the three gig streams triggered this at once.
+  void _ensureCountriesResolved(List<GigMarkerData> gigs) {
+    for (final g in gigs) {
+      final key = _countryCacheKey(g.position.latitude, g.position.longitude);
+      if (_countryCodeCache.containsKey(key) || _resolvingCountryKeys.contains(key)) {
+        continue;
+      }
+      _resolvingCountryKeys.add(key);
+      _pendingCountryQueue.add(g);
+    }
+    _drainCountryQueue();
+  }
+
+  Future<void> _drainCountryQueue() async {
+    if (_isResolvingCountries) return;
+    _isResolvingCountries = true;
+    try {
+      while (_pendingCountryQueue.isNotEmpty) {
+        final g = _pendingCountryQueue.removeAt(0);
+        final key = _countryCacheKey(g.position.latitude, g.position.longitude);
+        String? code;
+        // A failed lookup is never cached (so it isn't permanently treated as
+        // "unknown country" and left visible forever) — retry a few times
+        // with backoff before giving up for this pass.
+        for (var attempt = 0; attempt < 3 && code == null; attempt++) {
+          if (attempt > 0) await Future.delayed(Duration(seconds: attempt * 2));
+          code = await countryCodeFromCoordinates(g.position.latitude, g.position.longitude);
+        }
+        _resolvingCountryKeys.remove(key);
+        if (!mounted) return;
+        final resolvedCode = code;
+        if (resolvedCode != null) {
+          debugPrint('[GigMap] resolved gig ${g.id} (${g.title}) country: $resolvedCode');
+          setState(() => _countryCodeCache[key] = resolvedCode);
+        } else {
+          debugPrint('[GigMap] country lookup failed for gig ${g.id}, will retry on next update');
+        }
+        await Future.delayed(const Duration(milliseconds: 1100));
+      }
+    } finally {
+      _isResolvingCountries = false;
     }
   }
 
@@ -312,6 +391,7 @@ class _GigMapSectionState extends State<GigMapSection> {
               .whereType<GigMarkerData>()
               .toList();
           setState(() => _quickGigs = all);
+          _ensureCountriesResolved(all);
         }, onError: (e) => debugPrint('[GigMap] quick stream error: $e'));
   }
 
@@ -321,16 +401,15 @@ class _GigMapSectionState extends State<GigMapSection> {
         .where('status', isEqualTo: 'open')
         .snapshots()
         .listen((s) {
-          setState(() {
-            _openGigs = s.docs
-                .where((d) => (d.data()['hostId'] as String?) != widget.uid)
-                .map(
-                  (d) =>
-                      _toMarker(d.id, d.data(), 'open', workerUid: widget.uid),
-                )
-                .whereType<GigMarkerData>()
-                .toList();
-          });
+          final all = s.docs
+              .where((d) => (d.data()['hostId'] as String?) != widget.uid)
+              .map(
+                (d) => _toMarker(d.id, d.data(), 'open', workerUid: widget.uid),
+              )
+              .whereType<GigMarkerData>()
+              .toList();
+          setState(() => _openGigs = all);
+          _ensureCountriesResolved(all);
         }, onError: (e) => debugPrint('[GigMap] open stream error: $e'));
   }
 
@@ -341,12 +420,12 @@ class _GigMapSectionState extends State<GigMapSection> {
         .where('status', isEqualTo: 'offered')
         .snapshots()
         .listen((s) {
-          setState(() {
-            _offeredGigs = s.docs
-                .map((d) => _toMarker(d.id, d.data(), 'offered'))
-                .whereType<GigMarkerData>()
-                .toList();
-          });
+          final all = s.docs
+              .map((d) => _toMarker(d.id, d.data(), 'offered'))
+              .whereType<GigMarkerData>()
+              .toList();
+          setState(() => _offeredGigs = all);
+          _ensureCountriesResolved(all);
         }, onError: (e) => debugPrint('[GigMap] offered stream error: $e'));
   }
 
@@ -518,8 +597,18 @@ class _GigMapSectionState extends State<GigMapSection> {
         }
     }
 
-    final radiusKm = _radiusKm;
     final myLoc = _myLocation;
+    final myCountry = _myCountryCode;
+    if (myCountry != null) {
+      gigs = gigs.where((g) {
+        final key = _countryCacheKey(g.position.latitude, g.position.longitude);
+        final gigCountry = _countryCodeCache[key];
+        // Not resolved yet — keep it visible rather than hiding it while we wait.
+        return gigCountry == null || gigCountry == myCountry;
+      }).toList();
+    }
+
+    final radiusKm = _radiusKm;
     if (radiusKm != null && myLoc != null) {
       gigs = gigs.where((g) {
         final distM = Geolocator.distanceBetween(
