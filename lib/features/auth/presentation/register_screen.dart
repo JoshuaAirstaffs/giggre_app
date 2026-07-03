@@ -329,8 +329,27 @@ class _PhoneFieldState extends State<_PhoneField> {
 //  CompleteProfileScreen
 // ─────────────────────────────────────────────
 class CompleteProfileScreen extends StatefulWidget {
-  final User user;
-  const CompleteProfileScreen({super.key, required this.user});
+  // Already-signed-in user (used by the Login screen's Google flow).
+  final User? user;
+
+  // Pending Google credential — not yet signed in. Used by the Register
+  // screen's Google sign-up flow so the Firebase Auth account is only
+  // created once the user finishes entering their name/phone below.
+  final AuthCredential? pendingCredential;
+  final String? pendingDisplayName;
+  final String? pendingPhotoUrl;
+
+  const CompleteProfileScreen({super.key, required this.user})
+      : pendingCredential = null,
+        pendingDisplayName = null,
+        pendingPhotoUrl = null;
+
+  const CompleteProfileScreen.pendingGoogleAccount({
+    super.key,
+    required this.pendingCredential,
+    this.pendingDisplayName,
+    this.pendingPhotoUrl,
+  }) : user = null;
 
   @override
   State<CompleteProfileScreen> createState() => _CompleteProfileScreenState();
@@ -350,7 +369,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _nameController.text = widget.user.displayName ?? '';
+    _nameController.text = widget.user?.displayName ?? widget.pendingDisplayName ?? '';
   }
 
   Future<String> _generateReferralCode() async {
@@ -460,6 +479,71 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       _error = '';
     });
 
+    User authUser;
+    if (widget.user != null) {
+      authUser = widget.user!;
+    } else {
+      // Only now — once name & phone are filled in — do we actually create
+      // the Firebase Auth account for this Google sign-up. This avoids
+      // leaving an authenticated user with no profile if something goes
+      // wrong (lost connection, app closed, email already registered,
+      // etc.) before this point.
+      try {
+        final userCred = await FirebaseAuth.instance
+            .signInWithCredential(widget.pendingCredential!);
+        authUser = userCred.user!;
+      } on FirebaseAuthException catch (e) {
+        String message;
+        switch (e.code) {
+          case 'account-exists-with-different-credential':
+            message =
+                'This email is already registered. Please log in with email instead.';
+            break;
+          case 'network-request-failed':
+            message = 'No internet connection.';
+            break;
+          case 'user-disabled':
+            message = 'This account has been disabled.';
+            break;
+          case 'too-many-requests':
+            message = 'Too many attempts. Please try again later.';
+            break;
+          default:
+            message = e.message ?? 'Google Sign-In failed. Please try again.';
+        }
+        if (mounted) setState(() { _error = message; _isLoading = false; });
+        return;
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _error = 'Google Sign-In failed. Please try again.';
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+
+      // This Google account may already be fully registered (e.g. the user
+      // re-triggered sign-up on an existing account) — don't overwrite
+      // their profile, just continue into the app.
+      final existingDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(authUser.uid)
+          .get();
+      final existingData = existingDoc.data();
+      if (existingDoc.exists &&
+          existingData?['phone'] != null &&
+          (existingData!['phone'] as String).isNotEmpty) {
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const DashboardScreen()),
+            (route) => false,
+          );
+        }
+        return;
+      }
+    }
+
     try {
       final userId = await generateUserId();
       final String? referrerId = referralData?['userId'] as String?;
@@ -468,14 +552,14 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       final batch = FirebaseFirestore.instance.batch();
       final newUserRef = FirebaseFirestore.instance
           .collection('users')
-          .doc(widget.user.uid);
+          .doc(authUser.uid);
 
       batch.set(newUserRef, {
         'userId'          : userId,
-        'email'           : widget.user.email ?? '',
+        'email'           : authUser.email ?? '',
         'name'            : name,
         'phone'           : fullPhone,
-        'photoUrl'        : widget.user.photoURL ?? '',
+        'photoUrl'        : authUser.photoURL ?? widget.pendingPhotoUrl ?? '',
         'balance'         : 0,
         'createdAt'       : Timestamp.now(),
         'skills'          : [],
@@ -505,10 +589,10 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
             .collection('users')
             .doc(referrerId)
             .collection('referrals_list')
-            .doc(widget.user.uid);
+            .doc(authUser.uid);
         batch.set(referralListRef, {
           'name'              : name,
-          'email'             : widget.user.email ?? '',
+          'email'             : authUser.email ?? '',
           'joined_at'         : Timestamp.now(),
           'referral_code_used': referralCode,
           'isVerified'        : 'unverified',
@@ -810,37 +894,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   static const _blue = Color(0xFF1B6CA8);
   static const _yellow = Color(0xFFF5A623);
 
-  Future<void> _handlePostSignIn(User user) async {
-    final userRef =
-        FirebaseFirestore.instance.collection('users').doc(user.uid);
-    final userDoc = await userRef.get();
-    if (!mounted) return;
-    final data = userDoc.data();
-
-    // Block access if the account has a pending deletion request.
-    // AuthGate will detect this via authStateChanges and show the deletion screen.
-    if (data?['pendingDeletion'] == true) return;
-
-    final bool needsProfile = !userDoc.exists ||
-        (data?['phone'] == null || (data?['phone'] as String).isEmpty);
-    if (needsProfile) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => CompleteProfileScreen(user: user)),
-      );
-      return;
-    }
-    if (needsNewUserId(data?['userId'] as String?)) {
-      final newId = await generateUserId();
-      await userRef.update({'userId': newId});
-    }
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const DashboardScreen()),
-      (route) => false,
-    );
-  }
-
   Future<void> signInWithGoogle() async {
     setState(() {
       isGoogleLoading = true;
@@ -864,32 +917,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
         accessToken: accessToken,
         idToken: idToken,
       );
-      final userCred =
-          await FirebaseAuth.instance.signInWithCredential(credential);
-      await _handlePostSignIn(userCred.user!);
-    } on FirebaseAuthException catch (e) {
-      String message;
-      switch (e.code) {
-        case 'account-exists-with-different-credential':
-          message =
-              'This email is already registered. Please log in with email instead.';
-          break;
-        case 'network-request-failed':
-          message = 'No internet connection.';
-          break;
-        case 'user-disabled':
-          message = 'This account has been disabled.';
-          break;
-        case 'too-many-requests':
-          message = 'Too many attempts. Please try again later.';
-          break;
-        default:
-          message = e.message ?? 'Google Sign-In failed. Please try again.';
-      }
-      if (mounted) setState(() => error = message);
+      // Don't create the Firebase Auth account yet — wait until the user
+      // finishes entering their name/phone and taps Save & Continue, so we
+      // never leave a half-registered account behind if they lose their
+      // connection or back out before finishing (e.g. email turns out to
+      // already be registered).
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CompleteProfileScreen.pendingGoogleAccount(
+            pendingCredential: credential,
+            pendingDisplayName: googleUser.displayName,
+            pendingPhotoUrl: googleUser.photoUrl,
+          ),
+        ),
+      );
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() => error = 'Google Sign-In failed. Please try again.');
+      }
     } finally {
       if (mounted) setState(() => isGoogleLoading = false);
     }

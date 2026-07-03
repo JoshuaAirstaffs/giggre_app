@@ -67,6 +67,10 @@ class _AuthGateState extends State<AuthGate> {
   // UID for which _doRestore has completed — guards against the LoginScreen
   // calling setCurrentUserInfo before _doRestore runs its pendingDeletion check.
   String? _restoredForUid;
+  // True when a Firebase Auth session exists but registration was never
+  // finished (no Firestore profile yet, or no phone on file) — e.g. the app
+  // was closed or lost connection right after Google sign-in completed.
+  bool _needsProfile = false;
   late final Stream<User?> _authStream;
 
   @override
@@ -115,6 +119,20 @@ class _AuthGateState extends State<AuthGate> {
           return;
         }
 
+        final phone = data['phone'] as String?;
+        if (phone == null || phone.isEmpty) {
+          // Account exists in Firebase Auth but registration was never
+          // finished — send them to finish their profile instead of
+          // dropping them into the app with no name/phone on file.
+          if (mounted) {
+            setState(() {
+              _needsProfile = true;
+              _restoredForUid = user.uid;
+            });
+          }
+          return;
+        }
+
         context.read<CurrentUserProvider>().setCurrentUserInfo(
           user.email,
           data['name'],
@@ -122,17 +140,19 @@ class _AuthGateState extends State<AuthGate> {
           data['userId'],
           data['isVerified'],
         );
-        if (mounted) setState(() => _restoredForUid = user.uid);
-      } else {
         if (mounted) {
-          context.read<CurrentUserProvider>().setCurrentUserInfo(
-            user.email,
-            null,
-            user.uid,
-            null,
-            null,
-          );
-          setState(() => _restoredForUid = user.uid);
+          setState(() {
+            _needsProfile = false;
+            _restoredForUid = user.uid;
+          });
+        }
+      } else {
+        // No profile at all yet — same "finish registration" case as above.
+        if (mounted) {
+          setState(() {
+            _needsProfile = true;
+            _restoredForUid = user.uid;
+          });
         }
         return;
       }
@@ -174,13 +194,14 @@ class _AuthGateState extends State<AuthGate> {
 
         // No Firebase user — signed out. Reset all gate state and go to login.
         if (!snapshot.hasData && !provider.isLoggedIn) {
-          if (_pendingDeletion || _restoredForUid != null || _restoreError) {
+          if (_pendingDeletion || _restoredForUid != null || _restoreError || _needsProfile) {
             WidgetsBinding.instance.addPostFrameCallback(
               (_) => setState(() {
                 _pendingDeletion = false;
                 _scheduledDeleteAt = null;
                 _restoredForUid = null;
                 _restoreError = false;
+                _needsProfile = false;
               }),
             );
           }
@@ -197,6 +218,12 @@ class _AuthGateState extends State<AuthGate> {
               _deletionStatus = 'pending_deletion';
             }),
           );
+        }
+
+        // Auth account exists but registration was never completed — send
+        // them to finish it instead of the Dashboard or Login screen.
+        if (_needsProfile && _restoredForUid == snapshot.data?.uid) {
+          return CompleteProfileScreen(user: snapshot.data!);
         }
 
         // Trust the provider over the stream — avoids a LoginScreen flash if

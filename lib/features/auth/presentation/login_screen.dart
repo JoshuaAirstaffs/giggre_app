@@ -148,6 +148,33 @@ class _LoginScreenState extends State<LoginScreen> {
           accessToken: accessToken,
           idToken:     idToken,
         );
+
+        // Check whether this email already has an account *before* touching
+        // Firebase Auth. If it doesn't, this is really a sign-up — send the
+        // user straight to the name/phone/referral form (no Register screen
+        // needed) without creating an Auth account until they finish it.
+        final existingQuery = await FirebaseFirestore.instance
+            .collection('users')
+            .where('email', isEqualTo: googleUser.email)
+            .limit(1)
+            .get();
+
+        if (existingQuery.docs.isEmpty) {
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CompleteProfileScreen.pendingGoogleAccount(
+                  pendingCredential: credential,
+                  pendingDisplayName: googleUser.displayName,
+                  pendingPhotoUrl: googleUser.photoUrl,
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
         userCred = await FirebaseAuth.instance.signInWithCredential(credential);
       }
       await _handlePostSignIn(userCred.user!);
