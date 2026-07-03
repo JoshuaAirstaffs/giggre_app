@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:giggre_app/core/constants/api_keys.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -943,6 +945,7 @@ class _MapPickerScreen extends StatefulWidget {
 }
 
 class _MapPickerScreenState extends State<_MapPickerScreen> {
+
   GoogleMapController? _googleMapController;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();
@@ -956,10 +959,13 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   LatLng? _myLocation;
   int _geocodeRequestId = 0;
   Timer? _debounce;
+  Timer? _searchDebounce;
   // Skips the geocode that would otherwise fire immediately after the
   // explicit initState() lookup, or after a search/recenter jump that
   // already has (or doesn't need) its own address.
   bool _suppressNextGeocode = false;
+  List<Map<String, dynamic>> _placeSuggestions = [];
+  bool _showSuggestions = false;
 
   static final _defaultCenter = LatLng(14.5995, 120.9842);
 
@@ -975,6 +981,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _debounce?.cancel();
     _googleMapController?.dispose();
     _osmController.dispose();
@@ -1027,10 +1034,20 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     final addrObj = data['address'] as Map<String, dynamic>?;
     final placeName = data['name'] as String?;
     final displayName = data['display_name'] as String?;
+    String? roadPart;
+    if (addrObj != null) {
+      final houseNumber = addrObj['house_number'] as String?;
+      final road = (addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway']) as String?;
+      if (houseNumber != null && houseNumber.isNotEmpty && road != null && road.isNotEmpty) {
+        roadPart = '$houseNumber $road';
+      } else if (road != null && road.isNotEmpty) {
+        roadPart = road;
+      }
+    }
     final parts = [
       if (placeName != null && placeName.isNotEmpty) placeName,
+      roadPart,
       if (addrObj != null) ...[
-        addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'],
         addrObj['suburb'] ?? addrObj['neighbourhood'],
         addrObj['city'] ?? addrObj['town'] ?? addrObj['village'],
         addrObj['state'],
@@ -1041,7 +1058,131 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     return '';
   }
 
+  // Returns a specificity score for a Nominatim result — higher means more
+  // specific. Used to pick the best result when multiple candidates are returned.
+  int _nominatimSpecificity(Map<String, dynamic> result) {
+    final addr = result['address'] as Map<String, dynamic>? ?? {};
+    if (addr.containsKey('house_number')) return 5;
+    final cls = result['class'] as String? ?? '';
+    if (cls == 'building') return 4;
+    if (addr.containsKey('road') || addr.containsKey('pedestrian') || addr.containsKey('footway')) return 3;
+    if (addr.containsKey('suburb') || addr.containsKey('neighbourhood')) return 2;
+    if (addr.containsKey('city') || addr.containsKey('town') || addr.containsKey('village')) return 1;
+    return 0;
+  }
+
+  Future<void> _fetchSuggestions(String input) async {
+    // if (kIsWeb) { return; } // Places API blocked by CORS on web
+    if (input.trim().length < 2) {
+      if (_showSuggestions) {
+        setState(() {
+          _placeSuggestions = [];
+          _showSuggestions = false;
+        });
+      }
+      return;
+    }
+    final bias = _myLocation ?? _picked;
+    final uri = Uri.parse(
+            'https://maps.googleapis.com/maps/api/place/autocomplete/json')
+        .replace(queryParameters: {
+      'input': input.trim(),
+      'key': kGoogleMapsApiKey,
+      'components': 'country:ph',
+      'location': '${bias.latitude},${bias.longitude}',
+      'radius': '50000',
+      'language': 'en',
+    });
+    try {
+      final res = await http.get(uri);
+      if (!mounted) return;
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final status = data['status'] as String? ?? '';
+      if (status != 'OK' && status != 'ZERO_RESULTS') {
+        // Logs the exact reason (e.g. REQUEST_DENIED, API_NOT_ACTIVATED)
+        // so you can see it in the debug console.
+        debugPrint(
+            '[Places] status=$status msg=${data['error_message'] ?? ''}');
+        return;
+      }
+      final predictions =
+          (data['predictions'] as List? ?? []).cast<Map<String, dynamic>>();
+      debugPrint('[Places] got ${predictions.length} predictions, showing=${ predictions.isNotEmpty}');
+      setState(() {
+        _placeSuggestions = predictions;
+        _showSuggestions = predictions.isNotEmpty;
+      });
+    } catch (e) {
+      debugPrint('[Places] network error: $e');
+    }
+  }
+
+  Future<void> _selectSuggestion(Map<String, dynamic> prediction) async {
+    final placeId = prediction['place_id'] as String;
+    final description = prediction['description'] as String;
+    _searchCtrl.text = description;
+    setState(() {
+      _placeSuggestions = [];
+      _showSuggestions = false;
+      _searching = true;
+      _searchError = null;
+    });
+    FocusScope.of(context).unfocus();
+    try {
+      final uri =
+          Uri.parse('https://maps.googleapis.com/maps/api/place/details/json')
+              .replace(queryParameters: {
+        'place_id': placeId,
+        'fields': 'name,formatted_address,geometry',
+        'key': kGoogleMapsApiKey,
+        'language': 'en',
+      });
+      final res = await http.get(uri);
+      if (!mounted) return;
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final result = body['result'] as Map<String, dynamic>?;
+      if (result == null) {
+        setState(() {
+          _searchError = 'Could not get location details. Try again.';
+          _searching = false;
+        });
+        return;
+      }
+      final loc = ((result['geometry'] as Map)['location']) as Map;
+      final point = LatLng(
+        (loc['lat'] as num).toDouble(),
+        (loc['lng'] as num).toDouble(),
+      );
+      final formattedAddress =
+          result['formatted_address'] as String? ?? description;
+      _suppressNextGeocode = true;
+      setState(() {
+        _picked = point;
+        _address = formattedAddress;
+        _searching = false;
+      });
+      if (_useGoogleMaps) {
+        _googleMapController
+            ?.animateCamera(CameraUpdate.newLatLngZoom(point, 16.0));
+      } else if (_osmMapReady) {
+        _osmController.move(
+            ll.LatLng(point.latitude, point.longitude), 16.0);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _searchError = 'Could not find location. Try again.';
+        _searching = false;
+      });
+    }
+  }
+
   Future<void> _searchAddress() async {
+    // Prefer an already-fetched autocomplete result over a fresh geocode.
+    if (_placeSuggestions.isNotEmpty) {
+      await _selectSuggestion(_placeSuggestions.first);
+      return;
+    }
     final query = _searchCtrl.text.trim();
     if (query.isEmpty) return;
     FocusScope.of(context).unfocus();
@@ -1054,7 +1195,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         queryParameters: {
           'q': query,
           'format': 'json',
-          'limit': '1',
+          'limit': '5',
           'addressdetails': '1',
         },
       );
@@ -1068,7 +1209,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         });
         return;
       }
-      final result = data[0] as Map<String, dynamic>;
+      // Pick the most specific result (specific address > road > neighbourhood > city).
+      final sorted = List<Map<String, dynamic>>.from(data.cast<Map<String, dynamic>>())
+        ..sort((a, b) => _nominatimSpecificity(b).compareTo(_nominatimSpecificity(a)));
+      final result = sorted.first;
       final lat = double.parse(result['lat'] as String);
       final lon = double.parse(result['lon'] as String);
       final point = LatLng(lat, lon);
@@ -1270,6 +1414,20 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                   ),
                   child: TextField(
                     controller: _searchCtrl,
+                    onChanged: (value) {
+                      _searchDebounce?.cancel();
+                      if (value.trim().isEmpty) {
+                        setState(() {
+                          _placeSuggestions = [];
+                          _showSuggestions = false;
+                        });
+                        return;
+                      }
+                      _searchDebounce = Timer(
+                        const Duration(milliseconds: 350),
+                        () => _fetchSuggestions(value),
+                      );
+                    },
                     onSubmitted: (_) => _searchAddress(),
                     style: TextStyle(color: onSurface, fontSize: 13),
                     decoration: InputDecoration(
@@ -1314,6 +1472,82 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                     child: Text(_searchError!,
                         style: const TextStyle(
                             color: Colors.redAccent, fontSize: 12)),
+                  ),
+                if (_showSuggestions && _placeSuggestions.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 4),
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: borderColor),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.08),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _placeSuggestions.length > 5
+                            ? 5
+                            : _placeSuggestions.length,
+                        separatorBuilder: (_, _) =>
+                            Divider(height: 1, color: borderColor),
+                        itemBuilder: (context, index) {
+                          final p = _placeSuggestions[index];
+                          final mainText =
+                              (p['structured_formatting'] as Map?)?['main_text']
+                                      as String? ??
+                                  p['description'] as String? ??
+                                  '';
+                          final secondaryText =
+                              (p['structured_formatting'] as Map?)?[
+                                  'secondary_text'] as String?;
+                          return InkWell(
+                            onTap: () => _selectSuggestion(p),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.location_on_outlined,
+                                      size: 18, color: kSub),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(mainText,
+                                            style: TextStyle(
+                                                color: onSurface,
+                                                fontSize: 13,
+                                                fontWeight:
+                                                    FontWeight.w500)),
+                                        if (secondaryText != null &&
+                                            secondaryText.isNotEmpty)
+                                          Text(secondaryText,
+                                              style: TextStyle(
+                                                  color:
+                                                      onSurface.withValues(
+                                                          alpha: 0.55),
+                                                  fontSize: 11)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                   ),
               ],
             ),
