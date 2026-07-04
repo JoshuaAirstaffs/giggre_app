@@ -13,6 +13,7 @@ import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:http/http.dart' as http;
 import 'package:audioplayers/audioplayers.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/gms_availability.dart';
 import '../../../core/utils/country_check.dart';
 import 'package:intl/intl.dart';
@@ -1747,6 +1748,12 @@ class _LocationModeButton extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Map Picker
 // ─────────────────────────────────────────────────────────────────────────────
+class _SavedLocation {
+  final LatLng position;
+  final String address;
+  const _SavedLocation({required this.position, required this.address});
+}
+
 class _PickedLocation {
   final LatLng position;
   final String address;
@@ -1783,6 +1790,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   bool _suppressNextGeocode = false;
   List<Map<String, dynamic>> _placeSuggestions = [];
   bool _showSuggestions = false;
+  _SavedLocation? _recentLocation;
+  _SavedLocation? _favoriteLocation;
+  bool _showQuickPicks = false;
+  final _searchFocusNode = FocusNode();
 
   static final _defaultCenter = LatLng(14.5995, 120.9842);
 
@@ -1794,6 +1805,8 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     GmsAvailability.isAvailable.then((v) {
       if (mounted) setState(() => _useGoogleMaps = v);
     });
+    _loadSavedLocations();
+    _searchFocusNode.addListener(_onSearchFocusChanged);
   }
 
   @override
@@ -1803,6 +1816,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     _googleMapController?.dispose();
     _osmController.dispose();
     _searchCtrl.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -2085,10 +2099,98 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     }
   }
 
+  // ── Saved locations ──────────────────────────────────────────────────────────
+  Future<void> _loadSavedLocations() async {
+    final prefs = await SharedPreferences.getInstance();
+    final recentLat = prefs.getDouble('map_picker_recent_lat');
+    final recentLng = prefs.getDouble('map_picker_recent_lng');
+    final recentAddr = prefs.getString('map_picker_recent_address');
+    final favLat = prefs.getDouble('map_picker_fav_lat');
+    final favLng = prefs.getDouble('map_picker_fav_lng');
+    final favAddr = prefs.getString('map_picker_fav_address');
+    if (!mounted) return;
+    setState(() {
+      if (recentLat != null && recentLng != null && recentAddr != null) {
+        _recentLocation = _SavedLocation(
+            position: LatLng(recentLat, recentLng), address: recentAddr);
+      }
+      if (favLat != null && favLng != null && favAddr != null) {
+        _favoriteLocation = _SavedLocation(
+            position: LatLng(favLat, favLng), address: favAddr);
+      }
+    });
+  }
+
+  Future<void> _saveRecentLocation() async {
+    if (_address.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('map_picker_recent_lat', _picked.latitude);
+    await prefs.setDouble('map_picker_recent_lng', _picked.longitude);
+    await prefs.setString('map_picker_recent_address', _address);
+  }
+
+  Future<void> _saveFavoriteLocation() async {
+    if (_address.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('map_picker_fav_lat', _picked.latitude);
+    await prefs.setDouble('map_picker_fav_lng', _picked.longitude);
+    await prefs.setString('map_picker_fav_address', _address);
+    if (!mounted) return;
+    setState(() => _favoriteLocation =
+        _SavedLocation(position: _picked, address: _address));
+  }
+
+  Future<void> _clearFavoriteLocation() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('map_picker_fav_lat');
+    await prefs.remove('map_picker_fav_lng');
+    await prefs.remove('map_picker_fav_address');
+    if (!mounted) return;
+    setState(() => _favoriteLocation = null);
+  }
+
+  void _onSearchFocusChanged() {
+    if (!mounted) return;
+    if (_searchFocusNode.hasFocus && _searchCtrl.text.isEmpty) {
+      setState(() => _showQuickPicks = true);
+    } else if (!_searchFocusNode.hasFocus) {
+      setState(() => _showQuickPicks = false);
+    }
+  }
+
+  void _selectQuickPick(_SavedLocation loc) {
+    _searchCtrl.clear();
+    FocusScope.of(context).unfocus();
+    _suppressNextGeocode = true;
+    setState(() {
+      _picked = loc.position;
+      _address = loc.address;
+      _showQuickPicks = false;
+      _searchError = null;
+      _placeSuggestions = [];
+      _showSuggestions = false;
+    });
+    if (_useGoogleMaps) {
+      _googleMapController
+          ?.animateCamera(CameraUpdate.newLatLngZoom(loc.position, 16.0));
+    } else if (_osmMapReady) {
+      _osmController.move(
+          ll.LatLng(loc.position.latitude, loc.position.longitude), 16.0);
+    }
+  }
+
+  bool _isFavoriteCurrentLocation() {
+    if (_favoriteLocation == null) return false;
+    const eps = 0.00001;
+    return (_favoriteLocation!.position.latitude - _picked.latitude).abs() <
+            eps &&
+        (_favoriteLocation!.position.longitude - _picked.longitude).abs() < eps;
+  }
+
   // Called continuously while the map is being dragged — the pin is fixed
   // at screen-center, so whatever's under it is always the current pick.
   void _onCameraMoved(LatLng center) {
-    setState(() => _picked = center);
+    setState(() { _picked = center; _showQuickPicks = false; });
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 600), () {
       if (_suppressNextGeocode) {
@@ -2108,6 +2210,96 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       return;
     }
     _geocodePosition(_picked);
+  }
+
+  Widget _buildQuickPicksList() {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final hasFav = _favoriteLocation != null;
+    final hasRecent = _recentLocation != null;
+
+    Widget tile({
+      required IconData icon,
+      required Color iconColor,
+      required String label,
+      required String address,
+      required VoidCallback onTap,
+    }) {
+      return InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: iconColor),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        style: TextStyle(
+                            color: onSurface.withValues(alpha: 0.55),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 0.3)),
+                    Text(address,
+                        style: TextStyle(
+                            color: onSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasFav)
+              tile(
+                icon: Icons.star_rounded,
+                iconColor: const Color(0xFFF59E0B),
+                label: 'Default Location',
+                address: _favoriteLocation!.address,
+                onTap: () => _selectQuickPick(_favoriteLocation!),
+              ),
+            if (hasFav && hasRecent) Divider(height: 1, color: borderColor),
+            if (hasRecent)
+              tile(
+                icon: Icons.history_rounded,
+                iconColor: kSub,
+                label: 'Recent',
+                address: _recentLocation!.address,
+                onTap: () => _selectQuickPick(_recentLocation!),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildOsmMap() {
@@ -2134,6 +2326,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   }
 
   void _confirm() {
+    _saveRecentLocation();
     Navigator.pop(
       context,
       _PickedLocation(
@@ -2224,15 +2417,23 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                   ),
                   child: TextField(
                     controller: _searchCtrl,
+                    focusNode: _searchFocusNode,
+                    onTap: () {
+                      if (_searchCtrl.text.isEmpty) {
+                        setState(() => _showQuickPicks = true);
+                      }
+                    },
                     onChanged: (value) {
                       _searchDebounce?.cancel();
                       if (value.trim().isEmpty) {
                         setState(() {
                           _placeSuggestions = [];
                           _showSuggestions = false;
+                          _showQuickPicks = true;
                         });
                         return;
                       }
+                      setState(() => _showQuickPicks = false);
                       _searchDebounce = Timer(
                         const Duration(milliseconds: 350),
                         () => _fetchSuggestions(value),
@@ -2268,6 +2469,9 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                     ),
                   ),
                 ),
+                if (_showQuickPicks &&
+                    (_favoriteLocation != null || _recentLocation != null))
+                  _buildQuickPicksList(),
                 if (_searchError != null)
                   Container(
                     margin: const EdgeInsets.only(top: 6),
@@ -2464,6 +2668,27 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                                   ],
                                 ),
                         ),
+                        if (!_geocoding) ...[
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () {
+                              if (_isFavoriteCurrentLocation()) {
+                                _clearFavoriteLocation();
+                              } else {
+                                _saveFavoriteLocation();
+                              }
+                            },
+                            child: Icon(
+                              _isFavoriteCurrentLocation()
+                                  ? Icons.star_rounded
+                                  : Icons.star_border_rounded,
+                              color: _isFavoriteCurrentLocation()
+                                  ? const Color(0xFFF59E0B)
+                                  : kSub,
+                              size: 24,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 16),
