@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_html/flutter_html.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
+import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:provider/provider.dart';
 
 // ── Local message model ────────────────────────────────────────────────────────
@@ -106,6 +108,7 @@ class _ChatState extends State<Chat> {
   bool _resolvedNotified = false;
   bool _isGigChat = false;
   String? _peerName;
+  String? _peerPhotoUrl;
   // True once the room doc exists in Firestore — false for lazy gig chats
   // until the first message is sent.
   bool _roomCreated = true;
@@ -127,11 +130,29 @@ class _ChatState extends State<Chat> {
       _roomCreated = false;
       _peerName = params.peerName;
       _isLoadingInitial = false;
+      _fetchPeerPhoto(params.peerUid);
     } else {
       _loadInitial();
       _listenAndMarkSeen();
     }
     _listenRoomStatus();
+  }
+
+  Future<void> _fetchPeerPhoto(String uid) async {
+    if (uid.isEmpty) return;
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      if (!mounted) return;
+      final url = doc.data()?['photoUrl'] as String?;
+      if (url != null && url.isNotEmpty) {
+        setState(() => _peerPhotoUrl = url);
+      }
+    } catch (e) {
+      debugPrint('Fetch peer photo error: $e');
+    }
   }
 
   @override
@@ -579,20 +600,30 @@ class _ChatState extends State<Chat> {
         titleSpacing: 0,
         title: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: _isGigChat
-                    ? const Color(0xFF3B82F6)
-                    : const Color(0xFFFBBF24),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                _isGigChat ? Icons.work_outline_rounded : Icons.support_agent,
-                color: Colors.white,
-                size: 20,
-              ),
-            ),
+            _isGigChat
+                ? CircleAvatar(
+                    radius: 16,
+                    backgroundColor: const Color(0xFF3B82F6).withValues(alpha: 0.15),
+                    backgroundImage: (_peerPhotoUrl != null && _peerPhotoUrl!.isNotEmpty)
+                        ? CachedNetworkImageProvider(_peerPhotoUrl!)
+                        : null,
+                    child: (_peerPhotoUrl == null || _peerPhotoUrl!.isEmpty)
+                        ? const Icon(Icons.person_rounded,
+                            color: Color(0xFF3B82F6), size: 18)
+                        : null,
+                  )
+                : Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFBBF24),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.support_agent,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
             const SizedBox(width: 10),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -618,6 +649,21 @@ class _ChatState extends State<Chat> {
             ),
           ],
         ),
+        actions: (_isGigChat && widget.gigChatParams != null)
+            ? [
+                CallUserAction(
+                  targetUserId: widget.gigChatParams!.peerUid,
+                  targetUserName: widget.gigChatParams!.peerName,
+                  callType: CallType.voice,
+                ),
+                CallUserAction(
+                  targetUserId: widget.gigChatParams!.peerUid,
+                  targetUserName: widget.gigChatParams!.peerName,
+                  callType: CallType.video,
+                ),
+                const SizedBox(width: 8),
+              ]
+            : null,
       ),
       body: Column(
         children: [
@@ -655,6 +701,7 @@ class _ChatState extends State<Chat> {
                         isDark: isDark,
                         timeStr: msg.time != null ? _formatTime(msg.time!) : '',
                         isGigChat: _isGigChat,
+                        peerPhotoUrl: _peerPhotoUrl,
                       );
                     },
                   ),
@@ -770,12 +817,14 @@ class _MessageBubble extends StatelessWidget {
     required this.isDark,
     required this.timeStr,
     required this.isGigChat,
+    this.peerPhotoUrl,
   });
 
   final _Msg msg;
   final bool isDark;
   final String timeStr;
   final bool isGigChat;
+  final String? peerPhotoUrl;
 
   bool get _isHtml => msg.text.contains('<') && msg.text.contains('>');
 
@@ -790,20 +839,30 @@ class _MessageBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!msg.isMe) ...[
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: isGigChat
-                    ? const Color(0xFF3B82F6)
-                    : const Color(0xFFFBBF24),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Icon(
-                Icons.support_agent,
-                color: Colors.white,
-                size: 14,
-              ),
-            ),
+            isGigChat
+                ? CircleAvatar(
+                    radius: 12,
+                    backgroundColor: const Color(0xFF3B82F6).withValues(alpha: 0.15),
+                    backgroundImage: (peerPhotoUrl != null && peerPhotoUrl!.isNotEmpty)
+                        ? CachedNetworkImageProvider(peerPhotoUrl!)
+                        : null,
+                    child: (peerPhotoUrl == null || peerPhotoUrl!.isEmpty)
+                        ? const Icon(Icons.person_rounded,
+                            color: Color(0xFF3B82F6), size: 14)
+                        : null,
+                  )
+                : Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFBBF24),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(
+                      Icons.support_agent,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ),
             const SizedBox(width: 6),
           ],
           Flexible(

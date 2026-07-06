@@ -23,6 +23,7 @@ class CurrentUserProvider extends ChangeNotifier {
   StreamSubscription? _chatRoomsSubscription;
   StreamSubscription? _supportRoomsSubscription;
   StreamSubscription? _applicationsNotifSub;
+  StreamSubscription? _gigOffersNotifSub;
   final Map<String, StreamSubscription> _chatMessageSubs = {};
   final Set<String> _supportRoomIds = {};
   Timestamp? _chatListenStart;
@@ -97,6 +98,17 @@ class CurrentUserProvider extends ChangeNotifier {
         playSound: false,
       ),
     );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_offers',
+        'Gig Offers',
+        description: 'Notifications when a host offers you a gig directly',
+        importance: Importance.max,
+        // Sound is played manually via gig_sound.mp3 in
+        // _showGigOfferNotification, so the channel itself stays silent.
+        playSound: false,
+      ),
+    );
 
     _notificationsInitialized = true;
   }
@@ -120,6 +132,12 @@ class CurrentUserProvider extends ChangeNotifier {
             builder: (_) => GigDetailSheet(gigId: gigId, gigType: 'open'),
           );
         });
+        return;
+      }
+
+      if (data['type'] == 'gig_offered') {
+        // Tapping just brings the app to the foreground — the gig worker
+        // screen's own Firestore listener surfaces the pending offer card.
         return;
       }
 
@@ -164,6 +182,7 @@ class CurrentUserProvider extends ChangeNotifier {
     _listenToIncomingCall(uid);
     _listenToGigChatMessages(uid);
     _listenToGigApplications(uid);
+    _listenToGigOffers(uid);
   }
 
   void clearUser() {
@@ -186,6 +205,8 @@ class CurrentUserProvider extends ChangeNotifier {
     _chatListenStart = null;
     _applicationsNotifSub?.cancel();
     _applicationsNotifSub = null;
+    _gigOffersNotifSub?.cancel();
+    _gigOffersNotifSub = null;
     _stopRingtone();
     _audioPlayer.dispose(); // ← clean up
     _appNotifPlayer.dispose();
@@ -545,6 +566,63 @@ class CurrentUserProvider extends ChangeNotifier {
           android: AndroidNotificationDetails(
             'gig_applications_v2',
             'Gig Applications',
+            importance: Importance.max,
+            priority: Priority.high,
+            playSound: false,
+          ),
+          iOS: DarwinNotificationDetails(presentAlert: true, presentSound: false),
+        ),
+        payload: payload,
+      ),
+      _appNotifPlayer.play(AssetSource('sounds/gig_sound.mp3')),
+    ]);
+  }
+
+  // ── Gig-offer listener (worker side) ──────────────────────────────────────
+
+  void _listenToGigOffers(String? uid) {
+    if (uid == null) return;
+    _gigOffersNotifSub?.cancel();
+
+    final listenStart = Timestamp.now();
+
+    _gigOffersNotifSub = FirebaseFirestore.instance
+        .collection('offered_gigs')
+        .where('workerId', isEqualTo: uid)
+        .where('status', isEqualTo: 'offered')
+        .snapshots()
+        .listen(
+          (snap) {
+            for (final change in snap.docChanges) {
+              if (change.type != DocumentChangeType.added) continue;
+              final data = change.doc.data() ?? {};
+              final createdAt = data['createdAt'];
+              if (createdAt is Timestamp && createdAt.compareTo(listenStart) <= 0) continue;
+              final hostName = data['hostName'] as String? ?? 'A host';
+              final gigTitle = data['title'] as String? ?? 'a gig';
+              _showGigOfferNotification(hostName, gigTitle, change.doc.id);
+            }
+          },
+          onError: (e) =>
+              debugPrint('[GigOfferNotif] stream error: $e'),
+        );
+  }
+
+  Future<void> _showGigOfferNotification(
+      String hostName, String gigTitle, String gigId) async {
+    final payload = jsonEncode({
+      'type': 'gig_offered',
+      'gigId': gigId,
+    });
+    await Future.wait([
+      _notifications.show(
+        ('$hostName$gigTitle').hashCode.abs() % 100000,
+        'New Gig Offer',
+        '$hostName offered you a gig — "$gigTitle"',
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'gig_offers',
+            'Gig Offers',
             importance: Importance.max,
             priority: Priority.high,
             playSound: false,

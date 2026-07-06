@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../chat/worker_message_action.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Favorite Workers sheet
@@ -307,6 +308,11 @@ class _FavoriteWorkerCard extends StatelessWidget {
                 ],
               ],
             ),
+          ),
+          const SizedBox(width: 8),
+          WorkerMessageAction(
+            workerId: worker['uid'] as String? ?? '',
+            workerName: name,
           ),
           const SizedBox(width: 8),
           GestureDetector(

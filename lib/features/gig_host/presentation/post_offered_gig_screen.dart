@@ -38,16 +38,37 @@ const _kPurple = Color(0xFF8B5CF6);
 //  Worker data model for picker
 // ─────────────────────────────────────────────────────────────────────────────
 class _WorkerEntry {
-  final String uid;       // Firebase Auth UID (Firestore doc ID)
-  final String userId;    // Custom human-readable ID e.g. "YSJ135610"
+  final String uid; // Firebase Auth UID (Firestore doc ID)
+  final String userId; // Custom human-readable ID e.g. "YSJ135610"
   final String name;
   final String email;
+  final double rating;
+  final int ratingCount;
+  final int completedGigs;
   const _WorkerEntry({
     required this.uid,
     required this.userId,
     required this.name,
     required this.email,
+    this.rating = 5.0,
+    this.ratingCount = 0,
+    this.completedGigs = 0,
   });
+}
+
+// Counts a worker's completed gigs across all gig collections.
+Future<int> _fetchCompletedGigsCount(String workerId) async {
+  final db = FirebaseFirestore.instance;
+  int count = 0;
+  for (final col in ['quick_gigs', 'open_gigs', 'offered_gigs']) {
+    final snap = await db
+        .collection(col)
+        .where('workerId', isEqualTo: workerId)
+        .where('status', isEqualTo: 'completed')
+        .get();
+    count += snap.docs.length;
+  }
+  return count;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -123,7 +144,10 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
   Future<void> _preloadWorker(String uid, String fallbackName) async {
     try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
       if (!mounted) return;
       final data = doc.data();
       setState(() {
@@ -203,19 +227,22 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
       String address = 'GPS location ready';
       try {
-        final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude)
-            .timeout(const Duration(seconds: 10));
+        final placemarks = await placemarkFromCoordinates(
+          pos.latitude,
+          pos.longitude,
+        ).timeout(const Duration(seconds: 10));
         if (placemarks.isNotEmpty) {
           final p = placemarks.first;
-          final hasName = p.name != null &&
-              p.name!.isNotEmpty &&
-              p.name != p.street;
+          final hasName =
+              p.name != null && p.name!.isNotEmpty && p.name != p.street;
           final parts = [
             if (hasName) p.name,
             if (p.street != null && p.street!.isNotEmpty) p.street,
-            if (p.subLocality != null && p.subLocality!.isNotEmpty) p.subLocality,
+            if (p.subLocality != null && p.subLocality!.isNotEmpty)
+              p.subLocality,
             if (p.locality != null && p.locality!.isNotEmpty) p.locality,
-            if (p.administrativeArea != null && p.administrativeArea!.isNotEmpty)
+            if (p.administrativeArea != null &&
+                p.administrativeArea!.isNotEmpty)
               p.administrativeArea,
           ];
           if (parts.isNotEmpty) address = parts.join(', ');
@@ -246,10 +273,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       lastDate: now.add(const Duration(days: 365)),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: Theme.of(ctx).colorScheme.copyWith(
-                primary: _kPurple,
-                onPrimary: Colors.white,
-              ),
+          colorScheme: Theme.of(
+            ctx,
+          ).colorScheme.copyWith(primary: _kPurple, onPrimary: Colors.white),
         ),
         child: child!,
       ),
@@ -263,10 +289,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       initialTime: _scheduledTime ?? TimeOfDay.now(),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: Theme.of(ctx).colorScheme.copyWith(
-                primary: _kPurple,
-                onPrimary: Colors.white,
-              ),
+          colorScheme: Theme.of(
+            ctx,
+          ).colorScheme.copyWith(primary: _kPurple, onPrimary: Colors.white),
         ),
         child: child!,
       ),
@@ -276,7 +301,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
   // ── Map location picker ───────────────────────────────────────────────────────
   Future<void> _openMapPicker() async {
-    final initial = _mapPosition ??
+    final initial =
+        _mapPosition ??
         (_gpsPosition != null
             ? LatLng(_gpsPosition!.latitude, _gpsPosition!.longitude)
             : null);
@@ -327,7 +353,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       return;
     }
 
-    final hasLocation = _useMapLocation ? _mapPosition != null : _gpsPosition != null;
+    final hasLocation = _useMapLocation
+        ? _mapPosition != null
+        : _gpsPosition != null;
     if (!hasLocation) {
       _showSnack('Location is required. Please enable GPS or select on map.');
       return;
@@ -383,7 +411,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         scheduledDate: scheduledAt,
       );
 
-      await FirebaseFirestore.instance.collection('offered_gigs').add(gig.toMap());
+      await FirebaseFirestore.instance
+          .collection('offered_gigs')
+          .add(gig.toMap());
 
       if (!mounted) return;
       setState(() => _posting = false);
@@ -422,7 +452,11 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 color: Colors.red.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.public_off_rounded, color: Colors.red, size: 40),
+              child: const Icon(
+                Icons.public_off_rounded,
+                color: Colors.red,
+                size: 40,
+              ),
             ),
             const SizedBox(height: 16),
             const Text(
@@ -442,7 +476,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 onPressed: () => Navigator.of(context).pop(),
@@ -489,19 +525,21 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      await FirebaseFirestore.instance.collection('gig_templates').add(
-        GigTemplateModel(
-          hostId: uid,
-          gigType: 'offered',
-          name: name.isNotEmpty ? name : title,
-          title: title,
-          description: _descCtrl.text.trim(),
-          budget: budgetVal,
-          skillRequired: _selectedSkill ?? '',
-          experienceLevel: _experienceLevel,
-          createdAt: DateTime.now(),
-        ).toMap(),
-      );
+      await FirebaseFirestore.instance
+          .collection('gig_templates')
+          .add(
+            GigTemplateModel(
+              hostId: uid,
+              gigType: 'offered',
+              name: name.isNotEmpty ? name : title,
+              title: title,
+              description: _descCtrl.text.trim(),
+              budget: budgetVal,
+              skillRequired: _selectedSkill ?? '',
+              experienceLevel: _experienceLevel,
+              createdAt: DateTime.now(),
+            ).toMap(),
+          );
       if (mounted) _showSnack('Template saved!');
     } catch (_) {
       if (mounted) _showSnack('Failed to save template.');
@@ -520,7 +558,11 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: kSub, size: 20),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: kSub,
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -535,9 +577,14 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
               child: const Icon(Icons.send_rounded, color: _kPurple, size: 16),
             ),
             const SizedBox(width: 10),
-            Text('Post Offered Gig',
-                style: TextStyle(
-                    color: onSurface, fontWeight: FontWeight.bold, fontSize: 16)),
+            Text(
+              'Post Offered Gig',
+              style: TextStyle(
+                color: onSurface,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
           ],
         ),
         actions: const [ThemeToggleButton()],
@@ -567,8 +614,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 _buildTextField(
                   controller: _titleCtrl,
                   hint: 'e.g. Fix the plumbing in my bathroom',
-                  validator: (v) =>
-                      v == null || v.trim().isEmpty ? 'Title is required' : null,
+                  validator: (v) => v == null || v.trim().isEmpty
+                      ? 'Title is required'
+                      : null,
                 ),
                 const SizedBox(height: 20),
 
@@ -577,7 +625,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 const SizedBox(height: 10),
                 _buildTextField(
                   controller: _descCtrl,
-                  hint: 'Describe the task, expectations, and any special notes...',
+                  hint:
+                      'Describe the task, expectations, and any special notes...',
                   maxLines: 4,
                 ),
                 const SizedBox(height: 20),
@@ -600,9 +649,13 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 _buildTextField(
                   controller: _budgetCtrl,
                   hint: '0.00',
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d+\.?\d{0,2}'),
+                    ),
                   ],
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'Enter amount';
@@ -610,35 +663,47 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                     if (n == null || n <= 0) return 'Enter a valid amount';
                     return null;
                   },
-                  prefix: const Text(r'$ ',
-                      style: TextStyle(
-                          color: _kPurple,
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold)),
+                  prefix: const Text(
+                    r'$ ',
+                    style: TextStyle(
+                      color: _kPurple,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 20),
 
                 // ── Schedule ──────────────────────────────────────
                 Row(
                   children: [
-                    Text('Schedule',
-                        style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold)),
+                    Text(
+                      'Schedule',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: kSub.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: kSub.withValues(alpha: 0.25)),
                       ),
-                      child: const Text('Optional',
-                          style: TextStyle(
-                              color: kSub,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w500)),
+                      child: const Text(
+                        'Optional',
+                        style: TextStyle(
+                          color: kSub,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -663,13 +728,17 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2.5),
+                              color: Colors.white,
+                              strokeWidth: 2.5,
+                            ),
                           )
                         : const Icon(Icons.send_rounded, size: 18),
                     label: Text(
                       _posting ? 'Sending Offer...' : 'Send Offered Gig',
                       style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold),
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _kPurple,
@@ -677,7 +746,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                       disabledBackgroundColor: _kPurple.withValues(alpha: 0.4),
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30)),
+                        borderRadius: BorderRadius.circular(30),
+                      ),
                     ),
                   ),
                 ),
@@ -689,14 +759,19 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _posting ? null : _saveAsTemplate,
                     icon: const Icon(Icons.bookmark_add_outlined, size: 18),
-                    label: const Text('Save as Template',
-                        style: TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w600)),
+                    label: const Text(
+                      'Save as Template',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: _kPurple,
                       side: BorderSide(color: _kPurple.withValues(alpha: 0.6)),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30)),
+                        borderRadius: BorderRadius.circular(30),
+                      ),
                     ),
                   ),
                 ),
@@ -755,30 +830,34 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                         Text(
                           _selectedWorker!.name,
                           style: TextStyle(
-                              color: onSurface,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600),
+                            color: onSurface,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         const SizedBox(height: 2),
                         Row(
                           children: [
-                            if (_selectedWorker!.userId.isNotEmpty) ...[
-                              Text(
-                                _selectedWorker!.userId,
-                                style: const TextStyle(
-                                    color: _kPurple,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 0.5),
-                              ),
-                              const SizedBox(width: 6),
-                              const Text('·', style: TextStyle(color: kSub, fontSize: 11)),
-                              const SizedBox(width: 6),
-                            ],
+                            // if (_selectedWorker!.userId.isNotEmpty) ...[
+                            //   Text(
+                            //     _selectedWorker!.userId,
+                            //     style: const TextStyle(
+                            //         color: _kPurple,
+                            //         fontSize: 11,
+                            //         fontWeight: FontWeight.w600,
+                            //         letterSpacing: 0.5),
+                            //   ),
+                            //   const SizedBox(width: 6),
+                            //   const Text('·', style: TextStyle(color: kSub, fontSize: 11)),
+                            //   const SizedBox(width: 6),
+                            // ],
                             Flexible(
                               child: Text(
                                 _selectedWorker!.email,
-                                style: const TextStyle(color: kSub, fontSize: 11),
+                                style: const TextStyle(
+                                  color: kSub,
+                                  fontSize: 11,
+                                ),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
@@ -792,7 +871,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                     ),
             ),
             Icon(
-              hasWorker ? Icons.swap_horiz_rounded : Icons.keyboard_arrow_down_rounded,
+              hasWorker
+                  ? Icons.swap_horiz_rounded
+                  : Icons.keyboard_arrow_down_rounded,
               color: kSub,
               size: 20,
             ),
@@ -810,12 +891,16 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       _workerSkillsXP = {};
     });
     try {
-
-      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
       if (!mounted) return;
       final raw = doc.data()?['skillsXP'] as Map<String, dynamic>? ?? {};
       setState(() {
-        _workerSkillsXP = raw.map((k, v) => MapEntry(k, (v as num?)?.toInt() ?? 0));
+        _workerSkillsXP = raw.map(
+          (k, v) => MapEntry(k, (v as num?)?.toInt() ?? 0),
+        );
         _loadingWorkerSkills = false;
       });
     } catch (_) {
@@ -832,7 +917,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
     final workerSkills = _workerSkillsXP.keys.toList()..sort();
     final noWorker = _selectedWorker == null;
-    final enabled = !noWorker && !_loadingWorkerSkills && workerSkills.isNotEmpty;
+    final enabled =
+        !noWorker && !_loadingWorkerSkills && workerSkills.isNotEmpty;
 
     String hintText;
     if (noWorker) {
@@ -862,7 +948,10 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
           value: _selectedSkill,
           isExpanded: true,
           dropdownColor: cardColor,
-          hint: Text(hintText, style: const TextStyle(color: kSub, fontSize: 14)),
+          hint: Text(
+            hintText,
+            style: const TextStyle(color: kSub, fontSize: 14),
+          ),
           icon: _loadingWorkerSkills
               ? const SizedBox(
                   width: 16,
@@ -873,12 +962,16 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
           style: TextStyle(color: onSurface, fontSize: 14),
           items: enabled
               ? workerSkills
-                  .map((skill) => DropdownMenuItem(
+                    .map(
+                      (skill) => DropdownMenuItem(
                         value: skill,
-                        child: Text(skill,
-                            style: TextStyle(color: onSurface, fontSize: 14)),
-                      ))
-                  .toList()
+                        child: Text(
+                          skill,
+                          style: TextStyle(color: onSurface, fontSize: 14),
+                        ),
+                      ),
+                    )
+                    .toList()
               : null,
           onChanged: enabled ? (v) => setState(() => _selectedSkill = v) : null,
         ),
@@ -896,10 +989,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _kPurple.withValues(alpha: 0.6),
-          width: 1.5,
-        ),
+        border: Border.all(color: _kPurple.withValues(alpha: 0.6), width: 1.5),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
@@ -916,14 +1006,19 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
               value: lvValue,
               child: Row(
                 children: [
-                  Text(lvLabel,
-                      style: TextStyle(
-                          color: onSurface,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500)),
+                  Text(
+                    lvLabel,
+                    style: TextStyle(
+                      color: onSurface,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                   const SizedBox(width: 8),
-                  Text('• $lvSub',
-                      style: const TextStyle(color: kSub, fontSize: 12)),
+                  Text(
+                    '• $lvSub',
+                    style: const TextStyle(color: kSub, fontSize: 12),
+                  ),
                 ],
               ),
             );
@@ -941,8 +1036,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final dateSet = _scheduledDate != null;
     final timeSet = _scheduledTime != null;
-    final dateLabel =
-        dateSet ? DateFormat('EEE, MMM d').format(_scheduledDate!) : 'Pick a date';
+    final dateLabel = dateSet
+        ? DateFormat('EEE, MMM d').format(_scheduledDate!)
+        : 'Pick a date';
     final timeLabel = timeSet ? _scheduledTime!.format(context) : 'Pick a time';
 
     return Row(
@@ -957,14 +1053,19 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 color: dateSet ? _kPurple.withValues(alpha: 0.08) : cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: dateSet ? _kPurple.withValues(alpha: 0.6) : borderColor,
+                  color: dateSet
+                      ? _kPurple.withValues(alpha: 0.6)
+                      : borderColor,
                   width: dateSet ? 1.5 : 1,
                 ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.calendar_today_rounded,
-                      color: dateSet ? _kPurple : kSub, size: 16),
+                  Icon(
+                    Icons.calendar_today_rounded,
+                    color: dateSet ? _kPurple : kSub,
+                    size: 16,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -972,7 +1073,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                       style: TextStyle(
                         color: dateSet ? onSurface : kSub,
                         fontSize: 13,
-                        fontWeight: dateSet ? FontWeight.w600 : FontWeight.normal,
+                        fontWeight: dateSet
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -980,7 +1083,11 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                   if (dateSet)
                     GestureDetector(
                       onTap: () => setState(() => _scheduledDate = null),
-                      child: const Icon(Icons.close_rounded, color: kSub, size: 14),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        color: kSub,
+                        size: 14,
+                      ),
                     ),
                 ],
               ),
@@ -998,14 +1105,19 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 color: timeSet ? _kPurple.withValues(alpha: 0.08) : cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: timeSet ? _kPurple.withValues(alpha: 0.6) : borderColor,
+                  color: timeSet
+                      ? _kPurple.withValues(alpha: 0.6)
+                      : borderColor,
                   width: timeSet ? 1.5 : 1,
                 ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.access_time_rounded,
-                      color: timeSet ? _kPurple : kSub, size: 16),
+                  Icon(
+                    Icons.access_time_rounded,
+                    color: timeSet ? _kPurple : kSub,
+                    size: 16,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -1013,14 +1125,20 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                       style: TextStyle(
                         color: timeSet ? onSurface : kSub,
                         fontSize: 13,
-                        fontWeight: timeSet ? FontWeight.w600 : FontWeight.normal,
+                        fontWeight: timeSet
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                     ),
                   ),
                   if (timeSet)
                     GestureDetector(
                       onTap: () => setState(() => _scheduledTime = null),
-                      child: const Icon(Icons.close_rounded, color: kSub, size: 14),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        color: kSub,
+                        size: 14,
+                      ),
                     ),
                 ],
               ),
@@ -1058,18 +1176,19 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: (_useMapLocation
-                          ? _kPurple
-                          : (hasError ? Colors.redAccent : _kPurple))
-                      .withValues(alpha: 0.12),
+                  color:
+                      (_useMapLocation
+                              ? _kPurple
+                              : (hasError ? Colors.redAccent : _kPurple))
+                          .withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
                   _useMapLocation
                       ? Icons.map_outlined
                       : (hasError
-                          ? Icons.location_off_outlined
-                          : Icons.location_on_rounded),
+                            ? Icons.location_off_outlined
+                            : Icons.location_on_rounded),
                   color: _useMapLocation
                       ? _kPurple
                       : (hasError ? Colors.redAccent : _kPurple),
@@ -1085,40 +1204,46 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                             width: 16,
                             height: 16,
                             child: CircularProgressIndicator(
-                                color: _kPurple, strokeWidth: 2),
+                              color: _kPurple,
+                              strokeWidth: 2,
+                            ),
                           ),
                           SizedBox(width: 10),
-                          Text('Detecting location...',
-                              style: TextStyle(color: kSub, fontSize: 13)),
+                          Text(
+                            'Detecting location...',
+                            style: TextStyle(color: kSub, fontSize: 13),
+                          ),
                         ],
                       )
                     : hasError
-                        ? Text(_locationError!,
-                            style: const TextStyle(
-                                color: Colors.redAccent, fontSize: 13))
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _address.isNotEmpty
-                                    ? _address
-                                    : 'Location ready',
-                                style: TextStyle(color: onSurface, fontSize: 13),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                _useMapLocation
-                                    ? 'Map-selected location'
-                                    : 'Current GPS location',
-                                style: TextStyle(
-                                  color: _useMapLocation ? _kPurple : kSub,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ],
+                    ? Text(
+                        _locationError!,
+                        style: const TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 13,
+                        ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _address.isNotEmpty ? _address : 'Location ready',
+                            style: TextStyle(color: onSurface, fontSize: 13),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _useMapLocation
+                                ? 'Map-selected location'
+                                : 'Current GPS location',
+                            style: TextStyle(
+                              color: _useMapLocation ? _kPurple : kSub,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
               ),
             ],
           ),
@@ -1182,11 +1307,17 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       style: TextStyle(color: textColor, fontSize: 14),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: TextStyle(color: textColor.withValues(alpha: 0.35), fontSize: 14),
+        hintStyle: TextStyle(
+          color: textColor.withValues(alpha: 0.35),
+          fontSize: 14,
+        ),
         prefix: prefix,
         filled: true,
         fillColor: cardColor,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 14,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: borderColor),
@@ -1253,7 +1384,8 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
     try {
       final db = FirebaseFirestore.instance;
       final hostDoc = await db.collection('users').doc(widget.hostId).get();
-      final ids = (hostDoc.data()?['favoriteWorkerIds'] as List?)
+      final ids =
+          (hostDoc.data()?['favoriteWorkerIds'] as List?)
               ?.map((e) => e.toString())
               .where((id) => id != widget.hostId)
               .toList() ??
@@ -1268,18 +1400,21 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
         ids.map((id) => db.collection('users').doc(id).get()),
       );
 
-      final workers = docs
-          .where((d) => d.exists)
-          .map((d) {
-            final data = d.data() as Map<String, dynamic>;
-            return _WorkerEntry(
-              uid: d.id,
-              userId: data['userId'] ?? '',
-              name: data['name'] ?? 'Unknown',
-              email: data['email'] ?? '',
-            );
-          })
-          .toList();
+      final workers = await Future.wait(
+        docs.where((d) => d.exists).map((d) async {
+          final data = d.data() as Map<String, dynamic>;
+          final completed = await _fetchCompletedGigsCount(d.id);
+          return _WorkerEntry(
+            uid: d.id,
+            userId: data['userId'] ?? '',
+            name: data['name'] ?? 'Unknown',
+            email: data['email'] ?? '',
+            rating: (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0,
+            ratingCount: (data['ratingCount'] as num?)?.toInt() ?? 0,
+            completedGigs: completed,
+          );
+        }),
+      );
 
       if (!mounted) return;
       setState(() {
@@ -1307,10 +1442,12 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
 
     final lower = q.toLowerCase();
     final matched = _favorites
-        .where((w) =>
-            w.name.toLowerCase().contains(lower) ||
-            w.email.toLowerCase().contains(lower) ||
-            w.userId.toLowerCase().contains(lower))
+        .where(
+          (w) =>
+              w.name.toLowerCase().contains(lower) ||
+              w.email.toLowerCase().contains(lower) ||
+              w.userId.toLowerCase().contains(lower),
+        )
         .toList();
 
     setState(() {
@@ -1342,7 +1479,10 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
     final normalised = query.trim().toUpperCase();
     final validFormat = RegExp(r'^[A-Z]{3}[0-9]{6}$').hasMatch(normalised);
     if (!validFormat) {
-      setState(() { _uidResult = null; _uidSearching = false; });
+      setState(() {
+        _uidResult = null;
+        _uidSearching = false;
+      });
       return;
     }
 
@@ -1354,27 +1494,42 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
           .get();
       if (!mounted) return;
       if (snap.docs.isEmpty) {
-        setState(() { _uidResult = null; _uidSearching = false; });
+        setState(() {
+          _uidResult = null;
+          _uidSearching = false;
+        });
         return;
       }
       final doc = snap.docs.first;
       // Block self-selection
       if (doc.id == widget.hostId) {
-        setState(() { _uidResult = null; _uidSearching = false; });
+        setState(() {
+          _uidResult = null;
+          _uidSearching = false;
+        });
         return;
       }
       final data = doc.data();
+      final completed = await _fetchCompletedGigsCount(doc.id);
+      if (!mounted) return;
       setState(() {
         _uidResult = _WorkerEntry(
           uid: doc.id,
           userId: data['userId'] ?? normalised,
           name: data['name'] ?? 'Unknown',
           email: data['email'] ?? '',
+          rating: (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0,
+          ratingCount: (data['ratingCount'] as num?)?.toInt() ?? 0,
+          completedGigs: completed,
         );
         _uidSearching = false;
       });
     } catch (_) {
-      if (mounted) setState(() { _uidResult = null; _uidSearching = false; });
+      if (mounted)
+        setState(() {
+          _uidResult = null;
+          _uidSearching = false;
+        });
     }
   }
 
@@ -1386,7 +1541,8 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
     const purple = _kPurple;
 
     final hasQuery = _searchCtrl.text.trim().isNotEmpty;
-    final showEmpty = !_loading && _filtered.isEmpty && _uidResult == null && !_uidSearching;
+    final showEmpty =
+        !_loading && _filtered.isEmpty && _uidResult == null && !_uidSearching;
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.75,
@@ -1415,11 +1571,14 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Select Gig Worker',
-                        style: TextStyle(
-                            color: onSurface,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold)),
+                    Text(
+                      'Select Gig Worker',
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     const Text(
                       'From your favorites · or search by worker ID',
@@ -1442,7 +1601,10 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
                     Text(
                       _loading ? '...' : '${_favorites.length}',
                       style: const TextStyle(
-                          color: purple, fontSize: 12, fontWeight: FontWeight.w600),
+                        color: purple,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
@@ -1456,16 +1618,27 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
             decoration: InputDecoration(
               hintText: 'Search by worker ID...',
               hintStyle: TextStyle(
-                  color: onSurface.withValues(alpha: 0.35), fontSize: 14),
+                color: onSurface.withValues(alpha: 0.35),
+                fontSize: 14,
+              ),
               filled: true,
               fillColor: Theme.of(context).scaffoldBackgroundColor,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              prefixIcon:
-                  const Icon(Icons.search_rounded, color: kSub, size: 20),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+              prefixIcon: const Icon(
+                Icons.search_rounded,
+                color: kSub,
+                size: 20,
+              ),
               suffixIcon: hasQuery
                   ? IconButton(
-                      icon: const Icon(Icons.close_rounded, color: kSub, size: 18),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: kSub,
+                        size: 18,
+                      ),
                       onPressed: () => _searchCtrl.clear(),
                     )
                   : null,
@@ -1488,107 +1661,118 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator(color: purple))
                 : showEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              hasQuery
-                                  ? Icons.person_off_outlined
-                                  : Icons.favorite_border_rounded,
-                              color: kSub.withValues(alpha: 0.5),
-                              size: 40,
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              hasQuery
-                                  ? 'No worker found'
-                                  : 'No favorite workers yet',
-                              style: const TextStyle(
-                                  color: kSub,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              hasQuery
-                                  ? 'Check the worker ID and try again'
-                                  : 'Add workers to favorites from your gig history',
-                              style: const TextStyle(color: kSub, fontSize: 12),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          hasQuery
+                              ? Icons.person_off_outlined
+                              : Icons.favorite_border_rounded,
+                          color: kSub.withValues(alpha: 0.5),
+                          size: 40,
                         ),
-                      )
-                    : ListView(
-                        children: [
-                          if (_filtered.isNotEmpty) ...[
-                            if (!hasQuery)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Text(
-                                  'Favorite Workers',
-                                  style: TextStyle(
-                                      color: onSurface,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                            ..._filtered.map((w) => _WorkerTile(
-                                  worker: w,
-                                  onTap: () => Navigator.pop(context, w),
-                                  borderColor: borderColor,
-                                  isFavorite: true,
-                                )),
-                          ],
-                          if (_uidSearching)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 16),
-                              child: Center(
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                          color: purple, strokeWidth: 2),
-                                    ),
-                                    SizedBox(width: 10),
-                                    Text('Looking up worker ID...',
-                                        style: TextStyle(
-                                            color: kSub, fontSize: 13)),
-                                  ],
-                                ),
+                        const SizedBox(height: 10),
+                        Text(
+                          hasQuery
+                              ? 'No worker found'
+                              : 'No favorite workers yet',
+                          style: const TextStyle(
+                            color: kSub,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          hasQuery
+                              ? 'Check the worker ID and try again'
+                              : 'Add workers to favorites from your gig history',
+                          style: const TextStyle(color: kSub, fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView(
+                    children: [
+                      if (_filtered.isNotEmpty) ...[
+                        if (!hasQuery)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              'Favorite Workers',
+                              style: TextStyle(
+                                color: onSurface,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          if (_uidResult != null) ...[
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8, top: 4),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.search_rounded,
-                                      color: kSub, size: 14),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Found by worker ID',
-                                    style: TextStyle(
-                                        color: onSurface,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600),
+                          ),
+                        ..._filtered.map(
+                          (w) => _WorkerTile(
+                            worker: w,
+                            onTap: () => Navigator.pop(context, w),
+                            borderColor: borderColor,
+                            isFavorite: true,
+                          ),
+                        ),
+                      ],
+                      if (_uidSearching)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          child: Center(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    color: purple,
+                                    strokeWidth: 2,
                                   ),
-                                ],
+                                ),
+                                SizedBox(width: 10),
+                                Text(
+                                  'Looking up worker ID...',
+                                  style: TextStyle(color: kSub, fontSize: 13),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (_uidResult != null) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8, top: 4),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.search_rounded,
+                                color: kSub,
+                                size: 14,
                               ),
-                            ),
-                            _WorkerTile(
-                              worker: _uidResult!,
-                              onTap: () => Navigator.pop(context, _uidResult),
-                              borderColor: borderColor,
-                              isFavorite: false,
-                            ),
-                          ],
-                        ],
-                      ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Found by worker ID',
+                                style: TextStyle(
+                                  color: onSurface,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        _WorkerTile(
+                          worker: _uidResult!,
+                          onTap: () => Navigator.pop(context, _uidResult),
+                          borderColor: borderColor,
+                          isFavorite: false,
+                        ),
+                      ],
+                    ],
+                  ),
           ),
         ],
       ),
@@ -1631,32 +1815,63 @@ class _WorkerTile extends StatelessWidget {
             ),
             child: const Icon(Icons.person_rounded, color: purple, size: 20),
           ),
-          title: Text(worker.name,
-              style: TextStyle(
-                  color: onSurface,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500)),
+          title: Text(
+            worker.name,
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (worker.userId.isNotEmpty)
-                Text(worker.userId,
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.star_rounded, color: Colors.amber, size: 12),
+                  const SizedBox(width: 2),
+                  Text(
+                    worker.rating.toStringAsFixed(1),
                     style: const TextStyle(
-                        color: _kPurple,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5)),
+                      color: kSub,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    ' (${worker.ratingCount})',
+                    style: const TextStyle(color: kSub, fontSize: 11),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    color: Color(0xFF10B981),
+                    size: 12,
+                  ),
+                  const SizedBox(width: 2),
+                  Text(
+                    '${worker.completedGigs} completed',
+                    style: const TextStyle(color: kSub, fontSize: 11),
+                  ),
+                ],
+              ),
               if (worker.email.isNotEmpty)
-                Text(worker.email,
-                    style: const TextStyle(color: kSub, fontSize: 11)),
+                Text(
+                  worker.email,
+                  style: const TextStyle(color: kSub, fontSize: 11),
+                ),
             ],
           ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (isFavorite)
-                const Icon(Icons.favorite_rounded,
-                    color: Color(0xFFEC4899), size: 14),
+                const Icon(
+                  Icons.favorite_rounded,
+                  color: Color(0xFFEC4899),
+                  size: 14,
+                ),
               const SizedBox(width: 4),
               const Icon(Icons.chevron_right_rounded, color: kSub, size: 18),
             ],
@@ -1677,11 +1892,14 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-            fontSize: 15,
-            fontWeight: FontWeight.bold));
+    return Text(
+      text,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurface,
+        fontSize: 15,
+        fontWeight: FontWeight.bold,
+      ),
+    );
   }
 }
 
@@ -1769,7 +1987,6 @@ class _MapPickerScreen extends StatefulWidget {
 }
 
 class _MapPickerScreenState extends State<_MapPickerScreen> {
-
   GoogleMapController? _googleMapController;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();
@@ -1827,7 +2044,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
           CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
         );
       } else if (_osmMapReady) {
-        _osmController.move(ll.LatLng(_myLocation!.latitude, _myLocation!.longitude), 14.0);
+        _osmController.move(
+          ll.LatLng(_myLocation!.latitude, _myLocation!.longitude),
+          14.0,
+        );
       }
       return;
     }
@@ -1839,7 +2059,8 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) return;
+          perm == LocationPermission.deniedForever)
+        return;
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -1853,7 +2074,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
           CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
         );
       } else if (_osmMapReady) {
-        _osmController.move(ll.LatLng(_myLocation!.latitude, _myLocation!.longitude), 14.0);
+        _osmController.move(
+          ll.LatLng(_myLocation!.latitude, _myLocation!.longitude),
+          14.0,
+        );
       }
     } catch (_) {}
   }
@@ -1868,8 +2092,13 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     String? roadPart;
     if (addrObj != null) {
       final houseNumber = addrObj['house_number'] as String?;
-      final road = (addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway']) as String?;
-      if (houseNumber != null && houseNumber.isNotEmpty && road != null && road.isNotEmpty) {
+      final road =
+          (addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'])
+              as String?;
+      if (houseNumber != null &&
+          houseNumber.isNotEmpty &&
+          road != null &&
+          road.isNotEmpty) {
         roadPart = '$houseNumber $road';
       } else if (road != null && road.isNotEmpty) {
         roadPart = road;
@@ -1896,9 +2125,16 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     if (addr.containsKey('house_number')) return 5;
     final cls = result['class'] as String? ?? '';
     if (cls == 'building') return 4;
-    if (addr.containsKey('road') || addr.containsKey('pedestrian') || addr.containsKey('footway')) return 3;
-    if (addr.containsKey('suburb') || addr.containsKey('neighbourhood')) return 2;
-    if (addr.containsKey('city') || addr.containsKey('town') || addr.containsKey('village')) return 1;
+    if (addr.containsKey('road') ||
+        addr.containsKey('pedestrian') ||
+        addr.containsKey('footway'))
+      return 3;
+    if (addr.containsKey('suburb') || addr.containsKey('neighbourhood'))
+      return 2;
+    if (addr.containsKey('city') ||
+        addr.containsKey('town') ||
+        addr.containsKey('village'))
+      return 1;
     return 0;
   }
 
@@ -1914,16 +2150,19 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       return;
     }
     final bias = _myLocation ?? _picked;
-    final uri = Uri.parse(
-            'https://maps.googleapis.com/maps/api/place/autocomplete/json')
-        .replace(queryParameters: {
-      'input': input.trim(),
-      'key': kGoogleMapsApiKey,
-      'components': 'country:ph',
-      'location': '${bias.latitude},${bias.longitude}',
-      'radius': '50000',
-      'language': 'en',
-    });
+    final uri =
+        Uri.parse(
+          'https://maps.googleapis.com/maps/api/place/autocomplete/json',
+        ).replace(
+          queryParameters: {
+            'input': input.trim(),
+            'key': kGoogleMapsApiKey,
+            'components': 'country:ph',
+            'location': '${bias.latitude},${bias.longitude}',
+            'radius': '50000',
+            'language': 'en',
+          },
+        );
     try {
       final res = await http.get(uri);
       if (!mounted) return;
@@ -1931,11 +2170,12 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       final status = data['status'] as String? ?? '';
       if (status != 'OK' && status != 'ZERO_RESULTS') {
         debugPrint(
-            '[Places] status=$status msg=${data['error_message'] ?? ''}');
+          '[Places] status=$status msg=${data['error_message'] ?? ''}',
+        );
         return;
       }
-      final predictions =
-          (data['predictions'] as List? ?? []).cast<Map<String, dynamic>>();
+      final predictions = (data['predictions'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
       setState(() {
         _placeSuggestions = predictions;
         _showSuggestions = predictions.isNotEmpty;
@@ -1958,13 +2198,16 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     FocusScope.of(context).unfocus();
     try {
       final uri =
-          Uri.parse('https://maps.googleapis.com/maps/api/place/details/json')
-              .replace(queryParameters: {
-        'place_id': placeId,
-        'fields': 'name,formatted_address,geometry',
-        'key': kGoogleMapsApiKey,
-        'language': 'en',
-      });
+          Uri.parse(
+            'https://maps.googleapis.com/maps/api/place/details/json',
+          ).replace(
+            queryParameters: {
+              'place_id': placeId,
+              'fields': 'name,formatted_address,geometry',
+              'key': kGoogleMapsApiKey,
+              'language': 'en',
+            },
+          );
       final res = await http.get(uri);
       if (!mounted) return;
       final body = jsonDecode(res.body) as Map<String, dynamic>;
@@ -1990,11 +2233,11 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         _searching = false;
       });
       if (_useGoogleMaps) {
-        _googleMapController
-            ?.animateCamera(CameraUpdate.newLatLngZoom(point, 16.0));
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(point, 16.0),
+        );
       } else if (_osmMapReady) {
-        _osmController.move(
-            ll.LatLng(point.latitude, point.longitude), 16.0);
+        _osmController.move(ll.LatLng(point.latitude, point.longitude), 16.0);
       }
     } catch (_) {
       if (!mounted) return;
@@ -2019,15 +2262,19 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       _searchError = null;
     });
     try {
-      final uri = Uri.parse('https://nominatim.openstreetmap.org/search').replace(
-        queryParameters: {
-          'q': query,
-          'format': 'json',
-          'limit': '5',
-          'addressdetails': '1',
-        },
+      final uri = Uri.parse('https://nominatim.openstreetmap.org/search')
+          .replace(
+            queryParameters: {
+              'q': query,
+              'format': 'json',
+              'limit': '5',
+              'addressdetails': '1',
+            },
+          );
+      final res = await http.get(
+        uri,
+        headers: {'User-Agent': 'giggre_app/1.0'},
       );
-      final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
       if (!mounted) return;
       final data = jsonDecode(res.body) as List;
       if (data.isEmpty) {
@@ -2038,8 +2285,12 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         return;
       }
       // Pick the most specific result (specific address > road > neighbourhood > city).
-      final sorted = List<Map<String, dynamic>>.from(data.cast<Map<String, dynamic>>())
-        ..sort((a, b) => _nominatimSpecificity(b).compareTo(_nominatimSpecificity(a)));
+      final sorted =
+          List<Map<String, dynamic>>.from(data.cast<Map<String, dynamic>>())
+            ..sort(
+              (a, b) =>
+                  _nominatimSpecificity(b).compareTo(_nominatimSpecificity(a)),
+            );
       final result = sorted.first;
       final lat = double.parse(result['lat'] as String);
       final lon = double.parse(result['lon'] as String);
@@ -2055,7 +2306,9 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         _searching = false;
       });
       if (_useGoogleMaps) {
-        _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(point, 16.0));
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(point, 16.0),
+        );
       } else if (_osmMapReady) {
         _osmController.move(ll.LatLng(point.latitude, point.longitude), 16.0);
       }
@@ -2077,7 +2330,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         'https://nominatim.openstreetmap.org/reverse'
         '?lat=${pos.latitude}&lon=${pos.longitude}&format=json&zoom=18&addressdetails=1',
       );
-      final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
+      final res = await http.get(
+        uri,
+        headers: {'User-Agent': 'giggre_app/1.0'},
+      );
       if (!mounted || requestId != _geocodeRequestId) return;
       String address = 'Selected location';
       if (res.statusCode == 200) {
@@ -2112,11 +2368,15 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     setState(() {
       if (recentLat != null && recentLng != null && recentAddr != null) {
         _recentLocation = _SavedLocation(
-            position: LatLng(recentLat, recentLng), address: recentAddr);
+          position: LatLng(recentLat, recentLng),
+          address: recentAddr,
+        );
       }
       if (favLat != null && favLng != null && favAddr != null) {
         _favoriteLocation = _SavedLocation(
-            position: LatLng(favLat, favLng), address: favAddr);
+          position: LatLng(favLat, favLng),
+          address: favAddr,
+        );
       }
     });
   }
@@ -2136,8 +2396,12 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     await prefs.setDouble('map_picker_fav_lng', _picked.longitude);
     await prefs.setString('map_picker_fav_address', _address);
     if (!mounted) return;
-    setState(() => _favoriteLocation =
-        _SavedLocation(position: _picked, address: _address));
+    setState(
+      () => _favoriteLocation = _SavedLocation(
+        position: _picked,
+        address: _address,
+      ),
+    );
   }
 
   Future<void> _clearFavoriteLocation() async {
@@ -2171,11 +2435,14 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       _showSuggestions = false;
     });
     if (_useGoogleMaps) {
-      _googleMapController
-          ?.animateCamera(CameraUpdate.newLatLngZoom(loc.position, 16.0));
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(loc.position, 16.0),
+      );
     } else if (_osmMapReady) {
       _osmController.move(
-          ll.LatLng(loc.position.latitude, loc.position.longitude), 16.0);
+        ll.LatLng(loc.position.latitude, loc.position.longitude),
+        16.0,
+      );
     }
   }
 
@@ -2190,7 +2457,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   // Called continuously while the map is being dragged — the pin is fixed
   // at screen-center, so whatever's under it is always the current pick.
   void _onCameraMoved(LatLng center) {
-    setState(() { _picked = center; _showQuickPicks = false; });
+    setState(() {
+      _picked = center;
+      _showQuickPicks = false;
+    });
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 600), () {
       if (_suppressNextGeocode) {
@@ -2238,19 +2508,25 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(label,
-                        style: TextStyle(
-                            color: onSurface.withValues(alpha: 0.55),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                            letterSpacing: 0.3)),
-                    Text(address,
-                        style: TextStyle(
-                            color: onSurface,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: onSurface.withValues(alpha: 0.55),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    Text(
+                      address,
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
@@ -2313,7 +2589,9 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         },
         onPositionChanged: (camera, hasGesture) {
           if (!hasGesture) return;
-          _onCameraMoved(LatLng(camera.center.latitude, camera.center.longitude));
+          _onCameraMoved(
+            LatLng(camera.center.latitude, camera.center.longitude),
+          );
         },
       ),
       children: [
@@ -2350,19 +2628,29 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: kSub, size: 20),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: kSub,
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Select Location',
-            style: TextStyle(
-                color: onSurface, fontWeight: FontWeight.bold, fontSize: 16)),
+        title: Text(
+          'Select Location',
+          style: TextStyle(
+            color: onSurface,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
         actions: const [ThemeToggleButton()],
       ),
       body: Stack(
         children: [
           _useGoogleMaps
               ? GoogleMap(
-                  onMapCreated: (controller) => _googleMapController = controller,
+                  onMapCreated: (controller) =>
+                      _googleMapController = controller,
                   initialCameraPosition: CameraPosition(
                     target: _picked,
                     zoom: 16.0,
@@ -2388,7 +2676,11 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                   color: Colors.red,
                   size: 44,
                   shadows: [
-                    Shadow(color: Colors.black45, blurRadius: 6, offset: Offset(0, 2)),
+                    Shadow(
+                      color: Colors.black45,
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
+                    ),
                   ],
                 ),
               ),
@@ -2444,10 +2736,14 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                     decoration: InputDecoration(
                       hintText: 'Search address or place...',
                       hintStyle: TextStyle(
-                          color: onSurface.withValues(alpha: 0.4),
-                          fontSize: 13),
-                      prefixIcon: const Icon(Icons.search_rounded,
-                          color: kSub, size: 20),
+                        color: onSurface.withValues(alpha: 0.4),
+                        fontSize: 13,
+                      ),
+                      prefixIcon: const Icon(
+                        Icons.search_rounded,
+                        color: kSub,
+                        size: 20,
+                      ),
                       suffixIcon: _searching
                           ? const Padding(
                               padding: EdgeInsets.all(12),
@@ -2455,17 +2751,24 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                                 width: 16,
                                 height: 16,
                                 child: CircularProgressIndicator(
-                                    color: purple, strokeWidth: 2),
+                                  color: purple,
+                                  strokeWidth: 2,
+                                ),
                               ),
                             )
                           : IconButton(
-                              icon: const Icon(Icons.arrow_forward_rounded,
-                                  color: purple, size: 20),
+                              icon: const Icon(
+                                Icons.arrow_forward_rounded,
+                                color: purple,
+                                size: 20,
+                              ),
                               onPressed: _searchAddress,
                             ),
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 14),
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
                     ),
                   ),
                 ),
@@ -2476,16 +2779,23 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                   Container(
                     margin: const EdgeInsets.only(top: 6),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: cardColor,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                          color: Colors.redAccent.withValues(alpha: 0.4)),
+                        color: Colors.redAccent.withValues(alpha: 0.4),
+                      ),
                     ),
-                    child: Text(_searchError!,
-                        style: const TextStyle(
-                            color: Colors.redAccent, fontSize: 12)),
+                    child: Text(
+                      _searchError!,
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 if (_showSuggestions && _placeSuggestions.isNotEmpty)
                   Container(
@@ -2517,41 +2827,52 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                           final p = _placeSuggestions[index];
                           final mainText =
                               (p['structured_formatting'] as Map?)?['main_text']
-                                      as String? ??
-                                  p['description'] as String? ??
-                                  '';
+                                  as String? ??
+                              p['description'] as String? ??
+                              '';
                           final secondaryText =
-                              (p['structured_formatting'] as Map?)?[
-                                  'secondary_text'] as String?;
+                              (p['structured_formatting']
+                                      as Map?)?['secondary_text']
+                                  as String?;
                           return InkWell(
                             onTap: () => _selectSuggestion(p),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 10),
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.location_on_outlined,
-                                      size: 18, color: kSub),
+                                  const Icon(
+                                    Icons.location_on_outlined,
+                                    size: 18,
+                                    color: kSub,
+                                  ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Text(mainText,
-                                            style: TextStyle(
-                                                color: onSurface,
-                                                fontSize: 13,
-                                                fontWeight:
-                                                    FontWeight.w500)),
+                                        Text(
+                                          mainText,
+                                          style: TextStyle(
+                                            color: onSurface,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
                                         if (secondaryText != null &&
                                             secondaryText.isNotEmpty)
-                                          Text(secondaryText,
-                                              style: TextStyle(
-                                                  color:
-                                                      onSurface.withValues(
-                                                          alpha: 0.55),
-                                                  fontSize: 11)),
+                                          Text(
+                                            secondaryText,
+                                            style: TextStyle(
+                                              color: onSurface.withValues(
+                                                alpha: 0.55,
+                                              ),
+                                              fontSize: 11,
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ),
@@ -2590,131 +2911,145 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                 child: Icon(
                   Icons.my_location_rounded,
                   size: 18,
-                  color: _myLocation != null
-                      ? const Color(0xFF8B5CF6)
-                      : kSub,
+                  color: _myLocation != null ? const Color(0xFF8B5CF6) : kSub,
                 ),
               ),
             ),
           ),
           Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
-                decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(24)),
-                  border: Border(top: BorderSide(color: borderColor)),
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: purple.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(Icons.location_on_rounded,
-                              color: purple, size: 20),
+                border: Border(top: BorderSide(color: borderColor)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: purple.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _geocoding
-                              ? const Row(
-                                  children: [
-                                    SizedBox(
-                                      width: 14,
-                                      height: 14,
-                                      child: CircularProgressIndicator(
-                                          color: purple, strokeWidth: 2),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text('Getting address...',
-                                        style: TextStyle(
-                                            color: kSub, fontSize: 13)),
-                                  ],
-                                )
-                              : Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      _address.isNotEmpty
-                                          ? _address
-                                          : 'Location selected',
-                                      style: TextStyle(
-                                          color: onSurface,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 2),
-                                    const Text('Drag the map to fine-tune the pin',
-                                        style: TextStyle(
-                                            color: kSub, fontSize: 11)),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Lat: ${_picked.latitude.toStringAsFixed(6)}  Lng: ${_picked.longitude.toStringAsFixed(6)}',
-                                      style: const TextStyle(
-                                          color: kSub, fontSize: 10),
-                                    ),
-                                  ],
-                                ),
+                        child: const Icon(
+                          Icons.location_on_rounded,
+                          color: purple,
+                          size: 20,
                         ),
-                        if (!_geocoding) ...[
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () {
-                              if (_isFavoriteCurrentLocation()) {
-                                _clearFavoriteLocation();
-                              } else {
-                                _saveFavoriteLocation();
-                              }
-                            },
-                            child: Icon(
-                              _isFavoriteCurrentLocation()
-                                  ? Icons.star_rounded
-                                  : Icons.star_border_rounded,
-                              color: _isFavoriteCurrentLocation()
-                                  ? const Color(0xFFF59E0B)
-                                  : kSub,
-                              size: 24,
-                            ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _geocoding
+                            ? const Row(
+                                children: [
+                                  SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      color: purple,
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Getting address...',
+                                    style: TextStyle(color: kSub, fontSize: 13),
+                                  ),
+                                ],
+                              )
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _address.isNotEmpty
+                                        ? _address
+                                        : 'Location selected',
+                                    style: TextStyle(
+                                      color: onSurface,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  const Text(
+                                    'Drag the map to fine-tune the pin',
+                                    style: TextStyle(color: kSub, fontSize: 11),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Lat: ${_picked.latitude.toStringAsFixed(6)}  Lng: ${_picked.longitude.toStringAsFixed(6)}',
+                                    style: const TextStyle(
+                                      color: kSub,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                      if (!_geocoding) ...[
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () {
+                            if (_isFavoriteCurrentLocation()) {
+                              _clearFavoriteLocation();
+                            } else {
+                              _saveFavoriteLocation();
+                            }
+                          },
+                          child: Icon(
+                            _isFavoriteCurrentLocation()
+                                ? Icons.star_rounded
+                                : Icons.star_border_rounded,
+                            color: _isFavoriteCurrentLocation()
+                                ? const Color(0xFFF59E0B)
+                                : kSub,
+                            size: 24,
                           ),
-                        ],
+                        ),
                       ],
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton.icon(
-                        onPressed: _geocoding ? null : _confirm,
-                        icon: const Icon(Icons.check_rounded, size: 18),
-                        label: const Text('Confirm Location',
-                            style: TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: purple,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: purple.withValues(alpha: 0.4),
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      onPressed: _geocoding ? null : _confirm,
+                      icon: const Icon(Icons.check_rounded, size: 18),
+                      label: const Text(
+                        'Confirm Location',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: purple,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: purple.withValues(alpha: 0.4),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
+          ),
         ],
       ),
     );
@@ -2746,17 +3081,22 @@ class _SuccessSheet extends StatelessWidget {
             decoration: BoxDecoration(
               color: _kPurple.withValues(alpha: 0.15),
               shape: BoxShape.circle,
-              border: Border.all(color: _kPurple.withValues(alpha: 0.5), width: 2),
+              border: Border.all(
+                color: _kPurple.withValues(alpha: 0.5),
+                width: 2,
+              ),
             ),
-            child:
-                const Icon(Icons.send_rounded, color: _kPurple, size: 38),
+            child: const Icon(Icons.send_rounded, color: _kPurple, size: 38),
           ),
           const SizedBox(height: 20),
-          Text('Offered Gig Sent!',
-              style: TextStyle(
-                  color: onSurface,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold)),
+          Text(
+            'Offered Gig Sent!',
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 8),
           const Text(
             'Your offer has been sent to the worker.\nThey will be notified shortly.',
@@ -2774,10 +3114,13 @@ class _SuccessSheet extends StatelessWidget {
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
+                  borderRadius: BorderRadius.circular(30),
+                ),
               ),
-              child: const Text('View My Gigs',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              child: const Text(
+                'View My Gigs',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
             ),
           ),
           const SizedBox(height: 8),

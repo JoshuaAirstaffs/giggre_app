@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -961,6 +962,30 @@ class _ChatHomeItem extends StatefulWidget {
 }
 
 class _ChatHomeItemState extends State<_ChatHomeItem> {
+  String? _peerPhotoUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isGigChat && widget.peerUid.isNotEmpty) {
+      _fetchPeerPhoto();
+    }
+  }
+
+  Future<void> _fetchPeerPhoto() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.peerUid)
+          .get();
+      if (!mounted) return;
+      final url = doc.data()?['photoUrl'] as String?;
+      if (url != null && url.isNotEmpty) {
+        setState(() => _peerPhotoUrl = url);
+      }
+    } catch (_) {}
+  }
+
   late final Stream<bool> _unreadStream = widget.isGigChat
       ? FirebaseFirestore.instance
           .collection('chat_rooms')
@@ -1085,21 +1110,32 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
               padding: const EdgeInsets.all(14.0),
               child: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: widget.isGigChat
-                          ? const Color(0xFF3B82F6)
-                          : _statusColor,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      widget.isGigChat
-                          ? Icons.work_outline_rounded
-                          : Icons.support_agent,
-                      color: Colors.white,
-                    ),
-                  ),
+                  widget.isGigChat
+                      ? CircleAvatar(
+                          radius: 20,
+                          backgroundColor:
+                              const Color(0xFF3B82F6).withValues(alpha: 0.15),
+                          backgroundImage: (_peerPhotoUrl != null &&
+                                  _peerPhotoUrl!.isNotEmpty)
+                              ? CachedNetworkImageProvider(_peerPhotoUrl!)
+                              : null,
+                          child: (_peerPhotoUrl == null ||
+                                  _peerPhotoUrl!.isEmpty)
+                              ? const Icon(Icons.person_rounded,
+                                  color: Color(0xFF3B82F6))
+                              : null,
+                        )
+                      : Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: _statusColor,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.support_agent,
+                            color: Colors.white,
+                          ),
+                        ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
