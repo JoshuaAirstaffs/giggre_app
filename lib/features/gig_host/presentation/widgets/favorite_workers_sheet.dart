@@ -28,7 +28,8 @@ class _FavoriteWorkersSheetState extends State<FavoriteWorkersSheet> {
   Future<void> _load() async {
     final db = FirebaseFirestore.instance;
     final hostDoc = await db.collection('users').doc(widget.hostId).get();
-    final ids = (hostDoc.data()?['favoriteWorkerIds'] as List?)
+    final ids =
+        (hostDoc.data()?['favoriteWorkerIds'] as List?)
             ?.map((e) => e.toString())
             .toList() ??
         [];
@@ -61,13 +62,12 @@ class _FavoriteWorkersSheetState extends State<FavoriteWorkersSheet> {
 
   Future<void> _unfavorite(String workerId) async {
     setState(() => _workers.removeWhere((w) => w['uid'] == workerId));
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(widget.hostId)
-        .set(
-          {'favoriteWorkerIds': FieldValue.arrayRemove([workerId])},
-          SetOptions(merge: true),
-        );
+    await FirebaseFirestore.instance.collection('users').doc(widget.hostId).set(
+      {
+        'favoriteWorkerIds': FieldValue.arrayRemove([workerId]),
+      },
+      SetOptions(merge: true),
+    );
   }
 
   @override
@@ -111,18 +111,24 @@ class _FavoriteWorkersSheetState extends State<FavoriteWorkersSheet> {
                       color: pink.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.favorite_rounded,
-                        color: pink, size: 18),
+                    child: const Icon(
+                      Icons.favorite_rounded,
+                      color: pink,
+                      size: 18,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Favorite Workers',
-                          style: TextStyle(
-                              color: onSurface,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold)),
+                      Text(
+                        'Favorite Workers',
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       Text(
                         _loading ? '...' : '${_workers.length} saved',
                         style: const TextStyle(color: kSub, fontSize: 12),
@@ -135,8 +141,7 @@ class _FavoriteWorkersSheetState extends State<FavoriteWorkersSheet> {
             const Divider(height: 1, color: kBorder),
             if (_loading)
               const Expanded(
-                child: Center(
-                    child: CircularProgressIndicator(color: kAmber)),
+                child: Center(child: CircularProgressIndicator(color: kAmber)),
               )
             else if (_workers.isEmpty)
               Expanded(
@@ -144,11 +149,16 @@ class _FavoriteWorkersSheetState extends State<FavoriteWorkersSheet> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.favorite_border_rounded,
-                          color: kSub.withValues(alpha: 0.35), size: 52),
+                      Icon(
+                        Icons.favorite_border_rounded,
+                        color: kSub.withValues(alpha: 0.35),
+                        size: 52,
+                      ),
                       const SizedBox(height: 12),
-                      const Text('No favorite workers yet',
-                          style: TextStyle(color: kSub, fontSize: 14)),
+                      const Text(
+                        'No favorite workers yet',
+                        style: TextStyle(color: kSub, fontSize: 14),
+                      ),
                       const SizedBox(height: 6),
                       const Text(
                         'Tap the heart icon on a worker\nin your Gig History to save them here.',
@@ -202,10 +212,8 @@ class _FavoriteWorkerCard extends StatelessWidget {
     final photoUrl = worker['photoUrl'] as String? ?? '';
     final rating = (worker['ratingAsWorker'] as num? ?? 5.0).toDouble();
     final ratingCount = (worker['ratingCount'] as num? ?? 0).toInt();
-    final skills = (worker['skills'] as List?)
-            ?.map((e) => e.toString())
-            .toList() ??
-        [];
+    final skills =
+        (worker['skills'] as List?)?.map((e) => e.toString()).toList() ?? [];
     final isOnline = worker['isOnline'] as bool? ?? false;
     const pink = Color(0xFFEC4899);
 
@@ -217,7 +225,8 @@ class _FavoriteWorkerCard extends StatelessWidget {
             : Colors.grey.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-            color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.18)),
+          color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.18),
+        ),
       ),
       child: Row(
         children: [
@@ -235,10 +244,9 @@ class _FavoriteWorkerCard extends StatelessWidget {
                       color: const Color(0xFF22C55E),
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: isDark
-                              ? const Color(0xFF1A1A2E)
-                              : Colors.white,
-                          width: 2),
+                        color: isDark ? const Color(0xFF1A1A2E) : Colors.white,
+                        width: 2,
+                      ),
                     ),
                   ),
                 ),
@@ -249,40 +257,46 @@ class _FavoriteWorkerCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name,
-                    style: TextStyle(
-                        color: onSurface,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
+                Text(
+                  name,
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 const SizedBox(height: 3),
                 Row(
                   children: [
                     ...List.generate(5, (i) {
                       final full = i < rating.floor();
-                      final half =
-                          !full && i < rating && rating - i >= 0.5;
+                      final half = !full && i < rating && rating - i >= 0.5;
                       return Icon(
                         full
                             ? Icons.star_rounded
                             : half
-                                ? Icons.star_half_rounded
-                                : Icons.star_outline_rounded,
+                            ? Icons.star_half_rounded
+                            : Icons.star_outline_rounded,
                         color: kAmber,
                         size: 12,
                       );
                     }),
                     const SizedBox(width: 4),
-                    Text(rating.toStringAsFixed(1),
-                        style: TextStyle(
-                            color: onSurface,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600)),
+                    Text(
+                      rating.toStringAsFixed(1),
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(width: 3),
-                    Text('($ratingCount)',
-                        style:
-                            const TextStyle(color: kSub, fontSize: 10)),
+                    Text(
+                      '($ratingCount)',
+                      style: const TextStyle(color: kSub, fontSize: 10),
+                    ),
                   ],
                 ),
                 if (skills.isNotEmpty) ...[
@@ -292,17 +306,25 @@ class _FavoriteWorkerCard extends StatelessWidget {
                     runSpacing: 4,
                     children: skills
                         .take(3)
-                        .map((s) => Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 7, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: kBlue.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(20),
+                        .map(
+                          (s) => Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: kBlue.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              s,
+                              style: const TextStyle(
+                                color: kBlue,
+                                fontSize: 10,
                               ),
-                              child: Text(s,
-                                  style: const TextStyle(
-                                      color: kBlue, fontSize: 10)),
-                            ))
+                            ),
+                          ),
+                        )
                         .toList(),
                   ),
                 ],
@@ -324,8 +346,7 @@ class _FavoriteWorkerCard extends StatelessWidget {
                 color: pink.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.favorite_rounded,
-                  color: pink, size: 18),
+              child: const Icon(Icons.favorite_rounded, color: pink, size: 18),
             ),
           ),
         ],
@@ -374,8 +395,11 @@ class _DefaultAvatar extends StatelessWidget {
         shape: BoxShape.circle,
         border: Border.all(color: kAmber.withValues(alpha: 0.4), width: 2),
       ),
-      child: Icon(Icons.account_circle_rounded,
-          color: kAmber, size: size * 0.6),
+      child: Icon(
+        Icons.account_circle_rounded,
+        color: kAmber,
+        size: size * 0.6,
+      ),
     );
   }
 }

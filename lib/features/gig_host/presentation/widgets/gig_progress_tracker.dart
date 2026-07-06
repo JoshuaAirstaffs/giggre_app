@@ -61,10 +61,13 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
         .where('status', whereIn: _activeStatuses)
         .snapshots()
         .listen((snap) {
-      if (!mounted) return;
-      setState(() => _quickDocs =
-          snap.docs.map((d) => (doc: d, collection: 'quick_gigs')).toList());
-    }, onError: (e) => debugPrint('[GigProgressTracker] quick stream: $e'));
+          if (!mounted) return;
+          setState(
+            () => _quickDocs = snap.docs
+                .map((d) => (doc: d, collection: 'quick_gigs'))
+                .toList(),
+          );
+        }, onError: (e) => debugPrint('[GigProgressTracker] quick stream: $e'));
 
     _openSub = FirebaseFirestore.instance
         .collection('open_gigs')
@@ -72,24 +75,38 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
         .where('status', whereIn: _activeStatuses)
         .snapshots()
         .listen((snap) {
-      if (!mounted) return;
-      setState(() => _openDocs =
-          snap.docs.map((d) => (doc: d, collection: 'open_gigs')).toList());
-    }, onError: (e) => debugPrint('[GigProgressTracker] open stream: $e'));
+          if (!mounted) return;
+          setState(
+            () => _openDocs = snap.docs
+                .map((d) => (doc: d, collection: 'open_gigs'))
+                .toList(),
+          );
+        }, onError: (e) => debugPrint('[GigProgressTracker] open stream: $e'));
 
     _offeredSub = FirebaseFirestore.instance
         .collection('offered_gigs')
         .where('hostId', isEqualTo: widget.hostId)
         .where('status', whereIn: _activeStatuses)
         .snapshots()
-        .listen((snap) {
-      if (!mounted) return;
-      setState(() => _offeredDocs =
-          snap.docs.map((d) => (doc: d, collection: 'offered_gigs')).toList());
-    }, onError: (e) => debugPrint('[GigProgressTracker] offered stream: $e'));
+        .listen(
+          (snap) {
+            if (!mounted) return;
+            setState(
+              () => _offeredDocs = snap.docs
+                  .map((d) => (doc: d, collection: 'offered_gigs'))
+                  .toList(),
+            );
+          },
+          onError: (e) => debugPrint('[GigProgressTracker] offered stream: $e'),
+        );
   }
 
-  Future<void> _showWorkerRating(String workerId, String workerName) async {
+  Future<void> _showWorkerRating(
+    String workerId,
+    String workerName,
+    String gigId,
+    String gigCollection,
+  ) async {
     if (!mounted) return;
     await showDialog(
       context: context,
@@ -97,6 +114,8 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
       builder: (_) => _WorkerRatingDialog(
         workerId: workerId,
         workerName: workerName,
+        gigId: gigId,
+        gigCollection: gigCollection,
       ),
     );
   }
@@ -133,8 +152,7 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
             ),
             const Spacer(),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: kAmber.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
@@ -152,11 +170,13 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
           ],
         ),
         const SizedBox(height: 12),
-        ...allDocs.map((item) => _GigProgressCard(
-              doc: item.doc,
-              gigCollection: item.collection,
-              onPaymentConfirmed: _showWorkerRating,
-            )),
+        ...allDocs.map(
+          (item) => _GigProgressCard(
+            doc: item.doc,
+            gigCollection: item.collection,
+            onPaymentConfirmed: _showWorkerRating,
+          ),
+        ),
       ],
     );
   }
@@ -168,7 +188,13 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
 class _GigProgressCard extends StatelessWidget {
   final QueryDocumentSnapshot doc;
   final String gigCollection; // 'quick_gigs' | 'open_gigs' | 'offered_gigs'
-  final Future<void> Function(String workerId, String workerName)? onPaymentConfirmed;
+  final Future<void> Function(
+    String workerId,
+    String workerName,
+    String gigId,
+    String gigCollection,
+  )?
+  onPaymentConfirmed;
 
   const _GigProgressCard({
     required this.doc,
@@ -197,8 +223,22 @@ class _GigProgressCard extends StatelessWidget {
         ];
 
   List<String> get _stepLabels => gigCollection == 'quick_gigs'
-      ? const ['In Progress', 'Arrived', 'Working', 'Done', 'Payment', 'Completed']
-      : const ['On the way', 'Arrived', 'Working', 'Done', 'Payment', 'Completed'];
+      ? const [
+          'In Progress',
+          'Arrived',
+          'Working',
+          'Done',
+          'Payment',
+          'Completed',
+        ]
+      : const [
+          'On the way',
+          'Arrived',
+          'Working',
+          'Done',
+          'Payment',
+          'Completed',
+        ];
 
   static const _stepIcons = [
     Icons.directions_rounded,
@@ -253,7 +293,12 @@ class _GigProgressCard extends StatelessWidget {
     );
 
     if (workerConfirmed && workerId != null && workerId.isNotEmpty) {
-      await onPaymentConfirmed?.call(workerId, workerName);
+      await onPaymentConfirmed?.call(
+        workerId,
+        workerName,
+        gigId,
+        gigCollection,
+      );
     }
   }
 
@@ -264,10 +309,12 @@ class _GigProgressCard extends StatelessWidget {
     final title = data['title'] as String? ?? 'Gig';
     final status = data['status'] as String? ?? 'navigating';
     // offered_gigs use 'workerName'/'workerId'; quick/open use 'assignedWorkerName'/'assignedWorkerId'
-    final workerName = data['assignedWorkerName'] as String? ??
-                       data['workerName'] as String? ?? 'Worker';
-    final workerId = data['assignedWorkerId'] as String? ??
-                     data['workerId'] as String?;
+    final workerName =
+        data['assignedWorkerName'] as String? ??
+        data['workerName'] as String? ??
+        'Worker';
+    final workerId =
+        data['assignedWorkerId'] as String? ?? data['workerId'] as String?;
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
     final isOfferedGig = gigCollection == 'offered_gigs';
     final isOpenGig = gigCollection == 'open_gigs';
@@ -316,25 +363,26 @@ class _GigProgressCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(9),
                 decoration: BoxDecoration(
-                  color: (isOfferedGig
-                          ? const Color(0xFF8B5CF6)
-                          : isOpenGig
+                  color:
+                      (isOfferedGig
+                              ? const Color(0xFF8B5CF6)
+                              : isOpenGig
                               ? kBlue
                               : kAmber)
-                      .withValues(alpha: 0.12),
+                          .withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
                   isOfferedGig
                       ? Icons.send_rounded
                       : isOpenGig
-                          ? Icons.workspace_premium_outlined
-                          : Icons.flash_on_rounded,
+                      ? Icons.workspace_premium_outlined
+                      : Icons.flash_on_rounded,
                   color: isOfferedGig
                       ? const Color(0xFF8B5CF6)
                       : isOpenGig
-                          ? kBlue
-                          : kAmber,
+                      ? kBlue
+                      : kAmber,
                   size: 18,
                 ),
               ),
@@ -343,30 +391,43 @@ class _GigProgressCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: TextStyle(
-                            color: onSurface,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        const Icon(Icons.person_outline_rounded,
-                            color: kSub, size: 12),
+                        const Icon(
+                          Icons.person_outline_rounded,
+                          color: kSub,
+                          size: 12,
+                        ),
                         const SizedBox(width: 4),
-                        Text(workerName,
-                            style:
-                                const TextStyle(color: kSub, fontSize: 11)),
+                        Text(
+                          workerName,
+                          style: const TextStyle(color: kSub, fontSize: 11),
+                        ),
                         const SizedBox(width: 10),
-                        const Icon(Icons.attach_money_rounded,
-                            color: kAmber, size: 12),
-                        Text('₱${budget.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                                color: kAmber,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600)),
+                        const Icon(
+                          Icons.attach_money_rounded,
+                          color: kAmber,
+                          size: 12,
+                        ),
+                        Text(
+                          '₱${budget.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            color: kAmber,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -375,18 +436,22 @@ class _GigProgressCard extends StatelessWidget {
               if (isTaskComplete)
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: green.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border:
-                        Border.all(color: green.withValues(alpha: 0.4)),
+                    border: Border.all(color: green.withValues(alpha: 0.4)),
                   ),
-                  child: const Text('Action Required',
-                      style: TextStyle(
-                          color: green,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'Action Required',
+                    style: TextStyle(
+                      color: green,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -404,10 +469,10 @@ class _GigProgressCard extends StatelessWidget {
                 final dotBg = isDone
                     ? green
                     : isActive
-                        ? green.withValues(alpha: 0.12)
-                        : (isDark
-                            ? kBorder.withValues(alpha: 0.5)
-                            : Colors.grey.withValues(alpha: 0.12));
+                    ? green.withValues(alpha: 0.12)
+                    : (isDark
+                          ? kBorder.withValues(alpha: 0.5)
+                          : Colors.grey.withValues(alpha: 0.12));
 
                 return Row(
                   children: [
@@ -428,9 +493,7 @@ class _GigProgressCard extends StatelessWidget {
                             ),
                           ),
                           child: Icon(
-                            isDone
-                                ? Icons.check_rounded
-                                : _stepIcons[i],
+                            isDone ? Icons.check_rounded : _stepIcons[i],
                             size: 13,
                             color: isDone ? Colors.white : dotColor,
                           ),
@@ -482,9 +545,10 @@ class _GigProgressCard extends StatelessWidget {
                         ? 'Worker is on the way'
                         : 'Waiting for worker location…',
                     style: const TextStyle(
-                        color: kBlue,
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold),
+                      color: kBlue,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),
@@ -510,7 +574,9 @@ class _GigProgressCard extends StatelessWidget {
                     ? 'Live · Tap ⛶ to expand · Blue line = route'
                     : 'Waiting for worker location...',
                 style: TextStyle(
-                    color: kSub.withValues(alpha: 0.7), fontSize: 10),
+                  color: kSub.withValues(alpha: 0.7),
+                  fontSize: 10,
+                ),
               ),
             ),
           ],
@@ -525,20 +591,25 @@ class _GigProgressCard extends StatelessWidget {
                 color: const Color(0xFF22C55E).withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                    color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
+                  color: const Color(0xFF22C55E).withValues(alpha: 0.4),
+                ),
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.location_on_rounded,
-                      color: Color(0xFF22C55E), size: 14),
+                  Icon(
+                    Icons.location_on_rounded,
+                    color: Color(0xFF22C55E),
+                    size: 14,
+                  ),
                   SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       'Worker has arrived at the gig location!',
                       style: TextStyle(
-                          color: Color(0xFF22C55E),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600),
+                        color: Color(0xFF22C55E),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -559,16 +630,20 @@ class _GigProgressCard extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.hourglass_top_rounded,
-                      color: Colors.orange, size: 14),
+                  const Icon(
+                    Icons.hourglass_top_rounded,
+                    color: Colors.orange,
+                    size: 14,
+                  ),
                   const SizedBox(width: 6),
                   const Expanded(
                     child: Text(
                       'Cancellation request pending admin review',
                       style: TextStyle(
-                          color: Colors.orange,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600),
+                        color: Colors.orange,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -584,17 +659,25 @@ class _GigProgressCard extends StatelessWidget {
               height: 46,
               child: ElevatedButton.icon(
                 onPressed: () => _showPaymentAndComplete(
-                    context, gigId, workerId, workerName, title, budget),
+                  context,
+                  gigId,
+                  workerId,
+                  workerName,
+                  title,
+                  budget,
+                ),
                 icon: const Icon(Icons.verified_rounded, size: 20),
-                label: const Text('Gig Completed',
-                    style: TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.bold)),
+                label: const Text(
+                  'Gig Completed',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: green,
                   foregroundColor: Colors.white,
                   elevation: 0,
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ),
@@ -668,7 +751,9 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
     final lat = widget.workerLocation!.latitude;
     final lng = widget.workerLocation!.longitude;
     if (_useGoogleMaps) {
-      _googleController?.animateCamera(CameraUpdate.newLatLng(LatLng(lat, lng)));
+      _googleController?.animateCamera(
+        CameraUpdate.newLatLng(LatLng(lat, lng)),
+      );
     } else if (_osmReady) {
       _osmController.move(ll.LatLng(lat, lng), _osmController.camera.zoom);
     }
@@ -682,11 +767,14 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
     final rec = ui.PictureRecorder();
     final can = Canvas(rec);
     can.drawCircle(const Offset(cx, cy), r, Paint()..color = color);
-    can.drawCircle(const Offset(cx, cy), r,
-        Paint()
-          ..color = Colors.white
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5);
+    can.drawCircle(
+      const Offset(cx, cy),
+      r,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
     final img = await rec.endRecording().toImage(px.toInt(), px.toInt());
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.bytes(data!.buffer.asUint8List());
@@ -709,7 +797,8 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
     final gLng = widget.gigLocation.longitude;
     try {
       final url = Uri.parse(
-          'http://router.project-osrm.org/route/v1/driving/$wLng,$wLat;$gLng,$gLat?overview=full&geometries=polyline');
+        'http://router.project-osrm.org/route/v1/driving/$wLng,$wLat;$gLng,$gLat?overview=full&geometries=polyline',
+      );
       final res = await http.get(url);
       if (!mounted || res.statusCode != 200) {
         if (attempt < 3) {
@@ -729,8 +818,9 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
           .decodePolyline(geometry)
           .map((p) => LatLng(p.latitude, p.longitude))
           .toList();
-      final decodedOsm =
-          decoded.map((p) => ll.LatLng(p.latitude, p.longitude)).toList();
+      final decodedOsm = decoded
+          .map((p) => ll.LatLng(p.latitude, p.longitude))
+          .toList();
       if (mounted) {
         setState(() {
           _routePoints = decoded;
@@ -762,42 +852,61 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
   }
 
   void _openFullScreen() {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => _FullScreenTrackingMap(
-        gigId: widget.gigId,
-        gigCollection: widget.gigCollection,
-        gigLocation: widget.gigLocation,
-        initialWorkerLocation: widget.workerLocation,
-        useGoogleMaps: _useGoogleMaps,
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _FullScreenTrackingMap(
+          gigId: widget.gigId,
+          gigCollection: widget.gigCollection,
+          gigLocation: widget.gigLocation,
+          initialWorkerLocation: widget.workerLocation,
+          useGoogleMaps: _useGoogleMaps,
+        ),
       ),
-    ));
+    );
   }
 
   Set<Marker> _googleMarkers() {
     final markers = <Marker>{};
-    markers.add(Marker(
-      markerId: const MarkerId('gig'),
-      position: LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
-      icon: _icons['gig'] ??
-          BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-    ));
-    if (widget.workerLocation != null) {
-      markers.add(Marker(
-        markerId: const MarkerId('worker'),
+    markers.add(
+      Marker(
+        markerId: const MarkerId('gig'),
         position: LatLng(
-            widget.workerLocation!.latitude, widget.workerLocation!.longitude),
-        icon: _icons['worker'] ??
-            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
-        anchor: const Offset(0.5, 0.5),
-      ));
+          widget.gigLocation.latitude,
+          widget.gigLocation.longitude,
+        ),
+        icon:
+            _icons['gig'] ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+      ),
+    );
+    if (widget.workerLocation != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('worker'),
+          position: LatLng(
+            widget.workerLocation!.latitude,
+            widget.workerLocation!.longitude,
+          ),
+          icon:
+              _icons['worker'] ??
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+          anchor: const Offset(0.5, 0.5),
+        ),
+      );
     }
     return markers;
   }
 
   Widget _buildMap() {
-    final gigPos = ll.LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude);
+    final gigPos = ll.LatLng(
+      widget.gigLocation.latitude,
+      widget.gigLocation.longitude,
+    );
     final workerPos = widget.workerLocation != null
-        ? ll.LatLng(widget.workerLocation!.latitude, widget.workerLocation!.longitude)
+        ? ll.LatLng(
+            widget.workerLocation!.latitude,
+            widget.workerLocation!.longitude,
+          )
         : null;
 
     if (_useGoogleMaps) {
@@ -834,7 +943,8 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
         initialCenter: workerPos ?? gigPos,
         initialZoom: 14.0,
         interactionOptions: const fm.InteractionOptions(
-          flags: fm.InteractiveFlag.pinchZoom |
+          flags:
+              fm.InteractiveFlag.pinchZoom |
               fm.InteractiveFlag.doubleTapZoom |
               fm.InteractiveFlag.drag,
         ),
@@ -857,33 +967,35 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
               ),
             ],
           ),
-        fm.MarkerLayer(markers: [
-          fm.Marker(
-            point: gigPos,
-            width: 20,
-            height: 20,
-            child: Container(
-              decoration: BoxDecoration(
-                color: kAmber,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 1.5),
-              ),
-            ),
-          ),
-          if (workerPos != null)
+        fm.MarkerLayer(
+          markers: [
             fm.Marker(
-              point: workerPos,
+              point: gigPos,
               width: 20,
               height: 20,
               child: Container(
                 decoration: BoxDecoration(
-                  color: kBlue,
+                  color: kAmber,
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 1.5),
                 ),
               ),
             ),
-        ]),
+            if (workerPos != null)
+              fm.Marker(
+                point: workerPos,
+                width: 20,
+                height: 20,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: kBlue,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 1.5),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ],
     );
   }
@@ -907,9 +1019,10 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
               child: Text(
                 '${_fmtEta(_routeEtaSeconds)}  ·  ${_fmtDist(_routeDistanceM)}',
                 style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600),
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -925,7 +1038,11 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
               onTap: _openFullScreen,
               child: const Padding(
                 padding: EdgeInsets.all(6),
-                child: Icon(Icons.fullscreen_rounded, color: Colors.white, size: 22),
+                child: Icon(
+                  Icons.fullscreen_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
               ),
             ),
           ),
@@ -980,22 +1097,29 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
         .doc(widget.gigId)
         .snapshots()
         .listen((snap) {
-      if (!mounted || !snap.exists) return;
-      final data = snap.data() as Map<String, dynamic>;
-      final newLoc = data['workerLocation'] as GeoPoint?;
-      if (newLoc == null) return;
-      if (newLoc.latitude == _workerLocation?.latitude &&
-          newLoc.longitude == _workerLocation?.longitude) { return; }
-      setState(() => _workerLocation = newLoc);
-      final lat = newLoc.latitude;
-      final lng = newLoc.longitude;
-      if (widget.useGoogleMaps) {
-        _googleController?.animateCamera(CameraUpdate.newLatLng(LatLng(lat, lng)));
-      } else {
-        _osmController.move(ll.LatLng(lat, lng), _osmController.camera.zoom);
-      }
-      _fetchRoute();
-    });
+          if (!mounted || !snap.exists) return;
+          final data = snap.data() as Map<String, dynamic>;
+          final newLoc = data['workerLocation'] as GeoPoint?;
+          if (newLoc == null) return;
+          if (newLoc.latitude == _workerLocation?.latitude &&
+              newLoc.longitude == _workerLocation?.longitude) {
+            return;
+          }
+          setState(() => _workerLocation = newLoc);
+          final lat = newLoc.latitude;
+          final lng = newLoc.longitude;
+          if (widget.useGoogleMaps) {
+            _googleController?.animateCamera(
+              CameraUpdate.newLatLng(LatLng(lat, lng)),
+            );
+          } else {
+            _osmController.move(
+              ll.LatLng(lat, lng),
+              _osmController.camera.zoom,
+            );
+          }
+          _fetchRoute();
+        });
   }
 
   @override
@@ -1013,11 +1137,14 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
     final rec = ui.PictureRecorder();
     final can = Canvas(rec);
     can.drawCircle(const Offset(cx, cy), r, Paint()..color = color);
-    can.drawCircle(const Offset(cx, cy), r,
-        Paint()
-          ..color = Colors.white
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5);
+    can.drawCircle(
+      const Offset(cx, cy),
+      r,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
     final img = await rec.endRecording().toImage(px.toInt(), px.toInt());
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.bytes(data!.buffer.asUint8List());
@@ -1040,7 +1167,8 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
     final gLng = widget.gigLocation.longitude;
     try {
       final url = Uri.parse(
-          'http://router.project-osrm.org/route/v1/driving/$wLng,$wLat;$gLng,$gLat?overview=full&geometries=polyline');
+        'http://router.project-osrm.org/route/v1/driving/$wLng,$wLat;$gLng,$gLat?overview=full&geometries=polyline',
+      );
       final res = await http.get(url);
       if (!mounted || res.statusCode != 200) {
         if (attempt < 3) {
@@ -1060,8 +1188,9 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
           .decodePolyline(geometry)
           .map((p) => LatLng(p.latitude, p.longitude))
           .toList();
-      final decodedOsm =
-          decoded.map((p) => ll.LatLng(p.latitude, p.longitude)).toList();
+      final decodedOsm = decoded
+          .map((p) => ll.LatLng(p.latitude, p.longitude))
+          .toList();
       if (mounted) {
         setState(() {
           _routePoints = decoded;
@@ -1094,27 +1223,42 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
 
   Set<Marker> _googleMarkers() {
     final markers = <Marker>{};
-    markers.add(Marker(
-      markerId: const MarkerId('gig'),
-      position: LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
-      icon: _icons['gig'] ??
-          BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-    ));
+    markers.add(
+      Marker(
+        markerId: const MarkerId('gig'),
+        position: LatLng(
+          widget.gigLocation.latitude,
+          widget.gigLocation.longitude,
+        ),
+        icon:
+            _icons['gig'] ??
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+      ),
+    );
     if (_workerLocation != null) {
-      markers.add(Marker(
-        markerId: const MarkerId('worker'),
-        position: LatLng(_workerLocation!.latitude, _workerLocation!.longitude),
-        icon: _icons['worker'] ??
-            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
-        anchor: const Offset(0.5, 0.5),
-      ));
+      markers.add(
+        Marker(
+          markerId: const MarkerId('worker'),
+          position: LatLng(
+            _workerLocation!.latitude,
+            _workerLocation!.longitude,
+          ),
+          icon:
+              _icons['worker'] ??
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+          anchor: const Offset(0.5, 0.5),
+        ),
+      );
     }
     return markers;
   }
 
   @override
   Widget build(BuildContext context) {
-    final gigPosOsm = ll.LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude);
+    final gigPosOsm = ll.LatLng(
+      widget.gigLocation.latitude,
+      widget.gigLocation.longitude,
+    );
     final workerPosOsm = _workerLocation != null
         ? ll.LatLng(_workerLocation!.latitude, _workerLocation!.longitude)
         : null;
@@ -1129,17 +1273,20 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Worker is on the way',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white)),
+            const Text(
+              'Worker is on the way',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
             Text(
               _routeEtaSeconds > 0
                   ? '${_fmtEta(_routeEtaSeconds)}  ·  ${_fmtDist(_routeDistanceM)}'
                   : (_workerLocation != null
-                      ? 'Live tracking active'
-                      : 'Waiting for worker...'),
+                        ? 'Live tracking active'
+                        : 'Waiting for worker...'),
               style: TextStyle(
                 fontSize: 11,
                 color: Colors.white.withValues(alpha: 0.85),
@@ -1153,8 +1300,10 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
           widget.useGoogleMaps
               ? GoogleMap(
                   onMapCreated: (c) => _googleController = c,
-                  initialCameraPosition:
-                      CameraPosition(target: initialTarget, zoom: 15.0),
+                  initialCameraPosition: CameraPosition(
+                    target: initialTarget,
+                    zoom: 15.0,
+                  ),
                   markers: _googleMarkers(),
                   polylines: _routePoints.isNotEmpty
                       ? {
@@ -1191,34 +1340,41 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
                           ),
                         ],
                       ),
-                    fm.MarkerLayer(markers: [
-                      fm.Marker(
-                        point: gigPosOsm,
-                        width: 20,
-                        height: 20,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: kAmber,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 1.5),
-                          ),
-                        ),
-                      ),
-                      if (workerPosOsm != null)
+                    fm.MarkerLayer(
+                      markers: [
                         fm.Marker(
-                          point: workerPosOsm,
+                          point: gigPosOsm,
                           width: 20,
                           height: 20,
                           child: Container(
                             decoration: BoxDecoration(
-                              color: kBlue,
+                              color: kAmber,
                               shape: BoxShape.circle,
-                              border:
-                                  Border.all(color: Colors.white, width: 1.5),
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 1.5,
+                              ),
                             ),
                           ),
                         ),
-                    ]),
+                        if (workerPosOsm != null)
+                          fm.Marker(
+                            point: workerPosOsm,
+                            width: 20,
+                            height: 20,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: kBlue,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
         ],
@@ -1233,10 +1389,14 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
 class _WorkerRatingDialog extends StatefulWidget {
   final String workerId;
   final String workerName;
+  final String gigId;
+  final String gigCollection;
 
   const _WorkerRatingDialog({
     required this.workerId,
     required this.workerName,
+    required this.gigId,
+    required this.gigCollection,
   });
 
   @override
@@ -1259,13 +1419,19 @@ class _WorkerRatingDialogState extends State<_WorkerRatingDialog> {
       final snap = await db.collection('users').doc(widget.workerId).get();
       final data = snap.data() ?? {};
       final currentRating = (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
-      final currentCount = (data['ratingAsWorkerCount'] as num?)?.toInt() ?? 0;
+      final currentCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
       final newCount = currentCount + 1;
       final newRating = ((currentRating * currentCount) + _selected) / newCount;
-      await db.collection('users').doc(widget.workerId).update({
-        'ratingAsWorker': double.parse(newRating.toStringAsFixed(2)),
-        'ratingAsWorkerCount': newCount,
-      });
+      await Future.wait([
+        db.collection('users').doc(widget.workerId).update({
+          'ratingAsWorker': double.parse(newRating.toStringAsFixed(2)),
+          'ratingCount': newCount,
+        }),
+        db.collection(widget.gigCollection).doc(widget.gigId).update({
+          'hostRating': _selected,
+          'hostRatedAt': FieldValue.serverTimestamp(),
+        }),
+      ]);
     } catch (_) {}
     if (mounted) Navigator.pop(context);
   }
@@ -1345,8 +1511,10 @@ class _WorkerRatingDialogState extends State<_WorkerRatingDialog> {
               Expanded(
                 child: TextButton(
                   onPressed: _submitting ? null : () => Navigator.pop(context),
-                  child: const Text('Skip',
-                      style: TextStyle(color: kSub, fontSize: 14)),
+                  child: const Text(
+                    'Skip',
+                    style: TextStyle(color: kSub, fontSize: 14),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1360,7 +1528,8 @@ class _WorkerRatingDialogState extends State<_WorkerRatingDialog> {
                     disabledBackgroundColor: _green.withValues(alpha: 0.4),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 13),
                   ),
                   child: _submitting
@@ -1368,11 +1537,17 @@ class _WorkerRatingDialogState extends State<_WorkerRatingDialog> {
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2),
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
                         )
-                      : const Text('Submit',
+                      : const Text(
+                          'Submit',
                           style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.bold)),
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
               ),
             ],

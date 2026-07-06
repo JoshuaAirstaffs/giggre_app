@@ -19,6 +19,13 @@ class _WorkerRatingsScreenState extends State<WorkerRatingsScreen> {
   bool _loading = true;
   List<_RatingItem> _items = [];
 
+  // Canonical rating shown across the rest of the app (dashboard, favorite
+  // worker cards, worker picker) — read directly from the user doc so this
+  // screen's header always matches, rather than recomputing its own average
+  // from whatever gig docs happen to carry a hostRating.
+  double _avgRating = 0;
+  int _ratingCount = 0;
+
   @override
   void initState() {
     super.initState();
@@ -38,6 +45,10 @@ class _WorkerRatingsScreenState extends State<WorkerRatingsScreen> {
         _fetchCollection('open_gigs', uid, 'open'),
         _fetchCollection('offered_gigs', uid, 'offered'),
       ]);
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
 
       final all = results.expand((e) => e).toList()
         ..sort((a, b) {
@@ -47,8 +58,12 @@ class _WorkerRatingsScreenState extends State<WorkerRatingsScreen> {
           return b.ratedAt!.compareTo(a.ratedAt!);
         });
 
+      final userData = userDoc.data() ?? {};
+
       setState(() {
         _items = all;
+        _avgRating = (userData['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
+        _ratingCount = (userData['ratingCount'] as num?)?.toInt() ?? 0;
         _loading = false;
       });
     } catch (e) {
@@ -58,31 +73,32 @@ class _WorkerRatingsScreenState extends State<WorkerRatingsScreen> {
   }
 
   Future<List<_RatingItem>> _fetchCollection(
-      String collection, String uid, String type) async {
+    String collection,
+    String uid,
+    String type,
+  ) async {
     final snap = await FirebaseFirestore.instance
         .collection(collection)
         .where('workerId', isEqualTo: uid)
         .get();
 
-    return snap.docs.where((doc) {
-      final rating = (doc.data()['hostRating'] as num?)?.toInt() ?? 0;
-      return rating > 0;
-    }).map((doc) {
-      final d = doc.data();
-      final ratedAt = (d['hostRatedAt'] as Timestamp?)?.toDate();
-      return _RatingItem(
-        gigTitle: d['title'] as String? ?? type,
-        hostName: d['hostName'] as String? ?? '',
-        rating: (d['hostRating'] as num).toInt(),
-        gigType: type,
-        ratedAt: ratedAt,
-      );
-    }).toList();
-  }
-
-  double get _avgRating {
-    if (_items.isEmpty) return 0;
-    return _items.fold<double>(0, (acc, e) => acc + e.rating) / _items.length;
+    return snap.docs
+        .where((doc) {
+          final rating = (doc.data()['hostRating'] as num?)?.toInt() ?? 0;
+          return rating > 0;
+        })
+        .map((doc) {
+          final d = doc.data();
+          final ratedAt = (d['hostRatedAt'] as Timestamp?)?.toDate();
+          return _RatingItem(
+            gigTitle: d['title'] as String? ?? type,
+            hostName: d['hostName'] as String? ?? '',
+            rating: (d['hostRating'] as num).toInt(),
+            gigType: type,
+            ratedAt: ratedAt,
+          );
+        })
+        .toList();
   }
 
   @override
@@ -97,30 +113,26 @@ class _WorkerRatingsScreenState extends State<WorkerRatingsScreen> {
           _RatingsHeader(
             isDark: isDark,
             avgRating: _avgRating,
-            ratingCount: _items.length,
+            ratingCount: _ratingCount,
             items: _items,
           ),
           Expanded(
             child: _loading
-                ? const Center(
-                    child: CircularProgressIndicator(color: kAmber))
+                ? const Center(child: CircularProgressIndicator(color: kAmber))
                 : _items.isEmpty
-                    ? _EmptyState(onSurface: onSurface)
-                    : RefreshIndicator(
-                        color: kAmber,
-                        onRefresh: _load,
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                          itemCount: _items.length,
-                          itemBuilder: (ctx, i) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _RatingCard(
-                              item: _items[i],
-                              isDark: isDark,
-                            ),
-                          ),
-                        ),
+                ? _EmptyState(onSurface: onSurface)
+                : RefreshIndicator(
+                    color: kAmber,
+                    onRefresh: _load,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                      itemCount: _items.length,
+                      itemBuilder: (ctx, i) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _RatingCard(item: _items[i], isDark: isDark),
                       ),
+                    ),
+                  ),
           ),
         ],
       ),
@@ -195,16 +207,22 @@ class _RatingsHeader extends StatelessWidget {
                         color: Colors.white.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.arrow_back_ios_new_rounded,
-                          color: Colors.white, size: 16),
+                      child: const Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white,
+                        size: 16,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Text('Ratings & Reviews',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold)),
+                  const Text(
+                    'Ratings & Reviews',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 24),
@@ -217,22 +235,24 @@ class _RatingsHeader extends StatelessWidget {
                       Text(
                         avgRating.toStringAsFixed(1),
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 48,
-                            fontWeight: FontWeight.bold,
-                            height: 1),
+                          color: Colors.white,
+                          fontSize: 48,
+                          fontWeight: FontWeight.bold,
+                          height: 1,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Row(
                         children: List.generate(5, (i) {
                           final full = i < avgRating.floor();
-                          final half = !full && i < avgRating && avgRating - i >= 0.5;
+                          final half =
+                              !full && i < avgRating && avgRating - i >= 0.5;
                           return Icon(
                             full
                                 ? Icons.star_rounded
                                 : half
-                                    ? Icons.star_half_rounded
-                                    : Icons.star_outline_rounded,
+                                ? Icons.star_half_rounded
+                                : Icons.star_outline_rounded,
                             color: kAmber,
                             size: 18,
                           );
@@ -242,8 +262,9 @@ class _RatingsHeader extends StatelessWidget {
                       Text(
                         '$ratingCount ${ratingCount == 1 ? 'review' : 'reviews'}',
                         style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.65),
-                            fontSize: 13),
+                          color: Colors.white.withValues(alpha: 0.65),
+                          fontSize: 13,
+                        ),
                       ),
                     ],
                   ),
@@ -275,10 +296,13 @@ class _RatingBreakdown extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 4),
           child: Row(
             children: [
-              Text('$star',
-                  style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.75),
-                      fontSize: 11)),
+              Text(
+                '$star',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.75),
+                  fontSize: 11,
+                ),
+              ),
               const SizedBox(width: 4),
               const Icon(Icons.star_rounded, color: kAmber, size: 11),
               const SizedBox(width: 6),
@@ -288,8 +312,7 @@ class _RatingBreakdown extends StatelessWidget {
                   child: LinearProgressIndicator(
                     value: fraction,
                     backgroundColor: Colors.white.withValues(alpha: 0.15),
-                    valueColor:
-                        const AlwaysStoppedAnimation<Color>(kAmber),
+                    valueColor: const AlwaysStoppedAnimation<Color>(kAmber),
                     minHeight: 6,
                   ),
                 ),
@@ -300,8 +323,9 @@ class _RatingBreakdown extends StatelessWidget {
                 child: Text(
                   '$count',
                   style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.65),
-                      fontSize: 11),
+                    color: Colors.white.withValues(alpha: 0.65),
+                    fontSize: 11,
+                  ),
                   textAlign: TextAlign.end,
                 ),
               ),
@@ -391,12 +415,15 @@ class _RatingCard extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(item.gigTitle,
-                          style: TextStyle(
-                              color: onSurface,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600),
-                          overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        item.gigTitle,
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     _TypeBadge(label: _typeLabel, color: _typeColor),
@@ -406,14 +433,18 @@ class _RatingCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      const Icon(Icons.person_outline_rounded,
-                          size: 12, color: kSub),
+                      const Icon(
+                        Icons.person_outline_rounded,
+                        size: 12,
+                        color: kSub,
+                      ),
                       const SizedBox(width: 4),
                       Expanded(
-                        child: Text('by ${item.hostName}',
-                            style:
-                                const TextStyle(color: kSub, fontSize: 12),
-                            overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          'by ${item.hostName}',
+                          style: const TextStyle(color: kSub, fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
@@ -433,24 +464,27 @@ class _RatingCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      item.rating < _labels.length
-                          ? _labels[item.rating]
-                          : '',
+                      item.rating < _labels.length ? _labels[item.rating] : '',
                       style: const TextStyle(
-                          color: kAmber,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600),
+                        color: kAmber,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     if (item.ratedAt != null) ...[
                       const Spacer(),
                       Row(
                         children: [
-                          const Icon(Icons.access_time_rounded,
-                              size: 11, color: kSub),
+                          const Icon(
+                            Icons.access_time_rounded,
+                            size: 11,
+                            color: kSub,
+                          ),
                           const SizedBox(width: 3),
-                          Text(_fmtDate(item.ratedAt!),
-                              style: const TextStyle(
-                                  color: kSub, fontSize: 11)),
+                          Text(
+                            _fmtDate(item.ratedAt!),
+                            style: const TextStyle(color: kSub, fontSize: 11),
+                          ),
                         ],
                       ),
                     ],
@@ -466,8 +500,19 @@ class _RatingCard extends StatelessWidget {
 
   static String _fmtDate(DateTime dt) {
     const months = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[dt.month]} ${dt.day}, ${dt.year}';
   }
@@ -486,9 +531,14 @@ class _TypeBadge extends StatelessWidget {
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(label,
-          style: TextStyle(
-              color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }
@@ -507,17 +557,25 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.star_border_rounded,
-              size: 64, color: onSurface.withValues(alpha: 0.2)),
+          Icon(
+            Icons.star_border_rounded,
+            size: 64,
+            color: onSurface.withValues(alpha: 0.2),
+          ),
           const SizedBox(height: 16),
-          Text('No ratings yet',
-              style: TextStyle(
-                  color: onSurface.withValues(alpha: 0.5),
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500)),
+          Text(
+            'No ratings yet',
+            style: TextStyle(
+              color: onSurface.withValues(alpha: 0.5),
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           const SizedBox(height: 6),
-          const Text('Ratings from hosts will appear here',
-              style: TextStyle(color: kSub, fontSize: 13)),
+          const Text(
+            'Ratings from hosts will appear here',
+            style: TextStyle(color: kSub, fontSize: 13),
+          ),
         ],
       ),
     );

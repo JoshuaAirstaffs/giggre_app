@@ -8,6 +8,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
+import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
@@ -29,6 +30,7 @@ class GigMarkerData {
   final List<String> requiredSkills;
   final String hostId;
   final bool hasApplied;
+  final DateTime? scheduledDate;
 
   const GigMarkerData({
     required this.id,
@@ -44,6 +46,7 @@ class GigMarkerData {
     this.requiredSkills = const [],
     required this.hostId,
     this.hasApplied = false,
+    this.scheduledDate,
   });
 }
 
@@ -109,6 +112,32 @@ class _GigMapSectionState extends State<GigMapSection> {
   // Store context for use in marker callbacks
   BuildContext? _context;
 
+  // Marker-triggered sheets (gig / cluster) are tagged with this route name so
+  // we can close any that are already open before showing a new one — instead
+  // of relying on a plain flag, which races when an "outside tap" dismissal
+  // and a new marker tap land at the same time (e.g. two simultaneous touches)
+  // and can end up popping the wrong route. popUntil only ever removes routes
+  // carrying this name, so it can't reach past our own sheets into the
+  // underlying screen, and it's a safe no-op if none are open.
+  static const _markerSheetRouteName = 'gig_marker_sheet';
+
+  void _openMarkerSheet(
+    BuildContext context,
+    WidgetBuilder builder, {
+    bool isScrollControlled = false,
+  }) {
+    Navigator.of(
+      context,
+    ).popUntil((route) => route.settings.name != _markerSheetRouteName);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: isScrollControlled,
+      routeSettings: const RouteSettings(name: _markerSheetRouteName),
+      builder: builder,
+    );
+  }
+
   List<GigMarkerData> _quickGigs = [];
   List<GigMarkerData> _openGigs = [];
   List<GigMarkerData> _offeredGigs = [];
@@ -133,12 +162,13 @@ class _GigMapSectionState extends State<GigMapSection> {
   Future<void> _fetchAllSkills() async {
     try {
       final snap = await FirebaseFirestore.instance.collection('skills').get();
-      final names = snap.docs
-          .where((d) => d.id != '_counter')
-          .map((d) => (d.data()['name'] as String?) ?? d.id)
-          .where((s) => s.isNotEmpty)
-          .toList()
-        ..sort();
+      final names =
+          snap.docs
+              .where((d) => d.id != '_counter')
+              .map((d) => (d.data()['name'] as String?) ?? d.id)
+              .where((s) => s.isNotEmpty)
+              .toList()
+            ..sort();
       if (mounted) setState(() => _allSkillNames = names);
     } catch (_) {}
   }
@@ -169,21 +199,23 @@ class _GigMapSectionState extends State<GigMapSection> {
 
     if (label != null) {
       final fs = label.length <= 2 ? 7.0 : 5.5;
-      final pb = ui.ParagraphBuilder(
-        ui.ParagraphStyle(
-          textAlign: TextAlign.center,
-          fontSize: fs,
-          fontWeight: FontWeight.bold,
-        ),
-      )
-        ..pushStyle(ui.TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          fontSize: fs,
-        ))
-        ..addText(label);
-      final para = pb.build()
-        ..layout(const ui.ParagraphConstraints(width: px));
+      final pb =
+          ui.ParagraphBuilder(
+              ui.ParagraphStyle(
+                textAlign: TextAlign.center,
+                fontSize: fs,
+                fontWeight: FontWeight.bold,
+              ),
+            )
+            ..pushStyle(
+              ui.TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: fs,
+              ),
+            )
+            ..addText(label);
+      final para = pb.build()..layout(const ui.ParagraphConstraints(width: px));
       can.drawParagraph(para, Offset(0, cy - para.height / 2));
     }
 
@@ -201,9 +233,9 @@ class _GigMapSectionState extends State<GigMapSection> {
         _makeMarkerIcon(const Color(0xFF22D3EE)),
         _makeMarkerIcon(const Color(0xFFF97316), label: '…'),
       ]);
-      _icons['quick']    = results[0];
-      _icons['open']     = results[1];
-      _icons['offered']  = results[2];
+      _icons['quick'] = results[0];
+      _icons['open'] = results[1];
+      _icons['offered'] = results[2];
       _icons['location'] = results[3];
       _icons['cluster_default'] = results[4];
       if (mounted) setState(() {});
@@ -251,10 +283,17 @@ class _GigMapSectionState extends State<GigMapSection> {
       bool enabled = await Geolocator.isLocationServiceEnabled();
       if (!enabled) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: const Text('Location is off. Enable GPS to center the map on you.'),
-            action: SnackBarAction(label: 'Enable', onPressed: () => Geolocator.openLocationSettings()),
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'Location is off. Enable GPS to center the map on you.',
+              ),
+              action: SnackBarAction(
+                label: 'Enable',
+                onPressed: () => Geolocator.openLocationSettings(),
+              ),
+            ),
+          );
         }
         return;
       }
@@ -265,14 +304,21 @@ class _GigMapSectionState extends State<GigMapSection> {
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(perm == LocationPermission.deniedForever
-                ? 'Location permanently denied. Enable it in app settings.'
-                : 'Location permission denied.'),
-            action: perm == LocationPermission.deniedForever
-                ? SnackBarAction(label: 'Settings', onPressed: () => Geolocator.openAppSettings())
-                : null,
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                perm == LocationPermission.deniedForever
+                    ? 'Location permanently denied. Enable it in app settings.'
+                    : 'Location permission denied.',
+              ),
+              action: perm == LocationPermission.deniedForever
+                  ? SnackBarAction(
+                      label: 'Settings',
+                      onPressed: () => Geolocator.openAppSettings(),
+                    )
+                  : null,
+            ),
+          );
         }
         return;
       }
@@ -309,15 +355,22 @@ class _GigMapSectionState extends State<GigMapSection> {
   Future<void> _resolveMyCountry(LatLng loc) async {
     for (var attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await Future.delayed(Duration(seconds: attempt * 2));
-      final code = await countryCodeFromCoordinates(loc.latitude, loc.longitude);
+      final code = await countryCodeFromCoordinates(
+        loc.latitude,
+        loc.longitude,
+      );
       if (!mounted) return;
       if (code != null) {
-        debugPrint('[GigMap] resolved worker country: $code (from ${loc.latitude}, ${loc.longitude})');
+        debugPrint(
+          '[GigMap] resolved worker country: $code (from ${loc.latitude}, ${loc.longitude})',
+        );
         setState(() => _myCountryCode = code);
         return;
       }
     }
-    debugPrint('[GigMap] could not resolve worker\'s own country after retries');
+    debugPrint(
+      '[GigMap] could not resolve worker\'s own country after retries',
+    );
   }
 
   // Queues gigs whose country isn't cached yet (grouped by a ~1km grid key so
@@ -327,7 +380,8 @@ class _GigMapSectionState extends State<GigMapSection> {
   void _ensureCountriesResolved(List<GigMarkerData> gigs) {
     for (final g in gigs) {
       final key = _countryCacheKey(g.position.latitude, g.position.longitude);
-      if (_countryCodeCache.containsKey(key) || _resolvingCountryKeys.contains(key)) {
+      if (_countryCodeCache.containsKey(key) ||
+          _resolvingCountryKeys.contains(key)) {
         continue;
       }
       _resolvingCountryKeys.add(key);
@@ -349,16 +403,23 @@ class _GigMapSectionState extends State<GigMapSection> {
         // with backoff before giving up for this pass.
         for (var attempt = 0; attempt < 3 && code == null; attempt++) {
           if (attempt > 0) await Future.delayed(Duration(seconds: attempt * 2));
-          code = await countryCodeFromCoordinates(g.position.latitude, g.position.longitude);
+          code = await countryCodeFromCoordinates(
+            g.position.latitude,
+            g.position.longitude,
+          );
         }
         _resolvingCountryKeys.remove(key);
         if (!mounted) return;
         final resolvedCode = code;
         if (resolvedCode != null) {
-          debugPrint('[GigMap] resolved gig ${g.id} (${g.title}) country: $resolvedCode');
+          debugPrint(
+            '[GigMap] resolved gig ${g.id} (${g.title}) country: $resolvedCode',
+          );
           setState(() => _countryCodeCache[key] = resolvedCode);
         } else {
-          debugPrint('[GigMap] country lookup failed for gig ${g.id}, will retry on next update');
+          debugPrint(
+            '[GigMap] country lookup failed for gig ${g.id}, will retry on next update',
+          );
         }
         await Future.delayed(const Duration(milliseconds: 1100));
       }
@@ -490,16 +551,18 @@ class _GigMapSectionState extends State<GigMapSection> {
           });
 
       // Notify the host — fire-and-forget so a failure doesn't block the apply flow
-      unawaited(FirebaseFirestore.instance.collection('notifications').add({
-        'userId': gig.hostId,
-        'category': 'new_applicant',
-        'message': '${widget.workerName} applied to your gig "${gig.title}"',
-        'workerName': widget.workerName,
-        'workerId': widget.uid,
-        'gigId': gig.id,
-        'gigTitle': gig.title,
-        'createdAt': FieldValue.serverTimestamp(),
-      }));
+      unawaited(
+        FirebaseFirestore.instance.collection('notifications').add({
+          'userId': gig.hostId,
+          'category': 'new_applicant',
+          'message': '${widget.workerName} applied to your gig "${gig.title}"',
+          'workerName': widget.workerName,
+          'workerId': widget.uid,
+          'gigId': gig.id,
+          'gigTitle': gig.title,
+          'createdAt': FieldValue.serverTimestamp(),
+        }),
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -562,6 +625,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       requiredSkills: List<String>.from(data['requiredSkills'] ?? []),
       hostId: data['hostId'] as String? ?? '',
       hasApplied: hasApplied,
+      scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
     );
   }
 
@@ -582,17 +646,22 @@ class _GigMapSectionState extends State<GigMapSection> {
         break;
       case _SkillFilter.mySkills:
         gigs = gigs
-            .where((g) =>
-                g.requiredSkills.isEmpty ||
-                g.requiredSkills.any((s) => widget.workerSkills
-                    .any((ws) => _matchesSkill(ws, s))))
+            .where(
+              (g) =>
+                  g.requiredSkills.isEmpty ||
+                  g.requiredSkills.any(
+                    (s) =>
+                        widget.workerSkills.any((ws) => _matchesSkill(ws, s)),
+                  ),
+            )
             .toList();
       case _SkillFilter.specific:
         final skill = _specificSkill;
         if (skill != null) {
           gigs = gigs
-              .where((g) =>
-                  g.requiredSkills.any((s) => _matchesSkill(s, skill)))
+              .where(
+                (g) => g.requiredSkills.any((s) => _matchesSkill(s, skill)),
+              )
               .toList();
         }
     }
@@ -706,7 +775,8 @@ class _GigMapSectionState extends State<GigMapSection> {
         Marker(
           markerId: const MarkerId('my_location'),
           position: _myLocation!,
-          icon: _icons['location'] ??
+          icon:
+              _icons['location'] ??
               BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan),
           infoWindow: InfoWindow(
             title: widget.workerName.isNotEmpty
@@ -725,17 +795,23 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   Color _colorForType(String type) {
     switch (type) {
-      case 'open':    return kBlue;
-      case 'offered': return const Color(0xFF8B5CF6);
-      default:        return kAmber;
+      case 'open':
+        return kBlue;
+      case 'offered':
+        return const Color(0xFF8B5CF6);
+      default:
+        return kAmber;
     }
   }
 
   IconData _iconForType(String type) {
     switch (type) {
-      case 'open':    return Icons.workspace_premium_outlined;
-      case 'offered': return Icons.send_rounded;
-      default:        return Icons.flash_on_rounded;
+      case 'open':
+        return Icons.workspace_premium_outlined;
+      case 'offered':
+        return Icons.send_rounded;
+      default:
+        return Icons.flash_on_rounded;
     }
   }
 
@@ -746,73 +822,93 @@ class _GigMapSectionState extends State<GigMapSection> {
       if (cluster.count == 1 && cluster.singleGig != null) {
         final gig = cluster.singleGig!;
         final color = _colorForType(gig.gigType);
-        osmMarkers.add(fm.Marker(
-          point: _toLL(cluster.center),
-          width: 32,
-          height: 32,
-          child: GestureDetector(
-            onTap: () {
-              final ctx = _context;
-              if (ctx != null) _showGigSheet(ctx, gig);
-            },
-            child: Container(
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+        osmMarkers.add(
+          fm.Marker(
+            point: _toLL(cluster.center),
+            width: 32,
+            height: 32,
+            child: GestureDetector(
+              onTap: () {
+                final ctx = _context;
+                if (ctx != null) _showGigSheet(ctx, gig);
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black26, blurRadius: 4),
+                  ],
+                ),
+                child: Icon(
+                  _iconForType(gig.gigType),
+                  color: Colors.white,
+                  size: 16,
+                ),
               ),
-              child: Icon(_iconForType(gig.gigType), color: Colors.white, size: 16),
             ),
           ),
-        ));
+        );
       } else {
-        osmMarkers.add(fm.Marker(
-          point: _toLL(cluster.center),
-          width: 36,
-          height: 36,
-          child: GestureDetector(
-            onTap: () {
-              final ctx = _context;
-              if (ctx != null) _showClusterSheet(ctx, cluster.gigs);
-            },
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.orange,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-              ),
-              child: Center(
-                child: Text(
-                  '${cluster.count}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+        osmMarkers.add(
+          fm.Marker(
+            point: _toLL(cluster.center),
+            width: 36,
+            height: 36,
+            child: GestureDetector(
+              onTap: () {
+                final ctx = _context;
+                if (ctx != null) _showClusterSheet(ctx, cluster.gigs);
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.orange,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black26, blurRadius: 4),
+                  ],
+                ),
+                child: Center(
+                  child: Text(
+                    '${cluster.count}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ));
+        );
       }
     }
     if (_myLocation != null) {
-      osmMarkers.add(fm.Marker(
-        point: _toLL(_myLocation!),
-        width: 28,
-        height: 28,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.cyan,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+      osmMarkers.add(
+        fm.Marker(
+          point: _toLL(_myLocation!),
+          width: 28,
+          height: 28,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.cyan,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: const [
+                BoxShadow(color: Colors.black26, blurRadius: 4),
+              ],
+            ),
+            child: const Icon(
+              Icons.person_rounded,
+              color: Colors.white,
+              size: 14,
+            ),
           ),
-          child: const Icon(Icons.person_rounded, color: Colors.white, size: 14),
         ),
-      ));
+      );
     }
     return fm.FlutterMap(
       mapController: _osmController,
@@ -878,538 +974,528 @@ class _GigMapSectionState extends State<GigMapSection> {
           .toList();
     }
 
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final cardColor = Theme.of(ctx).cardColor;
-        final onSurface = Theme.of(ctx).colorScheme.onSurface;
-        final color = pinColor;
-        final typeLabel = gig.gigType == 'open'
-            ? 'Open Gig'
-            : gig.gigType == 'offered'
-            ? 'Offered to You'
-            : 'Quick Gig';
-        final isAppliedPending = gig.gigType == 'open' && gig.hasApplied;
-        final btnLabel = isAppliedPending
-            ? 'Application Pending'
-            : gig.gigType == 'open'
-            ? 'Apply Now'
-            : gig.gigType == 'offered'
-            ? 'Accept Offer'
-            : 'Start Gig';
-        final missing = missingSkills();
-        final canApply = missing.isEmpty;
+    _openMarkerSheet(context, (ctx) {
+      final cardColor = Theme.of(ctx).cardColor;
+      final onSurface = Theme.of(ctx).colorScheme.onSurface;
+      final color = pinColor;
+      final typeLabel = gig.gigType == 'open'
+          ? 'Open Gig'
+          : gig.gigType == 'offered'
+          ? 'Offered to You'
+          : 'Quick Gig';
+      final isAppliedPending = gig.gigType == 'open' && gig.hasApplied;
+      final btnLabel = isAppliedPending
+          ? 'Application Pending'
+          : gig.gigType == 'open'
+          ? 'Apply Now'
+          : gig.gigType == 'offered'
+          ? 'Accept Offer'
+          : 'Start Gig';
+      final missing = missingSkills();
+      final canApply = missing.isEmpty;
 
-        return Container(
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(pinIcon, color: color, size: 22),
+      return Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          gig.title,
+                  child: Icon(pinIcon, color: color, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        gig.title,
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          typeLabel,
                           style: TextStyle(
-                            color: onSurface,
-                            fontSize: 16,
+                            color: color,
+                            fontSize: 10,
                             fontWeight: FontWeight.bold,
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 2),
-                        Container(
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _GigSheetRow(
+              icon: Icons.person_outline_rounded,
+              label: 'Host',
+              value: gig.hostName.isNotEmpty ? gig.hostName : '—',
+            ),
+            _GigSheetRow(
+              icon: Icons.attach_money_rounded,
+              label: 'Budget',
+              value: '₱${gig.budget.toStringAsFixed(0)}',
+              valueColor: kAmber,
+            ),
+            if (gig.scheduledDate != null)
+              _GigSheetRow(
+                icon: Icons.calendar_today_rounded,
+                label: 'Schedule',
+                value: DateFormat(
+                  'EEE, MMM d • h:mm a',
+                ).format(gig.scheduledDate!),
+              ),
+            if (gig.address.isNotEmpty)
+              _GigSheetRow(
+                icon: Icons.location_on_outlined,
+                label: 'Location',
+                value: gig.address,
+                maxLines: null,
+              ),
+            if (gig.experienceLevel.isNotEmpty)
+              _GigSheetRow(
+                icon: Icons.bar_chart_rounded,
+                label: 'Experience',
+                value: gig.experienceLevel,
+              ),
+            if (gig.requiredSkills.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.construction_rounded, color: kSub, size: 16),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Skills: ',
+                    style: TextStyle(color: kSub, fontSize: 13),
+                  ),
+                  Expanded(
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: gig.requiredSkills.map((s) {
+                        final has = widget.workerSkills.any(
+                          (ws) =>
+                              ws.toLowerCase().trim() == s.toLowerCase().trim(),
+                        );
+                        return Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 2,
+                            horizontal: 8,
+                            vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: color.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            typeLabel,
-                            style: TextStyle(
-                              color: color,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
+                            color: has
+                                ? const Color(
+                                    0xFF10B981,
+                                  ).withValues(alpha: 0.12)
+                                : Colors.red.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: has
+                                  ? const Color(
+                                      0xFF10B981,
+                                    ).withValues(alpha: 0.4)
+                                  : Colors.red.withValues(alpha: 0.35),
                             ),
                           ),
-                        ),
-                      ],
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                has
+                                    ? Icons.check_circle_outline
+                                    : Icons.cancel_outlined,
+                                size: 11,
+                                color: has
+                                    ? const Color(0xFF10B981)
+                                    : Colors.red,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                s,
+                                style: TextStyle(
+                                  color: has
+                                      ? const Color(0xFF10B981)
+                                      : Colors.red,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              _GigSheetRow(
-                icon: Icons.person_outline_rounded,
-                label: 'Host',
-                value: gig.hostName.isNotEmpty ? gig.hostName : '—',
-              ),
-              _GigSheetRow(
-                icon: Icons.attach_money_rounded,
-                label: 'Budget',
-                value: '₱${gig.budget.toStringAsFixed(0)}',
-                valueColor: kAmber,
-              ),
-              if (gig.address.isNotEmpty)
-                _GigSheetRow(
-                  icon: Icons.location_on_outlined,
-                  label: 'Location',
-                  value: gig.address,
+            ],
+            if (missing.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
                 ),
-              if (gig.experienceLevel.isNotEmpty)
-                _GigSheetRow(
-                  icon: Icons.bar_chart_rounded,
-                  label: 'Experience',
-                  value: gig.experienceLevel,
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
                 ),
-              if (gig.requiredSkills.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
                     const Icon(
-                      Icons.construction_rounded,
-                      color: kSub,
-                      size: 16,
+                      Icons.info_outline_rounded,
+                      color: Colors.red,
+                      size: 15,
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'Skills: ',
-                      style: TextStyle(color: kSub, fontSize: 13),
-                    ),
                     Expanded(
-                      child: Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: gig.requiredSkills.map((s) {
-                          final has = widget.workerSkills.any(
-                            (ws) =>
-                                ws.toLowerCase().trim() ==
-                                s.toLowerCase().trim(),
-                          );
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: has
-                                  ? const Color(
-                                      0xFF10B981,
-                                    ).withValues(alpha: 0.12)
-                                  : Colors.red.withValues(alpha: 0.10),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: has
-                                    ? const Color(
-                                        0xFF10B981,
-                                      ).withValues(alpha: 0.4)
-                                    : Colors.red.withValues(alpha: 0.35),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  has
-                                      ? Icons.check_circle_outline
-                                      : Icons.cancel_outlined,
-                                  size: 11,
-                                  color: has
-                                      ? const Color(0xFF10B981)
-                                      : Colors.red,
-                                ),
-                                const SizedBox(width: 3),
-                                Text(
-                                  s,
-                                  style: TextStyle(
-                                    color: has
-                                        ? const Color(0xFF10B981)
-                                        : Colors.red,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
+                      child: Text(
+                        'You lack ${missing.length == 1 ? 'a required skill' : '${missing.length} required skills'}: ${missing.join(', ')}',
+                        style: const TextStyle(color: Colors.red, fontSize: 12),
                       ),
                     ),
                   ],
                 ),
-              ],
-              if (missing.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
+              ),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: ElevatedButton(
+                onPressed: (canApply && !isAppliedPending)
+                    ? () {
+                        if (widget.isVerified != 'verified') {
+                          _showModal(context);
+                          return;
+                        }
+                        Navigator.pop(ctx);
+                        if (gig.gigType == 'quick') {
+                          widget.onQuickGigStarted?.call(gig);
+                        } else if (gig.gigType == 'open') {
+                          _applyToOpenGig(gig);
+                        }
+                      }
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: canApply ? color : Colors.grey.shade400,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: isAppliedPending
+                      ? kAmber.withValues(alpha: 0.75)
+                      : Colors.grey.shade400,
+                  disabledForegroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.07),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: Colors.red.withValues(alpha: 0.25),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.info_outline_rounded,
-                        color: Colors.red,
-                        size: 15,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (isAppliedPending) ...[
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
                       ),
                       const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'You lack ${missing.length == 1 ? 'a required skill' : '${missing.length} required skills'}: ${missing.join(', ')}',
-                          style: const TextStyle(
-                            color: Colors.red,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
                     ],
-                  ),
-                ),
-              ],
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                height: 46,
-                child: ElevatedButton(
-                  onPressed: (canApply && !isAppliedPending)
-                      ? () {
-                          if (widget.isVerified != 'verified') {
-                            _showModal(context);
-                            return;
-                          }
-                          Navigator.pop(ctx);
-                          if (gig.gigType == 'quick') {
-                            widget.onQuickGigStarted?.call(gig);
-                          } else if (gig.gigType == 'open') {
-                            _applyToOpenGig(gig);
-                          }
-                        }
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: canApply ? color : Colors.grey.shade400,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: isAppliedPending
-                        ? kAmber.withValues(alpha: 0.75)
-                        : Colors.grey.shade400,
-                    disabledForegroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                    Text(
+                      isAppliedPending
+                          ? 'Application Pending'
+                          : canApply
+                          ? btnLabel
+                          : 'Skills Required',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (isAppliedPending) ...[
-                        const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      Text(
-                        isAppliedPending
-                            ? 'Application Pending'
-                            : canApply
-                            ? btnLabel
-                            : 'Skills Required',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
-    );
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   //  Bottom sheet: cluster list
   // ─────────────────────────────────────────────────────────────────────────
   void _showClusterSheet(BuildContext context, List<GigMarkerData> gigs) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) {
-        final cardColor = Theme.of(ctx).cardColor;
-        final onSurface = Theme.of(ctx).colorScheme.onSurface;
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        return Container(
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.fromLTRB(0, 20, 0, 16),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: kBorder,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+    _openMarkerSheet(context, (ctx) {
+      final cardColor = Theme.of(ctx).cardColor;
+      final onSurface = Theme.of(ctx).colorScheme.onSurface;
+      final isDark = Theme.of(ctx).brightness == Brightness.dark;
+      return Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(0, 20, 0, 16),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: kBorder,
+                borderRadius: BorderRadius.circular(2),
               ),
-              const SizedBox(height: 16),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: kAmber.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                        Icons.work_outline_rounded,
-                        color: kAmber,
-                        size: 18,
-                      ),
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: kAmber.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${gigs.length} Gigs in this area',
-                          style: TextStyle(
-                            color: onSurface,
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const Text(
-                          'Tap a gig to see details',
-                          style: TextStyle(color: kSub, fontSize: 11),
-                        ),
-                      ],
+                    child: const Icon(
+                      Icons.work_outline_rounded,
+                      color: kAmber,
+                      size: 18,
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Divider(
-                color: isDark
-                    ? kBorder.withValues(alpha: 0.5)
-                    : Colors.grey.withValues(alpha: 0.15),
-              ),
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(ctx).size.height * 0.45,
-                ),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
                   ),
-                  itemCount: gigs.length,
-                  separatorBuilder: (_, i) => Divider(
-                    height: 1,
-                    color: isDark
-                        ? kBorder.withValues(alpha: 0.4)
-                        : Colors.grey.withValues(alpha: 0.1),
-                  ),
-                  itemBuilder: (_, i) {
-                    final g = gigs[i];
-                    final typeColor = g.gigType == 'open'
-                        ? kBlue
-                        : g.gigType == 'offered'
-                        ? const Color(0xFF8B5CF6)
-                        : kAmber;
-                    final typeIcon = g.gigType == 'open'
-                        ? Icons.workspace_premium_outlined
-                        : g.gigType == 'offered'
-                        ? Icons.send_rounded
-                        : Icons.flash_on_rounded;
-                    final typeLabel = g.gigType == 'open'
-                        ? 'Open'
-                        : g.gigType == 'offered'
-                        ? 'Offered'
-                        : 'Quick';
-                    final btnLabel = g.gigType == 'open'
-                        ? 'Apply'
-                        : g.gigType == 'offered'
-                        ? 'Accept'
-                        : 'Start';
-                    final missing =
-                        g.gigType == 'open' && g.requiredSkills.isNotEmpty
-                        ? g.requiredSkills
-                              .where(
-                                (s) => !widget.workerSkills.any(
-                                  (ws) =>
-                                      ws.toLowerCase().trim() ==
-                                      s.toLowerCase().trim(),
-                                ),
-                              )
-                              .toList()
-                        : <String>[];
-                    final canApply = missing.isEmpty;
-
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      leading: Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: typeColor.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(typeIcon, color: typeColor, size: 20),
-                      ),
-                      title: Text(
-                        g.title,
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${gigs.length} Gigs in this area',
                         style: TextStyle(
                           color: onSurface,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                  vertical: 1,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: typeColor.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  typeLabel,
-                                  style: TextStyle(
-                                    color: typeColor,
-                                    fontSize: 10,
-                                  ),
+                      const Text(
+                        'Tap a gig to see details',
+                        style: TextStyle(color: kSub, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Divider(
+              color: isDark
+                  ? kBorder.withValues(alpha: 0.5)
+                  : Colors.grey.withValues(alpha: 0.15),
+            ),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.45,
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                itemCount: gigs.length,
+                separatorBuilder: (_, i) => Divider(
+                  height: 1,
+                  color: isDark
+                      ? kBorder.withValues(alpha: 0.4)
+                      : Colors.grey.withValues(alpha: 0.1),
+                ),
+                itemBuilder: (_, i) {
+                  final g = gigs[i];
+                  final typeColor = g.gigType == 'open'
+                      ? kBlue
+                      : g.gigType == 'offered'
+                      ? const Color(0xFF8B5CF6)
+                      : kAmber;
+                  final typeIcon = g.gigType == 'open'
+                      ? Icons.workspace_premium_outlined
+                      : g.gigType == 'offered'
+                      ? Icons.send_rounded
+                      : Icons.flash_on_rounded;
+                  final typeLabel = g.gigType == 'open'
+                      ? 'Open'
+                      : g.gigType == 'offered'
+                      ? 'Offered'
+                      : 'Quick';
+                  final btnLabel = g.gigType == 'open'
+                      ? 'Apply'
+                      : g.gigType == 'offered'
+                      ? 'Accept'
+                      : 'Start';
+                  final missing =
+                      g.gigType == 'open' && g.requiredSkills.isNotEmpty
+                      ? g.requiredSkills
+                            .where(
+                              (s) => !widget.workerSkills.any(
+                                (ws) =>
+                                    ws.toLowerCase().trim() ==
+                                    s.toLowerCase().trim(),
+                              ),
+                            )
+                            .toList()
+                      : <String>[];
+                  final canApply = missing.isEmpty;
+
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    leading: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: typeColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(typeIcon, color: typeColor, size: 20),
+                    ),
+                    title: Text(
+                      g.title,
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: typeColor.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                typeLabel,
+                                style: TextStyle(
+                                  color: typeColor,
+                                  fontSize: 10,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Text(
-                                '₱${g.budget.toStringAsFixed(0)}',
-                                style: const TextStyle(
-                                  color: kAmber,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (missing.isNotEmpty) ...[
-                            const SizedBox(height: 3),
+                            ),
+                            const SizedBox(width: 8),
                             Text(
-                              'Missing: ${missing.join(', ')}',
+                              '₱${g.budget.toStringAsFixed(0)}',
                               style: const TextStyle(
-                                color: Colors.red,
-                                fontSize: 10,
+                                color: kAmber,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
+                        ),
+                        if (missing.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            'Missing: ${missing.join(', ')}',
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 10,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ],
-                      ),
-                      trailing: TextButton(
-                        onPressed: canApply
-                            ? () {
-                                if (widget.isVerified != 'verified') {
-                                  Navigator.pop(ctx);
-                                  _showModal(context);
-                                  return;
-                                }
+                      ],
+                    ),
+                    trailing: TextButton(
+                      onPressed: canApply
+                          ? () {
+                              if (widget.isVerified != 'verified') {
                                 Navigator.pop(ctx);
-                                if (g.gigType == 'quick') {
-                                  widget.onQuickGigStarted?.call(g);
-                                } else if (g.gigType == 'open') {
-                                  _applyToOpenGig(g);
-                                }
+                                _showModal(context);
+                                return;
                               }
-                            : null,
-                        style: TextButton.styleFrom(
-                          backgroundColor: canApply
-                              ? typeColor.withValues(alpha: 0.1)
-                              : Colors.grey.withValues(alpha: 0.1),
-                          foregroundColor: canApply ? typeColor : Colors.grey,
-                          disabledForegroundColor: Colors.grey,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              Navigator.pop(ctx);
+                              if (g.gigType == 'quick') {
+                                widget.onQuickGigStarted?.call(g);
+                              } else if (g.gigType == 'open') {
+                                _applyToOpenGig(g);
+                              }
+                            }
+                          : null,
+                      style: TextButton.styleFrom(
+                        backgroundColor: canApply
+                            ? typeColor.withValues(alpha: 0.1)
+                            : Colors.grey.withValues(alpha: 0.1),
+                        foregroundColor: canApply ? typeColor : Colors.grey,
+                        disabledForegroundColor: Colors.grey,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
                         ),
-                        child: Text(
-                          canApply ? btnLabel : 'Locked',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(
+                        canApply ? btnLabel : 'Locked',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
               ),
-            ],
-          ),
-        );
-      },
-    );
+            ),
+          ],
+        ),
+      );
+    }, isScrollControlled: true);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1431,16 +1517,16 @@ class _GigMapSectionState extends State<GigMapSection> {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             Widget sectionTitle(String text) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    text,
-                    style: TextStyle(
-                      color: onSurface,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                );
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            );
 
             Widget choiceChip({
               required String label,
@@ -1451,18 +1537,18 @@ class _GigMapSectionState extends State<GigMapSection> {
                 onTap: onTap,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 8),
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: selected
                         ? kAmber.withValues(alpha: 0.15)
                         : (isDark
-                            ? Colors.white.withValues(alpha: 0.05)
-                            : Colors.black.withValues(alpha: 0.04)),
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.04)),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: selected
-                          ? kAmber
-                          : Theme.of(ctx).dividerColor,
+                      color: selected ? kAmber : Theme.of(ctx).dividerColor,
                     ),
                   ),
                   child: Text(
@@ -1470,8 +1556,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                     style: TextStyle(
                       color: selected ? kAmber : onSurface,
                       fontSize: 12,
-                      fontWeight:
-                          selected ? FontWeight.bold : FontWeight.normal,
+                      fontWeight: selected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
                     ),
                   ),
                 ),
@@ -1516,8 +1603,10 @@ class _GigMapSectionState extends State<GigMapSection> {
                               _radiusKm = null;
                             });
                           },
-                          child: const Text('Reset',
-                              style: TextStyle(color: kSub, fontSize: 12)),
+                          child: const Text(
+                            'Reset',
+                            style: TextStyle(color: kSub, fontSize: 12),
+                          ),
                         ),
                       ],
                     ),
@@ -1531,7 +1620,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                           label: 'All Gigs',
                           selected: _skillFilter == _SkillFilter.all,
                           onTap: () {
-                            setSheetState(() => _skillFilter = _SkillFilter.all);
+                            setSheetState(
+                              () => _skillFilter = _SkillFilter.all,
+                            );
                             setState(() => _skillFilter = _SkillFilter.all);
                           },
                         ),
@@ -1540,9 +1631,11 @@ class _GigMapSectionState extends State<GigMapSection> {
                           selected: _skillFilter == _SkillFilter.mySkills,
                           onTap: () {
                             setSheetState(
-                                () => _skillFilter = _SkillFilter.mySkills);
+                              () => _skillFilter = _SkillFilter.mySkills,
+                            );
                             setState(
-                                () => _skillFilter = _SkillFilter.mySkills);
+                              () => _skillFilter = _SkillFilter.mySkills,
+                            );
                           },
                         ),
                         choiceChip(
@@ -1578,7 +1671,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                                 ? Colors.white.withValues(alpha: 0.05)
                                 : Colors.black.withValues(alpha: 0.04),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Theme.of(ctx).dividerColor),
+                            border: Border.all(
+                              color: Theme.of(ctx).dividerColor,
+                            ),
                           ),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
@@ -1586,8 +1681,10 @@ class _GigMapSectionState extends State<GigMapSection> {
                                   ? _specificSkill
                                   : skills.first,
                               isExpanded: true,
-                              icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                                  color: kSub),
+                              icon: const Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                color: kSub,
+                              ),
                               style: TextStyle(
                                 color: onSurface,
                                 fontSize: 13,
@@ -1596,10 +1693,12 @@ class _GigMapSectionState extends State<GigMapSection> {
                               dropdownColor: cardColor,
                               borderRadius: BorderRadius.circular(12),
                               items: skills
-                                  .map((s) => DropdownMenuItem(
-                                        value: s,
-                                        child: Text(s),
-                                      ))
+                                  .map(
+                                    (s) => DropdownMenuItem(
+                                      value: s,
+                                      child: Text(s),
+                                    ),
+                                  )
                                   .toList(),
                               onChanged: (s) {
                                 if (s == null) return;
@@ -1616,7 +1715,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                       spacing: 8,
                       runSpacing: 8,
                       children: _radiusOptions.map((r) {
-                        final label = r == null ? 'Any' : '${r.toStringAsFixed(0)} km';
+                        final label = r == null
+                            ? 'Any'
+                            : '${r.toStringAsFixed(0)} km';
                         return choiceChip(
                           label: label,
                           selected: _radiusKm == r,
@@ -1648,9 +1749,13 @@ class _GigMapSectionState extends State<GigMapSection> {
                             borderRadius: BorderRadius.circular(14),
                           ),
                         ),
-                        child: const Text('Done',
-                            style: TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'Done',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -1878,10 +1983,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                           SizedBox(width: 5),
                           Text(
                             'Tap to lock map',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                            ),
+                            style: TextStyle(color: Colors.white, fontSize: 11),
                           ),
                         ],
                       ),
@@ -1996,7 +2098,8 @@ class _GigMapSectionState extends State<GigMapSection> {
                     _googleMapController = c;
                     if (_myLocation != null) {
                       c.animateCamera(
-                          CameraUpdate.newLatLngZoom(_myLocation!, 14.0));
+                        CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
+                      );
                     }
                   },
                   initialCameraPosition: const CameraPosition(
@@ -2036,19 +2139,17 @@ class _GigMapSectionState extends State<GigMapSection> {
                       BoxShadow(color: Colors.black26, blurRadius: 6),
                     ],
                   ),
-                  child: const Icon(
-                    Icons.close_rounded,
-                    size: 18,
-                    color: kSub,
-                  ),
+                  child: const Icon(Icons.close_rounded, size: 18, color: kSub),
                 ),
               ),
               const SizedBox(width: 8),
               // Title pill
               Expanded(
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: Theme.of(ctx).cardColor.withValues(alpha: 0.93),
                     borderRadius: BorderRadius.circular(20),
@@ -2068,8 +2169,10 @@ class _GigMapSectionState extends State<GigMapSection> {
               if (offeredCount > 0)
                 Container(
                   margin: const EdgeInsets.only(right: 6),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF8B5CF6).withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(20),
@@ -2087,8 +2190,10 @@ class _GigMapSectionState extends State<GigMapSection> {
                   ),
                 ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: kGold.withValues(alpha: 0.92),
                   borderRadius: BorderRadius.circular(20),
@@ -2226,11 +2331,13 @@ class _GigSheetRow extends StatelessWidget {
   final String label;
   final String value;
   final Color? valueColor;
+  final int? maxLines;
   const _GigSheetRow({
     required this.icon,
     required this.label,
     required this.value,
     this.valueColor,
+    this.maxLines = 1,
   });
 
   @override
@@ -2238,6 +2345,7 @@ class _GigSheetRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, color: kSub, size: 16),
           const SizedBox(width: 8),
@@ -2250,8 +2358,10 @@ class _GigSheetRow extends StatelessWidget {
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              maxLines: maxLines,
+              overflow: maxLines == null
+                  ? TextOverflow.visible
+                  : TextOverflow.ellipsis,
             ),
           ),
         ],
