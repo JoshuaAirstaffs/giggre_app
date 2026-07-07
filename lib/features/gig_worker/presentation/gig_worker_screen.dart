@@ -394,6 +394,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               ? [data['skillRequired'] as String]
               : [],
           hostId: data['hostId'] as String? ?? '',
+          scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
         );
         _pendingOfferedGigDesc = data['description'] as String? ?? '';
         _pendingOfferedGigSkill = data['skillRequired'] as String? ?? '';
@@ -432,6 +433,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             position: LatLng(geo.latitude, geo.longitude),
             assignedWorkerId: uid,
             hostId: data['hostId'] as String? ?? '',
+            scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
           );
           _showAssignedPopup(gig);
           break;
@@ -575,6 +577,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         position: LatLng(geo.latitude, geo.longitude),
         assignedWorkerId: uid,
         hostId: data['hostId'] as String? ?? '',
+        scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
       );
       // Auto-accept: skip review window and accept immediately
       if (_autoAccept) {

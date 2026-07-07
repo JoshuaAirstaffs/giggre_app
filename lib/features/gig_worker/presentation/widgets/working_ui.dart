@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui' as ui;
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -896,194 +896,65 @@ class _NavigatingSection extends StatefulWidget {
 }
 
 class _NavigatingSectionState extends State<_NavigatingSection> {
-  GoogleMapController? _googleMapController;
   bool _useGoogleMaps = GmsAvailability.cachedIsAvailable;
-  final _osmController = fm.MapController();
-  bool _osmMapReady = false;
-
-  final Map<String, BitmapDescriptor> _icons = {};
-
-  Future<BitmapDescriptor> _makeIcon(Color color) async {
-    const px = 20.0;
-    const r = 8.0;
-    const cx = px / 2, cy = px / 2;
-    final rec = ui.PictureRecorder();
-    final can = Canvas(rec);
-    can.drawCircle(const Offset(cx, cy), r, Paint()..color = color);
-    can.drawCircle(
-      const Offset(cx, cy),
-      r,
-      Paint()
-        ..color = Colors.white
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
-    );
-    final img = await rec.endRecording().toImage(px.toInt(), px.toInt());
-    final data = await img.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
-  }
-
-  Future<void> _loadIcons() async {
-    try {
-      _icons['gig'] = await _makeIcon(kAmber);
-      if (mounted) setState(() {});
-    } catch (_) {}
-  }
 
   @override
   void initState() {
     super.initState();
-    _loadIcons();
     GmsAvailability.isAvailable.then((v) {
       if (mounted) setState(() => _useGoogleMaps = v);
     });
   }
 
-  @override
-  void dispose() {
-    _googleMapController?.dispose();
-    _osmController.dispose();
-    super.dispose();
-  }
-
-  @override
-  void didUpdateWidget(_NavigatingSection oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Pan the camera when the worker location updates
-    if (widget.workerLocation != null &&
-        widget.workerLocation != oldWidget.workerLocation) {
-      if (_useGoogleMaps) {
-        _googleMapController?.animateCamera(
-          CameraUpdate.newLatLng(widget.workerLocation!),
-        );
-      } else if (_osmMapReady) {
-        _osmController.move(
-          ll.LatLng(widget.workerLocation!.latitude, widget.workerLocation!.longitude),
-          _osmController.camera.zoom,
-        );
-      }
-    }
+  void _openFullScreenMap() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: _NavMapCore(
+                    gig: widget.gig,
+                    workerLocation: widget.workerLocation,
+                    routePoints: widget.routePoints,
+                    onDestinationTap: _openNavigation,
+                  ),
+                ),
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: _MapRoundButton(
+                    icon: Icons.close_rounded,
+                    onTap: () => Navigator.of(ctx).pop(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _openNavigation() async {
     final dest = widget.gig.position;
-    final uri  = Uri.parse(
-      'geo:${dest.latitude},${dest.longitude}'
-      '?q=${dest.latitude},${dest.longitude}(Gig+Location)',
+    // Opened in an in-app browser (Custom Tabs / SFSafariViewController) —
+    // unlike a full external app hand-off, this gives a visible close button
+    // that reliably returns the user to the app instead of stranding them
+    // in a separate Google Maps task.
+    final dirUri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1'
+      '&destination=${dest.latitude},${dest.longitude}'
+      '&travelmode=driving',
     );
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
-
-  Set<Marker> _buildGoogleMarkers() {
-    // Worker location is shown by the native blue dot (myLocationEnabled: true).
-    // Only the gig destination needs a custom pin.
-    final gigPos = LatLng(
-      widget.gig.position.latitude,
-      widget.gig.position.longitude,
-    );
-    return {
-      Marker(
-        markerId: const MarkerId('gig'),
-        position: gigPos,
-        icon: _icons['gig'] ??
-            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-      ),
-    };
-  }
-
-  Widget _buildOsmMap() {
-    final gigPos = ll.LatLng(
-      widget.gig.position.latitude,
-      widget.gig.position.longitude,
-    );
-    final workerPos = widget.workerLocation != null
-        ? ll.LatLng(widget.workerLocation!.latitude, widget.workerLocation!.longitude)
-        : null;
-    final osmMarkers = <fm.Marker>[];
-    if (workerPos != null) {
-      osmMarkers.add(fm.Marker(
-        point: workerPos,
-        width: 28,
-        height: 28,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.lightBlue,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-          ),
-          child: const Icon(Icons.person_rounded, color: Colors.white, size: 14),
-        ),
-      ));
-    }
-    osmMarkers.add(fm.Marker(
-      point: gigPos,
-      width: 32,
-      height: 32,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.orange,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2),
-          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-        ),
-        child: const Icon(Icons.work_rounded, color: Colors.white, size: 16),
-      ),
-    ));
-    final routePoints = widget.routePoints
-        .map((p) => ll.LatLng(p.latitude, p.longitude))
-        .toList();
-    return fm.FlutterMap(
-      mapController: _osmController,
-      options: fm.MapOptions(
-        initialCenter: workerPos ?? gigPos,
-        initialZoom: 14.0,
-        onMapReady: () {
-          if (mounted) setState(() => _osmMapReady = true);
-        },
-        interactionOptions: const fm.InteractionOptions(
-          flags: fm.InteractiveFlag.pinchZoom |
-              fm.InteractiveFlag.doubleTapZoom |
-              fm.InteractiveFlag.drag,
-        ),
-      ),
-      children: [
-        fm.TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.giggre.mobile',
-        ),
-        if (routePoints.isNotEmpty)
-          fm.PolylineLayer(
-            polylines: [
-              fm.Polyline(points: routePoints, color: kBlue, strokeWidth: 4),
-            ],
-          ),
-        fm.MarkerLayer(markers: osmMarkers),
-      ],
-    );
-  }
-
-  Set<Polyline> _buildPolylines() {
-    if (widget.routePoints.isEmpty) return {};
-    return {
-      Polyline(
-        polylineId: const PolylineId('route'),
-        points: widget.routePoints,
-        color: kBlue,
-        width: 4,
-      ),
-    };
+    await launchUrl(dirUri, mode: LaunchMode.inAppBrowserView);
   }
 
   @override
   Widget build(BuildContext context) {
-    final gigPos = LatLng(
-      widget.gig.position.latitude,
-      widget.gig.position.longitude,
-    );
-    final initialTarget = widget.workerLocation ?? gigPos;
     final cardColor  = Theme.of(context).cardColor;
     final onSurface  = Theme.of(context).colorScheme.onSurface;
     final hasEta     = widget.routeDistanceM != null && widget.routeEtaSeconds != null;
@@ -1099,46 +970,33 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
               'Head to the gig location. Auto-detecting arrival within 40 m.',
         ),
         const SizedBox(height: 12),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            height: 220,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: widget.divider),
-            ),
-            child: _useGoogleMaps
-                ? GoogleMap(
-                    onMapCreated: (controller) {
-                      _googleMapController = controller;
-                      if (widget.workerLocation != null) {
-                        controller.animateCamera(
-                          CameraUpdate.newLatLngZoom(widget.workerLocation!, 16.0),
-                        );
-                      }
-                    },
-                    initialCameraPosition: CameraPosition(
-                      target: initialTarget,
-                      zoom: 14.0,
-                    ),
-                    myLocationEnabled: true,
-                    myLocationButtonEnabled: false,
-                    zoomControlsEnabled: false,
-                    markers: _buildGoogleMarkers(),
-                    polylines: _buildPolylines(),
-                    gestureRecognizers: {
-                      Factory<OneSequenceGestureRecognizer>(
-                          () => EagerGestureRecognizer()),
-                    },
-                  )
-                : _buildOsmMap(),
-          ),
+        _NavMapCore(
+          gig: widget.gig,
+          workerLocation: widget.workerLocation,
+          routePoints: widget.routePoints,
+          divider: widget.divider,
+          height: 220,
+          onExpand: _openFullScreenMap,
+          onDestinationTap: _openNavigation,
         ),
         const SizedBox(height: 6),
         Center(
           child: Text(
-            'Auto-detected at 40 m · Blue dot = you · Amber pin = gig · Blue line = route',
+            'Auto-detected at 40 m · Blue dot = you · Red pin = gig · Blue line = route',
             style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 10),
+            textAlign: TextAlign.center,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Center(
+          child: Text(
+            'Tap the destination to show directions',
+            style: TextStyle(
+              color: kSub.withValues(alpha: 0.7),
+              fontSize: 10,
+              fontStyle: FontStyle.italic,
+            ),
+            textAlign: TextAlign.center,
           ),
         ),
 
@@ -1205,6 +1063,311 @@ class _NavigatingSectionState extends State<_NavigatingSection> {
           ),
         ],
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Navigation map core — renders the Google/OSM map with zoom + expand controls.
+//  Used both embedded (fixed height, rounded card) and full screen (height: null).
+// ─────────────────────────────────────────────────────────────────────────────
+class _NavMapCore extends StatefulWidget {
+  final GigMarkerData gig;
+  final LatLng? workerLocation;
+  final List<LatLng> routePoints;
+  final Color? divider;
+  final double? height;
+  final VoidCallback? onExpand;
+  final VoidCallback? onDestinationTap;
+
+  const _NavMapCore({
+    required this.gig,
+    required this.workerLocation,
+    required this.routePoints,
+    this.divider,
+    this.height,
+    this.onExpand,
+    this.onDestinationTap,
+  });
+
+  @override
+  State<_NavMapCore> createState() => _NavMapCoreState();
+}
+
+class _NavMapCoreState extends State<_NavMapCore> {
+  GoogleMapController? _googleMapController;
+  bool _useGoogleMaps = GmsAvailability.cachedIsAvailable;
+  final _osmController = fm.MapController();
+  bool _osmMapReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    GmsAvailability.isAvailable.then((v) {
+      if (mounted) setState(() => _useGoogleMaps = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    _googleMapController?.dispose();
+    _osmController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(_NavMapCore oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.workerLocation != oldWidget.workerLocation) {
+      _animateToFit();
+    }
+  }
+
+  // Fits the camera so both the worker's live position and the gig
+  // destination stay in view, instead of a fixed zoom that may crop one out.
+  void _animateToFit() {
+    final worker = widget.workerLocation;
+    final gigPos = LatLng(
+      widget.gig.position.latitude,
+      widget.gig.position.longitude,
+    );
+    if (worker == null) {
+      if (_useGoogleMaps) {
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(gigPos, 15.0),
+        );
+      } else if (_osmMapReady) {
+        _osmController.move(ll.LatLng(gigPos.latitude, gigPos.longitude), 15.0);
+      }
+      return;
+    }
+
+    final swLat = min(gigPos.latitude, worker.latitude);
+    final swLng = min(gigPos.longitude, worker.longitude);
+    final neLat = max(gigPos.latitude, worker.latitude);
+    final neLng = max(gigPos.longitude, worker.longitude);
+
+    if (_useGoogleMaps) {
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngBounds(
+          LatLngBounds(
+            southwest: LatLng(swLat, swLng),
+            northeast: LatLng(neLat, neLng),
+          ),
+          60,
+        ),
+      );
+    } else if (_osmMapReady) {
+      _osmController.fitCamera(
+        fm.CameraFit.bounds(
+          bounds: fm.LatLngBounds(
+            ll.LatLng(swLat, swLng),
+            ll.LatLng(neLat, neLng),
+          ),
+          padding: const EdgeInsets.all(60),
+        ),
+      );
+    }
+  }
+
+  Set<Marker> _buildGoogleMarkers() {
+    // Worker location is shown by the native blue dot (myLocationEnabled: true).
+    // Only the gig destination needs a pin.
+    final gigPos = LatLng(
+      widget.gig.position.latitude,
+      widget.gig.position.longitude,
+    );
+    return {
+      Marker(
+        markerId: const MarkerId('gig'),
+        position: gigPos,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        // No custom onTap — tapping shows the info window, and Android's
+        // native map toolbar (Directions / Open in Google Maps) appears
+        // alongside it automatically since mapToolbarEnabled defaults to true.
+        infoWindow: InfoWindow(
+          title: widget.gig.title.isNotEmpty ? widget.gig.title : 'Gig Location',
+          snippet: 'Tap for directions',
+        ),
+      ),
+    };
+  }
+
+  Set<Polyline> _buildPolylines() {
+    if (widget.routePoints.isEmpty) return {};
+    return {
+      Polyline(
+        polylineId: const PolylineId('route'),
+        points: widget.routePoints,
+        color: kBlue,
+        width: 4,
+      ),
+    };
+  }
+
+  Widget _buildOsmMap() {
+    final gigPos = ll.LatLng(
+      widget.gig.position.latitude,
+      widget.gig.position.longitude,
+    );
+    final workerPos = widget.workerLocation != null
+        ? ll.LatLng(widget.workerLocation!.latitude, widget.workerLocation!.longitude)
+        : null;
+    final osmMarkers = <fm.Marker>[];
+    if (workerPos != null) {
+      osmMarkers.add(fm.Marker(
+        point: workerPos,
+        width: 28,
+        height: 28,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.lightBlue,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+          ),
+          child: const Icon(Icons.person_rounded, color: Colors.white, size: 14),
+        ),
+      ));
+    }
+    osmMarkers.add(fm.Marker(
+      point: gigPos,
+      width: 32,
+      height: 32,
+      child: GestureDetector(
+        onTap: widget.onDestinationTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.red,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+          ),
+          child: const Icon(Icons.work_rounded, color: Colors.white, size: 16),
+        ),
+      ),
+    ));
+    final routePoints = widget.routePoints
+        .map((p) => ll.LatLng(p.latitude, p.longitude))
+        .toList();
+    return fm.FlutterMap(
+      mapController: _osmController,
+      options: fm.MapOptions(
+        initialCenter: workerPos ?? gigPos,
+        initialZoom: 14.0,
+        onMapReady: () {
+          if (mounted) setState(() => _osmMapReady = true);
+          _animateToFit();
+        },
+        interactionOptions: const fm.InteractionOptions(
+          flags: fm.InteractiveFlag.pinchZoom |
+              fm.InteractiveFlag.doubleTapZoom |
+              fm.InteractiveFlag.drag,
+        ),
+      ),
+      children: [
+        fm.TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.giggre.mobile',
+        ),
+        if (routePoints.isNotEmpty)
+          fm.PolylineLayer(
+            polylines: [
+              fm.Polyline(points: routePoints, color: kBlue, strokeWidth: 4),
+            ],
+          ),
+        fm.MarkerLayer(markers: osmMarkers),
+      ],
+    );
+  }
+
+  Widget _buildControls() {
+    if (widget.onExpand == null) return const SizedBox.shrink();
+    return Positioned(
+      left: 10,
+      bottom: 10,
+      child: _MapRoundButton(
+        icon: Icons.fullscreen_rounded,
+        onTap: widget.onExpand!,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gigPos = LatLng(
+      widget.gig.position.latitude,
+      widget.gig.position.longitude,
+    );
+    final initialTarget = widget.workerLocation ?? gigPos;
+
+    final mapWidget = _useGoogleMaps
+        ? GoogleMap(
+            onMapCreated: (controller) {
+              _googleMapController = controller;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _animateToFit();
+              });
+            },
+            initialCameraPosition: CameraPosition(
+              target: initialTarget,
+              zoom: 14.0,
+            ),
+            myLocationEnabled: true,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            markers: _buildGoogleMarkers(),
+            polylines: _buildPolylines(),
+            gestureRecognizers: {
+              Factory<OneSequenceGestureRecognizer>(
+                  () => EagerGestureRecognizer()),
+            },
+          )
+        : _buildOsmMap();
+
+    final stack = Stack(
+      children: [
+        Positioned.fill(child: mapWidget),
+        _buildControls(),
+      ],
+    );
+
+    if (widget.height == null) return stack;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        height: widget.height,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: widget.divider != null ? Border.all(color: widget.divider!) : null,
+        ),
+        child: stack,
+      ),
+    );
+  }
+}
+
+class _MapRoundButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _MapRoundButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: const CircleBorder(),
+      elevation: 3,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Icon(icon, size: 18, color: Colors.black87),
+        ),
+      ),
     );
   }
 }

@@ -100,6 +100,66 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     super.dispose();
   }
 
+  void _openFullScreenTrackingMap(
+    BuildContext context, {
+    required LatLng gigLocation,
+  }) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              // Own live stream so the map keeps tracking the worker while
+              // full screen, instead of a one-time snapshot from the sheet.
+              stream: FirebaseFirestore.instance
+                  .collection(_collection)
+                  .doc(widget.gigId)
+                  .snapshots(),
+              builder: (context, snap) {
+                final liveData = snap.data?.data();
+                final workerGeo = liveData?['workerLocation'] as GeoPoint?;
+                final liveWorkerLocation = workerGeo != null
+                    ? LatLng(workerGeo.latitude, workerGeo.longitude)
+                    : null;
+                final liveWorkerName =
+                    liveData?['assignedWorkerName'] as String? ??
+                    liveData?['workerName'] as String? ??
+                    'Worker';
+                final liveWorkerId =
+                    liveData?['assignedWorkerId'] as String? ??
+                    liveData?['workerId'] as String?;
+                return Stack(
+                  children: [
+                    Positioned.fill(
+                      child: _GigTrackingMap(
+                        gigLocation: gigLocation,
+                        workerLocation: liveWorkerLocation,
+                        workerId: (liveWorkerId?.isNotEmpty ?? false)
+                            ? liveWorkerId
+                            : null,
+                        workerName: liveWorkerName,
+                      ),
+                    ),
+                    Positioned(
+                      top: 12,
+                      left: 12,
+                      child: _MapRoundButton(
+                        icon: Icons.close_rounded,
+                        onTap: () => Navigator.of(ctx).pop(),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _dispatchGig() async {
     final data = _data;
     if (data == null || widget.gigType != 'quick') return;
@@ -686,13 +746,32 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   borderRadius: BorderRadius.circular(16),
                   child: SizedBox(
                     height: 220,
-                    child: _GigTrackingMap(
-                      gigLocation: gigLocation,
-                      workerLocation: (isActive && workerLocation != null)
-                          ? workerLocation
-                          : null,
-                      workerId: workerId.isNotEmpty ? workerId : null,
-                      workerName: workerName.isNotEmpty ? workerName : 'Worker',
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: _GigTrackingMap(
+                            gigLocation: gigLocation,
+                            workerLocation: (isActive && workerLocation != null)
+                                ? workerLocation
+                                : null,
+                            workerId: workerId.isNotEmpty ? workerId : null,
+                            workerName: workerName.isNotEmpty
+                                ? workerName
+                                : 'Worker',
+                          ),
+                        ),
+                        Positioned(
+                          left: 10,
+                          bottom: 10,
+                          child: _MapRoundButton(
+                            icon: Icons.fullscreen_rounded,
+                            onTap: () => _openFullScreenTrackingMap(
+                              ctx,
+                              gigLocation: gigLocation,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -1250,14 +1329,49 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
   }
 
   void _animateToCenter() {
-    final center = _computeCenter();
-    final zoom = widget.workerLocation != null ? 14.0 : 15.0;
+    final worker = widget.workerLocation;
+    if (worker == null) {
+      // Only the destination is known so far — just center on it.
+      if (_useGoogleMaps) {
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(widget.gigLocation, 15.0),
+        );
+      } else if (_osmMapReady) {
+        _osmController.move(
+          ll.LatLng(widget.gigLocation.latitude, widget.gigLocation.longitude),
+          15.0,
+        );
+      }
+      return;
+    }
+
+    // Both the worker and destination are known — fit the camera so both
+    // stay in view instead of a fixed zoom that may crop one of them out.
+    final swLat = min(widget.gigLocation.latitude, worker.latitude);
+    final swLng = min(widget.gigLocation.longitude, worker.longitude);
+    final neLat = max(widget.gigLocation.latitude, worker.latitude);
+    final neLng = max(widget.gigLocation.longitude, worker.longitude);
+
     if (_useGoogleMaps) {
       _googleMapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(center, zoom),
+        CameraUpdate.newLatLngBounds(
+          LatLngBounds(
+            southwest: LatLng(swLat, swLng),
+            northeast: LatLng(neLat, neLng),
+          ),
+          60,
+        ),
       );
     } else if (_osmMapReady) {
-      _osmController.move(ll.LatLng(center.latitude, center.longitude), zoom);
+      _osmController.fitCamera(
+        fm.CameraFit.bounds(
+          bounds: fm.LatLngBounds(
+            ll.LatLng(swLat, swLng),
+            ll.LatLng(neLat, neLng),
+          ),
+          padding: const EdgeInsets.all(60),
+        ),
+      );
     }
   }
 
@@ -1339,6 +1453,7 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
         ),
         onMapReady: () {
           if (mounted) setState(() => _osmMapReady = true);
+          _animateToCenter();
         },
       ),
       children: [
@@ -1380,6 +1495,9 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
             ? GoogleMap(
                 onMapCreated: (controller) {
                   _googleMapController = controller;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _animateToCenter();
+                  });
                 },
                 initialCameraPosition: CameraPosition(
                   target: center,
@@ -1448,6 +1566,33 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Small round icon button overlaid on the tracking map (expand / close).
+// ─────────────────────────────────────────────────────────────────────────────
+class _MapRoundButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _MapRoundButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: const CircleBorder(),
+      elevation: 3,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Icon(icon, size: 18, color: Colors.black87),
+        ),
+      ),
     );
   }
 }

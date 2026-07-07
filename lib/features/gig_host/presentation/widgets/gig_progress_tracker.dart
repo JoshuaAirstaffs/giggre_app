@@ -1005,46 +1005,49 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
     return Stack(
       children: [
         _buildMap(),
-        // ETA chip — bottom-left
-        if (_routeEtaSeconds > 0)
-          Positioned(
-            bottom: 6,
-            left: 6,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.65),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                '${_fmtEta(_routeEtaSeconds)}  ·  ${_fmtDist(_routeDistanceM)}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        // Fullscreen button — top-right corner
+        // ETA chip + fullscreen button — bottom-left
         Positioned(
-          top: 6,
-          right: 6,
-          child: Material(
-            color: Colors.black54,
-            borderRadius: BorderRadius.circular(8),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: _openFullScreen,
-              child: const Padding(
-                padding: EdgeInsets.all(6),
-                child: Icon(
-                  Icons.fullscreen_rounded,
-                  color: Colors.white,
-                  size: 22,
+          bottom: 6,
+          left: 6,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_routeEtaSeconds > 0) ...[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.65),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${_fmtEta(_routeEtaSeconds)}  ·  ${_fmtDist(_routeDistanceM)}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Material(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(8),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: _openFullScreen,
+                  child: const Padding(
+                    padding: EdgeInsets.all(6),
+                    child: Icon(
+                      Icons.fullscreen_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ),
       ],

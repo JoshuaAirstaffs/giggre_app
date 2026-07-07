@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -160,6 +161,12 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
     }
   }
 
+  Future<bool> _requestCameraPermission() async {
+    if (!Platform.isAndroid && !Platform.isIOS) return true;
+    final status = await Permission.camera.request();
+    return status.isGranted;
+  }
+
   void _showResultModal({
     required bool success,
     required String title,
@@ -232,6 +239,83 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
   }
 
   Future<void> _pickAndUpload(_DocCategory category) async {
+    final choice = await showDialog<_UploadSource>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Add Document'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.pop(ctx, _UploadSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Choose from Gallery'),
+              onTap: () => Navigator.pop(ctx, _UploadSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_open_rounded),
+              title: const Text('Browse Files'),
+              onTap: () => Navigator.pop(ctx, _UploadSource.files),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+
+    if (choice == _UploadSource.camera) {
+      final granted = await _requestCameraPermission();
+      if (!granted) {
+        if (mounted) {
+          _showResultModal(
+            success: false,
+            title: 'Permission Denied',
+            message: 'Camera permission is required to take a photo. Please enable it in settings.',
+          );
+        }
+        return;
+      }
+
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+
+      final file = File(picked.path);
+      await _uploadFile(category, file, picked.name, await file.length());
+      return;
+    }
+
+    if (choice == _UploadSource.gallery) {
+      final granted = await _requestPermission();
+      if (!granted) {
+        if (mounted) {
+          _showResultModal(
+            success: false,
+            title: 'Permission Denied',
+            message: 'Storage permission is required to upload files. Please enable it in settings.',
+          );
+        }
+        return;
+      }
+
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+
+      final file = File(picked.path);
+      await _uploadFile(category, file, picked.name, await file.length());
+      return;
+    }
+
     final granted = await _requestPermission();
     if (!granted) {
       if (mounted) {
@@ -253,6 +337,15 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
     final file = File(result.files.single.path!);
     final fileName = result.files.single.name;
     final fileSize = result.files.single.size;
+    await _uploadFile(category, file, fileName, fileSize);
+  }
+
+  Future<void> _uploadFile(
+    _DocCategory category,
+    File file,
+    String fileName,
+    int fileSize,
+  ) async {
     final storagePath =
         'users/${widget.userId}/documents/${category.key}/$fileName';
 
@@ -1200,6 +1293,8 @@ Widget _buildCategoryGridCard(_DocCategory category) {
     );
   }
 }
+
+enum _UploadSource { camera, gallery, files }
 
 class _DocCategory {
   final String key;

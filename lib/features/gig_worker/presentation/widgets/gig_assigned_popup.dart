@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import 'gig_map_section.dart';
 
@@ -123,6 +124,14 @@ class GigAssignedDialog extends StatelessWidget {
               _DetailRow(
                 icon: Icons.location_on_outlined,
                 value: gig.address,
+              ),
+            ],
+            if (gig.scheduledDate != null) ...[
+              const SizedBox(height: 6),
+              _DetailRow(
+                icon: Icons.calendar_today_rounded,
+                value: DateFormat('EEE, MMM d • h:mm a')
+                    .format(gig.scheduledDate!),
               ),
             ],
             const SizedBox(height: 14),
