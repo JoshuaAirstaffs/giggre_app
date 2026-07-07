@@ -1044,6 +1044,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   _SavedLocation? _recentLocation;
   _SavedLocation? _favoriteLocation;
   bool _showQuickPicks = false;
+  bool _locationLocked = false;
   final _searchFocusNode = FocusNode();
 
   static final _defaultCenter = LatLng(14.5995, 120.9842);
@@ -1242,13 +1243,14 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         _picked = point;
         _address = formattedAddress;
         _searching = false;
+        _locationLocked = true;
       });
       if (_useGoogleMaps) {
         _googleMapController
-            ?.animateCamera(CameraUpdate.newLatLngZoom(point, 16.0));
+            ?.animateCamera(CameraUpdate.newLatLngZoom(point, 18.0));
       } else if (_osmMapReady) {
         _osmController.move(
-            ll.LatLng(point.latitude, point.longitude), 16.0);
+            ll.LatLng(point.latitude, point.longitude), 18.0);
       }
     } catch (_) {
       if (!mounted) return;
@@ -1307,11 +1309,12 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         _picked = point;
         _address = formatted.isNotEmpty ? formatted : query;
         _searching = false;
+        _locationLocked = true;
       });
       if (_useGoogleMaps) {
-        _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(point, 16.0));
+        _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(point, 18.0));
       } else if (_osmMapReady) {
-        _osmController.move(ll.LatLng(point.latitude, point.longitude), 16.0);
+        _osmController.move(ll.LatLng(point.latitude, point.longitude), 18.0);
       }
     } catch (_) {
       if (!mounted) return;
@@ -1423,13 +1426,14 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       _searchError = null;
       _placeSuggestions = [];
       _showSuggestions = false;
+      _locationLocked = true;
     });
     if (_useGoogleMaps) {
       _googleMapController
-          ?.animateCamera(CameraUpdate.newLatLngZoom(loc.position, 16.0));
+          ?.animateCamera(CameraUpdate.newLatLngZoom(loc.position, 18.0));
     } else if (_osmMapReady) {
       _osmController.move(
-          ll.LatLng(loc.position.latitude, loc.position.longitude), 16.0);
+          ll.LatLng(loc.position.latitude, loc.position.longitude), 18.0);
     }
   }
 
@@ -1444,6 +1448,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   // Called continuously while the map is being dragged — the pin is fixed
   // at screen-center, so whatever's under it is always the current pick.
   void _onCameraMoved(LatLng center) {
+    if (_locationLocked) return;
     setState(() { _picked = center; _showQuickPicks = false; });
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 600), () {
@@ -1458,6 +1463,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   // Google Maps reports when the camera has settled — resolve immediately
   // instead of waiting out the debounce window.
   void _onCameraIdle() {
+    if (_locationLocked) return;
     _debounce?.cancel();
     if (_suppressNextGeocode) {
       _suppressNextGeocode = false;
@@ -1485,6 +1491,25 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.giggre.mobile',
         ),
+        if (_locationLocked)
+          fm.MarkerLayer(
+            markers: [
+              fm.Marker(
+                point: ll.LatLng(_picked.latitude, _picked.longitude),
+                width: 44,
+                height: 44,
+                alignment: Alignment.bottomCenter,
+                child: const Icon(
+                  Icons.location_pin,
+                  color: Colors.red,
+                  size: 44,
+                  shadows: [
+                    Shadow(color: Colors.black45, blurRadius: 6, offset: Offset(0, 2)),
+                  ],
+                ),
+              ),
+            ],
+          ),
       ],
     );
   }
@@ -1629,28 +1654,36 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                   zoomControlsEnabled: false,
                   onCameraMove: (position) => _onCameraMoved(position.target),
                   onCameraIdle: _onCameraIdle,
+                  markers: _locationLocked
+                      ? {
+                          Marker(
+                            markerId: const MarkerId('selected'),
+                            position: _picked,
+                          ),
+                        }
+                      : {},
                 )
               : _buildOsmMap(),
 
-          // ── Fixed center pin — drag the map underneath it to place it
-          // precisely; far more accurate than tapping, especially when
-          // zoomed out. ──────────────────────────────────────────────
-          IgnorePointer(
-            child: Align(
-              alignment: Alignment.center,
-              child: Transform.translate(
-                offset: const Offset(0, -20),
-                child: const Icon(
-                  Icons.location_pin,
-                  color: Colors.red,
-                  size: 44,
-                  shadows: [
-                    Shadow(color: Colors.black45, blurRadius: 6, offset: Offset(0, 2)),
-                  ],
+          // ── Fixed center pin — only shown when location is not locked;
+          // once locked a real map marker is used instead. ─────────────
+          if (!_locationLocked)
+            IgnorePointer(
+              child: Align(
+                alignment: Alignment.center,
+                child: Transform.translate(
+                  offset: const Offset(0, -20),
+                  child: const Icon(
+                    Icons.location_pin,
+                    color: Colors.red,
+                    size: 44,
+                    shadows: [
+                      Shadow(color: Colors.black45, blurRadius: 6, offset: Offset(0, 2)),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
 
           // ── Search bar ───────────────────────────────────────
           Positioned(
@@ -1934,11 +1967,17 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                                           TextOverflow.ellipsis,
                                     ),
                                     const SizedBox(height: 2),
-                                    const Text(
-                                        'Drag the map to fine-tune the pin',
-                                        style: TextStyle(
-                                            color: kSub,
-                                            fontSize: 11)),
+                                    Text(
+                                      _locationLocked
+                                          ? 'Location pinned'
+                                          : 'Drag the map to fine-tune the pin',
+                                      style: TextStyle(
+                                        color: _locationLocked
+                                            ? const Color(0xFF10B981)
+                                            : kSub,
+                                        fontSize: 11,
+                                      ),
+                                    ),
                                     const SizedBox(height: 4),
                                     Text(
                                       'Lat: ${_picked.latitude.toStringAsFixed(6)}  Lng: ${_picked.longitude.toStringAsFixed(6)}',
@@ -1972,6 +2011,48 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
+                    if (_locationLocked) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            setState(() => _locationLocked = false);
+                            if (_useGoogleMaps) {
+                              _googleMapController?.animateCamera(
+                                CameraUpdate.newLatLng(_picked),
+                              );
+                            } else if (_osmMapReady) {
+                              _osmController.move(
+                                ll.LatLng(_picked.latitude, _picked.longitude),
+                                _osmController.camera.zoom,
+                              );
+                            }
+                          },
+                          icon: const Icon(
+                            Icons.edit_location_alt_outlined,
+                            size: 16,
+                          ),
+                          label: const Text(
+                            'Select Different Location',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: kAmber,
+                            side: BorderSide(
+                              color: kAmber.withValues(alpha: 0.6),
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
                     SizedBox(
                       width: double.infinity,
                       height: 50,
