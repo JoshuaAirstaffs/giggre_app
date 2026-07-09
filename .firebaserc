@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "dev": "simpleproject-8ff7a",
+    "prod": "giggre-prod",
+    "default": "dev"
+  }
+}

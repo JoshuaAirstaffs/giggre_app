@@ -10,6 +10,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
+import '../../../core/providers/current_user_provider.dart';
 import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
@@ -145,6 +147,7 @@ Future<void> _logout() async {
 
   if (confirm == true) {
     if (mounted) {
+      context.read<CurrentUserProvider>().clearUser();
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
         (route) => false,

@@ -9,8 +9,9 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
-import '../../../core/theme/app_colors.dart';
+import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
+import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../auth/presentation/login_screen.dart';
 import 'widgets/dispatch_offer_card.dart';
@@ -402,7 +403,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
   void _showAssignedPopup(GigMarkerData gig) {
     if (!mounted) return;
-    CurrentUserProvider.showGigAssignedNotification(gig.gigType, gig.title);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       showDialog(
@@ -1154,6 +1154,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                         _dispatchSub?.cancel();
                         _offeredGigSub?.cancel();
                         if (!mounted) return;
+                        context.read<CurrentUserProvider>().clearUser();
                         Navigator.of(context).pushAndRemoveUntil(
                           MaterialPageRoute(builder: (_) => const LoginScreen()),
                           (_) => false,

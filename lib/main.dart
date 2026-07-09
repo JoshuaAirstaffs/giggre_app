@@ -224,15 +224,17 @@ class _AuthGateState extends State<AuthGate> {
 
         // Auth account exists but registration was never completed — send
         // them to finish it instead of the Dashboard or Login screen.
-        if (_needsProfile && _restoredForUid == snapshot.data?.uid) {
-          return CompleteProfileScreen(user: snapshot.data!);
+        if (_needsProfile && _restoredForUid == FirebaseAuth.instance.currentUser?.uid) {
+          return CompleteProfileScreen(user: snapshot.data ?? FirebaseAuth.instance.currentUser!);
         }
 
-        // Trust the provider over the stream — avoids a LoginScreen flash if
-        // Firebase briefly emits null during token refresh on app restart.
-        // Also require _doRestore ran for this user so the pendingDeletion
-        // check always runs before we open the home screen.
-        if (provider.isLoggedIn && _restoredForUid == snapshot.data?.uid) {
+        // Trust currentUser (synchronous, already restored by native SDK on
+        // cold start) over the stream — authStateChanges() can emit a null
+        // first event after a full process restart before it catches up,
+        // which previously fell through to LoginScreen despite a valid
+        // restored session. Also require _doRestore ran for this user so the
+        // pendingDeletion check always runs before we open the home screen.
+        if (provider.isLoggedIn && _restoredForUid == FirebaseAuth.instance.currentUser?.uid) {
           return const MainNavigation();
         }
 
@@ -327,7 +329,13 @@ class _PendingDeletionScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () => FirebaseAuth.instance.signOut(),
+                onPressed: () async {
+                  final uid = FirebaseAuth.instance.currentUser?.uid;
+                  if (uid != null) {
+                    await CurrentUserProvider.unregisterPushForUid(uid);
+                  }
+                  await FirebaseAuth.instance.signOut();
+                },
                 child: const Text(
                   'Sign Out',
                   style: TextStyle(color: Colors.grey, fontSize: 14),
@@ -387,7 +395,13 @@ class _RestoreErrorScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () => FirebaseAuth.instance.signOut(),
+                onPressed: () async {
+                  final uid = FirebaseAuth.instance.currentUser?.uid;
+                  if (uid != null) {
+                    await CurrentUserProvider.unregisterPushForUid(uid);
+                  }
+                  await FirebaseAuth.instance.signOut();
+                },
                 child: const Text(
                   'Sign Out',
                   style: TextStyle(color: Colors.grey, fontSize: 14),
