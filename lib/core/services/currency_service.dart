@@ -39,7 +39,7 @@ class CurrencyService {
     final detected = await detectCurrency();
 
     if (detected == null) {
-      return existing ?? 'PHP';
+      return existing ?? 'USD';
     }
 
     if (detected != existing) {
