@@ -11,6 +11,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/providers/current_user_provider.dart';
+import '../../../core/services/earnings_service.dart';
 import '../../auth/presentation/login_screen.dart';
 import 'widgets/dispatch_offer_card.dart';
 import 'widgets/earnings_card.dart';
@@ -59,9 +60,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   bool _autoAccept = false;
   bool _seekingQuickGigs = false;
 
-  // Earnings
-  double _totalEarnings = 0;
-  double _weeklyEarnings = 0;
+  // Earnings grouped by currency code
+  Map<String, double> _earningsByCode = {};
+  Map<String, double> _weeklyByCode = {};
   int _completedGigs = 0;
 
   // Active gigs (when working)
@@ -81,10 +82,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   StreamSubscription? _offeredGigSub;
   StreamSubscription? _openGigAssignSub;
   StreamSubscription? _profileSub;
-
-  // Earnings streams
-  final List<StreamSubscription> _earningsSubs = [];
-  final Map<String, List<Map<String, dynamic>>> _gigsByCollection = {};
 
   // Decline suspension
   DateTime? _suspendedUntil;
@@ -108,9 +105,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _offeredGigSub?.cancel();
     _openGigAssignSub?.cancel();
     _suspensionTimer?.cancel();
-    for (final sub in _earningsSubs) {
-      sub.cancel();
-    }
     _setOnlineStatus(false);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -190,10 +184,26 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         _suspendedUntil = suspendedUntil;
         _loading = false;
         _isVerified = data['isVerified'] as String? ?? '';
+
+        // Earnings — read directly from the aggregated field on the user doc.
+        final earningsData =
+            (data['earnings'] as Map<String, dynamic>?) ?? {};
+        final storedWeek = earningsData['currentWeek'] as String? ?? '';
+        final currentWeek = EarningsService.currentWeekLabel();
+        final rawTotal =
+            (earningsData['total'] as Map<String, dynamic>?) ?? {};
+        final rawWeekly = storedWeek == currentWeek
+            ? (earningsData['weekly'] as Map<String, dynamic>?) ?? {}
+            : <String, dynamic>{};
+        _earningsByCode = rawTotal.map(
+            (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0));
+        _weeklyByCode = rawWeekly.map(
+            (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0));
+        _completedGigs =
+            (earningsData['completedGigs'] as num?)?.toInt() ?? 0;
       });
 
       if (isFirstLoad) {
-        _startEarningsSubs(uid);
         _saveLocationToFirestore();
         _startDispatchSub(uid);
         _startOfferedGigSub(uid);
@@ -209,58 +219,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         }
       }
     }, onError: (e) => debugPrint('[GigWorker] profile stream error: $e'));
-  }
-
-  void _startEarningsSubs(String uid) {
-    for (final sub in _earningsSubs) {
-      sub.cancel();
-    }
-    _earningsSubs.clear();
-    _gigsByCollection.clear();
-
-    final now = DateTime.now();
-    final weekStartMidnight = DateTime(
-      now.year,
-      now.month,
-      now.day - (now.weekday - 1),
-    );
-
-    void recalculate() {
-      double total = 0, weekly = 0;
-      int completed = 0;
-      for (final gigs in _gigsByCollection.values) {
-        for (final gig in gigs) {
-          final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
-          total += budget;
-          completed++;
-          final ts = gig['completedAt'] as Timestamp?;
-          if (ts != null && ts.toDate().isAfter(weekStartMidnight)) {
-            weekly += budget;
-          }
-        }
-      }
-      if (mounted) {
-        setState(() {
-          _totalEarnings = total;
-          _weeklyEarnings = weekly;
-          _completedGigs = completed;
-        });
-      }
-    }
-
-    for (final col in ['quick_gigs', 'open_gigs', 'offered_gigs']) {
-      final sub = FirebaseFirestore.instance
-          .collection(col)
-          .where('workerId', isEqualTo: uid)
-          .where('status', isEqualTo: 'completed')
-          .snapshots()
-          .listen((snap) {
-        _gigsByCollection[col] =
-            snap.docs.map((d) => d.data()).toList();
-        recalculate();
-      }, onError: (e) => debugPrint('[GigWorker] earnings stream error: $e'));
-      _earningsSubs.add(sub);
-    }
   }
 
   /// On app resume/init, restore WorkingUI if worker has an ongoing gig.
@@ -1195,8 +1153,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                         _profileSub?.cancel();
                         _dispatchSub?.cancel();
                         _offeredGigSub?.cancel();
-                        for (final sub in _earningsSubs) { sub.cancel(); }
-                        _earningsSubs.clear();
                         if (!mounted) return;
                         Navigator.of(context).pushAndRemoveUntil(
                           MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -1301,8 +1257,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
                           // ── Earnings (2-col) ──────────────────────────
                           EarningsCard(
-                            totalEarnings: _totalEarnings,
-                            weeklyEarnings: _weeklyEarnings,
+                            totalByCurrency: _earningsByCode,
+                            weeklyByCurrency: _weeklyByCode,
                             completedGigs: _completedGigs,
                           ),
                           const SizedBox(height: 20),

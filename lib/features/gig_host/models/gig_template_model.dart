@@ -8,6 +8,7 @@ class GigTemplateModel {
   final String title;
   final String description;
   final double budget;
+  final String currencyCode;
   final String skillRequired;   // open / offered only
   final String experienceLevel; // open / offered only
   final DateTime createdAt;
@@ -20,6 +21,7 @@ class GigTemplateModel {
     required this.title,
     required this.description,
     required this.budget,
+    this.currencyCode = 'PHP',
     this.skillRequired = '',
     this.experienceLevel = '',
     required this.createdAt,
@@ -32,6 +34,7 @@ class GigTemplateModel {
         'title': title,
         'description': description,
         'budget': budget,
+        'currencyCode': currencyCode,
         'skillRequired': skillRequired,
         'experienceLevel': experienceLevel,
         'createdAt': Timestamp.fromDate(createdAt),
@@ -47,6 +50,7 @@ class GigTemplateModel {
       title: d['title'] ?? '',
       description: d['description'] ?? '',
       budget: (d['budget'] as num?)?.toDouble() ?? 0,
+      currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
       skillRequired: d['skillRequired'] ?? '',
       experienceLevel: d['experienceLevel'] ?? '',
       createdAt: d['createdAt'] != null

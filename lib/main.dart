@@ -133,13 +133,15 @@ class _AuthGateState extends State<AuthGate> {
           return;
         }
 
-        context.read<CurrentUserProvider>().setCurrentUserInfo(
+        final provider = context.read<CurrentUserProvider>();
+        provider.setCurrentUserInfo(
           user.email,
           data['name'],
           user.uid,
           data['userId'],
           data['isVerified'],
         );
+        provider.initCurrencyCode(user.uid, data);
         if (mounted) {
           setState(() {
             _needsProfile = false;

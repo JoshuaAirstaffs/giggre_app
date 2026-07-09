@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/currency_formatter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig History Screen — all completed gigs for the current worker
@@ -17,7 +18,7 @@ class GigHistoryScreen extends StatefulWidget {
 class _GigHistoryScreenState extends State<GigHistoryScreen> {
   bool _loading = true;
   List<_HistoryItem> _items = [];
-  double _totalEarnings = 0;
+  Map<String, double> _earningsByCode = {};
 
   @override
   void initState() {
@@ -32,20 +33,29 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
       return;
     }
 
-    final results = await Future.wait([
+    final gigResults = await Future.wait([
       _fetchCollection('quick_gigs', uid, 'Quick'),
       _fetchCollection('open_gigs', uid, 'Open'),
       _fetchCollection('offered_gigs', uid, 'Offered'),
     ]);
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
 
-    final all = results.expand((e) => e).toList()
+    final all = gigResults.expand((e) => e).toList()
       ..sort((a, b) => b.completedAt.compareTo(a.completedAt));
 
-    final total = all.fold<double>(0, (acc, e) => acc + e.budget);
+    final earningsData =
+        ((userDoc.data() ?? {})['earnings'] as Map<String, dynamic>?) ?? {};
+    final rawTotal =
+        (earningsData['total'] as Map<String, dynamic>?) ?? {};
+    final byCode = rawTotal.map(
+        (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0.0));
 
     setState(() {
       _items = all;
-      _totalEarnings = total;
+      _earningsByCode = Map<String, double>.from(byCode);
       _loading = false;
     });
   }
@@ -69,6 +79,7 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
         title: d['title'] as String? ?? type,
         address: d['address'] as String? ?? '',
         budget: (d['budget'] as num?)?.toDouble() ?? 0,
+        currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
         completedAt: completedAt,
         hostName: d['hostName'] as String? ?? '',
       );
@@ -86,7 +97,7 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
         children: [
           _GigHistoryHeader(
             isDark: isDark,
-            totalEarnings: _totalEarnings,
+            earningsByCode: _earningsByCode,
             gigCount: _items.length,
           ),
           Expanded(
@@ -136,6 +147,7 @@ class _HistoryItem {
   final String title;
   final String address;
   final double budget;
+  final String currencyCode;
   final DateTime completedAt;
   final String hostName;
 
@@ -145,6 +157,7 @@ class _HistoryItem {
     required this.title,
     required this.address,
     required this.budget,
+    required this.currencyCode,
     required this.completedAt,
     required this.hostName,
   });
@@ -156,17 +169,25 @@ class _HistoryItem {
 
 class _GigHistoryHeader extends StatelessWidget {
   final bool isDark;
-  final double totalEarnings;
+  final Map<String, double> earningsByCode;
   final int gigCount;
 
   const _GigHistoryHeader({
     required this.isDark,
-    required this.totalEarnings,
+    required this.earningsByCode,
     required this.gigCount,
   });
 
   @override
   Widget build(BuildContext context) {
+    final sortedEntries = earningsByCode.isEmpty
+        ? [const MapEntry('PHP', 0.0)]
+        : (earningsByCode.entries.toList()..sort((a, b) => a.key.compareTo(b.key)));
+
+    final earningsValue = sortedEntries
+        .map((e) => CurrencyFormatter.format(e.value, e.key))
+        .join('  ·  ');
+
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -221,7 +242,7 @@ class _GigHistoryHeader extends StatelessWidget {
                   Expanded(
                     child: _StatChip(
                       label: 'Total Earned',
-                      value: '\$${totalEarnings.toStringAsFixed(2)}',
+                      value: earningsValue,
                       icon: Icons.payments_rounded,
                     ),
                   ),
@@ -373,11 +394,13 @@ class _GigHistoryCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis),
                     ),
                     const SizedBox(width: 8),
-                    Text('\$${item.budget.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                            color: Color(0xFF10B981),
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold)),
+                    Text(
+                      CurrencyFormatter.format(item.budget, item.currencyCode),
+                      style: const TextStyle(
+                          color: Color(0xFF10B981),
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4),

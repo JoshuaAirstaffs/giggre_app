@@ -11,6 +11,7 @@ import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.da
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/currency_formatter.dart';
 import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
 import 'widgets/payment_history_sheet.dart';
@@ -57,7 +58,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   int _gigsPosted = 0;
   int _activeGigs = 0;
   int _completedGigs = 0;
-  double _totalSpent = 0;
+  Map<String, double> _spentByCurrency = {};
 
   double _completionRate = 0;
 
@@ -206,14 +207,16 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
     int gigsPostedCount = allDocs.length;
     int activeGigsCount = 0;
     int completedCount = 0;
-    double totalSpentAmt = 0;
+    final Map<String, double> spentByCode = {};
 
     for (final d in allDocs) {
       final status = d['status'] as String? ?? '';
       if (_activeStatuses.contains(status)) activeGigsCount++;
       if (status == 'completed') {
         completedCount++;
-        totalSpentAmt += (d['budget'] as num? ?? 0).toDouble();
+        final amount = (d['budget'] as num? ?? 0).toDouble();
+        final code = (d['currencyCode'] as String?) ?? 'PHP';
+        spentByCode[code] = (spentByCode[code] ?? 0) + amount;
       }
     }
 
@@ -222,7 +225,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
       _gigsPosted = gigsPostedCount;
       _activeGigs = activeGigsCount;
       _completedGigs = completedCount;
-      _totalSpent = totalSpentAmt;
+      _spentByCurrency = spentByCode;
       _completionRate = gigsPostedCount > 0
           ? (completedCount / gigsPostedCount) * 100
           : 0;
@@ -988,9 +991,12 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                         ),
                         _StatCard2(
                           label: 'Total Spent',
-                          value: _totalSpent > 0
-                              ? '₱${_totalSpent.toStringAsFixed(0)}'
-                              : '₱0',
+                          value: _spentByCurrency.isEmpty
+                              ? CurrencyFormatter.format(0, 'PHP')
+                              : (_spentByCurrency.entries.toList()
+                                    ..sort((a, b) => a.key.compareTo(b.key)))
+                                  .map((e) => CurrencyFormatter.format(e.value, e.key))
+                                  .join('  '),
                           icon: Icons.payments_outlined,
                           color: const Color(0xFFEC4899),
                           cardColor: cardColor,
@@ -1801,6 +1807,7 @@ class _GigHistoryCard extends StatelessWidget {
     final gigType = gig['gigType'] as String? ?? 'quick';
     final title = gig['title'] as String? ?? 'Gig';
     final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
+    final currencyCode = (gig['currencyCode'] as String?) ?? 'PHP';
     final workerName =
         gig['assignedWorkerName'] as String? ??
         gig['workerName'] as String? ??
@@ -1963,7 +1970,7 @@ class _GigHistoryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '₱${budget.toStringAsFixed(0)}',
+                  CurrencyFormatter.format(budget, currencyCode),
                   style: TextStyle(
                     color: onSurface,
                     fontSize: 15,
@@ -2052,6 +2059,7 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
     final title = gig['title'] as String? ?? 'Gig';
     final description = gig['description'] as String? ?? '';
     final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
+    final currencyCode = (gig['currencyCode'] as String?) ?? 'PHP';
     final address = gig['address'] as String? ?? '';
     final workerName =
         gig['assignedWorkerName'] as String? ??
@@ -2182,7 +2190,7 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
                 _HistoryDetailRow(
                   icon: Icons.attach_money_rounded,
                   label: 'Budget',
-                  value: '₱${budget.toStringAsFixed(0)}',
+                  value: CurrencyFormatter.format(budget, currencyCode),
                   valueColor: kAmber,
                   onSurface: onSurface,
                 ),

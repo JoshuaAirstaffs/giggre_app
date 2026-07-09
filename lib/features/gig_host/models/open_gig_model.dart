@@ -9,6 +9,7 @@ class OpenGigModel {
   final List<String> requiredSkills;
   final String experienceLevel; // 'entry' | 'intermediate' | 'expert'
   final double budget;
+  final String currencyCode;
   final String status;
   final GeoPoint location;
   final String address;
@@ -24,6 +25,7 @@ class OpenGigModel {
     required this.requiredSkills,
     required this.experienceLevel,
     required this.budget,
+    this.currencyCode = 'PHP',
     required this.location,
     required this.address,
     this.status = 'open',
@@ -39,6 +41,7 @@ class OpenGigModel {
         'requiredSkills': requiredSkills,
         'experienceLevel': experienceLevel,
         'budget': budget,
+        'currencyCode': currencyCode,
         'location': location,
         'address': address,
         'status': status,
@@ -59,6 +62,7 @@ class OpenGigModel {
       requiredSkills: List<String>.from(d['requiredSkills'] ?? []),
       experienceLevel: d['experienceLevel'] ?? 'entry',
       budget: (d['budget'] ?? 0).toDouble(),
+      currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
       location: d['location'] as GeoPoint,
       address: d['address'] ?? '',
       status: d['status'] ?? 'open',

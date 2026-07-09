@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  PaymentSelectionSheet — host selects how the worker will be paid
@@ -13,12 +14,14 @@ import '../../../../core/theme/app_colors.dart';
 class PaymentSelectionSheet extends StatefulWidget {
   final String gigTitle;
   final double budget;
+  final String currencyCode;
   final Future<void> Function(String paymentMethod) onConfirm;
 
   const PaymentSelectionSheet({
     super.key,
     required this.gigTitle,
     required this.budget,
+    this.currencyCode = 'PHP',
     required this.onConfirm,
   });
 
@@ -26,6 +29,7 @@ class PaymentSelectionSheet extends StatefulWidget {
     required BuildContext context,
     required String gigTitle,
     required double budget,
+    String currencyCode = 'PHP',
     required Future<void> Function(String paymentMethod) onConfirm,
   }) {
     return showModalBottomSheet(
@@ -35,6 +39,7 @@ class PaymentSelectionSheet extends StatefulWidget {
       builder: (_) => PaymentSelectionSheet(
         gigTitle: gigTitle,
         budget: budget,
+        currencyCode: currencyCode,
         onConfirm: onConfirm,
       ),
     );
@@ -99,7 +104,7 @@ class _PaymentSelectionSheetState extends State<PaymentSelectionSheet> {
                         color: green, size: 18),
                     const SizedBox(width: 8),
                     Text(
-                      '₱${widget.budget.toStringAsFixed(0)}',
+                      CurrencyFormatter.format(widget.budget, widget.currencyCode),
                       style: const TextStyle(
                           color: green,
                           fontSize: 17,
@@ -238,7 +243,7 @@ class _PaymentSelectionSheetState extends State<PaymentSelectionSheet> {
                         color: kAmber.withValues(alpha: 0.3)),
                   ),
                   child: Text(
-                    '₱${widget.budget.toStringAsFixed(0)}',
+                    CurrencyFormatter.format(widget.budget, widget.currencyCode),
                     style: const TextStyle(
                         color: kAmber,
                         fontSize: 14,

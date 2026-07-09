@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 
 class PaymentHistorySheet extends StatelessWidget {
   final List<Map<String, dynamic>> gigs;
@@ -28,16 +29,39 @@ class PaymentHistorySheet extends StatelessWidget {
     );
   }
 
-  double get _totalSpent =>
-      gigs.fold(0.0, (acc, g) => acc + ((g['budget'] as num?)?.toDouble() ?? 0));
-
-  Map<String, double> get _byMethod {
+  // Total spent grouped by currency code.
+  Map<String, double> get _totalByCurrency {
     final map = <String, double>{};
     for (final g in gigs) {
-      final method = (g['paymentMethod'] as String? ?? 'cash');
-      map[method] = (map[method] ?? 0) + ((g['budget'] as num?)?.toDouble() ?? 0);
+      final code = (g['currencyCode'] as String?) ?? 'PHP';
+      map[code] = (map[code] ?? 0) + ((g['budget'] as num?)?.toDouble() ?? 0);
     }
     return map;
+  }
+
+  // Spending per payment method (keyed by method label), tracks first-seen currency per method.
+  Map<String, ({double amount, String currencyCode})> get _byMethod {
+    final map = <String, ({double amount, String currencyCode})>{};
+    for (final g in gigs) {
+      final method = (g['paymentMethod'] as String? ?? 'cash');
+      final amount = (g['budget'] as num?)?.toDouble() ?? 0;
+      final code = (g['currencyCode'] as String?) ?? 'PHP';
+      final existing = map[method];
+      map[method] = (
+        amount: (existing?.amount ?? 0) + amount,
+        currencyCode: existing?.currencyCode ?? code,
+      );
+    }
+    return map;
+  }
+
+  String _totalSpentLabel() {
+    final entries = _totalByCurrency.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    if (entries.isEmpty) return CurrencyFormatter.format(0, 'PHP');
+    return entries
+        .map((e) => CurrencyFormatter.format(e.value, e.key))
+        .join('  ');
   }
 
   @override
@@ -105,7 +129,7 @@ class PaymentHistorySheet extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text('₱${_totalSpent.toStringAsFixed(0)}',
+                        Text(_totalSpentLabel(),
                             style: TextStyle(
                                 color: onSurface,
                                 fontSize: 16,
@@ -125,6 +149,8 @@ class PaymentHistorySheet extends StatelessWidget {
                 child: Row(
                   children: _byMethod.entries.map((e) {
                     final cfg = _methodConfig(e.key);
+                    final label = CurrencyFormatter.format(
+                        e.value.amount, e.value.currencyCode);
                     return Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: Container(
@@ -147,7 +173,7 @@ class PaymentHistorySheet extends StatelessWidget {
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600)),
                             const SizedBox(width: 4),
-                            Text('₱${e.value.toStringAsFixed(0)}',
+                            Text(label,
                                 style: TextStyle(
                                     color: cfg.color,
                                     fontSize: 11,
@@ -253,6 +279,7 @@ class _PaymentCard extends StatelessWidget {
 
     final title = gig['title'] as String? ?? 'Gig';
     final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
+    final currencyCode = (gig['currencyCode'] as String?) ?? 'PHP';
     final paymentMethod = gig['paymentMethod'] as String? ?? 'cash';
     final workerName = gig['assignedWorkerName'] as String? ??
         gig['workerName'] as String? ?? '';
@@ -367,11 +394,13 @@ class _PaymentCard extends StatelessWidget {
 
           // ── Amount ────────────────────────────────────────────────
           const SizedBox(width: 12),
-          Text('₱${budget.toStringAsFixed(0)}',
-              style: TextStyle(
-                  color: onSurface,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold)),
+          Text(
+            CurrencyFormatter.format(budget, currencyCode),
+            style: TextStyle(
+                color: onSurface,
+                fontSize: 15,
+                fontWeight: FontWeight.bold),
+          ),
         ],
       ),
     );

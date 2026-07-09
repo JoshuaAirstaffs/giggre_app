@@ -11,6 +11,7 @@ import 'package:giggre_app/features/call/incoming_call_screen.dart';
 import 'package:giggre_app/features/call/incoming_video_call_screen.dart';
 import 'package:giggre_app/features/gig_host/presentation/widgets/gig_detail_sheet.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
+import '../services/currency_service.dart';
 
 class CurrentUserProvider extends ChangeNotifier {
   String? _currentEmail;
@@ -36,12 +37,28 @@ class CurrentUserProvider extends ChangeNotifier {
 
   static GlobalKey<NavigatorState>? navigatorKey;
 
+  String _currencyCode = 'PHP';
+  bool _currencyInitialized = false;
+
   String? get currentEmail => _currentEmail;
   String? get currentName => _currentName;
   String? get uid => _uid;
   String? get userId => _userId;
   String? get isVerified => _isVerified;
   bool get isLoggedIn => _uid != null;
+  String get currencyCode => _currencyCode;
+
+  // Called once per session after setCurrentUserInfo. Reads the stored
+  // currencyCode from the user doc; if absent, detects it via GPS and persists
+  // it to Firestore. No-op on subsequent calls within the same session.
+  Future<void> initCurrencyCode(
+      String uid, Map<String, dynamic> userDoc) async {
+    if (_currencyInitialized) return;
+    _currencyInitialized = true;
+    final code = await CurrencyService.initForUser(uid, userDoc);
+    _currencyCode = code;
+    notifyListeners();
+  }
 
   static Future<void> initNotifications() async {
     if (_notificationsInitialized) return;
@@ -189,6 +206,8 @@ class CurrentUserProvider extends ChangeNotifier {
     _currentEmail = null;
     _currentName = null;
     _uid = null;
+    _currencyCode = 'PHP';
+    _currencyInitialized = false;
     _ticketSubscription?.cancel();
     _ticketSubscription = null;
     _callSubscription?.cancel();

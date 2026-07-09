@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -181,7 +182,7 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
               const SizedBox(width: 16),
               const Icon(Icons.attach_money_rounded, color: kAmber, size: 14),
               Text(
-                '₱${widget.gig.budget.toStringAsFixed(0)}',
+                CurrencyFormatter.format(widget.gig.budget, widget.gig.currencyCode),
                 style: const TextStyle(
                     color: kAmber,
                     fontSize: 13,

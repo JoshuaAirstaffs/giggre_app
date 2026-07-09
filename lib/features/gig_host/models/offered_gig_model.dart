@@ -11,6 +11,7 @@ class OfferedGigModel {
   final String skillRequired;
   final String experienceLevel; // 'entry' | 'intermediate' | 'expert'
   final double budget;
+  final String currencyCode;
   final String status;
   final GeoPoint location;
   final String address;
@@ -28,6 +29,7 @@ class OfferedGigModel {
     required this.skillRequired,
     required this.experienceLevel,
     required this.budget,
+    this.currencyCode = 'PHP',
     required this.location,
     required this.address,
     this.status = 'offered',
@@ -45,6 +47,7 @@ class OfferedGigModel {
         'skillRequired': skillRequired,
         'experienceLevel': experienceLevel,
         'budget': budget,
+        'currencyCode': currencyCode,
         'location': location,
         'address': address,
         'status': status,
@@ -67,6 +70,7 @@ class OfferedGigModel {
       skillRequired: d['skillRequired'] ?? '',
       experienceLevel: d['experienceLevel'] ?? 'entry',
       budget: (d['budget'] ?? 0).toDouble(),
+      currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
       location: d['location'] as GeoPoint,
       address: d['address'] ?? '',
       status: d['status'] ?? 'offered',

@@ -97,14 +97,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
-      context.read<CurrentUserProvider>().setCurrentUserInfo(
+      final docData = doc.data() ?? {};
+      final provider = context.read<CurrentUserProvider>();
+      provider.setCurrentUserInfo(
         cred.user?.email,
-        doc.data()?['name'],
+        docData['name'],
         uid,
-        doc.data()?['userId'],
-        doc.data()?['isVerified'],
+        docData['userId'],
+        docData['isVerified'],
       );
-      _navigateByRole(doc.data()?['role']);
+      provider.initCurrencyCode(uid, docData);
+      _navigateByRole(docData['role']);
 
     } on FirebaseAuthException catch (e) {
       String message;

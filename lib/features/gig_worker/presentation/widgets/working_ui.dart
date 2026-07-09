@@ -15,6 +15,7 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
 import 'worker_payment_confirm_sheet.dart';
 import '../../../../core/services/gms_availability.dart';
@@ -480,6 +481,7 @@ class _WorkingUIState extends State<WorkingUI> {
       gigId: widget.gig.id,
       gigCollection: widget.gigCollection,
       budget: widget.gig.budget,
+      currencyCode: widget.gig.currencyCode,
       hostName: widget.gig.hostName,
       onConfirmed: _onPaymentConfirmed,
     );
@@ -698,7 +700,7 @@ class _WorkingUIState extends State<WorkingUI> {
                         color: green,
                         title: 'Gig Completed!',
                         subtitle:
-                            '₱${widget.gig.budget.toStringAsFixed(0)} will be released to your wallet.',
+                            '${CurrencyFormatter.format(widget.gig.budget, widget.gig.currencyCode)} will be released to your wallet.',
                       ),
 
                     const SizedBox(height: 16),
@@ -1659,7 +1661,7 @@ class _GigInfoCard extends StatelessWidget {
                 _InfoRow(
                   icon: Icons.attach_money_rounded,
                   label: 'Budget',
-                  value: '₱${gig.budget.toStringAsFixed(0)}',
+                  value: CurrencyFormatter.format(gig.budget, gig.currencyCode),
                   valueColor: kAmber,
                 ),
                 if (gig.address.isNotEmpty)

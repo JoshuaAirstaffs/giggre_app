@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 
 // Derives worker activity from quick_gigs / open_gigs / offered_gigs.
 // Items older than [_kWindow] are filtered out; a 60-second timer refreshes
@@ -139,6 +140,7 @@ class _WorkerNotificationsSheetState
       final gigTitle = gig['title'] as String? ?? 'Gig';
       final hostName = gig['hostName'] as String? ?? 'Host';
       final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
+      final currencyCode = (gig['currencyCode'] as String?) ?? 'PHP';
       final gigType = gig['gigType'] as String? ?? 'quick';
       final status = gig['status'] as String? ?? '';
       final payMethod = gig['paymentMethod'] as String? ?? 'cash';
@@ -166,7 +168,7 @@ class _WorkerNotificationsSheetState
       tryAdd(
         'completedAt',
         _ActivityType.paymentConfirmed,
-        'Payment Confirmed  ₱${budget.toStringAsFixed(0)}',
+        'Payment Confirmed  ${CurrencyFormatter.format(budget, currencyCode)}',
         'Paid via $capitalized · "$gigTitle"',
       );
 
@@ -187,7 +189,7 @@ class _WorkerNotificationsSheetState
           'createdAt',
           _ActivityType.newOffer,
           'New Gig Offer',
-          '"$gigTitle" from $hostName · ₱${budget.toStringAsFixed(0)}',
+          '"$gigTitle" from $hostName · ${CurrencyFormatter.format(budget, currencyCode)}',
         );
       }
 

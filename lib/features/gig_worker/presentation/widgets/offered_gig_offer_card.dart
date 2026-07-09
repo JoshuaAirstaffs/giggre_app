@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -125,7 +126,7 @@ class OfferedGigOfferCard extends StatelessWidget {
               const SizedBox(width: 12),
               const Icon(Icons.attach_money_rounded, color: purple, size: 14),
               Text(
-                '₱${gig.budget.toStringAsFixed(0)}',
+                CurrencyFormatter.format(gig.budget, gig.currencyCode),
                 style: const TextStyle(
                   color: purple,
                   fontSize: 13,

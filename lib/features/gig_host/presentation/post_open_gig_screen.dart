@@ -17,8 +17,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/gms_availability.dart';
 import '../../../core/utils/country_check.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
+import '../../../core/providers/current_user_provider.dart';
+import '../../../core/utils/currency_formatter.dart';
 import '../models/gig_template_model.dart';
 import '../models/open_gig_model.dart';
 import 'widgets/template_name_dialog.dart';
@@ -273,6 +276,9 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       return;
     }
 
+    // Fallback if gig-location geocoding fails during submit.
+    final fallbackCurrency = context.read<CurrentUserProvider>().currencyCode;
+
     setState(() => _posting = true);
     try {
       if (_useMapLocation && _mapPosition != null && _gpsPosition != null) {
@@ -296,6 +302,11 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
           ? GeoPoint(_mapPosition!.latitude, _mapPosition!.longitude)
           : GeoPoint(_gpsPosition!.latitude, _gpsPosition!.longitude);
 
+      final gigCountry = await countryCodeFromCoordinates(geoPoint.latitude, geoPoint.longitude);
+      final currency = gigCountry != null
+          ? CurrencyFormatter.countryToCurrency(gigCountry)
+          : fallbackCurrency;
+
       DateTime? scheduledAt;
       if (_scheduledDate != null) {
         final t = _scheduledTime ?? const TimeOfDay(hour: 8, minute: 0);
@@ -316,6 +327,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         requiredSkills: [_selectedSkill!],
         experienceLevel: _experienceLevel,
         budget: double.parse(_budgetCtrl.text.trim()),
+        currencyCode: currency,
         location: geoPoint,
         address: _address,
         scheduledDate: scheduledAt,
@@ -419,6 +431,8 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       _showSnack('Enter a valid amount before saving as template.');
       return;
     }
+    // Capture before async gap.
+    final currency = context.read<CurrentUserProvider>().currencyCode;
     final name = await showDialog<String>(
       context: context,
       builder: (_) => TemplateNameDialog(initialName: title),
@@ -435,6 +449,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
           title: title,
           description: _descCtrl.text.trim(),
           budget: budgetVal,
+          currencyCode: currency,
           skillRequired: _selectedSkill ?? '',
           experienceLevel: _experienceLevel,
           createdAt: DateTime.now(),
@@ -549,8 +564,9 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                     if (n == null || n <= 0) return 'Enter a valid amount';
                     return null;
                   },
-                  prefix: const Text(r'$ ',
-                      style: TextStyle(
+                  prefix: Text(
+                      '${CurrencyFormatter.symbol(context.read<CurrentUserProvider>().currencyCode)} ',
+                      style: const TextStyle(
                           color: kBlue,
                           fontSize: 15,
                           fontWeight: FontWeight.bold)),

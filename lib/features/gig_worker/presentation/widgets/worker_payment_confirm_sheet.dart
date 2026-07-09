@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/services/earnings_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  WorkerPaymentConfirmSheet — shown to worker when gig enters 'payment' status.
@@ -11,6 +14,7 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
   final String gigId;
   final String gigCollection;
   final double budget;
+  final String currencyCode;
   final String hostName;
   // Called after Firestore update succeeds — parent owns the pop + rating flow.
   final VoidCallback? onConfirmed;
@@ -20,6 +24,7 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
     required this.gigId,
     required this.gigCollection,
     required this.budget,
+    this.currencyCode = 'PHP',
     required this.hostName,
     this.onConfirmed,
   });
@@ -29,6 +34,7 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
     required String gigId,
     required String gigCollection,
     required double budget,
+    String currencyCode = 'PHP',
     required String hostName,
     VoidCallback? onConfirmed,
   }) {
@@ -42,6 +48,7 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
         gigId: gigId,
         gigCollection: gigCollection,
         budget: budget,
+        currencyCode: currencyCode,
         hostName: hostName,
         onConfirmed: onConfirmed,
       ),
@@ -91,10 +98,11 @@ class _WorkerPaymentConfirmSheetState
       _errorMsg = null;
     });
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection(widget.gigCollection)
-          .doc(widget.gigId)
-          .get();
+      final db = FirebaseFirestore.instance;
+      final gigRef = db.collection(widget.gigCollection).doc(widget.gigId);
+
+      // Validate the payment code before opening a transaction.
+      final snap = await gigRef.get();
       final storedCode = snap.data()?['paymentCode'] as String?;
       if (storedCode == null || storedCode != trimmed) {
         setState(() {
@@ -104,14 +112,30 @@ class _WorkerPaymentConfirmSheetState
         });
         return;
       }
-      await FirebaseFirestore.instance
-          .collection(widget.gigCollection)
-          .doc(widget.gigId)
-          .update({
-        'status': 'completed',
-        'completedAt': FieldValue.serverTimestamp(),
-        'paymentConfirmedAt': FieldValue.serverTimestamp(),
-        'paymentConfirmedBy': 'worker',
+
+      final workerId = FirebaseAuth.instance.currentUser!.uid;
+      final workerRef = db.collection('users').doc(workerId);
+      final currentWeek = EarningsService.currentWeekLabel();
+
+      await db.runTransaction((tx) async {
+        // Re-read inside the transaction for the idempotency guard.
+        final gigSnap = await tx.get(gigRef);
+        if (gigSnap.data()?['status'] == 'completed') return;
+
+        await EarningsService.incrementInTransaction(
+          tx: tx,
+          workerRef: workerRef,
+          budget: widget.budget,
+          currencyCode: widget.currencyCode,
+          currentWeek: currentWeek,
+        );
+
+        tx.update(gigRef, {
+          'status': 'completed',
+          'completedAt': FieldValue.serverTimestamp(),
+          'paymentConfirmedAt': FieldValue.serverTimestamp(),
+          'paymentConfirmedBy': 'worker',
+        });
       });
       // Let the parent (WorkingUI) own the pop + rating dialog flow so there
       // is no race between this Navigator.pop and the Firestore stream firing.
@@ -213,7 +237,7 @@ class _WorkerPaymentConfirmSheetState
                   const Icon(Icons.payments_rounded, color: green, size: 22),
                   const SizedBox(width: 10),
                   Text(
-                    '₱${widget.budget.toStringAsFixed(0)}',
+                    CurrencyFormatter.format(widget.budget, widget.currencyCode),
                     style: const TextStyle(
                       color: green,
                       fontSize: 26,

@@ -466,13 +466,15 @@ class _HomeScreenState extends State<HomeScreen> {
       _selectedRole = data?['role'];
       _photoUrl = data?['photoUrl'] ?? '';
     });
-    context.read<CurrentUserProvider>().setCurrentUserInfo(
+    final homeProvider = context.read<CurrentUserProvider>();
+    homeProvider.setCurrentUserInfo(
       FirebaseAuth.instance.currentUser?.email,
       data?['name'],
       uid,
       data?['userId'],
       data?['isVerified'],
     );
+    homeProvider.initCurrencyCode(uid, data ?? {});
     if (data?['pendingDeletion'] == true) {
       final reqSnap = await FirebaseFirestore.instance
           .collection('account_delete_requests')

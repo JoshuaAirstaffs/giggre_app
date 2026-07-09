@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
 
 class GigAssignedDialog extends StatelessWidget {
@@ -116,7 +117,7 @@ class GigAssignedDialog extends StatelessWidget {
             const SizedBox(height: 6),
             _DetailRow(
               icon: Icons.attach_money_rounded,
-              value: '₱${gig.budget.toStringAsFixed(0)}',
+              value: CurrencyFormatter.format(gig.budget, gig.currencyCode),
               valueColor: green,
             ),
             if (gig.address.isNotEmpty) ...[

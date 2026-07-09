@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/features/gig_host/models/gig_template_model.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/currency_formatter.dart';
 import '../services/quick_gig_matching_service.dart';
 import 'widgets/gig_detail_sheet.dart';
 
@@ -879,7 +880,10 @@ class _GigTileState extends State<GigTile> {
                         ),
                       ],
                       Text(
-                        '₱${(data['budget'] as num?)?.toStringAsFixed(0) ?? '0'}',
+                        CurrencyFormatter.format(
+                          (data['budget'] as num?)?.toDouble() ?? 0,
+                          (data['currencyCode'] as String?) ?? 'PHP',
+                        ),
                         style: const TextStyle(
                           color: kAmber,
                           fontSize: 12,

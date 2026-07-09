@@ -19,6 +19,7 @@ import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
 import 'gig_host_profile_screen.dart';
 import '../models/gig_template_model.dart';
+import '../../../core/utils/currency_formatter.dart';
 import 'widgets/admin_gig_config_sheet.dart';
 import 'widgets/notifications_sheet.dart';
 import 'host_gigs_screen.dart';
@@ -2334,7 +2335,7 @@ class _TemplatesSheet extends StatelessWidget {
                           fontWeight: FontWeight.w600)),
                 ),
                 const SizedBox(width: 6),
-                Text('₱${t.budget.toStringAsFixed(0)}',
+                Text(CurrencyFormatter.format(t.budget, t.currencyCode),
                     style: const TextStyle(
                         color: kAmber,
                         fontSize: 11,

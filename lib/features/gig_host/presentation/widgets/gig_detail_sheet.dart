@@ -15,6 +15,7 @@ import '../../../../core/services/gms_availability.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:giggre_app/features/chat/gig_chat_action.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../services/quick_gig_matching_service.dart';
 import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
@@ -357,12 +358,14 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         'Worker';
     final title = data['title'] as String? ?? 'Gig';
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
+    final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
 
     String? paymentCode;
     await PaymentSelectionSheet.show(
       context: context,
       gigTitle: title,
       budget: budget,
+      currencyCode: currencyCode,
       onConfirm: (paymentMethod) async {
         paymentCode = _generatePaymentCode();
         await Future.wait([
@@ -385,7 +388,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       gigCollection: _collection,
       paymentCode: paymentCode!,
       budget: budget,
+      currencyCode: currencyCode,
       workerName: workerName,
+      workerId: workerId ?? '',
     );
     if (!mounted || !workerConfirmed) return;
 
@@ -642,6 +647,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         final title = data['title'] as String? ?? 'Gig';
         final description = data['description'] as String? ?? '';
         final budget = (data['budget'] as num?)?.toDouble() ?? 0;
+        final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
         final address = data['address'] as String? ?? '';
         final geo = data['location'] as GeoPoint?;
         final gigLocation = geo != null
@@ -971,7 +977,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     ],
                     _DetailRow(
                       icon: Icons.attach_money_rounded,
-                      label: '₱${budget.toStringAsFixed(0)}',
+                      label: CurrencyFormatter.format(budget, currencyCode),
                       iconColor: kAmber,
                     ),
                     if (address.isNotEmpty) ...[

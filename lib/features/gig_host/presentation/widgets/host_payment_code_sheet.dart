@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/services/earnings_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  HostPaymentCodeSheet — shown to host after selecting payment method.
@@ -15,7 +17,9 @@ class HostPaymentCodeSheet extends StatefulWidget {
   final String gigCollection;
   final String paymentCode;
   final double budget;
+  final String currencyCode;
   final String workerName;
+  final String workerId;
 
   const HostPaymentCodeSheet({
     super.key,
@@ -23,7 +27,9 @@ class HostPaymentCodeSheet extends StatefulWidget {
     required this.gigCollection,
     required this.paymentCode,
     required this.budget,
+    this.currencyCode = 'PHP',
     required this.workerName,
+    required this.workerId,
   });
 
   static Future<bool> show({
@@ -32,7 +38,9 @@ class HostPaymentCodeSheet extends StatefulWidget {
     required String gigCollection,
     required String paymentCode,
     required double budget,
+    String currencyCode = 'PHP',
     required String workerName,
+    required String workerId,
   }) async {
     final result = await showModalBottomSheet<bool>(
       context: context,
@@ -45,7 +53,9 @@ class HostPaymentCodeSheet extends StatefulWidget {
         gigCollection: gigCollection,
         paymentCode: paymentCode,
         budget: budget,
+        currencyCode: currencyCode,
         workerName: workerName,
+        workerId: workerId,
       ),
     );
     return result ?? false;
@@ -165,13 +175,28 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
     if (confirm != true || !mounted) return;
     setState(() => _manualProcessing = true);
     try {
-      await FirebaseFirestore.instance
-          .collection(widget.gigCollection)
-          .doc(widget.gigId)
-          .update({
-        'status': 'completed',
-        'completedAt': FieldValue.serverTimestamp(),
-        'paymentConfirmedManually': true,
+      final db = FirebaseFirestore.instance;
+      final gigRef = db.collection(widget.gigCollection).doc(widget.gigId);
+      final workerRef = db.collection('users').doc(widget.workerId);
+      final currentWeek = EarningsService.currentWeekLabel();
+
+      await db.runTransaction((tx) async {
+        final gigSnap = await tx.get(gigRef);
+        if (gigSnap.data()?['status'] == 'completed') return;
+
+        await EarningsService.incrementInTransaction(
+          tx: tx,
+          workerRef: workerRef,
+          budget: widget.budget,
+          currencyCode: widget.currencyCode,
+          currentWeek: currentWeek,
+        );
+
+        tx.update(gigRef, {
+          'status': 'completed',
+          'completedAt': FieldValue.serverTimestamp(),
+          'paymentConfirmedManually': true,
+        });
       });
     } finally {
       if (mounted) setState(() => _manualProcessing = false);
@@ -346,7 +371,7 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
                   const Icon(Icons.payments_rounded, color: green, size: 16),
                   const SizedBox(width: 6),
                   Text(
-                    '₱${widget.budget.toStringAsFixed(0)} Cash',
+                    '${CurrencyFormatter.format(widget.budget, widget.currencyCode)} Cash',
                     style: const TextStyle(
                       color: green,
                       fontSize: 15,

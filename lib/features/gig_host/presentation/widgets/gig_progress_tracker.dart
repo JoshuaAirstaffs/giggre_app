@@ -13,6 +13,7 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
 
@@ -256,12 +257,14 @@ class _GigProgressCard extends StatelessWidget {
     String workerName,
     String title,
     double budget,
+    String currencyCode,
   ) async {
     String? paymentCode;
     await PaymentSelectionSheet.show(
       context: context,
       gigTitle: title,
       budget: budget,
+      currencyCode: currencyCode,
       onConfirm: (paymentMethod) async {
         paymentCode = _generatePaymentCode();
         final db = FirebaseFirestore.instance;
@@ -289,7 +292,9 @@ class _GigProgressCard extends StatelessWidget {
       gigCollection: gigCollection,
       paymentCode: paymentCode!,
       budget: budget,
+      currencyCode: currencyCode,
       workerName: workerName,
+      workerId: workerId ?? '',
     );
 
     if (workerConfirmed && workerId != null && workerId.isNotEmpty) {
@@ -316,6 +321,7 @@ class _GigProgressCard extends StatelessWidget {
     final workerId =
         data['assignedWorkerId'] as String? ?? data['workerId'] as String?;
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
+    final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
     final isOfferedGig = gigCollection == 'offered_gigs';
     final isOpenGig = gigCollection == 'open_gigs';
     final isCancelPending = status == 'cancellation_requested';
@@ -421,7 +427,7 @@ class _GigProgressCard extends StatelessWidget {
                           size: 12,
                         ),
                         Text(
-                          '₱${budget.toStringAsFixed(0)}',
+                          CurrencyFormatter.format(budget, currencyCode),
                           style: const TextStyle(
                             color: kAmber,
                             fontSize: 11,
@@ -665,6 +671,7 @@ class _GigProgressCard extends StatelessWidget {
                   workerName,
                   title,
                   budget,
+                  currencyCode,
                 ),
                 icon: const Icon(Icons.verified_rounded, size: 20),
                 label: const Text(

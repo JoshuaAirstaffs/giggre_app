@@ -8,6 +8,7 @@ class QuickGigModel {
   final String description;
   final String category;
   final double budget;
+  final String currencyCode;
   final String duration;
   final GeoPoint location;
   final String address;
@@ -26,6 +27,7 @@ class QuickGigModel {
     required this.description,
     required this.category,
     required this.budget,
+    this.currencyCode = 'PHP',
     required this.duration,
     required this.location,
     required this.address,
@@ -44,6 +46,7 @@ class QuickGigModel {
         'description': description,
         'category': category,
         'budget': budget,
+        'currencyCode': currencyCode,
         'duration': duration,
         'location': location,
         'address': address,
@@ -64,6 +67,7 @@ class QuickGigModel {
       description: d['description'] ?? '',
       category: d['category'] ?? '',
       budget: (d['budget'] ?? 0).toDouble(),
+      currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
       duration: d['duration'] ?? '',
       location: d['location'] as GeoPoint,
       address: d['address'] ?? '',

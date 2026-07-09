@@ -12,6 +12,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
+import '../../../../core/utils/currency_formatter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data models
@@ -21,6 +22,7 @@ class GigMarkerData {
   final String title;
   final String gigType; // 'quick' | 'open' | 'offered'
   final double budget;
+  final String currencyCode;
   final String status;
   final String hostName;
   final String address;
@@ -37,6 +39,7 @@ class GigMarkerData {
     required this.title,
     required this.gigType,
     required this.budget,
+    this.currencyCode = 'PHP',
     required this.status,
     required this.hostName,
     required this.address,
@@ -626,6 +629,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       hostId: data['hostId'] as String? ?? '',
       hasApplied: hasApplied,
       scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
+      currencyCode: (data['currencyCode'] as String?) ?? 'PHP',
     );
   }
 
@@ -1063,7 +1067,7 @@ class _GigMapSectionState extends State<GigMapSection> {
             _GigSheetRow(
               icon: Icons.attach_money_rounded,
               label: 'Budget',
-              value: '₱${gig.budget.toStringAsFixed(0)}',
+              value: CurrencyFormatter.format(gig.budget, gig.currencyCode),
               valueColor: kAmber,
             ),
             if (gig.scheduledDate != null)
@@ -1425,7 +1429,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              '₱${g.budget.toStringAsFixed(0)}',
+                              CurrencyFormatter.format(g.budget, g.currencyCode),
                               style: const TextStyle(
                                 color: kAmber,
                                 fontSize: 12,
