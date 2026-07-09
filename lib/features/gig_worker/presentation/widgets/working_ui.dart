@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -19,6 +20,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
 import 'worker_payment_confirm_sheet.dart';
 import '../../../../core/services/gms_availability.dart';
+import '../../../../core/widgets/gig_completion_celebration.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig progress steps
@@ -162,6 +164,7 @@ class _WorkingUIState extends State<WorkingUI> {
   bool _cancelledHandled = false;
   // Show arrival confirmation prompt when geofence triggers
   bool _arrivedPromptVisible = false;
+  final _arrivedSoundPlayer = AudioPlayer();
   // Guard: show worker payment confirmation only once
   bool _paymentConfirmShown = false;
 
@@ -356,19 +359,21 @@ class _WorkingUIState extends State<WorkingUI> {
     // prompt again, and walking back in shows it again.
     if (withinRange != _arrivedPromptVisible) {
       setState(() => _arrivedPromptVisible = withinRange);
+      if (withinRange) {
+        _arrivedSoundPlayer.play(AssetSource('sounds/gig_sound.mp3'));
+      }
     }
   }
 
   Future<void> _confirmArrival() async {
     setState(() => _arrivedPromptVisible = false);
-    await _updateStatus('arrived');
-  }
-
-  Future<void> _updateStatus(String status) async {
     await FirebaseFirestore.instance
         .collection(widget.gigCollection)
         .doc(widget.gig.id)
-        .update({'status': status});
+        .update({
+      'status': 'arrived',
+      'arrivedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   /// On app restore, if the gig is already in 'working' status, pre-load the
@@ -495,6 +500,27 @@ class _WorkingUIState extends State<WorkingUI> {
     _ratingShown = true;
     // Pop the payment sheet — this context owns the navigator that holds it.
     if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+    // Wait a frame so the sheet's pop transition fully settles before pushing
+    // the celebration dialog on the same navigator.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showThankYouThenRating();
+    });
+  }
+
+  Future<void> _showThankYouThenRating() async {
+    if (mounted) {
+      try {
+        await GigCompletionCelebration.show(
+          context: context,
+          title: 'Thank You!',
+          subtitle: 'Payment received — great work getting this gig done!',
+          icon: Icons.celebration_rounded,
+        );
+      } catch (e, st) {
+        debugPrint('[WorkingUI] celebration dialog error: $e\n$st');
+      }
+    }
+    if (!mounted) return;
     _showHostRatingAndComplete({
       'hostId': widget.gig.hostId,
       'hostName': widget.gig.hostName,
@@ -569,6 +595,7 @@ class _WorkingUIState extends State<WorkingUI> {
     _locationSub?.cancel();
     _locationServiceSub?.cancel();
     _gigSub?.cancel();
+    _arrivedSoundPlayer.dispose();
     super.dispose();
   }
 
@@ -639,7 +666,7 @@ class _WorkingUIState extends State<WorkingUI> {
                     const SizedBox(height: 4),
 
                     // ── Step-specific section ──────────────────────────
-                    if (_step == _GigStep.navigating && !_arrivedPromptVisible)
+                    if (_step == _GigStep.navigating) ...[
                       _NavigatingSection(
                         gig: widget.gig,
                         workerLocation: _workerLocation,
@@ -649,20 +676,22 @@ class _WorkingUIState extends State<WorkingUI> {
                         routeSteps: _routeSteps,
                         divider: divider,
                       ),
-                    if (_step == _GigStep.navigating && _arrivedPromptVisible) ...[
-                      _StatusBanner(
-                        icon: Icons.location_on_rounded,
-                        color: green,
-                        title: "You're at the Location!",
-                        subtitle: 'Tap the button below to confirm your arrival.',
-                      ),
-                      const SizedBox(height: 16),
-                      _PrimaryButton(
-                        label: 'Confirm Arrival',
-                        icon: Icons.location_on_rounded,
-                        color: green,
-                        onPressed: _confirmArrival,
-                      ),
+                      if (_arrivedPromptVisible) ...[
+                        const SizedBox(height: 16),
+                        _StatusBanner(
+                          icon: Icons.location_on_rounded,
+                          color: green,
+                          title: "You're at the Location!",
+                          subtitle: 'Tap the button below to confirm your arrival.',
+                        ),
+                        const SizedBox(height: 16),
+                        _PrimaryButton(
+                          label: 'Confirm Arrival',
+                          icon: Icons.location_on_rounded,
+                          color: green,
+                          onPressed: _confirmArrival,
+                        ),
+                      ],
                     ],
                     if (_step == _GigStep.arrived)
                       _StatusBanner(

@@ -25,6 +25,11 @@ class CurrentUserProvider extends ChangeNotifier {
   StreamSubscription? _supportRoomsSubscription;
   StreamSubscription? _applicationsNotifSub;
   StreamSubscription? _gigOffersNotifSub;
+  StreamSubscription? _openGigScheduleSub;
+  StreamSubscription? _offeredGigScheduleSub;
+  final Map<String, Timer> _scheduleExpiryTimers = {};
+  final Map<String, StreamSubscription> _workerProgressSubs = {};
+  final Set<String> _notifiedProgressMilestones = {};
   final Map<String, StreamSubscription> _chatMessageSubs = {};
   final Set<String> _supportRoomIds = {};
   Timestamp? _chatListenStart;
@@ -126,6 +131,30 @@ class CurrentUserProvider extends ChangeNotifier {
         playSound: false,
       ),
     );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_auto_cancelled',
+        'Gig Auto-Cancelled',
+        description:
+            'Notifications when a gig is auto-cancelled because its scheduled time passed with no worker selected',
+        importance: Importance.max,
+        // Sound is played manually via gig_sound.mp3 in
+        // _showGigAutoCancelledNotification, so the channel itself stays silent.
+        playSound: false,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_worker_progress',
+        'Worker Progress',
+        description:
+            'Notifications when your worker arrives, starts, or completes a gig',
+        importance: Importance.max,
+        // Sound is played manually via gig_sound.mp3 in
+        // _showWorkerProgressNotification, so the channel itself stays silent.
+        playSound: false,
+      ),
+    );
 
     _notificationsInitialized = true;
   }
@@ -200,6 +229,8 @@ class CurrentUserProvider extends ChangeNotifier {
     _listenToGigChatMessages(uid);
     _listenToGigApplications(uid);
     _listenToGigOffers(uid);
+    _listenToScheduleExpiry(uid);
+    _listenToWorkerProgress(uid);
   }
 
   void clearUser() {
@@ -226,6 +257,19 @@ class CurrentUserProvider extends ChangeNotifier {
     _applicationsNotifSub = null;
     _gigOffersNotifSub?.cancel();
     _gigOffersNotifSub = null;
+    _openGigScheduleSub?.cancel();
+    _openGigScheduleSub = null;
+    _offeredGigScheduleSub?.cancel();
+    _offeredGigScheduleSub = null;
+    for (final timer in _scheduleExpiryTimers.values) {
+      timer.cancel();
+    }
+    _scheduleExpiryTimers.clear();
+    for (final sub in _workerProgressSubs.values) {
+      sub.cancel();
+    }
+    _workerProgressSubs.clear();
+    _notifiedProgressMilestones.clear();
     _stopRingtone();
     _audioPlayer.dispose(); // ← clean up
     _appNotifPlayer.dispose();
@@ -649,6 +693,239 @@ class CurrentUserProvider extends ChangeNotifier {
           iOS: DarwinNotificationDetails(presentAlert: true, presentSound: false),
         ),
         payload: payload,
+      ),
+      _appNotifPlayer.play(AssetSource('sounds/gig_sound.mp3')),
+    ]);
+  }
+
+  // ── Schedule-expiry watcher (host side) ────────────────────────────────────
+  // For open_gigs still at status 'open' and offered_gigs still at status
+  // 'offered', auto-cancels the gig the moment its scheduledDate passes with
+  // nobody locked in (no worker ever picked from applicants, or the targeted
+  // worker never accepted). The gig is not reusable — the host reposts fresh.
+
+  void _listenToScheduleExpiry(String? uid) {
+    if (uid == null) return;
+    _openGigScheduleSub?.cancel();
+    _offeredGigScheduleSub?.cancel();
+
+    _openGigScheduleSub = FirebaseFirestore.instance
+        .collection('open_gigs')
+        .where('hostId', isEqualTo: uid)
+        .where('status', isEqualTo: 'open')
+        .snapshots()
+        .listen(
+          (snap) => _syncScheduleTimers('open_gigs', snap),
+          onError: (e) => debugPrint('[ScheduleExpiry] open_gigs stream error: $e'),
+        );
+
+    _offeredGigScheduleSub = FirebaseFirestore.instance
+        .collection('offered_gigs')
+        .where('hostId', isEqualTo: uid)
+        .where('status', isEqualTo: 'offered')
+        .snapshots()
+        .listen(
+          (snap) => _syncScheduleTimers('offered_gigs', snap),
+          onError: (e) => debugPrint('[ScheduleExpiry] offered_gigs stream error: $e'),
+        );
+  }
+
+  void _syncScheduleTimers(String collection, QuerySnapshot<Map<String, dynamic>> snap) {
+    final seenKeys = <String>{};
+
+    for (final doc in snap.docs) {
+      final data = doc.data();
+      final scheduledDate = data['scheduledDate'] as Timestamp?;
+      if (scheduledDate == null) continue;
+
+      final key = '$collection:${doc.id}';
+      seenKeys.add(key);
+      _scheduleExpiryTimers.remove(key)?.cancel();
+
+      final remaining = scheduledDate.toDate().difference(DateTime.now());
+      _scheduleExpiryTimers[key] = Timer(
+        remaining.isNegative ? Duration.zero : remaining,
+        () => _autoCancelExpiredGig(collection, doc.id),
+      );
+    }
+
+    // Drop timers for docs that fell out of this snapshot (assigned, cancelled,
+    // schedule already cleared, etc).
+    final staleKeys = _scheduleExpiryTimers.keys
+        .where((k) => k.startsWith('$collection:') && !seenKeys.contains(k))
+        .toList();
+    for (final key in staleKeys) {
+      _scheduleExpiryTimers.remove(key)?.cancel();
+    }
+  }
+
+  Future<void> _autoCancelExpiredGig(String collection, String docId) async {
+    final expectedStatus = collection == 'open_gigs' ? 'open' : 'offered';
+    final ref = FirebaseFirestore.instance.collection(collection).doc(docId);
+    String? gigTitle;
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(ref);
+        if (!snap.exists) return;
+        final data = snap.data() as Map<String, dynamic>;
+        if (data['status'] != expectedStatus) return;
+        if (data['scheduledDate'] == null) return;
+        gigTitle = data['title'] as String? ?? 'your gig';
+        tx.update(ref, {
+          'status': 'cancelled',
+          'cancelledAt': FieldValue.serverTimestamp(),
+          'cancellation_reason': FieldValue.arrayUnion([
+            {
+              'reason': 'No worker selected before the scheduled time',
+              'approved': true,
+              'requestedBy': 'system',
+            },
+          ]),
+        });
+      });
+    } catch (e) {
+      debugPrint('[ScheduleExpiry] transaction error for $collection/$docId: $e');
+      return;
+    }
+
+    if (gigTitle != null) {
+      await _showGigAutoCancelledNotification(gigTitle!, docId);
+    }
+  }
+
+  Future<void> _showGigAutoCancelledNotification(String gigTitle, String gigId) async {
+    final payload = jsonEncode({
+      'type': 'gig_auto_cancelled',
+      'gigId': gigId,
+    });
+    await Future.wait([
+      _notifications.show(
+        ('gig_auto_cancelled$gigId').hashCode.abs() % 100000,
+        'Gig Cancelled',
+        'No worker was selected for "$gigTitle" before its scheduled time — the gig has been cancelled.',
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'gig_auto_cancelled',
+            'Gig Auto-Cancelled',
+            importance: Importance.max,
+            priority: Priority.high,
+            playSound: false,
+          ),
+          iOS: DarwinNotificationDetails(presentAlert: true, presentSound: false),
+        ),
+        payload: payload,
+      ),
+      _appNotifPlayer.play(AssetSource('sounds/gig_sound.mp3')),
+    ]);
+  }
+
+  // ── Worker-progress watcher (host side) ────────────────────────────────────
+  // Notifies the host when their worker confirms arrival, starts work, or
+  // completes the task, across all three gig collections.
+
+  void _listenToWorkerProgress(String? uid) {
+    if (uid == null) return;
+    debugPrint('[WorkerProgress] listening for uid=$uid');
+    for (final sub in _workerProgressSubs.values) {
+      sub.cancel();
+    }
+    _workerProgressSubs.clear();
+
+    for (final collection in ['quick_gigs', 'open_gigs', 'offered_gigs']) {
+      // Buffered a little into the past: 'arrivedAt' etc. are written via
+      // FieldValue.serverTimestamp(), so comparing against a raw client
+      // Timestamp.now() is vulnerable to client/server clock drift silently
+      // swallowing genuinely-new events right after this listener attaches.
+      final listenStart = Timestamp.fromDate(
+        DateTime.now().subtract(const Duration(seconds: 15)),
+      );
+      _workerProgressSubs[collection] = FirebaseFirestore.instance
+          .collection(collection)
+          .where('hostId', isEqualTo: uid)
+          .snapshots()
+          .listen(
+            (snap) => _checkWorkerProgress(collection, snap, listenStart),
+            onError: (e) =>
+                debugPrint('[WorkerProgress] $collection stream error: $e'),
+          );
+    }
+  }
+
+  void _checkWorkerProgress(
+    String collection,
+    QuerySnapshot<Map<String, dynamic>> snap,
+    Timestamp listenStart,
+  ) {
+    debugPrint(
+      '[WorkerProgress] $collection snapshot: ${snap.docChanges.length} changes',
+    );
+    for (final change in snap.docChanges) {
+      if (change.type == DocumentChangeType.removed) continue;
+      final data = change.doc.data() ?? {};
+      final workerName = data['assignedWorkerName'] as String? ??
+          data['workerName'] as String? ??
+          'Your worker';
+      final gigTitle = data['title'] as String? ?? 'your gig';
+
+      void checkMilestone(
+        String field,
+        String milestone,
+        String title,
+        String body,
+      ) {
+        final ts = data[field] as Timestamp?;
+        debugPrint(
+          '[WorkerProgress] ${change.doc.id} $field=${ts?.toDate()} listenStart=${listenStart.toDate()} status=${data['status']}',
+        );
+        if (ts == null || ts.compareTo(listenStart) <= 0) return;
+        final key = '$collection:${change.doc.id}:$milestone';
+        if (_notifiedProgressMilestones.contains(key)) {
+          debugPrint('[WorkerProgress] $key already notified, skipping');
+          return;
+        }
+        _notifiedProgressMilestones.add(key);
+        debugPrint('[WorkerProgress] firing notification for $key');
+        _showWorkerProgressNotification(title, body);
+      }
+
+      checkMilestone(
+        'arrivedAt',
+        'arrived',
+        '$workerName Has Arrived',
+        '$workerName is ready to start "$gigTitle"',
+      );
+      checkMilestone(
+        'workStartedAt',
+        'working',
+        '$workerName Started Working',
+        '$workerName is working on "$gigTitle"',
+      );
+      checkMilestone(
+        'workCompletedAt',
+        'task_complete',
+        '$workerName Completed the Task',
+        '$workerName finished "$gigTitle" — awaiting your confirmation',
+      );
+    }
+  }
+
+  Future<void> _showWorkerProgressNotification(String title, String body) async {
+    await Future.wait([
+      _notifications.show(
+        ('$title$body').hashCode.abs() % 100000,
+        title,
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'gig_worker_progress',
+            'Worker Progress',
+            importance: Importance.max,
+            priority: Priority.high,
+            playSound: false,
+          ),
+          iOS: DarwinNotificationDetails(presentAlert: true, presentSound: false),
+        ),
       ),
       _appNotifPlayer.play(AssetSource('sounds/gig_sound.mp3')),
     ]);

@@ -204,7 +204,6 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
         'Worker Assigned',
         '$workerName accepted "$gigTitle"',
       );
-
       // Cancellation requested — show who initiated it
       if (gig['status'] == 'cancellation_requested') {
         final reasons = gig['cancellation_reason'] as List?;
@@ -236,10 +235,13 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
         if (cancelledTs != null) {
           final dt = cancelledTs.toDate().toLocal();
           if (now.difference(dt) <= _kWindow) {
+            final isSystemAutoCancel = requestedBy == 'system';
             items.add(_ActivityItem(
               type: _ActivityType.cancelled,
-              title: 'Gig Cancelled',
-              body: 'Admin approved · Requested by ${requestedBy == 'worker' ? workerName : 'you'}',
+              title: isSystemAutoCancel ? 'Gig Auto-Cancelled' : 'Gig Cancelled',
+              body: isSystemAutoCancel
+                  ? 'No worker was selected for "$gigTitle" before the scheduled time'
+                  : 'Admin approved · Requested by ${requestedBy == 'worker' ? workerName : 'you'}',
               timestamp: dt,
               gigType: gigType,
             ));

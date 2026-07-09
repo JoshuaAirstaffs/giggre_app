@@ -234,10 +234,13 @@ class _WorkerNotificationsSheetState
         if (cancelledTs != null) {
           final dt = cancelledTs.toDate().toLocal();
           if (now.difference(dt) <= _kWindow) {
+            final isSystemAutoCancel = requestedBy == 'system';
             items.add(_ActivityItem(
               type: _ActivityType.cancelled,
-              title: 'Gig Cancelled',
-              body: 'Admin approved · Requested by ${requestedBy == 'host' ? hostName : 'you'}',
+              title: isSystemAutoCancel ? 'Gig Auto-Cancelled' : 'Gig Cancelled',
+              body: isSystemAutoCancel
+                  ? 'No one accepted "$gigTitle" before the scheduled time'
+                  : 'Admin approved · Requested by ${requestedBy == 'host' ? hostName : 'you'}',
               timestamp: dt,
               gigType: gigType,
             ));

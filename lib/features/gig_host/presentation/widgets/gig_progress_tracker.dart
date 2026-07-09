@@ -14,6 +14,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/widgets/gig_completion_celebration.dart';
 import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
 
@@ -108,6 +109,14 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
     String gigId,
     String gigCollection,
   ) async {
+    if (!mounted) return;
+    await GigCompletionCelebration.show(
+      context: context,
+      title: 'Gig Complete!',
+      subtitle: 'Payment confirmed — nice work getting this one done!',
+      icon: Icons.emoji_events_rounded,
+      accentColor: kAmber,
+    );
     if (!mounted) return;
     await showDialog(
       context: context,

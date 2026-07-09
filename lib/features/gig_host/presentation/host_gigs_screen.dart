@@ -213,6 +213,7 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
                             ('active', 'Active'),
                             ('scanning', 'Scanning'),
                             ('no_worker', 'No Worker'),
+                            ('cancelled', 'Cancelled'),
                           ],
                           onChanged: (v) => setState(() {
                             _statusFilter = v;

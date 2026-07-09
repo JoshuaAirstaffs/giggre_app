@@ -19,6 +19,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../services/quick_gig_matching_service.dart';
 import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
+import '../../../../core/widgets/gig_completion_celebration.dart';
 
 String _generatePaymentCode() {
   final r = Random();
@@ -79,11 +80,21 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
 
           if (data['status'] == 'cancelled' && !_cancelledHandled) {
             _cancelledHandled = true;
+            final reasons = data['cancellation_reason'] as List?;
+            final lastReason = reasons != null && reasons.isNotEmpty
+                ? reasons.last as Map<String, dynamic>?
+                : null;
+            final isSystemAutoCancel =
+                lastReason?['requestedBy'] == 'system';
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Gig cancellation has been approved by admin.'),
+                SnackBar(
+                  content: Text(
+                    isSystemAutoCancel
+                        ? 'This gig was auto-cancelled — no worker was selected before the scheduled time.'
+                        : 'Gig cancellation has been approved by admin.',
+                  ),
                   backgroundColor: Colors.redAccent,
                   behavior: SnackBarBehavior.floating,
                 ),
@@ -394,6 +405,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     );
     if (!mounted || !workerConfirmed) return;
 
+    await GigCompletionCelebration.show(
+      context: context,
+      title: 'Gig Complete!',
+      subtitle: 'Payment confirmed — nice work getting this one done!',
+      icon: Icons.emoji_events_rounded,
+      accentColor: kAmber,
+    );
+    if (!mounted) return;
+
     if (workerId != null && workerId.isNotEmpty) {
       await showDialog(
         context: context,
@@ -649,6 +669,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         final budget = (data['budget'] as num?)?.toDouble() ?? 0;
         final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
         final address = data['address'] as String? ?? '';
+        final scheduledDate = data['scheduledDate'] as Timestamp?;
         final geo = data['location'] as GeoPoint?;
         final gigLocation = geo != null
             ? LatLng(geo.latitude, geo.longitude)
@@ -980,6 +1001,13 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       label: CurrencyFormatter.format(budget, currencyCode),
                       iconColor: kAmber,
                     ),
+                    if (scheduledDate != null) ...[
+                      const SizedBox(height: 10),
+                      _DetailRow(
+                        icon: Icons.event_rounded,
+                        label: 'Scheduled for ${_fmtScheduledDate(scheduledDate)}',
+                      ),
+                    ],
                     if (address.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       _DetailRow(
@@ -1785,6 +1813,29 @@ class _TypeBadge extends StatelessWidget {
       ],
     );
   }
+}
+
+String _fmtScheduledDate(Timestamp ts) {
+  const months = [
+    '',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  final dt = ts.toDate().toLocal();
+  final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+  final m = dt.minute.toString().padLeft(2, '0');
+  final period = dt.hour >= 12 ? 'PM' : 'AM';
+  return '${months[dt.month]} ${dt.day}, ${dt.year} · $h:$m $period';
 }
 
 class _DetailRow extends StatelessWidget {

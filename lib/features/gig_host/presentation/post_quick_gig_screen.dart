@@ -249,6 +249,24 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       return;
     }
 
+    if (_scheduledDate != null) {
+      final t = _scheduledTime ?? const TimeOfDay(hour: 8, minute: 0);
+      final scheduledCheck = DateTime(
+        _scheduledDate!.year,
+        _scheduledDate!.month,
+        _scheduledDate!.day,
+        t.hour,
+        t.minute,
+      );
+      if (scheduledCheck.isBefore(DateTime.now())) {
+        _showSnack(
+          'Schedule invalid — the date and time you picked have already passed. Please choose a time in the future.',
+          isError: true,
+        );
+        return;
+      }
+    }
+
     // Fallback if gig-location geocoding fails during submit.
     final fallbackCurrency = context.read<CurrentUserProvider>().currencyCode;
 
@@ -325,11 +343,14 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     }
   }
 
-  void _showSnack(String msg) {
+  void _showSnack(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg),
-        backgroundColor: Theme.of(context).cardColor,
+        content: Text(
+          msg,
+          style: isError ? const TextStyle(color: Colors.white) : null,
+        ),
+        backgroundColor: isError ? Colors.redAccent : Theme.of(context).cardColor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
