@@ -328,7 +328,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
     try {
 
       if(!_canSubmitVerification) {
-        _showErrorModal(context);
+        _showErrorModal(context, onReturn: _checkUploadedDocuments);
         return;
       }
       final userDoc = await _firestore.collection('users').doc(uid).get();
@@ -590,8 +590,9 @@ class PerkCard extends StatelessWidget {
 }
 
 void _showErrorModal(
-  BuildContext context, 
-) {
+  BuildContext context, {
+  VoidCallback? onReturn,
+}) {
   showDialog(
     context: context,
     builder: (_) => AlertDialog(
@@ -642,7 +643,7 @@ void _showErrorModal(
                   MaterialPageRoute(
                     builder: (context) => MyDocumentsScreen(userId: FirebaseAuth.instance.currentUser!.uid),
                   ),
-                );
+                ).then((_) => onReturn?.call());
               },
               child: const Text('Go to My Documents', style: TextStyle(color: Colors.white)),
             ),
