@@ -9,7 +9,7 @@
     "build": "tsc",
     "build:watch": "tsc --watch",
     "serve": "npm run build && firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "deploy": "firebase deploy --only functions:onChatMessageCreated,functions:onOpenGigPosted,functions:onApplicantNotificationCreated,functions:onGigOfferCreated,functions:onTicketUpdated,functions:onVerificationStatusChanged,functions:onQuickGigProgress,functions:onOpenGigProgress,functions:onOfferedGigProgress,functions:onQuickGigAssigned,functions:onOpenGigAssigned,functions:onOfferedGigAssigned,functions:checkExpiredGigSchedules,functions:sendDailyTestReminder,functions:publishVersionAnnouncement"
   },
   "dependencies": {
     "firebase-admin": "^12.7.0",

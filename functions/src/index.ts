@@ -64,7 +64,7 @@ export const onChatMessageCreated = onDocumentCreated(
         sendPushToUser(uid, {
           title: senderName,
           body: text,
-          channelId: "gig_chat",
+          channelId: "gig_chat_v2",
           data: {
             type: "chat_message",
             roomId,
@@ -99,6 +99,21 @@ function distanceKm(
   return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
+// A worker's real skill set lives in skillsXP's keys (what the client calls
+// _skills — see gig_worker_screen.dart), not the legacy/unused `skills`
+// array field. Matching is case/whitespace-insensitive, same as the client's
+// own _matchesSkill helper in gig_map_section.dart.
+function hasMatchingSkill(
+  requiredSkills: string[],
+  workerSkillsXP: Record<string, unknown> | undefined
+): boolean {
+  if (!requiredSkills.length) return true;
+  const workerSkills = Object.keys(workerSkillsXP ?? {}).map((s) =>
+    s.toLowerCase().trim()
+  );
+  return requiredSkills.some((s) => workerSkills.includes(s.toLowerCase().trim()));
+}
+
 export const onOpenGigPosted = onDocumentCreated(
   "open_gigs/{gigId}",
   async (event) => {
@@ -108,8 +123,7 @@ export const onOpenGigPosted = onDocumentCreated(
     if (!gigLocation) return;
 
     const hostId = gig.hostId as string | undefined;
-    const hostName = (gig.hostName as string) ?? "A host";
-    const title = (gig.title as string) ?? "a gig";
+    const requiredSkills = (gig.requiredSkills as string[] | undefined) ?? [];
 
     // Only workers who've marked themselves available get pinged, matching
     // the same filter quick-gig auto-dispatch already uses.
@@ -122,8 +136,12 @@ export const onOpenGigPosted = onDocumentCreated(
     const nearbyWorkerIds = workersSnap.docs
       .filter((doc) => doc.id !== hostId)
       .filter((doc) => {
-        const geo = doc.data().location as admin.firestore.GeoPoint | undefined;
-        return !!geo && distanceKm(gigLocation, geo) <= NEARBY_WORKER_RADIUS_KM;
+        const data = doc.data();
+        const geo = data.location as admin.firestore.GeoPoint | undefined;
+        if (!geo || distanceKm(gigLocation, geo) > NEARBY_WORKER_RADIUS_KM) {
+          return false;
+        }
+        return hasMatchingSkill(requiredSkills, data.skillsXP);
       })
       .map((doc) => doc.id);
 
@@ -131,8 +149,8 @@ export const onOpenGigPosted = onDocumentCreated(
       nearbyWorkerIds.map((uid) =>
         sendPushToUser(uid, {
           title: "New Gig Nearby",
-          body: `${hostName} posted "${title}" near you — check it out!`,
-          channelId: "nearby_gigs",
+          body: "A new gig matches your skills — check it out!",
+          channelId: "nearby_gigs_v2",
           data: { type: "nearby_gig", gigId: event.params.gigId },
         })
       )
@@ -156,7 +174,7 @@ export const onApplicantNotificationCreated = onDocumentCreated(
     await sendPushToUser(hostUid, {
       title: "New Application",
       body: `A worker applied to your gig — ${workerName} wants "${gigTitle}"`,
-      channelId: "gig_applications_v3",
+      channelId: "gig_applications_v4",
       data: { type: "new_applicant", gigId },
     });
   }
@@ -177,7 +195,7 @@ export const onGigOfferCreated = onDocumentCreated(
     await sendPushToUser(workerId, {
       title: "New Gig Offer",
       body: `${hostName} offered you a gig — "${gigTitle}"`,
-      channelId: "gig_offers_v2",
+      channelId: "gig_offers_v3",
       data: { type: "gig_offered", gigId: event.params.gigId },
     });
   }
@@ -198,8 +216,68 @@ export const onTicketUpdated = onDocumentUpdated(
     await sendPushToUser(uid, {
       title: "Ticket Updated",
       body: `Your ticket "${after.subject}" is now ${after.status}`,
-      channelId: "ticket_updates",
+      channelId: "ticket_updates_v2",
       data: { type: "ticket_updated" },
+    });
+  }
+);
+
+// ── Verification status (admin decision) ────────────────────────────────────
+// Fires when an admin approves/rejects a user's verification request in
+// Firestore (users/{uid}.isVerified). Ignores the 'pending'/'unverified'
+// transitions the user themselves triggers from VerificationScreen.
+export const onVerificationStatusChanged = onDocumentUpdated(
+  "users/{uid}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+
+    const prevStatus = before.isVerified as string | undefined;
+    const newStatus = after.isVerified as string | undefined;
+    if (prevStatus === newStatus) return;
+    if (newStatus !== "verified" && newStatus !== "rejected") return;
+
+    const uid = event.params.uid;
+    const isApproved = newStatus === "verified";
+    await sendPushToUser(uid, {
+      title: isApproved ? "Verification Approved" : "Verification Rejected",
+      body: isApproved
+        ? "You're verified! You can now take on gigs that require it."
+        : "Your verification request was rejected. Please review and resubmit your documents.",
+      channelId: "verification_status_v1",
+      data: { type: "verification_status", status: newStatus },
+    });
+  }
+);
+
+// ── Skill request decision (admin decision) ─────────────────────────────────
+// Fires when an admin approves/rejects a worker's skill_requests doc
+// (see SkillRequestForm._submit). Ignores the initial create ('pending').
+export const onSkillRequestStatusChanged = onDocumentUpdated(
+  "skill_requests/{requestId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+
+    const prevStatus = before.status as string | undefined;
+    const newStatus = after.status as string | undefined;
+    if (prevStatus === newStatus) return;
+    if (newStatus !== "approved" && newStatus !== "rejected") return;
+
+    const uid = after.userId as string | undefined;
+    if (!uid) return;
+
+    const skillName = (after.skillName as string) || "your skill";
+    const isApproved = newStatus === "approved";
+    await sendPushToUser(uid, {
+      title: isApproved ? "Skill Request Approved" : "Skill Request Rejected",
+      body: isApproved
+        ? `Your request to add "${skillName}" has been approved.`
+        : `Your request to add "${skillName}" was rejected. Check the remarks in your Toolchest.`,
+      channelId: "skill_request_status_v1",
+      data: { type: "skill_request_status", status: newStatus },
     });
   }
 );
@@ -233,7 +311,7 @@ function makeWorkerProgressTrigger(collection: string) {
         await sendPushToUser(hostId, {
           title: title(workerName),
           body: body(workerName, gigTitle),
-          channelId: "gig_worker_progress_v2",
+          channelId: "gig_worker_progress_v3",
           data: { type: "worker_progress", gigId: event.params.gigId },
         });
       }
@@ -267,7 +345,7 @@ function makeGigAssignedTrigger(collection: string, gigTypeLabel: string) {
     await sendPushToUser(workerId, {
       title: `You're Assigned! — ${gigTypeLabel}`,
       body: `You've been assigned to: ${gigTitle}. Head to the location now.`,
-      channelId: "gig_assignments",
+      channelId: "gig_assignments_v2",
       data: { type: "gig_assigned", gigId: event.params.gigId },
     });
   });
@@ -325,7 +403,7 @@ export const checkExpiredGigSchedules = onSchedule(
           await sendPushToUser(hostId, {
             title: "Gig Cancelled",
             body: `No worker was selected for "${gigTitle}" before its scheduled time — the gig has been cancelled.`,
-            channelId: "gig_auto_cancelled_v2",
+            channelId: "gig_auto_cancelled_v3",
             data: { type: "gig_auto_cancelled", gigId: doc.id },
           });
         }
@@ -347,14 +425,15 @@ function isDevProject(): boolean {
   return currentProject === DEV_PROJECT_ID;
 }
 
+// Fires at 7am, 11am, and 6pm Asia/Manila daily.
 export const sendDailyTestReminder = onSchedule(
-  { schedule: "every day 07:00", timeZone: "Asia/Manila" },
+  { schedule: "0 7,11,18 * * *", timeZone: "Asia/Manila" },
   async () => {
     if (!isDevProject()) return;
     await broadcastToAllUsers({
-      title: "Testing Reminder",
-      body: "Good morning! Please open Giggre today and try out the latest test build.",
-      channelId: "tester_reminder",
+      title: "Time to Test!",
+      body: "Time to test, testers!!! Open Giggre and check out the latest build.",
+      channelId: "tester_reminder_v3",
       data: { type: "tester_reminder" },
     });
   }
@@ -392,7 +471,7 @@ export const publishVersionAnnouncement = onRequest(
       body: notes
         ? `Version ${version} is now available: ${notes}`
         : `Version ${version} is now available. Update the app to get it.`,
-      channelId: "tester_reminder",
+      channelId: "tester_reminder_v3",
       data: { type: "new_version", version },
     });
 

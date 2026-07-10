@@ -85,7 +85,7 @@ class PushNotificationService {
   Future<void> _showForeground(RemoteMessage message) async {
     final notification = message.notification;
     if (notification == null) return;
-    final channelId = message.data['channelId'] as String? ?? 'gig_chat';
+    final channelId = message.data['channelId'] as String? ?? 'gig_chat_v2';
 
     await _notifications.show(
       message.hashCode.abs() % 100000,

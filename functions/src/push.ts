@@ -25,7 +25,7 @@ export async function sendPushToUser(
       title: payload.title,
       body: payload.body,
     },
-    data: payload.data ?? {},
+    data: { ...(payload.data ?? {}), channelId: payload.channelId },
     android: {
       priority: "high",
       notification: {
@@ -94,7 +94,7 @@ export async function broadcastToAllUsers(payload: PushPayload): Promise<void> {
     await admin.messaging().sendEachForMulticast({
       tokens,
       notification: { title: payload.title, body: payload.body },
-      data: payload.data ?? {},
+      data: { ...(payload.data ?? {}), channelId: payload.channelId },
       android: {
         priority: "high",
         notification: { channelId: payload.channelId, sound: "default" },
