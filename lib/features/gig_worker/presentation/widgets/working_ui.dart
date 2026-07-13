@@ -21,108 +21,9 @@ import 'gig_map_section.dart';
 import 'worker_payment_confirm_sheet.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/widgets/gig_completion_celebration.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Gig progress steps
-// ─────────────────────────────────────────────────────────────────────────────
-enum _GigStep { navigating, arrived, working, taskComplete, payment, completed }
-
-_GigStep _stepFromStatus(String s) {
-  switch (s) {
-    case 'navigating':    return _GigStep.navigating;
-    case 'arrived':       return _GigStep.arrived;
-    case 'working':       return _GigStep.working;
-    case 'task_complete': return _GigStep.taskComplete;
-    case 'payment':       return _GigStep.payment;
-    case 'completed':     return _GigStep.completed;
-    default:              return _GigStep.navigating;
-  }
-}
-
-const _stepLabels = ['On the way', 'Arrived', 'Working', 'Done', 'Payment', 'Complete'];
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Active Gig design tokens — screen-scoped design system for this screen.
-//  Structural colors (bg/card/border/text) flip with the app theme; brand and
-//  status accents (blue/green/red) stay the same in both themes.
-// ─────────────────────────────────────────────────────────────────────────────
-Color _screenBg(bool isDark) => isDark ? kBg : const Color(0xFFF4F6FA);
-Color _cardBg(bool isDark) => isDark ? kCard : Colors.white;
-Color _cardBorder(bool isDark) => isDark ? kBorder : const Color(0xFFE4E9F0);
-const double _kCardRadius = 16.0;
-const Color _kPrimaryBlue = Color(0xFF2B6FB5);
-const Color _kDarkBlue = Color(0xFF1F4D80);
-Color _textPrimary(bool isDark) => isDark ? Colors.white : const Color(0xFF17263D);
-Color _textSecondary(bool isDark) => isDark ? const Color(0xFFB6C2D1) : const Color(0xFF5A6778);
-Color _textMuted(bool isDark) => isDark ? kSub : const Color(0xFF94A0B0);
-Color _textDisabled(bool isDark) => isDark ? const Color(0xFF64748B) : const Color(0xFFB7C0CD);
-const Color _kSuccessGreen = Color(0xFF2E9E6B);
-const Color _kDestructiveRed = Color(0xFFE5484D);
-Color _destructiveBorder(bool isDark) =>
-    isDark ? Colors.redAccent.withValues(alpha: 0.35) : const Color(0xFFF5C6C8);
-Color _dividerColor(bool isDark) => isDark ? kBorder : const Color(0xFFEEF2F7);
-Color _trackBg(bool isDark) => isDark ? const Color(0xFF334155) : const Color(0xFFE4E9F0);
-
-// Title/body copy for the progress card's instruction block — same 6-status
-// source of truth as _stepFromStatus above; no new states invented.
-class _StepCopy {
-  final String title;
-  final String body;
-  const _StepCopy(this.title, this.body);
-}
-
-_StepCopy _instructionFor(_GigStep step, GigMarkerData gig) {
-  switch (step) {
-    case _GigStep.navigating:
-      return const _StepCopy(
-        'Head to the gig location',
-        "We'll detect your arrival automatically within 40 m — no need to check in.",
-      );
-    case _GigStep.arrived:
-      return const _StepCopy(
-        "You've arrived!",
-        'Waiting for the host to confirm and start the gig.',
-      );
-    case _GigStep.working:
-      return const _StepCopy(
-        'Gig in progress',
-        'The host will mark the work as done when finished.',
-      );
-    case _GigStep.taskComplete:
-      return const _StepCopy(
-        'Work complete',
-        'Waiting for the host to process your payment.',
-      );
-    case _GigStep.payment:
-      return _StepCopy(
-        'Payment processing',
-        '${CurrencyFormatter.format(gig.budget, gig.currencyCode)} is on its way to you.',
-      );
-    case _GigStep.completed:
-      return const _StepCopy(
-        'All done — great work!',
-        'This gig is complete. Rate your host below.',
-      );
-  }
-}
-
-// Display-only address cleanup — collapses immediate consecutive duplicate
-// comma-separated parts (e.g. "Foo St, Foo St, City" -> "Foo St, City").
-// Never writes back to Firestore; the stored value is untouched.
-String _dedupedAddress(String address) {
-  final parts = address
-      .split(',')
-      .map((p) => p.trim())
-      .where((p) => p.isNotEmpty)
-      .toList();
-  final deduped = <String>[];
-  for (final p in parts) {
-    if (deduped.isEmpty || deduped.last.toLowerCase() != p.toLowerCase()) {
-      deduped.add(p);
-    }
-  }
-  return deduped.join(', ');
-}
+import '../../../gig_shared/active_gig_theme.dart';
+import '../../../gig_shared/active_gig_step.dart';
+import '../../../gig_shared/active_gig_widgets.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Route step model + helpers (used by _fetchRoute)
@@ -192,11 +93,6 @@ IconData _iconForStepData(Map<String, dynamic> step) {
   }
 }
 
-String _fmtDist(double meters) {
-  if (meters < 1000) return '${meters.round()} m';
-  return '${(meters / 1000).toStringAsFixed(1)} km';
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Working UI — full-screen view shown when a quick gig is active
 // ─────────────────────────────────────────────────────────────────────────────
@@ -221,9 +117,9 @@ class WorkingUI extends StatefulWidget {
 }
 
 class _WorkingUIState extends State<WorkingUI> {
-  _GigStep _step = _GigStep.navigating;
+  GigStep _step = GigStep.navigating;
 
-  _GigStep _lastActiveStep = _GigStep.navigating;
+  GigStep _lastActiveStep = GigStep.navigating;
   String _lastStatusString = 'navigating';
   bool _cancelPending = false;
 
@@ -297,7 +193,7 @@ class _WorkingUIState extends State<WorkingUI> {
 
       final newStep = isCancelPending
           ? _lastActiveStep
-          : _stepFromStatus(status);
+          : gigStepFromStatus(status);
 
       if (!isCancelPending) {
         _lastActiveStep = newStep;
@@ -311,17 +207,17 @@ class _WorkingUIState extends State<WorkingUI> {
         });
       }
 
-      if (newStep == _GigStep.working && !_stopwatch.isRunning) {
+      if (newStep == GigStep.working && !_stopwatch.isRunning) {
         _stopwatch.start();
       }
 
-      if (newStep == _GigStep.payment && !_paymentConfirmShown) {
+      if (newStep == GigStep.payment && !_paymentConfirmShown) {
         _paymentConfirmShown = true;
         WidgetsBinding.instance.addPostFrameCallback(
             (_) => _showWorkerPaymentConfirm());
       }
 
-      if (newStep == _GigStep.completed && !_ratingShown) {
+      if (newStep == GigStep.completed && !_ratingShown) {
         // Only trigger from the stream when the payment sheet was never opened
         // this session (app-restore path). The normal path goes through
         // _onPaymentConfirmed which already handles pop + rating.
@@ -377,7 +273,7 @@ class _WorkingUIState extends State<WorkingUI> {
         setState(() => _workerLocation = loc);
         _checkGeofence(pos);
         // Re-fetch route only when navigating and moved >30 m from last fetch
-        if (_step == _GigStep.navigating) {
+        if (_step == GigStep.navigating) {
           // Persist location to Firestore so host can track worker in real-time
           FirebaseFirestore.instance
               .collection(widget.gigCollection)
@@ -418,7 +314,7 @@ class _WorkingUIState extends State<WorkingUI> {
   }
 
   void _checkGeofence(Position pos) {
-    if (_step != _GigStep.navigating) return;
+    if (_step != GigStep.navigating) return;
     final dist = Geolocator.distanceBetween(
       pos.latitude, pos.longitude,
       widget.gig.position.latitude, widget.gig.position.longitude,
@@ -680,18 +576,21 @@ class _WorkingUIState extends State<WorkingUI> {
 
   @override
   Widget build(BuildContext context) {
-    final stepIndex = _GigStep.values.indexOf(_step);
-    final copy = _instructionFor(_step, widget.gig);
+    final stepIndex = GigStep.values.indexOf(_step);
+    final copy = workerInstructionFor(_step,
+        amount: widget.gig.budget, currencyCode: widget.gig.currencyCode);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: _screenBg(isDark),
+      backgroundColor: activeGigScreenBg(isDark),
       body: SafeArea(
         child: Column(
           children: [
-            _ActiveGigHeader(
-              statusLabel: _stepLabels[stepIndex],
+            ActiveGigHeader(
+              title: 'Active Gig',
+              statusLabel: kStepLabels[stepIndex],
               onBack: () => Navigator.of(context).maybePop(),
+              accent: kWorkerAccent,
             ),
 
             // ── Location warning ───────────────────────────────────────
@@ -731,18 +630,19 @@ class _WorkingUIState extends State<WorkingUI> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _ActiveGigProgressCard(
+                    ActiveGigProgressCard(
                       stepIndex: stepIndex,
                       title: copy.title,
                       body: copy.body,
-                      elapsed: _step == _GigStep.working ? _fmt(_elapsed) : null,
+                      elapsed: _step == GigStep.working ? _fmt(_elapsed) : null,
                       arrivedPromptVisible: _arrivedPromptVisible,
                       onConfirmArrival: _confirmArrival,
                       isCancelPending: _cancelPending,
-                      showStartGig: _step == _GigStep.arrived,
+                      showStartGig: _step == GigStep.arrived,
                       onStartGig: _startWork,
-                      showGigComplete: _step == _GigStep.working,
+                      showGigComplete: _step == GigStep.working,
                       onGigComplete: _completeWork,
+                      accent: kWorkerAccent,
                     ),
                     const SizedBox(height: 16),
 
@@ -760,10 +660,14 @@ class _WorkingUIState extends State<WorkingUI> {
 
                     // ── Cancel gig (only while still on the way / working) ─
                     if (!_cancelPending &&
-                        (_step == _GigStep.navigating ||
-                            _step == _GigStep.arrived ||
-                            _step == _GigStep.working))
-                      _CancelGigSection(onPressed: _showCancelReasonDialog),
+                        (_step == GigStep.navigating ||
+                            _step == GigStep.arrived ||
+                            _step == GigStep.working))
+                      CancelGigSection(
+                        onPressed: _showCancelReasonDialog,
+                        caption:
+                            'Cancelling after being selected may affect your worker rating',
+                      ),
 
                     const SizedBox(height: 20),
                   ],
@@ -777,420 +681,6 @@ class _WorkingUIState extends State<WorkingUI> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Header — compact gradient app bar
-// ─────────────────────────────────────────────────────────────────────────────
-class _ActiveGigHeader extends StatelessWidget {
-  final String statusLabel;
-  final VoidCallback onBack;
-  const _ActiveGigHeader({required this.statusLabel, required this.onBack});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 108,
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [_kPrimaryBlue, _kDarkBlue],
-        ),
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(22)),
-      ),
-      padding: const EdgeInsets.only(left: 4, right: 16),
-      child: Row(
-        children: [
-          IconButton(
-            onPressed: onBack,
-            icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                color: Colors.white, size: 18),
-          ),
-          const Text(
-            'Active Gig',
-            style: TextStyle(
-                color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
-          ),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(13),
-            ),
-            child: Text(
-              '●  $statusLabel',
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  6-step horizontal tracker
-// ─────────────────────────────────────────────────────────────────────────────
-class _StepTracker extends StatelessWidget {
-  final int currentIndex;
-  const _StepTracker({required this.currentIndex});
-
-  @override
-  Widget build(BuildContext context) {
-    final total = _stepLabels.length;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final segment = constraints.maxWidth / total;
-        final fillFraction =
-            total <= 1 ? 1.0 : currentIndex / (total - 1);
-        return Column(
-          children: [
-            SizedBox(
-              height: 22,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Positioned(
-                    left: segment / 2,
-                    right: segment / 2,
-                    child: Container(
-                      height: 3,
-                      decoration: BoxDecoration(
-                        color: _trackBg(isDark),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: segment / 2,
-                    right: segment / 2,
-                    child: FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: fillFraction.clamp(0.0, 1.0),
-                      child: Container(
-                        height: 3,
-                        decoration: BoxDecoration(
-                          color: _kPrimaryBlue,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Row(
-                    children: List.generate(total, (i) {
-                      return Expanded(
-                        child: Center(
-                          child: _StepDot(
-                            isDone: i < currentIndex,
-                            isCurrent: i == currentIndex,
-                          ),
-                        ),
-                      );
-                    }),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 5),
-            Row(
-              children: List.generate(total, (i) {
-                final isCurrent = i == currentIndex;
-                final isDone = i < currentIndex;
-                final color = isCurrent
-                    ? _kPrimaryBlue
-                    : isDone
-                        ? _textSecondary(isDark)
-                        : _textDisabled(isDark);
-                return Expanded(
-                  child: Text(
-                    _stepLabels[i],
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 8,
-                      color: color,
-                      fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500,
-                    ),
-                  ),
-                );
-              }),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _StepDot extends StatelessWidget {
-  final bool isDone;
-  final bool isCurrent;
-  const _StepDot({required this.isDone, required this.isCurrent});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    if (isCurrent) {
-      return Container(
-        width: 22,
-        height: 22,
-        decoration: BoxDecoration(
-          color: _kPrimaryBlue.withValues(alpha: 0.18),
-          shape: BoxShape.circle,
-        ),
-        alignment: Alignment.center,
-        child: Container(
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            color: _kPrimaryBlue,
-            shape: BoxShape.circle,
-            border: Border.all(color: _cardBg(isDark), width: 3),
-          ),
-        ),
-      );
-    }
-    if (isDone) {
-      return Container(
-        width: 14,
-        height: 14,
-        decoration: const BoxDecoration(
-            color: _kPrimaryBlue, shape: BoxShape.circle),
-      );
-    }
-    return Container(
-      width: 12,
-      height: 12,
-      decoration: BoxDecoration(
-        color: _cardBg(isDark),
-        shape: BoxShape.circle,
-        border: Border.all(color: _cardBorder(isDark), width: 2),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Progress card — step tracker + instruction block (single source of truth:
-//  the same _step/stepIndex the header chip and tracker fill derive from)
-// ─────────────────────────────────────────────────────────────────────────────
-class _ActiveGigProgressCard extends StatelessWidget {
-  final int stepIndex;
-  final String title;
-  final String body;
-  final String? elapsed;
-  final bool arrivedPromptVisible;
-  final VoidCallback onConfirmArrival;
-  final bool isCancelPending;
-  final bool showStartGig;
-  final VoidCallback onStartGig;
-  final bool showGigComplete;
-  final VoidCallback onGigComplete;
-
-  const _ActiveGigProgressCard({
-    required this.stepIndex,
-    required this.title,
-    required this.body,
-    this.elapsed,
-    required this.arrivedPromptVisible,
-    required this.onConfirmArrival,
-    required this.isCancelPending,
-    required this.showStartGig,
-    required this.onStartGig,
-    required this.showGigComplete,
-    required this.onGigComplete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      decoration: BoxDecoration(
-        color: _cardBg(isDark),
-        borderRadius: BorderRadius.circular(_kCardRadius),
-        border: Border.all(color: _cardBorder(isDark)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
-            child: _StepTracker(currentIndex: stepIndex),
-          ),
-          Divider(height: 0, thickness: 1, color: _dividerColor(isDark)),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: TextStyle(
-                          color: _textPrimary(isDark),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.3,
-                        ),
-                      ),
-                    ),
-                    if (elapsed != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: _kSuccessGreen.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          elapsed!,
-                          style: const TextStyle(
-                            color: _kSuccessGreen,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  body,
-                  style: TextStyle(
-                      color: _textMuted(isDark), fontSize: 11, height: 1.4),
-                ),
-                if (arrivedPromptVisible) ...[
-                  const SizedBox(height: 14),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: _kSuccessGreen.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                          color: _kSuccessGreen.withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.location_on_rounded,
-                            color: _kSuccessGreen, size: 18),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            "You're at the location — confirm your arrival.",
-                            style: TextStyle(
-                                color: _kSuccessGreen,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 44,
-                    child: ElevatedButton(
-                      onPressed: onConfirmArrival,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _kSuccessGreen,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: const Text('Confirm Arrival',
-                          style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w700)),
-                    ),
-                  ),
-                ],
-                if (isCancelPending) ...[
-                  const SizedBox(height: 14),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: kAmber.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: kAmber.withValues(alpha: 0.3)),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.hourglass_top_rounded,
-                            color: kAmber, size: 18),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Cancellation pending — admin is reviewing your request.',
-                            style: TextStyle(
-                                color: kAmber,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                if (showStartGig) ...[
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 46,
-                    child: ElevatedButton.icon(
-                      onPressed: onStartGig,
-                      icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                      label: const Text('Start Gig',
-                          style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w700)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _kPrimaryBlue,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ),
-                ],
-                if (showGigComplete) ...[
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 46,
-                    child: ElevatedButton.icon(
-                      onPressed: onGigComplete,
-                      icon: const Icon(Icons.check_circle_outline_rounded,
-                          size: 20),
-                      label: const Text('Gig Complete',
-                          style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w700)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _kSuccessGreen,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Map card — reuses _NavMapCore's existing GoogleMap/OSM instance & config;
@@ -1227,7 +717,7 @@ class _ActiveGigMapCardState extends State<_ActiveGigMapCard> {
   }
 
   // Unchanged from the previous _NavigatingSectionState — same fullscreen
-  // map dialog, reusing the same _MapRoundButton close control.
+  // map dialog, reusing the same MapRoundButton close control.
   void _openFullScreenMap() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -1248,7 +738,7 @@ class _ActiveGigMapCardState extends State<_ActiveGigMapCard> {
                 Positioned(
                   top: 12,
                   left: 12,
-                  child: _MapRoundButton(
+                  child: MapRoundButton(
                     icon: Icons.close_rounded,
                     onTap: () => Navigator.of(ctx).pop(),
                   ),
@@ -1264,13 +754,16 @@ class _ActiveGigMapCardState extends State<_ActiveGigMapCard> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final distText = widget.routeDistanceM != null
+        ? ' · ${fmtDist(widget.routeDistanceM!)}'
+        : '';
     return ClipRRect(
-      borderRadius: BorderRadius.circular(_kCardRadius),
+      borderRadius: BorderRadius.circular(kActiveGigCardRadius),
       child: Container(
         height: 312,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(_kCardRadius),
-          border: Border.all(color: _cardBorder(isDark)),
+          borderRadius: BorderRadius.circular(kActiveGigCardRadius),
+          border: Border.all(color: activeGigCardBorder(isDark)),
         ),
         child: Stack(
           children: [
@@ -1289,51 +782,15 @@ class _ActiveGigMapCardState extends State<_ActiveGigMapCard> {
             Positioned(
               left: 8,
               top: 8,
-              child: _MapInfoChip(distanceM: widget.routeDistanceM),
+              child: MapInfoChip(
+                primaryLabel: 'You',
+                primaryDotColor: kWorkerAccent.solid,
+                secondaryLabel: 'Gig  - - Route$distText',
+                secondaryDotColor: Colors.red,
+              ),
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _MapInfoChip extends StatelessWidget {
-  final double? distanceM;
-  const _MapInfoChip({this.distanceM});
-
-  @override
-  Widget build(BuildContext context) {
-    final distText = distanceM != null ? ' · ${_fmtDist(distanceM!)}' : '';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: const BoxDecoration(
-                color: _kPrimaryBlue, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 4),
-          const Text('You',
-              style: TextStyle(color: Color(0xFF5A6778), fontSize: 9)),
-          const SizedBox(width: 8),
-          Container(
-            width: 6,
-            height: 6,
-            decoration:
-                const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 4),
-          Text('Gig  - - Route$distText',
-              style: const TextStyle(color: Color(0xFF5A6778), fontSize: 9)),
-        ],
       ),
     );
   }
@@ -1572,7 +1029,7 @@ class _NavMapCoreState extends State<_NavMapCore> {
     return Positioned(
       left: 10,
       bottom: 10,
-      child: _MapRoundButton(
+      child: MapRoundButton(
         icon: Icons.fullscreen_rounded,
         onTap: widget.onExpand!,
       ),
@@ -1634,30 +1091,6 @@ class _NavMapCoreState extends State<_NavMapCore> {
   }
 }
 
-class _MapRoundButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _MapRoundButton({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      shape: const CircleBorder(),
-      elevation: 3,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Icon(icon, size: 18, color: Colors.black87),
-        ),
-      ),
-    );
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig + host card
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1678,9 +1111,9 @@ class _GigHostCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: _cardBg(isDark),
-        borderRadius: BorderRadius.circular(_kCardRadius),
-        border: Border.all(color: _cardBorder(isDark)),
+        color: activeGigCardBg(isDark),
+        borderRadius: BorderRadius.circular(kActiveGigCardRadius),
+        border: Border.all(color: activeGigCardBorder(isDark)),
       ),
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -1693,7 +1126,7 @@ class _GigHostCard extends StatelessWidget {
                 child: Text(
                   gig.title,
                   style: TextStyle(
-                    color: _textPrimary(isDark),
+                    color: activeGigTextPrimary(isDark),
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.3,
@@ -1706,8 +1139,8 @@ class _GigHostCard extends StatelessWidget {
                   children: [
                     TextSpan(
                       text: CurrencyFormatter.format(gig.budget, gig.currencyCode),
-                      style: const TextStyle(
-                        color: _kPrimaryBlue,
+                      style: TextStyle(
+                        color: kWorkerAccent.solid,
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
                       ),
@@ -1715,7 +1148,7 @@ class _GigHostCard extends StatelessWidget {
                     TextSpan(
                       text: ' / gig',
                       style: TextStyle(
-                        color: _textMuted(isDark),
+                        color: activeGigTextMuted(isDark),
                         fontSize: 10,
                         fontWeight: FontWeight.w500,
                       ),
@@ -1731,19 +1164,19 @@ class _GigHostCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(Icons.location_on_outlined,
-                    color: _textMuted(isDark), size: 14),
+                    color: activeGigTextMuted(isDark), size: 14),
                 const SizedBox(width: 5),
                 Expanded(
                   child: Text(
-                    _dedupedAddress(gig.address),
-                    style: TextStyle(color: _textMuted(isDark), fontSize: 11),
+                    dedupedAddress(gig.address),
+                    style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 11),
                   ),
                 ),
               ],
             ),
           ],
           const SizedBox(height: 14),
-          Divider(height: 0, thickness: 1, color: _dividerColor(isDark)),
+          Divider(height: 0, thickness: 1, color: activeGigDividerColor(isDark)),
           const SizedBox(height: 14),
           if (gig.hostId.isNotEmpty)
             Row(
@@ -1752,14 +1185,14 @@ class _GigHostCard extends StatelessWidget {
                   width: 42,
                   height: 42,
                   decoration: BoxDecoration(
-                    color: _kPrimaryBlue.withValues(alpha: 0.12),
+                    color: kWorkerAccent.solid.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
                   alignment: Alignment.center,
                   child: Text(
                     _initials,
-                    style: const TextStyle(
-                      color: _kPrimaryBlue,
+                    style: TextStyle(
+                      color: kWorkerAccent.solid,
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                     ),
@@ -1773,39 +1206,39 @@ class _GigHostCard extends StatelessWidget {
                       Text(
                         gig.hostName.isNotEmpty ? gig.hostName : '—',
                         style: TextStyle(
-                          color: _textPrimary(isDark),
+                          color: activeGigTextPrimary(isDark),
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text('Your host',
-                          style: TextStyle(color: _textMuted(isDark), fontSize: 10.5)),
+                          style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 10.5)),
                     ],
                   ),
                 ),
-                _HostActionCircle(
-                  bg: _kPrimaryBlue.withValues(alpha: 0.12),
+                PartyActionCircle(
+                  bg: kWorkerAccent.solid.withValues(alpha: 0.12),
                   child: CallUserAction(
                     targetUserId: gig.hostId,
                     targetUserName: gig.hostName,
                     callType: CallType.voice,
-                    iconColor: _kPrimaryBlue,
+                    iconColor: kWorkerAccent.solid,
                   ),
                 ),
                 const SizedBox(width: 8),
-                _HostActionCircle(
-                  bg: _kPrimaryBlue.withValues(alpha: 0.12),
+                PartyActionCircle(
+                  bg: kWorkerAccent.solid.withValues(alpha: 0.12),
                   child: CallUserAction(
                     targetUserId: gig.hostId,
                     targetUserName: gig.hostName,
                     callType: CallType.video,
-                    iconColor: _kPrimaryBlue,
+                    iconColor: kWorkerAccent.solid,
                   ),
                 ),
                 const SizedBox(width: 8),
-                _HostActionCircle(
-                  bg: _kPrimaryBlue,
+                PartyActionCircle(
+                  bg: kWorkerAccent.solid,
                   child: GigChatAction(
                     gigId: gig.id,
                     targetUserId: gig.hostId,
@@ -1817,67 +1250,6 @@ class _GigHostCard extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
-}
-
-class _HostActionCircle extends StatelessWidget {
-  final Color bg;
-  final Widget child;
-  const _HostActionCircle({required this.bg, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 38,
-      height: 38,
-      decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
-      child: Center(child: child),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Cancel gig section
-// ─────────────────────────────────────────────────────────────────────────────
-class _CancelGigSection extends StatelessWidget {
-  final VoidCallback onPressed;
-  const _CancelGigSection({required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Column(
-      children: [
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: OutlinedButton.icon(
-            onPressed: onPressed,
-            icon: const Icon(Icons.close_rounded,
-                size: 18, color: _kDestructiveRed),
-            label: const Text(
-              'Cancel gig',
-              style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: _kDestructiveRed),
-            ),
-            style: OutlinedButton.styleFrom(
-              backgroundColor: _cardBg(isDark),
-              side: BorderSide(color: _destructiveBorder(isDark), width: 1),
-              shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Cancelling after being selected may affect your worker rating',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: _textDisabled(isDark), fontSize: 9.5),
-        ),
-      ],
     );
   }
 }

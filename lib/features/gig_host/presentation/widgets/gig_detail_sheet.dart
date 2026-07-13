@@ -20,6 +20,9 @@ import '../../services/quick_gig_matching_service.dart';
 import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
 import '../../../../core/widgets/gig_completion_celebration.dart';
+import '../../../gig_shared/active_gig_theme.dart';
+import '../../../gig_shared/active_gig_step.dart';
+import '../../../gig_shared/active_gig_widgets.dart';
 
 String _generatePaymentCode() {
   final r = Random();
@@ -688,40 +691,33 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             '';
         final isActive = _activeStatuses.contains(status);
         final isTaskComplete = status == 'task_complete';
-        const green = Color(0xFF22C55E);
-
-        // Stepper config for quick gigs
-        const stepStatuses = [
-          'navigating',
-          'arrived',
-          'working',
-          'task_complete',
-          'payment',
-          'completed',
-        ];
-        const stepLabels = [
-          'On the way',
-          'Arrived',
-          'Working',
-          'Done',
-          'Payment',
-          'Completed',
-        ];
-        const stepIcons = [
-          Icons.directions_rounded,
-          Icons.location_on_rounded,
-          Icons.work_rounded,
-          Icons.check_circle_outline_rounded,
-          Icons.payment_rounded,
-          Icons.verified_rounded,
-        ];
         final progressStatus = status == 'cancellation_requested'
             ? (data['lastProgressStatus'] as String? ?? 'working')
             : status;
-
-        final stepIndex = stepStatuses
-            .indexOf(progressStatus)
-            .clamp(0, stepStatuses.length - 1);
+        final resolvedWorkerName = workerName.isNotEmpty ? workerName : 'Worker';
+        final hostStep = gigStepFromStatus(progressStatus);
+        final hostStepIndex = GigStep.values.indexOf(hostStep);
+        final hostCopy = hostInstructionFor(
+          hostStep,
+          workerName: resolvedWorkerName,
+          amount: budget,
+          currencyCode: currencyCode,
+        );
+        final showCancelGig = ![
+          'completed',
+          'cancelled',
+          'no_worker',
+          'task_complete',
+          'payment',
+          'cancellation_requested',
+        ].contains(status);
+        final hostMapDistanceText = (gigLocation != null && workerLocation != null)
+            ? ' · ${fmtDist(const ll.Distance().as(
+                  ll.LengthUnit.Meter,
+                  ll.LatLng(gigLocation.latitude, gigLocation.longitude),
+                  ll.LatLng(workerLocation.latitude, workerLocation.longitude),
+                ))} away'
+            : '';
 
         return Container(
           decoration: BoxDecoration(
@@ -745,353 +741,327 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ),
               ),
 
-              // ── Title + status badge ───────────────────────────────
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        color: onSurface,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+              if (isActive) ...[
+                // ── Gold "Gig in Progress" header (mirrors worker's Figure 9) ──
+                ActiveGigHeader(
+                  title: 'Gig in Progress',
+                  statusLabel: _hostStatusChipLabel(hostStep, resolvedWorkerName),
+                  onBack: () => Navigator.pop(context),
+                  accent: kHostAccent,
+                ),
+                const SizedBox(height: 16),
+
+                // ── Live map card ────────────────────────────────────
+                if (gigLocation != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(kActiveGigCardRadius),
+                    child: Container(
+                      height: 176,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(kActiveGigCardRadius),
+                        border: Border.all(color: activeGigCardBorder(isDark)),
+                      ),
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: _GigTrackingMap(
+                              gigLocation: gigLocation,
+                              workerLocation: workerLocation,
+                              workerId: workerId.isNotEmpty ? workerId : null,
+                              workerName: resolvedWorkerName,
+                            ),
+                          ),
+                          Positioned(
+                            left: 8,
+                            top: 8,
+                            child: MapInfoChip(
+                              primaryLabel: resolvedWorkerName,
+                              primaryDotColor: kActiveGigSuccessGreen,
+                              secondaryLabel: 'Your gig$hostMapDistanceText',
+                              secondaryDotColor: kHostAccent.solid,
+                            ),
+                          ),
+                          if (workerLocation != null)
+                            const Positioned(right: 8, top: 8, child: LiveBadge()),
+                          Positioned(
+                            left: 10,
+                            bottom: 10,
+                            child: MapRoundButton(
+                              icon: Icons.fullscreen_rounded,
+                              onTap: () => _openFullScreenTrackingMap(
+                                ctx,
+                                gigLocation: gigLocation,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  _StatusBadge(status: status),
+                  const SizedBox(height: 16),
                 ],
-              ),
-              const SizedBox(height: 4),
-              _TypeBadge(gigType: widget.gigType),
-              const SizedBox(height: 16),
 
-              // ── Map: gig location + live worker pin ───────────────
-              if (gigLocation != null) ...[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: SizedBox(
-                    height: 220,
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: _GigTrackingMap(
-                            gigLocation: gigLocation,
-                            workerLocation: (isActive && workerLocation != null)
-                                ? workerLocation
-                                : null,
-                            workerId: workerId.isNotEmpty ? workerId : null,
-                            workerName: workerName.isNotEmpty
-                                ? workerName
-                                : 'Worker',
-                          ),
-                        ),
-                        Positioned(
-                          left: 10,
-                          bottom: 10,
-                          child: _MapRoundButton(
-                            icon: Icons.fullscreen_rounded,
-                            onTap: () => _openFullScreenTrackingMap(
-                              ctx,
-                              gigLocation: gigLocation,
+                // ── Progress card: stepper + host-perspective instructions ──
+                ActiveGigProgressCard(
+                  stepIndex: hostStepIndex,
+                  title: hostCopy.title,
+                  body: hostCopy.body,
+                  arrivedPromptVisible: false,
+                  onConfirmArrival: () {},
+                  isCancelPending: status == 'cancellation_requested',
+                  showStartGig: false,
+                  onStartGig: () {},
+                  showGigComplete: isTaskComplete,
+                  onGigComplete: _confirmCompleted,
+                  accent: kHostAccent,
+                ),
+                const SizedBox(height: 16),
+
+                // ── Gig + worker card ────────────────────────────────
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: activeGigCardBg(isDark),
+                    borderRadius: BorderRadius.circular(kActiveGigCardRadius),
+                    border: Border.all(color: activeGigCardBorder(isDark)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: TextStyle(
+                                color: activeGigTextPrimary(isDark),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.3,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (isActive && workerLocation != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF22C55E),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        const Text(
-                          'Worker location is live',
-                          style: TextStyle(color: kSub, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 16),
-              ],
-
-              // ── Applicants (open gig waiting for host to pick a worker) ──────
-              if (widget.gigType == 'open' && status == 'open') ...[
-                _buildApplicantsSection(
-                  List<Map<String, dynamic>>.from(
-                    (data['applicants'] as List<dynamic>? ?? [])
-                        .cast<Map<String, dynamic>>(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // ── Progress stepper (quick/open/offered gigs with active worker) ─
-              if ((widget.gigType == 'quick' ||
-                      widget.gigType == 'open' ||
-                      widget.gigType == 'offered') &&
-                  isActive) ...[
-                Text(
-                  'Task Progress',
-                  style: TextStyle(
-                    color: onSurface,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: List.generate(stepStatuses.length, (i) {
-                      final isStepActive = i == stepIndex;
-                      final isDone = i < stepIndex;
-                      final dotColor = (isStepActive || isDone) ? green : kSub;
-                      final dotBg = isDone
-                          ? green
-                          : isStepActive
-                          ? green.withValues(alpha: 0.12)
-                          : (isDark
-                                ? kBorder.withValues(alpha: 0.5)
-                                : Colors.grey.withValues(alpha: 0.12));
-                      return Row(
-                        children: [
-                          Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 30,
-                                height: 30,
-                                decoration: BoxDecoration(
-                                  color: dotBg,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: (isStepActive || isDone)
-                                        ? green
-                                        : kSub.withValues(alpha: 0.3),
-                                    width: isStepActive ? 2 : 1,
+                          RichText(
+                            textAlign: TextAlign.right,
+                            text: TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: CurrencyFormatter.format(budget, currencyCode),
+                                  style: TextStyle(
+                                    color: kHostAccent.onWhiteText,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
-                                child: Icon(
-                                  isDone ? Icons.check_rounded : stepIcons[i],
-                                  size: 14,
-                                  color: isDone ? Colors.white : dotColor,
+                                TextSpan(
+                                  text: ' / gig',
+                                  style: TextStyle(
+                                    color: activeGigTextMuted(isDark),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                stepLabels[i],
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  color: (isStepActive || isDone)
-                                      ? green
-                                      : kSub,
-                                  fontWeight: isStepActive
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (i < stepStatuses.length - 1)
-                            Container(
-                              width: 20,
-                              height: 1.5,
-                              margin: const EdgeInsets.only(bottom: 14),
-                              color: i < stepIndex
-                                  ? green
-                                  : kSub.withValues(alpha: 0.25),
+                              ],
                             ),
+                          ),
                         ],
-                      );
-                    }),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // ── Arrived notification ──────────────────────────────
-              if (status == 'arrived') ...[
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF22C55E).withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFF22C55E).withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(
-                            0xFF22C55E,
-                          ).withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.location_on_rounded,
-                          color: Color(0xFF22C55E),
-                          size: 18,
-                        ),
                       ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Column(
+                      if (address.isNotEmpty || scheduledDate != null) ...[
+                        const SizedBox(height: 8),
+                        Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'Worker has Arrived!',
-                              style: TextStyle(
-                                color: Color(0xFF22C55E),
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
+                            Icon(Icons.location_on_outlined,
+                                color: activeGigTextMuted(isDark), size: 14),
+                            const SizedBox(width: 5),
+                            Expanded(
+                              child: Text(
+                                [
+                                  if (address.isNotEmpty) dedupedAddress(address),
+                                  if (scheduledDate != null)
+                                    _fmtScheduledShort(scheduledDate),
+                                ].join(' · '),
+                                style: TextStyle(
+                                    color: activeGigTextMuted(isDark), fontSize: 11),
                               ),
-                            ),
-                            SizedBox(height: 2),
-                            Text(
-                              'The worker is at the gig location and ready to begin.',
-                              style: TextStyle(color: kSub, fontSize: 11),
                             ),
                           ],
                         ),
-                      ),
+                      ],
+                      if (workerId.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        Divider(height: 0, thickness: 1, color: activeGigDividerColor(isDark)),
+                        const SizedBox(height: 14),
+                        _WorkerProfileCard(
+                          key: ValueKey('worker_$workerId'),
+                          gigId: widget.gigId,
+                          workerId: workerId,
+                          workerName: resolvedWorkerName,
+                        ),
+                      ],
                     ],
                   ),
                 ),
-                const SizedBox(height: 12),
-              ],
 
-              // ── Task details ───────────────────────────────────────
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.04)
-                      : Colors.black.withValues(alpha: 0.03),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Theme.of(context).dividerColor),
-                ),
-                child: Column(
+                // ── Cancel gig ────────────────────────────────────────
+                if (showCancelGig) ...[
+                  const SizedBox(height: 20),
+                  CancelGigSection(
+                    onPressed: _requestCancellation,
+                    caption:
+                        'Cancelling now notifies $resolvedWorkerName · frequent cancellations affect your host rating',
+                  ),
+                ],
+              ] else ...[
+                // ── Title + status badge ───────────────────────────────
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (description.isNotEmpty) ...[
-                      _DetailRow(icon: Icons.notes_rounded, label: description),
-                      const SizedBox(height: 10),
-                    ],
-                    _DetailRow(
-                      icon: Icons.attach_money_rounded,
-                      label: CurrencyFormatter.format(budget, currencyCode),
-                      iconColor: kAmber,
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                    if (scheduledDate != null) ...[
-                      const SizedBox(height: 10),
-                      _DetailRow(
-                        icon: Icons.event_rounded,
-                        label: 'Scheduled for ${_fmtScheduledDate(scheduledDate)}',
-                      ),
-                    ],
-                    if (address.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      _DetailRow(
-                        icon: Icons.location_on_outlined,
-                        label: address,
-                      ),
-                    ],
-                    if (workerName.isNotEmpty && workerId.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Divider(height: 0.5, color: Theme.of(context).dividerColor),
-                      const SizedBox(height: 12),
-                      _WorkerProfileCard(
-                        key: ValueKey('worker_$workerId'),
-                        gigId: widget.gigId,
-                        workerId: workerId,
-                        workerName: workerName,
-                      ),
-                    ],
+                    const SizedBox(width: 8),
+                    _StatusBadge(status: status),
                   ],
                 ),
-              ),
-
-              // ── Cancel Gig request (before task_complete / payment) ───
-              if (![
-                'completed',
-                'cancelled',
-                'no_worker',
-                'task_complete',
-                'payment',
-                'cancellation_requested',
-              ].contains(status)) ...[
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: OutlinedButton.icon(
-                    onPressed: _requestCancellation,
-                    icon: const Icon(
-                      Icons.cancel_outlined,
-                      size: 20,
-                      color: Colors.redAccent,
-                    ),
-                    label: const Text(
-                      'Cancel Gig',
-                      style: TextStyle(fontSize: 15, color: Colors.redAccent),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(
-                        color: Colors.redAccent.withValues(alpha: 0.5),
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-
-              // ── Gig Completed button (host confirms when done) ─────
-              if (isTaskComplete) ...[
+                const SizedBox(height: 4),
+                _TypeBadge(gigType: widget.gigType),
                 const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton.icon(
-                    onPressed: _confirmCompleted,
-                    icon: const Icon(Icons.verified_rounded, size: 20),
-                    label: const Text(
-                      'Gig Completed',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: green,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+
+                // ── Map: gig location (no worker yet) ─────────────────
+                if (gigLocation != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: SizedBox(
+                      height: 220,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: _GigTrackingMap(
+                              gigLocation: gigLocation,
+                              workerLocation: null,
+                              workerId: workerId.isNotEmpty ? workerId : null,
+                              workerName: workerName.isNotEmpty
+                                  ? workerName
+                                  : 'Worker',
+                            ),
+                          ),
+                          Positioned(
+                            left: 10,
+                            bottom: 10,
+                            child: _MapRoundButton(
+                              icon: Icons.fullscreen_rounded,
+                              onTap: () => _openFullScreenTrackingMap(
+                                ctx,
+                                gigLocation: gigLocation,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                ],
+
+                // ── Applicants (open gig waiting for host to pick a worker) ──────
+                if (widget.gigType == 'open' && status == 'open') ...[
+                  _buildApplicantsSection(
+                    List<Map<String, dynamic>>.from(
+                      (data['applicants'] as List<dynamic>? ?? [])
+                          .cast<Map<String, dynamic>>(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
+                // ── Task details ───────────────────────────────────────
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.04)
+                        : Colors.black.withValues(alpha: 0.03),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Theme.of(context).dividerColor),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (description.isNotEmpty) ...[
+                        _DetailRow(icon: Icons.notes_rounded, label: description),
+                        const SizedBox(height: 10),
+                      ],
+                      _DetailRow(
+                        icon: Icons.attach_money_rounded,
+                        label: CurrencyFormatter.format(budget, currencyCode),
+                        iconColor: kAmber,
+                      ),
+                      if (scheduledDate != null) ...[
+                        const SizedBox(height: 10),
+                        _DetailRow(
+                          icon: Icons.event_rounded,
+                          label: 'Scheduled for ${_fmtScheduledDate(scheduledDate)}',
+                        ),
+                      ],
+                      if (address.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _DetailRow(
+                          icon: Icons.location_on_outlined,
+                          label: address,
+                        ),
+                      ],
+                      if (workerName.isNotEmpty && workerId.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Divider(height: 0.5, color: Theme.of(context).dividerColor),
+                        const SizedBox(height: 12),
+                        _WorkerProfileCard(
+                          key: ValueKey('worker_$workerId'),
+                          gigId: widget.gigId,
+                          workerId: workerId,
+                          workerName: workerName,
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
+
+                // ── Cancel Gig request (before task_complete / payment) ───
+                if (showCancelGig) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed: _requestCancellation,
+                      icon: const Icon(
+                        Icons.cancel_outlined,
+                        size: 20,
+                        color: Colors.redAccent,
+                      ),
+                      label: const Text(
+                        'Cancel Gig',
+                        style: TextStyle(fontSize: 15, color: Colors.redAccent),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(
+                          color: Colors.redAccent.withValues(alpha: 0.5),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
 
               // ── Dispatch button (quick gigs not yet accepted) ──────
@@ -1838,6 +1808,36 @@ String _fmtScheduledDate(Timestamp ts) {
   return '${months[dt.month]} ${dt.day}, ${dt.year} · $h:$m $period';
 }
 
+// Short "Fri, 4:59 PM" form used inline on the gold gig+worker card.
+String _fmtScheduledShort(Timestamp ts) {
+  const weekdays = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  final dt = ts.toDate().toLocal();
+  final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+  final m = dt.minute.toString().padLeft(2, '0');
+  final period = dt.hour >= 12 ? 'PM' : 'AM';
+  return '${weekdays[dt.weekday]}, $h:$m $period';
+}
+
+// Host-perspective status chip label for the gold "Gig in Progress" header —
+// same 6-status source of truth as gigStepFromStatus, just worded for the
+// host reading about their worker instead of the worker reading about self.
+String _hostStatusChipLabel(GigStep step, String workerName) {
+  switch (step) {
+    case GigStep.navigating:
+      return '$workerName on the way';
+    case GigStep.arrived:
+      return '$workerName arrived';
+    case GigStep.working:
+      return 'Working';
+    case GigStep.taskComplete:
+      return 'Work done';
+    case GigStep.payment:
+      return 'Payment in progress';
+    case GigStep.completed:
+      return 'Completed';
+  }
+}
+
 class _DetailRow extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1958,12 +1958,12 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
 
   @override
   Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _ProfileAvatar(photoUrl: _photoUrl, name: widget.workerName, size: 46),
-        const SizedBox(width: 12),
+        _ProfileAvatar(photoUrl: _photoUrl, name: widget.workerName, size: 42),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1971,14 +1971,14 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
               Text(
                 widget.workerName,
                 style: TextStyle(
-                  color: onSurface,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
+                  color: activeGigTextPrimary(isDark),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               if (_loading)
                 const SizedBox(
                   height: 12,
@@ -1989,61 +1989,42 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
                   ),
                 )
               else
-                Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 10,
-                  runSpacing: 2,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.star_rounded, color: kAmber, size: 14),
-                        const SizedBox(width: 2),
-                        Text(
-                          _rating.toStringAsFixed(1),
-                          style: TextStyle(
-                            color: onSurface,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          ' ($_ratingCount)',
-                          style: const TextStyle(color: kSub, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.task_alt_rounded,
-                            color: Color(0xFF22C55E), size: 13),
-                        const SizedBox(width: 3),
-                        Text(
-                          '$_completedGigs completed',
-                          style: const TextStyle(color: kSub, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ],
+                Text(
+                  '★ ${_rating.toStringAsFixed(1)} ($_ratingCount) · $_completedGigs gigs done',
+                  style: TextStyle(
+                      color: activeGigTextMuted(isDark), fontSize: 10.5),
                 ),
             ],
           ),
         ),
-        CallUserAction(
-          callType: CallType.voice,
-          targetUserId: widget.workerId,
-          targetUserName: widget.workerName,
+        PartyActionCircle(
+          bg: kHostAccent.solid.withValues(alpha: 0.12),
+          child: CallUserAction(
+            callType: CallType.voice,
+            targetUserId: widget.workerId,
+            targetUserName: widget.workerName,
+            iconColor: kHostAccent.solid,
+          ),
         ),
-        CallUserAction(
-          callType: CallType.video,
-          targetUserId: widget.workerId,
-          targetUserName: widget.workerName,
+        const SizedBox(width: 8),
+        PartyActionCircle(
+          bg: kHostAccent.solid.withValues(alpha: 0.12),
+          child: CallUserAction(
+            callType: CallType.video,
+            targetUserId: widget.workerId,
+            targetUserName: widget.workerName,
+            iconColor: kHostAccent.solid,
+          ),
         ),
-        GigChatAction(
-          gigId: widget.gigId,
-          targetUserId: widget.workerId,
-          targetUserName: widget.workerName,
+        const SizedBox(width: 8),
+        PartyActionCircle(
+          bg: kHostAccent.solid,
+          child: GigChatAction(
+            gigId: widget.gigId,
+            targetUserId: widget.workerId,
+            targetUserName: widget.workerName,
+            iconColor: Colors.white,
+          ),
         ),
       ],
     );

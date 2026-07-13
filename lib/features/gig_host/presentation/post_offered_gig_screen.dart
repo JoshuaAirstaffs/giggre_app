@@ -363,6 +363,11 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       return;
     }
 
+    if (_scheduledDate == null) {
+      _showSnack('Schedule is required. Please pick a date and time.', isError: true);
+      return;
+    }
+
     if (_scheduledDate != null) {
       final t = _scheduledTime ?? const TimeOfDay(hour: 8, minute: 0);
       final scheduledCheck = DateTime(
@@ -717,26 +722,6 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                         color: Theme.of(context).colorScheme.onSurface,
                         fontSize: 15,
                         fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: kSub.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: kSub.withValues(alpha: 0.25)),
-                      ),
-                      child: const Text(
-                        'Optional',
-                        style: TextStyle(
-                          color: kSub,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                        ),
                       ),
                     ),
                   ],
