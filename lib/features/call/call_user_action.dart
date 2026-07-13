@@ -16,12 +16,16 @@ class CallUserAction extends StatefulWidget {
     required this.targetUserName,
     required this.callType,
     this.token = '',
+    this.iconColor,
   });
 
   final String targetUserId;
   final String targetUserName;
   final CallType callType;
   final String token;
+  // Overrides the default icon color (purple for video, kBlue for voice).
+  // Null preserves today's look everywhere this widget is already used.
+  final Color? iconColor;
 
   @override
   State<CallUserAction> createState() => _CallUserActionState();
@@ -67,7 +71,8 @@ class _CallUserActionState extends State<CallUserAction>
   }
 
   bool get _isVideo => widget.callType == CallType.video;
-  Color get _callColor => _isVideo ? Colors.purple : kBlue;
+  Color get _callColor =>
+      widget.iconColor ?? (_isVideo ? Colors.purple : kBlue);
   IconData get _callIcon =>
       _isVideo ? Icons.videocam_rounded : Icons.call_rounded;
 

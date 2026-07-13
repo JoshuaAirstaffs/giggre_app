@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/theme_provider.dart';
 import '../../../services/delete_acc_service.dart';
 import 'widgets/worker_widgets.dart';
 
@@ -145,6 +147,27 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 const SizedBox(height: 8),
+
+                // ── Appearance ────────────────────────────────────
+                const SectionLabel('APPEARANCE'),
+                const SizedBox(height: 8),
+                Consumer<ThemeProvider>(
+                  builder: (context, themeProvider, _) => MenuCard(children: [
+                    MenuRow(
+                      icon: Icons.dark_mode_outlined,
+                      iconColor: kBlue,
+                      label: 'Dark Mode',
+                      onTap: () => themeProvider.toggle(),
+                      showArrow: false,
+                      trailing: Switch(
+                        value: themeProvider.isDark,
+                        activeThumbColor: kAmber,
+                        onChanged: (value) => themeProvider.setDark(value),
+                      ),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 24),
 
                 // ── Quick Gig Status ──────────────────────────────
                 const SectionLabel('QUICK GIG STATUS'),

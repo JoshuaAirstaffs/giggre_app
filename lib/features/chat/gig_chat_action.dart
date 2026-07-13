@@ -13,11 +13,15 @@ class GigChatAction extends StatefulWidget {
     required this.gigId,
     required this.targetUserId,
     required this.targetUserName,
+    this.iconColor,
   });
 
   final String gigId;
   final String targetUserId;
   final String targetUserName;
+  // Overrides the default kBlue icon color. Null preserves today's look
+  // everywhere this widget is already used.
+  final Color? iconColor;
 
   @override
   State<GigChatAction> createState() => _GigChatActionState();
@@ -115,7 +119,7 @@ class _GigChatActionState extends State<GigChatAction> {
     return IconButton(
       onPressed: _openChat,
       tooltip: 'Chat with ${widget.targetUserName}',
-      color: kBlue,
+      color: widget.iconColor ?? kBlue,
       icon: Stack(
         clipBehavior: Clip.none,
         children: [

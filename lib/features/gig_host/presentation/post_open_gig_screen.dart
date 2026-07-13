@@ -19,7 +19,6 @@ import '../../../core/utils/country_check.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/theme_provider.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../models/gig_template_model.dart';
@@ -518,7 +517,6 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                     fontSize: 16)),
           ],
         ),
-        actions: const [ThemeToggleButton()],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -1818,7 +1816,6 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                 color: onSurface,
                 fontWeight: FontWeight.bold,
                 fontSize: 16)),
-        actions: const [ThemeToggleButton()],
       ),
       body: Stack(
         children: [

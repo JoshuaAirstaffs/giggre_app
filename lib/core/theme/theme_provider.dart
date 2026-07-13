@@ -1,17 +1,35 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'app_colors.dart';
 
 class ThemeProvider extends ChangeNotifier {
+  static const _prefsKey = 'isDarkMode';
+
   ThemeMode _mode = ThemeMode.light; // default: light
+
+  ThemeProvider() {
+    _loadSavedMode();
+  }
 
   ThemeMode get mode => _mode;
   bool get isDark => _mode == ThemeMode.dark;
 
-  void toggle() {
-    _mode = isDark ? ThemeMode.light : ThemeMode.dark;
+  Future<void> _loadSavedMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedIsDark = prefs.getBool(_prefsKey);
+    if (savedIsDark == null) return;
+    _mode = savedIsDark ? ThemeMode.dark : ThemeMode.light;
     notifyListeners();
   }
+
+  Future<void> setDark(bool isDark) async {
+    _mode = isDark ? ThemeMode.dark : ThemeMode.light;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsKey, isDark);
+  }
+
+  void toggle() => setDark(!isDark);
 
   static ThemeData get lightTheme => ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -34,24 +52,4 @@ class ThemeProvider extends ChangeNotifier {
         cardColor: kCard,
         dividerColor: kBorder,
       );
-}
-
-// ─────────────────────────────────────────────
-//  Reusable theme toggle icon button
-// ─────────────────────────────────────────────
-class ThemeToggleButton extends StatelessWidget {
-  const ThemeToggleButton({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return IconButton(
-      tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-      icon: Icon(
-        isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-        color: kSub,
-      ),
-      onPressed: () => context.read<ThemeProvider>().toggle(),
-    );
-  }
 }

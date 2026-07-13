@@ -137,6 +137,7 @@ class MenuRow extends StatelessWidget {
   final int? badge;
   final VoidCallback onTap;
   final bool showArrow;
+  final Widget? trailing;
 
   const MenuRow({
     super.key,
@@ -148,6 +149,7 @@ class MenuRow extends StatelessWidget {
     this.subtitle,
     this.badge,
     this.showArrow = true,
+    this.trailing,
   });
 
   @override
@@ -217,7 +219,9 @@ class MenuRow extends StatelessWidget {
                 ],
               ),
             ),
-            if (showArrow)
+            if (trailing != null)
+              trailing!
+            else if (showArrow)
               const Icon(Icons.arrow_forward_ios_rounded,
                   color: kSub, size: 14),
           ],

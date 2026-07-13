@@ -7,7 +7,6 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import '../../../utils/user_utils.dart';
-import '../../../core/theme/theme_provider.dart';
 import 'register_screen.dart';
 import '../../../services/sound_service.dart';
 
@@ -245,7 +244,6 @@ class _LoginScreenState extends State<LoginScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         automaticallyImplyLeading: false,
-        actions: const [ThemeToggleButton()],
       ),
       body: Center(
         child: SingleChildScrollView(

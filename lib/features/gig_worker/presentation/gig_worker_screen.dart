@@ -28,12 +28,19 @@ import 'gig_history_screen.dart';
 import 'worker_ratings_screen.dart';
 import 'widgets/worker_notifications_sheet.dart';
 import 'worker_settings_screen.dart';
+import '../../../widgets/active_gig_bar.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main screen
 // ─────────────────────────────────────────────────────────────────────────────
 class GigWorkerScreen extends StatefulWidget {
-  const GigWorkerScreen({super.key});
+  // When true, an already-in-progress gig is restored straight into WorkingUI
+  // on entry (used by ActiveGigBar's "View" button). Defaults to false so
+  // normal entry (e.g. Home's "Continue as Gig Worker") always lands on the
+  // regular dashboard — the bar is the only entry point into the restore.
+  final bool restoreActiveGigOnEntry;
+
+  const GigWorkerScreen({super.key, this.restoreActiveGigOnEntry = false});
 
   @override
   State<GigWorkerScreen> createState() => _GigWorkerScreenState();
@@ -42,6 +49,10 @@ class GigWorkerScreen extends StatefulWidget {
 class _GigWorkerScreenState extends State<GigWorkerScreen>
     with WidgetsBindingObserver {
   bool _loading = true;
+  // Only true when entered via ActiveGigBar's "View" — keeps the loading
+  // spinner up (instead of flashing the dashboard) until _checkForActiveGig's
+  // async lookup resolves and WorkingUI is ready to show.
+  bool _awaitingActiveGigRestore = false;
   String _isVerified = '';
 
   // Profile data
@@ -71,6 +82,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   GigMarkerData? _activeOpenGig;
   GigMarkerData? _activeOfferedGig;
 
+  // Bottom-docked bar shown on the dashboard when a gig is in progress but
+  // not yet restored into WorkingUI (see GigWorkerScreen.restoreActiveGigOnEntry).
+  Stream<ActiveGigInfo?>? _activeGigBarStream;
+
   // Incoming dispatch offer (quick gig)
   GigMarkerData? _dispatchedGig;
 
@@ -94,9 +109,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   @override
   void initState() {
     super.initState();
+    _awaitingActiveGigRestore = widget.restoreActiveGigOnEntry;
     WidgetsBinding.instance.addObserver(this);
     _listenToProfile();
     _setOnlineStatus(true);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) _activeGigBarStream = watchActiveWorkerGig(uid);
   }
 
   @override
@@ -117,7 +135,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       _setOnlineStatus(true);
       // Restore WorkingUI if worker has an ongoing gig they came back to
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid != null) _checkForActiveGig(uid);
+      if (uid != null && widget.restoreActiveGigOnEntry) _checkForActiveGig(uid);
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _setOnlineStatus(false);
@@ -209,7 +227,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         _startDispatchSub(uid);
         _startOfferedGigSub(uid);
         _startOpenGigAssignSub(uid);
-        _checkForActiveGig(uid);
+        if (widget.restoreActiveGigOnEntry) _checkForActiveGig(uid);
       }
 
       if (suspendedUntil != null) {
@@ -316,7 +334,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           ));
         }
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      if (mounted && _awaitingActiveGigRestore) {
+        setState(() => _awaitingActiveGigRestore = false);
+      }
+    }
   }
 
   // ── Offered gig stream — listens for pending direct offers ────────────────
@@ -1192,7 +1215,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: _loading
+      body: (_loading || _awaitingActiveGigRestore)
           ? const Center(
               child: CircularProgressIndicator(
                   color: kBlue, strokeWidth: 2))
@@ -1217,7 +1240,14 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               onComplete: _finishOfferedGig,
               onCancel: _cancelOfferedGig,
             )
-          : Stack(
+          : StreamBuilder<ActiveGigInfo?>(
+              stream: _activeGigBarStream,
+              builder: (context, activeGigBarSnap) {
+                final activeGigForBar = activeGigBarSnap.data;
+                final showActiveGigBar = activeGigForBar != null &&
+                    _dispatchedGig == null &&
+                    _pendingOfferedGig == null;
+                return Stack(
               children: [
                 CustomScrollView(
                   slivers: [
@@ -1240,7 +1270,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                       ),
                     ),
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                      padding: EdgeInsets.fromLTRB(
+                          16, 0, 16, showActiveGigBar ? 32 + 86 : 32),
                       sliver: SliverList(
                         delegate: SliverChildListDelegate([
                           const SizedBox(height: 16),
@@ -1402,7 +1433,16 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                       onDecline: () => _declineOfferedGig(_pendingOfferedGig!),
                     ),
                   ),
+                if (showActiveGigBar)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: ActiveGigBar(gig: activeGigForBar),
+                  ),
               ],
+                );
+              },
             ),
     );
   }

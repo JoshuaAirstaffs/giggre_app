@@ -7,10 +7,12 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:giggre_app/services/delete_acc_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:provider/provider.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/theme_provider.dart';
 import '../../../core/utils/currency_formatter.dart';
 import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
@@ -1208,7 +1210,21 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             label: 'Notifications',
                             onTap: () => NotificationsSheet.show(context),
                           ),
-
+                          _Divider(isDark: isDark),
+                          Consumer<ThemeProvider>(
+                            builder: (context, themeProvider, _) => _MenuRow(
+                              icon: Icons.dark_mode_outlined,
+                              iconColor: kBlue,
+                              label: 'Dark Mode',
+                              onTap: () => themeProvider.toggle(),
+                              trailing: Switch(
+                                value: themeProvider.isDark,
+                                activeThumbColor: kAmber,
+                                onChanged: (value) =>
+                                    themeProvider.setDark(value),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -1473,6 +1489,7 @@ class _MenuRow extends StatelessWidget {
   final String? badge;
   final Color? badgeColor;
   final VoidCallback onTap;
+  final Widget? trailing;
 
   const _MenuRow({
     required this.icon,
@@ -1481,6 +1498,7 @@ class _MenuRow extends StatelessWidget {
     required this.onTap,
     this.badge,
     this.badgeColor,
+    this.trailing,
   });
 
   @override
@@ -1527,7 +1545,10 @@ class _MenuRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            const Icon(Icons.chevron_right_rounded, color: kSub, size: 20),
+            if (trailing != null)
+              trailing!
+            else
+              const Icon(Icons.chevron_right_rounded, color: kSub, size: 20),
           ],
         ),
       ),

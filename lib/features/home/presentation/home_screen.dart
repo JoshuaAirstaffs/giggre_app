@@ -23,11 +23,11 @@ import 'package:giggre_app/core/widgets/update_card.dart';
 import 'package:giggre_app/screens/app_contents/about_giggre.dart';
 import 'package:giggre_app/screens/giggre-updates.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/theme_provider.dart';
 import '../../../services/delete_acc_service.dart';
 import '../../auth/presentation/login_screen.dart';
 import '../../gig_host/presentation/gig_host_screen.dart';
 import '../../gig_worker/presentation/gig_worker_screen.dart';
+import '../../../widgets/active_gig_bar.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -56,6 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<ServiceStatus>? _locationServiceSub;
   bool _internetAvailable = true;
   Timer? _internetCheckTimer;
+  Stream<ActiveGigInfo?>? _activeGigStream;
 
   @override
   void initState() {
@@ -64,6 +65,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchUpdates();
     _listenForUnreadMessages();
     _listenForUnreadGigMessages();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) _activeGigStream = watchActiveWorkerGig(uid);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAppUpdate();
       _initLocationServiceListener();
@@ -745,12 +748,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final firstName = _userName.split(' ').first;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final themeProvider = context.read<ThemeProvider>();
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
-    final currentYear = DateTime.now().year;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -842,11 +842,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           _IconSquareButton(
-            icon: isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-            onTap: () => themeProvider.toggle(),
-          ),
-          const SizedBox(width: 8),
-          _IconSquareButton(
             icon: Icons.message_outlined,
             dot: _hasUnreadMessages || _hasUnreadGigMessages,
             onTap: () => Navigator.push(
@@ -863,13 +858,39 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: SafeArea(
-        child: RefreshIndicator(
+        child: StreamBuilder<ActiveGigInfo?>(
+          stream: _activeGigStream,
+          builder: (context, activeGigSnap) {
+            final activeGig = activeGigSnap.data;
+            return Stack(
+              children: [
+                _buildHomeContent(context, bottomPadding: activeGig != null ? 16 + 86 : 16),
+                if (activeGig != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: ActiveGigBar(gig: activeGig),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHomeContent(BuildContext context, {required double bottomPadding}) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final firstName = _userName.split(' ').first;
+    final currentYear = DateTime.now().year;
+    return RefreshIndicator(
           key: _refreshKey,
           onRefresh: _refreshAll,
           color: kGold,
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            padding: EdgeInsets.fromLTRB(20, 16, 20, bottomPadding),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1123,8 +1144,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-        ),
-      ),
     );
   }
 }

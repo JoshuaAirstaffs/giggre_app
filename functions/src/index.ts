@@ -271,14 +271,27 @@ export const onSkillRequestStatusChanged = onDocumentUpdated(
 
     const skillName = (after.skillName as string) || "your skill";
     const isApproved = newStatus === "approved";
-    await sendPushToUser(uid, {
-      title: isApproved ? "Skill Request Approved" : "Skill Request Rejected",
-      body: isApproved
-        ? `Your request to add "${skillName}" has been approved.`
-        : `Your request to add "${skillName}" was rejected. Check the remarks in your Toolchest.`,
-      channelId: "skill_request_status_v1",
-      data: { type: "skill_request_status", status: newStatus },
-    });
+    const message = isApproved
+      ? `Your request to add "${skillName}" has been approved.`
+      : `Your request to add "${skillName}" was rejected. Check the remarks in your Toolchest.`;
+
+    await Promise.all([
+      sendPushToUser(uid, {
+        title: isApproved ? "Skill Request Approved" : "Skill Request Rejected",
+        body: message,
+        channelId: "skill_request_status_v1",
+        data: { type: "skill_request_status", status: newStatus },
+      }),
+      // Surfaced in WorkerNotificationsSheet's activity list (reads
+      // notifications where userId == uid && category == 'skill_request').
+      admin.firestore().collection("notifications").add({
+        userId: uid,
+        category: "skill_request",
+        request_status: newStatus,
+        message,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      }),
+    ]);
   }
 );
 

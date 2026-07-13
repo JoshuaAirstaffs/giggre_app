@@ -14,7 +14,6 @@ import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/theme_provider.dart';
 import '../../auth/presentation/login_screen.dart';
 import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
@@ -488,14 +487,6 @@ class _HostHeader extends StatelessWidget {
                                 ),
                               ),
                             ],
-                          ),
-                          // Theme toggle (white-tinted)
-                          ColorFiltered(
-                            colorFilter: const ColorFilter.mode(
-                              Colors.white,
-                              BlendMode.srcIn,
-                            ),
-                            child: const ThemeToggleButton(),
                           ),
                           // Logout
                           IconButton(

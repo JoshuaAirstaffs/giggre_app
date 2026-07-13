@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/theme_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Worker Header — blue gradient band (mirrors Gig Host gold band)
@@ -128,13 +127,6 @@ class WorkerHeader extends StatelessWidget {
                         onPressed: onEdit,
                         style: IconButton.styleFrom(
                             foregroundColor: Colors.white),
-                      ),
-                      ColorFiltered(
-                        colorFilter: const ColorFilter.mode(
-                          Colors.white,
-                          BlendMode.srcIn,
-                        ),
-                        child: const ThemeToggleButton(),
                       ),
                       if (onLogout != null)
                         IconButton(

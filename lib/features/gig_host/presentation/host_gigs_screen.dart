@@ -130,7 +130,7 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
     if (_statusFilter == 'all') {
       all = all.where((d) {
         final s = d['status'] as String? ?? '';
-        return s != 'cancelled' && s != 'completed';
+        return s != 'completed';
       }).toList();
     } else if (_statusFilter == 'active') {
       all = all

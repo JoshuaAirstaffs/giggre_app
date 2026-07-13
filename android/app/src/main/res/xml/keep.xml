@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification sounds are referenced by name at runtime
+     (RawResourceAndroidNotificationSound), not via a static R.raw.* call the
+     release resource optimizer can trace, so it drops them unless kept here. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/gig_sound,@raw/test_sound" />

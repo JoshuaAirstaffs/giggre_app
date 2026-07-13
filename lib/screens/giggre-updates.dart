@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
-import 'package:giggre_app/core/theme/theme_provider.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -75,7 +74,6 @@ class _GiggreUpdatesState extends State<GiggreUpdates> {
             fontSize: 18,
           ),
         ),
-        actions: const [ThemeToggleButton()],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
