@@ -28,6 +28,7 @@ import '../../auth/presentation/login_screen.dart';
 import '../../gig_host/presentation/gig_host_screen.dart';
 import '../../gig_worker/presentation/gig_worker_screen.dart';
 import '../../../widgets/active_gig_bar.dart';
+import '../../gig_worker/presentation/verification_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -749,6 +750,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isVerified = context.watch<CurrentUserProvider>().isVerified;
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
 
@@ -864,7 +866,7 @@ class _HomeScreenState extends State<HomeScreen> {
             final activeGig = activeGigSnap.data;
             return Stack(
               children: [
-                _buildHomeContent(context, bottomPadding: activeGig != null ? 16 + 86 : 16),
+                _buildHomeContent(context, bottomPadding: activeGig != null ? 16 + 86 : 16, isVerified: isVerified),
                 if (activeGig != null)
                   Positioned(
                     left: 0,
@@ -880,7 +882,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHomeContent(BuildContext context, {required double bottomPadding}) {
+  Widget _buildHomeContent(BuildContext context, {required double bottomPadding, required String? isVerified}) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final firstName = _userName.split(' ').first;
     final currentYear = DateTime.now().year;
@@ -972,6 +974,59 @@ class _HomeScreenState extends State<HomeScreen> {
                               style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 11,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                // ── Verification banner ───────────────────────
+                if (isVerified != 'verified') ...[
+                  const SizedBox(height: 14),
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const VerificationScreen()),
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: Colors.amber.withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.verified_user_outlined,
+                              color: Colors.amber, size: 18),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'Your account is not yet verified.',
+                              style: TextStyle(
+                                  color: Colors.amber,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.amber,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              'Verify Now',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.bold),
                             ),
                           ),

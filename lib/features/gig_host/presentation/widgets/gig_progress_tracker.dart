@@ -234,7 +234,7 @@ class _GigProgressCard extends StatelessWidget {
 
   List<String> get _stepLabels => gigCollection == 'quick_gigs'
       ? const [
-          'In Progress',
+          'Searching',
           'Arrived',
           'Working',
           'Done',
@@ -250,14 +250,23 @@ class _GigProgressCard extends StatelessWidget {
           'Completed',
         ];
 
-  static const _stepIcons = [
-    Icons.directions_rounded,
-    Icons.location_on_rounded,
-    Icons.work_rounded,
-    Icons.check_circle_outline_rounded,
-    Icons.payment_rounded,
-    Icons.verified_rounded,
-  ];
+  List<IconData> get _stepIcons => gigCollection == 'quick_gigs'
+      ? const [
+          Icons.person_search_rounded,
+          Icons.location_on_rounded,
+          Icons.work_rounded,
+          Icons.check_circle_outline_rounded,
+          Icons.payment_rounded,
+          Icons.verified_rounded,
+        ]
+      : const [
+          Icons.directions_rounded,
+          Icons.location_on_rounded,
+          Icons.work_rounded,
+          Icons.check_circle_outline_rounded,
+          Icons.payment_rounded,
+          Icons.verified_rounded,
+        ];
 
   Future<void> _showPaymentAndComplete(
     BuildContext context,
@@ -323,10 +332,13 @@ class _GigProgressCard extends StatelessWidget {
     final title = data['title'] as String? ?? 'Gig';
     final status = data['status'] as String? ?? 'navigating';
     // offered_gigs use 'workerName'/'workerId'; quick/open use 'assignedWorkerName'/'assignedWorkerId'
-    final workerName =
+    // During 'in_progress' a worker has been dispatched but not yet accepted —
+    // hide their name so the host isn't misled into thinking they're assigned.
+    final rawWorkerName =
         data['assignedWorkerName'] as String? ??
         data['workerName'] as String? ??
         'Worker';
+    final workerName = status == 'in_progress' ? 'Searching for worker…' : rawWorkerName;
     final workerId =
         data['assignedWorkerId'] as String? ?? data['workerId'] as String?;
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
