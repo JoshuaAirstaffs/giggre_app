@@ -23,6 +23,7 @@ import '../models/gig_template_model.dart';
 import '../../../core/utils/currency_formatter.dart';
 import 'widgets/admin_gig_config_sheet.dart';
 import 'widgets/notifications_sheet.dart';
+import 'widgets/gig_detail_sheet.dart';
 import 'host_gigs_screen.dart';
 
 class GigHostScreen extends StatefulWidget {
@@ -553,12 +554,8 @@ class _HostHeader extends StatelessWidget {
             ),
           ),
         ),
-        // Stat cards directly below the gold band — full width, equal sizing
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-          child: _StatsRow(uid: uid),
-        ),
-        const SizedBox(height: 16),
+        // New-applicants summary — only rendered when there's something to review
+        _NewApplicantsCard(uid: uid),
       ],
     );
   }
@@ -662,36 +659,30 @@ class _HostSectionLabel extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stats Row
+//  New Applicants card — summarizes open gigs that currently have at least
+//  one applicant still waiting to be selected (status still 'open', so the
+//  count/visibility comes straight from the same `open_gigs` +
+//  `applicants` array already streamed for the dashboard's notification
+//  bell — nothing gets counted here that isn't actually pending). The
+//  `notifications` collection (category: 'new_applicant', fired on every
+//  apply — see gig_map_section.dart _applyToOpenGig) is only used as a
+//  best-effort source for "earliest application" display time; it never
+//  affects the count or whether the card shows at all.
 // ─────────────────────────────────────────────────────────────────────────────
-class _StatsRow extends StatefulWidget {
+class _NewApplicantsCard extends StatefulWidget {
   final String uid;
-  const _StatsRow({required this.uid});
+  const _NewApplicantsCard({required this.uid});
 
   @override
-  State<_StatsRow> createState() => _StatsRowState();
+  State<_NewApplicantsCard> createState() => _NewApplicantsCardState();
 }
 
-class _StatsRowState extends State<_StatsRow> {
-  int _total = 0, _active = 0, _done = 0;
-  List<Map> _quick = [], _open = [], _offered = [];
-  StreamSubscription? _quickSub, _openSub, _offeredSub;
-
-  static bool _isActive(Map d) {
-    final s = d['status'] as String? ?? '';
-    if (s == 'completed' || s == 'cancelled' || s.isEmpty) return false;
-    final assignedWorker = d['assignedWorkerId'] as String?;
-    return assignedWorker != null && assignedWorker.isNotEmpty;
-  }
-
-  void _recompute() {
-    final all = [..._quick, ..._open, ..._offered];
-    setState(() {
-      _total = all.length;
-      _active = all.where((d) => _isActive(d)).length;
-      _done = all.where((d) => d['status'] == 'completed').length;
-    });
-  }
+class _NewApplicantsCardState extends State<_NewApplicantsCard> {
+  StreamSubscription? _gigsSub;
+  StreamSubscription? _notifSub;
+  // Open gigs (status still 'open') that have >=1 applicant waiting.
+  List<Map<String, dynamic>> _pendingGigs = [];
+  List<Map<String, dynamic>> _applicantNotifs = [];
 
   @override
   void initState() {
@@ -700,78 +691,235 @@ class _StatsRowState extends State<_StatsRow> {
     final db = FirebaseFirestore.instance;
     void onErr(Object e) {
       if (FirebaseAuth.instance.currentUser == null) return;
-      debugPrint('[_StatsRow] stream error: $e');
+      debugPrint('[_NewApplicantsCard] stream error: $e');
     }
 
-    _quickSub = db.collection('quick_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
-      _quick = s.docs.map((d) => d.data() as Map).toList();
-      _recompute();
+    _gigsSub = db
+        .collection('open_gigs')
+        .where('hostId', isEqualTo: widget.uid)
+        .where('status', isEqualTo: 'open')
+        .snapshots()
+        .listen((snap) {
+      final pending = snap.docs.map((d) {
+        final data = Map<String, dynamic>.from(d.data());
+        data['id'] = d.id;
+        return data;
+      }).where((d) {
+        final applicants = d['applicants'] as List?;
+        return applicants != null && applicants.isNotEmpty;
+      }).toList();
+      if (mounted) setState(() => _pendingGigs = pending);
     }, onError: onErr);
-    _openSub = db.collection('open_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
-      _open = s.docs.map((d) => d.data() as Map).toList();
-      _recompute();
-    }, onError: onErr);
-    _offeredSub = db.collection('offered_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
-      _offered = s.docs.map((d) => d.data() as Map).toList();
-      _recompute();
+
+    // Same query shape as NotificationsSheet (userId + createdAt ordering,
+    // category filtered client-side) — no new Firestore index needed.
+    _notifSub = db
+        .collection('notifications')
+        .where('userId', isEqualTo: widget.uid)
+        .orderBy('createdAt', descending: true)
+        .limit(100)
+        .snapshots()
+        .listen((snap) {
+      final notifs = snap.docs
+          .map((d) => d.data())
+          .where((d) => d['category'] == 'new_applicant')
+          .toList();
+      if (mounted) setState(() => _applicantNotifs = notifs);
     }, onError: onErr);
   }
 
   @override
   void dispose() {
-    _quickSub?.cancel();
-    _openSub?.cancel();
-    _offeredSub?.cancel();
+    _gigsSub?.cancel();
+    _notifSub?.cancel();
     super.dispose();
+  }
+
+  static String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 
   @override
   Widget build(BuildContext context) {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(child: _StatCard(label: 'Posted', value: _total, color: kAmber)),
-          const SizedBox(width: 10),
-          Expanded(child: _StatCard(label: 'Active', value: _active, color: const Color(0xFF22C55E))),
-          const SizedBox(width: 10),
-          Expanded(child: _StatCard(label: 'Done', value: _done, color: kBlue)),
-        ],
+    if (_pendingGigs.isEmpty) return const SizedBox.shrink();
+
+    final pendingGigIds = _pendingGigs.map((g) => g['id'] as String).toSet();
+
+    // Best-effort "earliest application" time: the oldest new_applicant
+    // notification whose gig is still in the pending set. Falls back to no
+    // time (still shows the card) if none match.
+    final relevantNotifs = _applicantNotifs
+        .where((n) => pendingGigIds.contains(n['gigId'] as String? ?? ''))
+        .toList()
+      ..sort((a, b) {
+        final aTs = (a['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
+        final bTs = (b['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
+        return aTs.compareTo(bTs);
+      });
+    final earliestNotif = relevantNotifs.isNotEmpty ? relevantNotifs.first : null;
+    final earliestTs = (earliestNotif?['createdAt'] as Timestamp?)?.toDate();
+
+    // Reference gig for the title/Review target: the one behind the
+    // earliest notification if we found one, otherwise the pending gig with
+    // the most applicants waiting.
+    final fallbackGig = [..._pendingGigs]..sort((a, b) {
+        final aCount = (a['applicants'] as List).length;
+        final bCount = (b['applicants'] as List).length;
+        return bCount.compareTo(aCount);
+      });
+    final refGigId = earliestNotif?['gigId'] as String? ?? fallbackGig.first['id'] as String;
+    final refGigTitle = earliestNotif?['gigTitle'] as String? ??
+        fallbackGig.first['title'] as String? ??
+        'your gig';
+
+    final totalApplicants = _pendingGigs.fold<int>(
+        0, (acc, g) => acc + (g['applicants'] as List).length);
+
+    // Distinct applicants (by workerId) across all pending gigs, for the
+    // avatar stack.
+    final seen = <String>{};
+    final distinctNames = <String>[];
+    for (final gig in _pendingGigs) {
+      for (final a in (gig['applicants'] as List)) {
+        final map = a as Map<String, dynamic>;
+        final id = map['workerId'] as String? ?? '';
+        final name = map['workerName'] as String? ?? '?';
+        if (id.isNotEmpty && seen.add(id)) distinctNames.add(name);
+      }
+    }
+
+    const avatarColors = [
+      Color(0xFF2B6FB5),
+      Color(0xFF2E9E6B),
+      Color(0xFFB8622E),
+    ];
+    final shown = distinctNames.take(3).toList();
+    final overflow = distinctNames.length - shown.length;
+    final bubbleCount = shown.length + (overflow > 0 ? 1 : 0);
+    const avatarSize = 30.0;
+    const avatarStep = 20.0;
+    final stackWidth =
+        bubbleCount == 0 ? 0.0 : avatarSize + (bubbleCount - 1) * avatarStep;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: kGold.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: kGold.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: stackWidth,
+              height: avatarSize,
+              child: Stack(
+                children: [
+                  for (var i = 0; i < shown.length; i++)
+                    Positioned(
+                      left: i * avatarStep,
+                      child: _AvatarCircle(
+                        label: shown[i].isNotEmpty
+                            ? shown[i][0].toUpperCase()
+                            : '?',
+                        color: avatarColors[i % avatarColors.length],
+                      ),
+                    ),
+                  if (overflow > 0)
+                    Positioned(
+                      left: shown.length * avatarStep,
+                      child: _AvatarCircle(label: '+$overflow', color: kSub),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$totalApplicants ${totalApplicants == 1 ? 'applicant' : 'applicants'} '
+                    'waiting to be selected',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    earliestTs != null
+                        ? '$refGigTitle · ${_timeAgo(earliestTs)}'
+                        : refGigTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: kSub, fontSize: 11.5),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) =>
+                      GigDetailSheet(gigId: refGigId, gigType: 'open'),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kGold,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text(
+                'Review',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _StatCard extends StatelessWidget {
+class _AvatarCircle extends StatelessWidget {
   final String label;
-  final int value;
   final Color color;
-  const _StatCard(
-      {required this.label, required this.value, required this.color});
+  const _AvatarCircle({required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14),
+      width: 30,
+      height: 30,
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Theme.of(context).dividerColor),
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: Theme.of(context).cardColor, width: 2),
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            '$value',
-            style: TextStyle(
-                color: color,
-                fontSize: 22,
-                fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          Text(label,
-              style: const TextStyle(color: kSub, fontSize: 12)),
-        ],
+      alignment: Alignment.center,
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }

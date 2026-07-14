@@ -210,115 +210,6 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     }
   }
 
-  Future<void> _deleteGig() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Theme.of(ctx).cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 54,
-                height: 54,
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.delete_outline_rounded,
-                  color: Colors.redAccent,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                'Delete Gig?',
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(ctx).colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'This will permanently remove the gig. This cannot be undone.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
-              ),
-              const SizedBox(height: 22),
-              const Divider(height: 0.5, thickness: 0.5),
-              IntrinsicHeight(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextButton(
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: const RoundedRectangleBorder(
-                            borderRadius: BorderRadius.only(
-                              bottomLeft: Radius.circular(20),
-                            ),
-                          ),
-                        ),
-                        onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text(
-                          'Keep',
-                          style: TextStyle(color: kSub, fontSize: 15),
-                        ),
-                      ),
-                    ),
-                    const VerticalDivider(width: 0.5, thickness: 0.5),
-                    Expanded(
-                      child: TextButton(
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: const RoundedRectangleBorder(
-                            borderRadius: BorderRadius.only(
-                              bottomRight: Radius.circular(20),
-                            ),
-                          ),
-                        ),
-                        onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text(
-                          'Delete',
-                          style: TextStyle(
-                            color: Colors.redAccent,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    final messenger = ScaffoldMessenger.of(context);
-    await FirebaseFirestore.instance
-        .collection(_collection)
-        .doc(widget.gigId)
-        .delete();
-    if (mounted) Navigator.pop(context);
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Gig deleted'),
-        backgroundColor: Colors.redAccent,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
   Future<void> _requestCancellation() async {
     final controller = TextEditingController();
     bool submitted = false;
@@ -539,8 +430,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
 
   Widget _buildApplicantsSection(List<Map<String, dynamic>> applicants) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    const green = Color(0xFF22C55E);
+    final onSurface = activeGigTextPrimary(isDark);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -552,21 +442,20 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               style: TextStyle(
                 color: onSurface,
                 fontSize: 14,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: kBlue.withValues(alpha: 0.12),
+                color: kHostAccent.solid.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: kBlue.withValues(alpha: 0.4)),
               ),
               child: Text(
                 '${applicants.length}',
-                style: const TextStyle(
-                  color: kBlue,
+                style: TextStyle(
+                  color: kHostAccent.onWhiteText,
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
                 ),
@@ -578,62 +467,37 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         if (applicants.isEmpty)
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 24),
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.04)
-                  : Colors.black.withValues(alpha: 0.03),
+              color: _hostSheetRowSurface(isDark),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Theme.of(context).dividerColor),
+              border: Border.all(color: activeGigCardBorder(isDark)),
             ),
-            child: const Column(
-              children: [
-                Icon(Icons.people_outline_rounded, color: kSub, size: 28),
-                SizedBox(height: 8),
-                Text(
-                  'No applicants yet',
-                  style: TextStyle(color: kSub, fontSize: 13),
-                ),
-              ],
+            child: Text(
+              'No applicants yet',
+              style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 13),
             ),
           )
         else
-          Container(
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.04)
-                  : Colors.black.withValues(alpha: 0.03),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Theme.of(context).dividerColor),
-            ),
-            child: Column(
-              children: applicants.asMap().entries.map((entry) {
-                final i = entry.key;
-                final applicant = entry.value;
-                final workerId = applicant['workerId'] as String? ?? '';
-                final name = applicant['workerName'] as String? ?? 'Worker';
-                final isLast = i == applicants.length - 1;
-                return Column(
-                  children: [
-                    _ApplicantTile(
-                      key: ValueKey('applicant_$workerId'),
-                      workerId: workerId,
-                      workerName: name,
-                      accentColor: green,
-                      onSelect: () => _selectWorker(applicant),
-                    ),
-                    if (!isLast)
-                      Divider(
-                        height: 0.5,
-                        thickness: 0.5,
-                        indent: 16,
-                        endIndent: 16,
-                        color: Theme.of(context).dividerColor,
-                      ),
-                  ],
-                );
-              }).toList(),
-            ),
+          Column(
+            children: applicants.asMap().entries.map((entry) {
+              final i = entry.key;
+              final applicant = entry.value;
+              final workerId = applicant['workerId'] as String? ?? '';
+              final name = applicant['workerName'] as String? ?? 'Worker';
+              final isLast = i == applicants.length - 1;
+              return Padding(
+                padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
+                child: _ApplicantTile(
+                  key: ValueKey('applicant_$workerId'),
+                  workerId: workerId,
+                  workerName: name,
+                  accentColor: kActiveGigSuccessGreen,
+                  onSelect: () => _selectWorker(applicant),
+                ),
+              );
+            }).toList(),
           ),
       ],
     );
@@ -643,7 +507,6 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = Theme.of(context).cardColor;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
     final data = _data;
 
     return DraggableScrollableSheet(
@@ -668,7 +531,6 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
 
         final status = data['status'] as String? ?? '';
         final title = data['title'] as String? ?? 'Gig';
-        final description = data['description'] as String? ?? '';
         final budget = (data['budget'] as num?)?.toDouble() ?? 0;
         final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
         final address = data['address'] as String? ?? '';
@@ -711,6 +573,11 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           'payment',
           'cancellation_requested',
         ].contains(status);
+        final createdAt = data['createdAt'] as Timestamp?;
+        final applicantsList = List<Map<String, dynamic>>.from(
+          (data['applicants'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>(),
+        );
         final hostMapDistanceText = (gigLocation != null && workerLocation != null)
             ? ' · ${fmtDist(const ll.Distance().as(
                   ll.LengthUnit.Meter,
@@ -914,7 +781,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   ),
                 ],
               ] else ...[
-                // ── Title + status badge ───────────────────────────────
+                // ── Title + status dot ──────────────────────────────────
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -922,26 +789,59 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       child: Text(
                         title,
                         style: TextStyle(
-                          color: onSurface,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                          color: activeGigTextPrimary(isDark),
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
                         ),
                       ),
                     ),
                     const SizedBox(width: 8),
-                    _StatusBadge(status: status),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            color: _gigTypeAccent(widget.gigType),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _hostSheetStatusLabel(status),
+                          style: TextStyle(
+                            color: _gigTypeAccent(widget.gigType),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
-                _TypeBadge(gigType: widget.gigType),
+                Text(
+                  [
+                    _gigTypeLabel(widget.gigType),
+                    if (createdAt != null) 'posted ${_timeAgo(createdAt.toDate())}',
+                    if (widget.gigType == 'open')
+                      '${applicantsList.length} applicant${applicantsList.length == 1 ? '' : 's'}',
+                  ].join(' · '),
+                  style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 11),
+                ),
                 const SizedBox(height: 16),
 
                 // ── Map: gig location (no worker yet) ─────────────────
                 if (gigLocation != null) ...[
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: SizedBox(
-                      height: 220,
+                    borderRadius: BorderRadius.circular(14),
+                    child: Container(
+                      height: 140,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: activeGigCardBorder(isDark)),
+                      ),
                       child: Stack(
                         children: [
                           Positioned.fill(
@@ -974,87 +874,90 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
 
                 // ── Applicants (open gig waiting for host to pick a worker) ──────
                 if (widget.gigType == 'open' && status == 'open') ...[
-                  _buildApplicantsSection(
-                    List<Map<String, dynamic>>.from(
-                      (data['applicants'] as List<dynamic>? ?? [])
-                          .cast<Map<String, dynamic>>(),
-                    ),
-                  ),
+                  _buildApplicantsSection(applicantsList),
                   const SizedBox(height: 16),
                 ],
 
-                // ── Task details ───────────────────────────────────────
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.04)
-                        : Colors.black.withValues(alpha: 0.03),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Theme.of(context).dividerColor),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (description.isNotEmpty) ...[
-                        _DetailRow(icon: Icons.notes_rounded, label: description),
-                        const SizedBox(height: 10),
-                      ],
-                      _DetailRow(
-                        icon: Icons.attach_money_rounded,
-                        label: CurrencyFormatter.format(budget, currencyCode),
-                        iconColor: kAmber,
+                // ── Info grid: pay / schedule / location ───────────────
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _InfoGridCell(
+                        icon: Icons.payments_rounded,
+                        label: 'PAY',
+                        isDark: isDark,
+                        child: RichText(
+                          text: TextSpan(
+                            children: [
+                              TextSpan(
+                                text: CurrencyFormatter.format(budget, currencyCode),
+                                style: TextStyle(
+                                  color: kHostAccent.onWhiteText,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              TextSpan(
+                                text: ' / gig',
+                                style: TextStyle(
+                                  color: activeGigTextMuted(isDark),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                      if (scheduledDate != null) ...[
-                        const SizedBox(height: 10),
-                        _DetailRow(
-                          icon: Icons.event_rounded,
-                          label: 'Scheduled for ${_fmtScheduledDate(scheduledDate)}',
-                        ),
-                      ],
-                      if (address.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        _DetailRow(
-                          icon: Icons.location_on_outlined,
-                          label: address,
-                        ),
-                      ],
-                      if (workerName.isNotEmpty && workerId.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Divider(height: 0.5, color: Theme.of(context).dividerColor),
-                        const SizedBox(height: 12),
-                        _WorkerProfileCard(
-                          key: ValueKey('worker_$workerId'),
-                          gigId: widget.gigId,
-                          workerId: workerId,
-                          workerName: workerName,
-                        ),
-                      ],
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _InfoGridCell(
+                        icon: Icons.event_rounded,
+                        label: 'SCHEDULE',
+                        isDark: isDark,
+                        value: scheduledDate != null
+                            ? _fmtScheduleGrid(scheduledDate)
+                            : '—',
+                      ),
+                    ),
+                  ],
                 ),
+                if (address.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  _InfoGridCell(
+                    icon: Icons.location_on_outlined,
+                    label: 'LOCATION',
+                    isDark: isDark,
+                    value: dedupedAddress(address),
+                  ),
+                ],
+                const SizedBox(height: 16),
 
-                // ── Cancel Gig request (before task_complete / payment) ───
+                // ── Cancel gig ──────────────────────────────────────────
                 if (showCancelGig) ...[
-                  const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     height: 48,
                     child: OutlinedButton.icon(
                       onPressed: _requestCancellation,
                       icon: const Icon(
-                        Icons.cancel_outlined,
-                        size: 20,
-                        color: Colors.redAccent,
+                        Icons.close_rounded,
+                        size: 18,
+                        color: kActiveGigDestructiveRed,
                       ),
                       label: const Text(
-                        'Cancel Gig',
-                        style: TextStyle(fontSize: 15, color: Colors.redAccent),
+                        'Cancel gig',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: kActiveGigDestructiveRed,
+                        ),
                       ),
                       style: OutlinedButton.styleFrom(
-                        side: BorderSide(
-                          color: Colors.redAccent.withValues(alpha: 0.5),
-                        ),
+                        backgroundColor: activeGigCardBg(isDark),
+                        side: BorderSide(color: activeGigDestructiveBorder(isDark)),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
@@ -1087,35 +990,6 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       backgroundColor: kAmber,
                       foregroundColor: Colors.white,
                       elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-
-              // ── Delete button (only when gig is not active) ────────
-              if (!isActive) ...[
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: OutlinedButton.icon(
-                    onPressed: _deleteGig,
-                    icon: const Icon(
-                      Icons.delete_outline_rounded,
-                      size: 18,
-                      color: Colors.redAccent,
-                    ),
-                    label: const Text(
-                      'Delete Gig',
-                      style: TextStyle(fontSize: 15, color: Colors.redAccent),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(
-                        color: Colors.redAccent.withValues(alpha: 0.5),
-                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
@@ -1650,142 +1524,70 @@ class _WorkerPinAvatar extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Small helpers
 // ─────────────────────────────────────────────────────────────────────────────
-class _StatusBadge extends StatelessWidget {
-  final String status;
-  const _StatusBadge({required this.status});
-
-  Color _color() {
-    switch (status) {
-      case 'scanning':
-        return kAmber;
-      case 'in_progress':
-      case 'navigating':
-        return kBlue;
-      case 'arrived':
-        return const Color(0xFF06B6D4);
-      case 'working':
-        return const Color(0xFF8B5CF6);
-      case 'task_complete':
-        return const Color(0xFF22C55E);
-      case 'payment':
-        return const Color(0xFF22C55E);
-      case 'completed':
-        return const Color(0xFF22C55E);
-      case 'open':
-        return const Color(0xFF22C55E);
-      case 'offered':
-        return const Color(0xFF8B5CF6);
-      case 'cancelled':
-        return Colors.redAccent;
-      case 'no_worker':
-        return Colors.redAccent;
-      case 'cancellation_requested':
-        return Colors.orange;
-      default:
-        return kSub;
-    }
-  }
-
-  String _label() {
-    switch (status) {
-      case 'scanning':
-        return 'SCANNING';
-      case 'in_progress':
-        return 'IN PROGRESS';
-      case 'navigating':
-        return 'NAVIGATING';
-      case 'arrived':
-        return 'ARRIVED';
-      case 'working':
-        return 'WORKING';
-      case 'task_complete':
-        return 'TASK DONE';
-      case 'payment':
-        return 'PAYMENT';
-      case 'completed':
-        return 'COMPLETED';
-      case 'open':
-        return 'OPEN';
-      case 'offered':
-        return 'OFFERED';
-      case 'cancelled':
-        return 'CANCELLED';
-      case 'no_worker':
-        return 'NO WORKER';
-      case 'cancellation_requested':
-        return 'CANCEL PENDING';
-      default:
-        return status.toUpperCase();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = _color();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: c.withValues(alpha: 0.4)),
-      ),
-      child: Text(
-        _label(),
-        style: TextStyle(
-          color: c,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
+// Gig-type accent used by the pre-selection sheet's status dot/subline —
+// distinct from the gold/blue role accents above (those color the *host's*
+// side of an active gig; this colors the gig's *type* before anyone's picked).
+Color _gigTypeAccent(String gigType) {
+  switch (gigType) {
+    case 'open':
+      return const Color(0xFF2B6FB5);
+    case 'offered':
+      return const Color(0xFF8B6FD8);
+    default:
+      return const Color(0xFFF0A830);
   }
 }
 
-class _TypeBadge extends StatelessWidget {
-  final String gigType;
-  const _TypeBadge({required this.gigType});
-
-  @override
-  Widget build(BuildContext context) {
-    final IconData icon;
-    final Color color;
-    final String label;
-    switch (gigType) {
-      case 'open':
-        icon = Icons.workspace_premium_outlined;
-        color = kBlue;
-        label = 'Open Gig';
-        break;
-      case 'offered':
-        icon = Icons.send_rounded;
-        color = const Color(0xFF8B5CF6);
-        label = 'Offered Gig';
-        break;
-      default:
-        icon = Icons.flash_on_rounded;
-        color = kAmber;
-        label = 'Quick Gig';
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: color, size: 13),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
+String _gigTypeLabel(String gigType) {
+  switch (gigType) {
+    case 'open':
+      return 'Open Gig';
+    case 'offered':
+      return 'Offered Gig';
+    default:
+      return 'Quick Gig';
   }
 }
 
-String _fmtScheduledDate(Timestamp ts) {
+String _hostSheetStatusLabel(String status) {
+  switch (status) {
+    case 'scanning':
+      return 'Scanning';
+    case 'in_progress':
+      return 'In progress';
+    case 'open':
+      return 'Open';
+    case 'offered':
+      return 'Offered';
+    case 'no_worker':
+      return 'No worker';
+    case 'cancelled':
+      return 'Cancelled';
+    case 'cancellation_requested':
+      return 'Cancel pending';
+    default:
+      return status.isEmpty
+          ? ''
+          : status[0].toUpperCase() + status.substring(1).replaceAll('_', ' ');
+  }
+}
+
+Color _hostSheetRowSurface(bool isDark) =>
+    isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFFAFBFD);
+Color _hostSheetNeutralSurface(bool isDark) =>
+    isDark ? Colors.white.withValues(alpha: 0.06) : const Color(0xFFF1F5F9);
+
+String _timeAgo(DateTime dt) {
+  final diff = DateTime.now().difference(dt);
+  if (diff.inMinutes < 1) return 'just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  return '${diff.inDays}d ago';
+}
+
+// "Fri, Jul 11 · 4:59 PM" — the SCHEDULE cell's value format.
+String _fmtScheduleGrid(Timestamp ts) {
+  const weekdays = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const months = [
     '',
     'Jan',
@@ -1805,7 +1607,71 @@ String _fmtScheduledDate(Timestamp ts) {
   final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
   final m = dt.minute.toString().padLeft(2, '0');
   final period = dt.hour >= 12 ? 'PM' : 'AM';
-  return '${months[dt.month]} ${dt.day}, ${dt.year} · $h:$m $period';
+  return '${weekdays[dt.weekday]}, ${months[dt.month]} ${dt.day} · $h:$m $period';
+}
+
+// Pay/Schedule/Location grid cell used by the pre-selection sheet.
+class _InfoGridCell extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isDark;
+  final String? value;
+  final Widget? child;
+  const _InfoGridCell({
+    required this.icon,
+    required this.label,
+    required this.isDark,
+    this.value,
+    this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: _hostSheetNeutralSurface(isDark),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 15, color: activeGigTextMuted(isDark)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: activeGigTextMuted(isDark),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 2),
+              child ??
+                  Text(
+                    value ?? '—',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: activeGigTextPrimary(isDark),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 // Short "Fri, 4:59 PM" form used inline on the gold gig+worker card.
@@ -1835,35 +1701,6 @@ String _hostStatusChipLabel(GigStep step, String workerName) {
       return 'Payment in progress';
     case GigStep.completed:
       return 'Completed';
-  }
-}
-
-class _DetailRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color iconColor;
-
-  const _DetailRow({
-    required this.icon,
-    required this.label,
-    this.iconColor = kSub,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, color: iconColor, size: 16),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(color: kSub, fontSize: 13, height: 1.4),
-          ),
-        ),
-      ],
-    );
   }
 }
 
@@ -2144,13 +1981,19 @@ class _ApplicantTileState extends State<_ApplicantTile> {
 
   @override
   Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final onSurface = activeGigTextPrimary(isDark);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: _hostSheetRowSurface(isDark),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: activeGigCardBorder(isDark)),
+      ),
       child: Row(
         children: [
-          _ProfileAvatar(photoUrl: _photoUrl, name: widget.workerName, size: 40),
-          const SizedBox(width: 12),
+          _ProfileAvatar(photoUrl: _photoUrl, name: widget.workerName, size: 38),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2159,67 +2002,46 @@ class _ApplicantTileState extends State<_ApplicantTile> {
                   widget.workerName,
                   style: TextStyle(
                     color: onSurface,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 3),
                 if (_loading)
-                  const SizedBox(
+                  SizedBox(
                     height: 11,
                     width: 11,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: kAmber,
+                      color: kHostAccent.solid,
                     ),
                   )
                 else
-                  Wrap(
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 10,
-                    runSpacing: 2,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.star_rounded, color: kAmber, size: 13),
-                          const SizedBox(width: 2),
-                          Text(
-                            _rating.toStringAsFixed(1),
-                            style: TextStyle(
-                              color: onSurface,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            ' ($_ratingCount)',
-                            style: const TextStyle(color: kSub, fontSize: 10),
-                          ),
-                        ],
+                  RichText(
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    text: TextSpan(
+                      style: TextStyle(
+                        color: activeGigTextMuted(isDark),
+                        fontSize: 10.5,
                       ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.task_alt_rounded,
-                              color: Color(0xFF22C55E), size: 12),
-                          const SizedBox(width: 3),
-                          Text(
-                            '$_completedGigs completed',
-                            style: const TextStyle(color: kSub, fontSize: 10),
-                          ),
-                        ],
-                      ),
-                    ],
+                      children: [
+                        const TextSpan(text: '★ ', style: TextStyle(color: kGold)),
+                        TextSpan(
+                          text:
+                              '${_rating.toStringAsFixed(1)} ($_ratingCount) · $_completedGigs gigs done',
+                        ),
+                      ],
+                    ),
                   ),
               ],
             ),
           ),
           const SizedBox(width: 8),
           SizedBox(
-            height: 34,
+            height: 32,
             child: ElevatedButton(
               onPressed: widget.onSelect,
               style: ElevatedButton.styleFrom(
@@ -2228,12 +2050,12 @@ class _ApplicantTileState extends State<_ApplicantTile> {
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(16),
                 ),
               ),
               child: const Text(
                 'Select',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
               ),
             ),
           ),

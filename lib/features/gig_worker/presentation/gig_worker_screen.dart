@@ -13,6 +13,7 @@ import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
+import '../../../core/utils/worker_active_gig.dart';
 import '../../auth/presentation/login_screen.dart';
 import 'widgets/dispatch_offer_card.dart';
 import 'widgets/earnings_card.dart';
@@ -497,6 +498,11 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       _showSuspensionDialog();
       return;
     }
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid != null && await workerHasActiveGig(currentUid)) {
+      if (mounted) _showAlreadyActiveGigDialog();
+      return;
+    }
     await FirebaseFirestore.instance
         .collection('offered_gigs')
         .doc(gig.id)
@@ -621,8 +627,13 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     if (value && mounted) setState(() => _availableForGigs = true);
   }
 
-  void _onQuickGigStarted(GigMarkerData gig) {
-    setState(() => _activeQuickGig = gig);
+  Future<void> _onQuickGigStarted(GigMarkerData gig) async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid != null && await workerHasActiveGig(currentUid)) {
+      if (mounted) _showAlreadyActiveGigDialog();
+      return;
+    }
+    if (mounted) setState(() => _activeQuickGig = gig);
   }
 
   void _onOpenGigApplied(GigMarkerData gig) {
@@ -654,6 +665,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     }
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
+    if (await workerHasActiveGig(uid)) {
+      if (mounted) _showAlreadyActiveGigDialog();
+      return;
+    }
     await Future.wait([
       FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id).update({
         'status': 'navigating',
@@ -806,6 +821,59 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       }
       setState(() {});
     });
+  }
+
+  void _showAlreadyActiveGigDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: Container(
+          width: 52,
+          height: 52,
+          decoration: const BoxDecoration(
+            color: Color(0xFFFFF3CD),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.info_outline_rounded,
+              color: Colors.orange, size: 28),
+        ),
+        title: Text(
+          'Finish Your Current Gig First',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+              color: Theme.of(ctx).colorScheme.onSurface,
+              fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          "You need to finish your current gig before applying to or accepting another one.",
+          textAlign: TextAlign.center,
+          style: TextStyle(color: kSub, fontSize: 14, height: 1.5),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Got it'),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showSuspensionDialog() {

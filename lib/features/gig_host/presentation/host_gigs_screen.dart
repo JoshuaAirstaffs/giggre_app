@@ -184,9 +184,16 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
             )
           : Column(
               children: [
-                // ── Filter dropdowns ─────────────────────────────
+                // ── Stat cards (moved here from the dashboard) ───
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: _StatsRow(uid: widget.uid),
+                ),
+                const SizedBox(height: 12),
+
+                // ── Filter dropdowns ─────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                   child: Row(
                     children: [
                       Expanded(
@@ -274,6 +281,123 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Stats Row — moved here from the host dashboard, which now leads with the
+//  new-applicants summary card instead.
+// ─────────────────────────────────────────────────────────────────────────────
+class _StatsRow extends StatefulWidget {
+  final String uid;
+  const _StatsRow({required this.uid});
+
+  @override
+  State<_StatsRow> createState() => _StatsRowState();
+}
+
+class _StatsRowState extends State<_StatsRow> {
+  int _total = 0, _active = 0, _done = 0;
+  List<Map> _quick = [], _open = [], _offered = [];
+  StreamSubscription? _quickSub, _openSub, _offeredSub;
+
+  static bool _isActive(Map d) {
+    final s = d['status'] as String? ?? '';
+    if (s == 'completed' || s == 'cancelled' || s.isEmpty) return false;
+    final assignedWorker = d['assignedWorkerId'] as String?;
+    return assignedWorker != null && assignedWorker.isNotEmpty;
+  }
+
+  void _recompute() {
+    final all = [..._quick, ..._open, ..._offered];
+    setState(() {
+      _total = all.length;
+      _active = all.where((d) => _isActive(d)).length;
+      _done = all.where((d) => d['status'] == 'completed').length;
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.uid.isEmpty) return;
+    final db = FirebaseFirestore.instance;
+    void onErr(Object e) {
+      if (FirebaseAuth.instance.currentUser == null) return;
+      debugPrint('[_StatsRow] stream error: $e');
+    }
+
+    _quickSub = db.collection('quick_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
+      _quick = s.docs.map((d) => d.data() as Map).toList();
+      _recompute();
+    }, onError: onErr);
+    _openSub = db.collection('open_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
+      _open = s.docs.map((d) => d.data() as Map).toList();
+      _recompute();
+    }, onError: onErr);
+    _offeredSub = db.collection('offered_gigs').where('hostId', isEqualTo: widget.uid).snapshots().listen((s) {
+      _offered = s.docs.map((d) => d.data() as Map).toList();
+      _recompute();
+    }, onError: onErr);
+  }
+
+  @override
+  void dispose() {
+    _quickSub?.cancel();
+    _openSub?.cancel();
+    _offeredSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: _StatCard(label: 'Posted', value: _total, color: kAmber)),
+          const SizedBox(width: 10),
+          Expanded(child: _StatCard(label: 'Active', value: _active, color: const Color(0xFF22C55E))),
+          const SizedBox(width: 10),
+          Expanded(child: _StatCard(label: 'Done', value: _done, color: kBlue)),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final String label;
+  final int value;
+  final Color color;
+  const _StatCard(
+      {required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '$value',
+            style: TextStyle(
+                color: color,
+                fontSize: 22,
+                fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(label,
+              style: const TextStyle(color: kSub, fontSize: 12)),
+        ],
+      ),
     );
   }
 }
