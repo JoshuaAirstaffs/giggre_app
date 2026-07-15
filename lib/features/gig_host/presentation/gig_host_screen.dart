@@ -1,24 +1,20 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:geolocator/geolocator.dart';
-import 'package:provider/provider.dart';
-import '../../../core/providers/current_user_provider.dart';
 import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../auth/presentation/login_screen.dart';
 import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
-import 'gig_host_profile_screen.dart';
 import '../models/gig_template_model.dart';
 import '../../../core/utils/currency_formatter.dart';
 import 'widgets/admin_gig_config_sheet.dart';
@@ -27,7 +23,11 @@ import 'widgets/gig_detail_sheet.dart';
 import 'host_gigs_screen.dart';
 
 class GigHostScreen extends StatefulWidget {
-  const GigHostScreen({super.key});
+  // True when hosted as the Home tab root inside HostShell — suppresses the
+  // header's back arrow since there's no dashboard-level route to pop to.
+  final bool isTabRoot;
+
+  const GigHostScreen({super.key, this.isTabRoot = false});
 
   @override
   State<GigHostScreen> createState() => _GigHostScreenState();
@@ -35,8 +35,9 @@ class GigHostScreen extends StatefulWidget {
 
 class _GigHostScreenState extends State<GigHostScreen> {
   String _userName = '';
-  String? _isVerified;
   String _photoUrl = '';
+  final GlobalKey _workerMapKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -51,16 +52,20 @@ class _GigHostScreenState extends State<GigHostScreen> {
     if (!mounted) return;
     setState(() {
       _userName = doc.data()?['name'] ?? '';
-      _isVerified = doc.data()?['isVerified'] ?? '';
       _photoUrl = doc.data()?['photoUrl'] ?? '';
     });
   }
 
-  void _showProfile() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const GigHostProfileScreen()),
-    );
+  void _scrollToWorkerMap() {
+    final ctx = _workerMapKey.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+        alignment: 0.05,
+      );
+    }
   }
 
   void _showTemplates() {
@@ -72,92 +77,6 @@ class _GigHostScreenState extends State<GigHostScreen> {
       builder: (_) => _TemplatesSheet(hostId: uid, hostName: _userName),
     );
   }
-Future<void> _logout() async {
-  final confirm = await showDialog<bool>(
-    context: context,
-    builder: (_) => Dialog(
-      backgroundColor: Theme.of(context).cardColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 54, height: 54,
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 22),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Log out?',
-              style: TextStyle(
-                fontSize: 17, fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              "You'll need to sign back in to access your account.",
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
-            ),
-            const SizedBox(height: 22),
-            const Divider(height: 0.5, thickness: 0.5),
-            IntrinsicHeight(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
-                        ),
-                      ),
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Cancel', style: TextStyle(color: kSub, fontSize: 15)),
-                    ),
-                  ),
-                  const VerticalDivider(width: 0.5, thickness: 0.5),
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.only(bottomRight: Radius.circular(20)),
-                        ),
-                      ),
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Log out',
-                          style: TextStyle(color: Colors.redAccent, fontSize: 15, fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-
-  if (confirm == true) {
-    if (mounted) {
-      context.read<CurrentUserProvider>().clearUser();
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (route) => false,
-      );
-    }
-    await WidgetsBinding.instance.endOfFrame;
-    await GoogleSignIn().disconnect();
-    await FirebaseAuth.instance.signOut();
-  }
-}
 
   @override
   Widget build(BuildContext context) {
@@ -175,9 +94,9 @@ Future<void> _logout() async {
               firstName: firstName,
               photoUrl: _photoUrl,
               uid: uid,
-              onProfile: _showProfile,
+              showBackButton: !widget.isTabRoot,
               onTemplates: _showTemplates,
-              onLogout: _logout,
+              onViewWorkers: _scrollToWorkerMap,
             ),
           ),
 
@@ -186,72 +105,8 @@ Future<void> _logout() async {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                // ── Post a Gig ─────────────────────────────────
-                const _HostSectionLabel('Post a gig'),
-                const SizedBox(height: 10),
-                _FullWidthGigCard(
-                  title: 'Quick Gig',
-                  subtitle: 'Simple tasks, no skills required',
-                  icon: Icons.bolt_rounded,
-                  accentColor: kGold,
-                  onTap: () {
-                    if (_isVerified == 'verified') {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              PostQuickGigScreen(hostName: _userName),
-                        ),
-                      );
-                    } else {
-                      _showModal(context);
-                    }
-                  },
-                ),
-                const SizedBox(height: 10),
-                _FullWidthGigCard(
-                  title: 'Open Gig',
-                  subtitle: 'Skilled tasks for qualified workers',
-                  icon: Icons.workspace_premium_outlined,
-                  accentColor: kBlue,
-                  onTap: () {
-                    if (_isVerified == 'verified') {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              PostOpenGigScreen(hostName: _userName),
-                        ),
-                      );
-                    } else {
-                      _showModal(context);
-                    }
-                  },
-                ),
-                const SizedBox(height: 10),
-                _FullWidthGigCard(
-                  title: 'Offered Gig',
-                  subtitle: 'Direct offers to specific workers you trust',
-                  icon: Icons.send_rounded,
-                  accentColor: const Color(0xFF8B5CF6),
-                  onTap: () {
-                    if (_isVerified == 'verified') {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              PostOfferedGigScreen(hostName: _userName),
-                        ),
-                      );
-                    } else {
-                      _showModal(context);
-                    }
-                  },
-                ),
-                const SizedBox(height: 24),
-
                 // ── Workers Near You ───────────────────────────
-                _WorkerMapSection(hostName: _userName),
+                _WorkerMapSection(key: _workerMapKey, hostName: _userName),
                 const SizedBox(height: 24),
 
                 // ── Your Gigs ──────────────────────────────────
@@ -301,17 +156,17 @@ class _HostHeader extends StatelessWidget {
   final String firstName;
   final String photoUrl;
   final String uid;
-  final VoidCallback onProfile;
+  final bool showBackButton;
   final VoidCallback onTemplates;
-  final VoidCallback onLogout;
+  final VoidCallback onViewWorkers;
 
   const _HostHeader({
     required this.firstName,
     required this.photoUrl,
     required this.uid,
-    required this.onProfile,
+    required this.showBackButton,
     required this.onTemplates,
-    required this.onLogout,
+    required this.onViewWorkers,
   });
 
   @override
@@ -319,8 +174,14 @@ class _HostHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Gold gradient band
-        Container(
+        // Gold gradient band — bottom corners curve, matching the worker
+        // dashboard's header, so the banner below can overlap the curve.
+        ClipRRect(
+          borderRadius: const BorderRadius.only(
+            bottomLeft: Radius.circular(26),
+            bottomRight: Radius.circular(26),
+          ),
+          child: Container(
           width: double.infinity,
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -332,53 +193,45 @@ class _HostHeader extends StatelessWidget {
           child: SafeArea(
             bottom: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 4, 20),
+              padding: const EdgeInsets.fromLTRB(16, 12, 4, 44),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // ── Action row ──────────────────────────────
                   Row(
                     children: [
-                      // Left: back + "Gig Host / Dashboard" label
+                      // Left: back (when pushed) + "Gig Host / Dashboard" label
                       GestureDetector(
-                        onTap: () => Navigator.pop(context),
+                        onTap: showBackButton
+                            ? () => Navigator.pop(context)
+                            : null,
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Container(
-                              width: 34,
-                              height: 34,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.18),
-                                borderRadius: BorderRadius.circular(10),
+                            if (showBackButton) ...[
+                              Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(
+                                  Icons.arrow_back_ios_new_rounded,
+                                  color: Colors.white,
+                                  size: 15,
+                                ),
                               ),
-                              child: const Icon(
-                                Icons.arrow_back_ios_new_rounded,
+                              const SizedBox(width: 10),
+                            ],
+                            const Text(
+                              'Host Dashboard',
+                              style: TextStyle(
                                 color: Colors.white,
-                                size: 15,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.3,
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            const Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  'Gig Host',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Text(
-                                  'Dashboard',
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ],
                             ),
                           ],
                         ),
@@ -412,12 +265,16 @@ class _HostHeader extends StatelessWidget {
                                     tooltip: 'Notifications',
                                     icon: const Icon(
                                       Icons.notifications_outlined,
-                                      color: Colors.white,
+                                      size: 19,
                                     ),
                                     onPressed: () =>
                                         NotificationsSheet.show(context),
                                     style: IconButton.styleFrom(
                                       foregroundColor: Colors.white,
+                                      backgroundColor:
+                                          Colors.white.withValues(alpha: 0.18),
+                                      shape: const CircleBorder(),
+                                      fixedSize: const Size(38, 38),
                                     ),
                                   ),
                                   if (hasApplicants)
@@ -437,23 +294,21 @@ class _HostHeader extends StatelessWidget {
                               );
                             },
                           ),
-                          // Profile
-                          IconButton(
-                            tooltip: 'Profile',
-                            icon: const Icon(
-                              Icons.account_circle_outlined,
-                              color: Colors.white,
-                            ),
-                            onPressed: onProfile,
-                            style: IconButton.styleFrom(
-                                foregroundColor: Colors.white),
-                          ),
                           // More menu (templates + gig config)
                           PopupMenuButton<String>(
                             tooltip: 'More',
-                            icon: const Icon(
-                              Icons.more_vert_rounded,
-                              color: Colors.white,
+                            icon: Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.18),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.more_vert_rounded,
+                                color: Colors.white,
+                                size: 19,
+                              ),
                             ),
                             color: Theme.of(context).cardColor,
                             onSelected: (val) {
@@ -489,17 +344,6 @@ class _HostHeader extends StatelessWidget {
                               ),
                             ],
                           ),
-                          // Logout
-                          IconButton(
-                            tooltip: 'Log Out',
-                            icon: const Icon(
-                              Icons.logout_rounded,
-                              color: Colors.white,
-                            ),
-                            onPressed: onLogout,
-                            style: IconButton.styleFrom(
-                                foregroundColor: Colors.white),
-                          ),
                         ],
                       ),
                     ],
@@ -528,9 +372,7 @@ class _HostHeader extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              firstName.isNotEmpty
-                                  ? 'Hey, $firstName 👋'
-                                  : 'Welcome, Host!',
+                              firstName.isNotEmpty ? firstName : 'Welcome, Host!',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 20,
@@ -553,113 +395,33 @@ class _HostHeader extends StatelessWidget {
               ),
             ),
           ),
+          ),
         ),
-        // New-applicants summary — only rendered when there's something to review
-        _NewApplicantsCard(uid: uid),
+        // Workers-online card — always shown, overlapping the header's
+        // curved bottom edge, translated up by exactly half its own height
+        // (52/2) so the curve crosses its vertical center, matching the
+        // worker dashboard's header/AvailabilityCard overlap.
+        Transform.translate(
+          offset: const Offset(0, -26),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _WorkersOnlineCard(uid: uid, onViewWorkers: onViewWorkers),
+          ),
+        ),
+        // Applicant-waiting card — sits directly under the workers-online
+        // card in normal flow. No extra top padding: the translate above
+        // already leaves its own ~26px reserved (unpainted) gap before this.
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _ApplicantWaitingCard(uid: uid),
+        ),
       ],
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Full-Width Gig Card — horizontal icon + text + chevron
-// ─────────────────────────────────────────────────────────────────────────────
-class _FullWidthGigCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final Color accentColor;
-  final VoidCallback? onTap;
-
-  const _FullWidthGigCard({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.accentColor,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: accentColor.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: accentColor.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: accentColor.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: accentColor, size: 22),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: onSurface,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(color: kSub, fontSize: 12),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Icon(
-              Icons.arrow_forward_ios_rounded,
-              color: accentColor.withValues(alpha: 0.6),
-              size: 16,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Muted uppercase section label
-// ─────────────────────────────────────────────────────────────────────────────
-class _HostSectionLabel extends StatelessWidget {
-  final String text;
-  const _HostSectionLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) => Text(
-        text.toUpperCase(),
-        style: const TextStyle(
-          color: kSub,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.8,
-        ),
-      );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  New Applicants card — summarizes open gigs that currently have at least
+//  Applicant-priority banner — summarizes open gigs that currently have at least
 //  one applicant still waiting to be selected (status still 'open', so the
 //  count/visibility comes straight from the same `open_gigs` +
 //  `applicants` array already streamed for the dashboard's notification
@@ -669,15 +431,149 @@ class _HostSectionLabel extends StatelessWidget {
 //  best-effort source for "earliest application" display time; it never
 //  affects the count or whether the card shows at all.
 // ─────────────────────────────────────────────────────────────────────────────
-class _NewApplicantsCard extends StatefulWidget {
+const _kBannerBg = Color(0xFFFFF7E8);
+const _kBannerBorder = Color(0xFFF2DFB8);
+const _kBannerTitle = Color(0xFF17263D);
+const _kBannerSub = Color(0xFF8A7A55);
+const _kGoldDark = Color(0xFFD88810);
+const _kGoldText = Color(0xFFB06E00);
+const _kGreenDot = Color(0xFF2E9E6B);
+const _kAvatarBlue = Color(0xFF2B6FB5);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Workers-online card — always shown, overlapping the header's curved
+//  bottom edge (positioned by the parent _HostHeader via Transform.translate).
+//  "Online" here specifically means ready for quick gigs (isOnline AND
+//  seekingQuickGigs), matching this card's own "quick gig offers" subtitle —
+//  reuses the same users/isOnline stream shape as _WorkerMapSection, just
+//  filtered client-side by a different flag.
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkersOnlineCard extends StatefulWidget {
   final String uid;
-  const _NewApplicantsCard({required this.uid});
+  final VoidCallback onViewWorkers;
+  const _WorkersOnlineCard({required this.uid, required this.onViewWorkers});
 
   @override
-  State<_NewApplicantsCard> createState() => _NewApplicantsCardState();
+  State<_WorkersOnlineCard> createState() => _WorkersOnlineCardState();
 }
 
-class _NewApplicantsCardState extends State<_NewApplicantsCard> {
+class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
+  StreamSubscription? _onlineSub;
+  int _onlineWorkers = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.uid.isEmpty) return;
+    _onlineSub = FirebaseFirestore.instance
+        .collection('users')
+        .where('isOnline', isEqualTo: true)
+        .snapshots()
+        .listen((snap) {
+      final count =
+          snap.docs.where((d) => d.data()['seekingQuickGigs'] == true).length;
+      if (mounted) setState(() => _onlineWorkers = count);
+    }, onError: (e) {
+      if (FirebaseAuth.instance.currentUser == null) return;
+      debugPrint('[_WorkersOnlineCard] stream error: $e');
+    });
+  }
+
+  @override
+  void dispose() {
+    _onlineSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(15),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              color: _kGreenDot,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$_onlineWorkers ${_onlineWorkers == 1 ? 'worker' : 'workers'} online near you',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Ready to receive quick gig offers',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: kSub, fontSize: 10.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            height: 30,
+            child: OutlinedButton(
+              onPressed: widget.onViewWorkers,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _kGoldText,
+                side: const BorderSide(color: _kGoldDark),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15)),
+              ),
+              child: const Text(
+                'View',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Applicant-waiting card — sits in normal flow directly under the
+//  workers-online card, only rendered when at least one open gig (status
+//  still 'open') has an applicant waiting (count/visibility comes straight
+//  from the same `open_gigs` + `applicants` array already streamed for the
+//  dashboard's notification bell). The `notifications` collection (category:
+//  'new_applicant', fired on every apply — see gig_map_section.dart
+//  _applyToOpenGig) is only used as a best-effort source for "most recent
+//  applicant" display; it never affects the count or whether the card shows.
+// ─────────────────────────────────────────────────────────────────────────────
+class _ApplicantWaitingCard extends StatefulWidget {
+  final String uid;
+  const _ApplicantWaitingCard({required this.uid});
+
+  @override
+  State<_ApplicantWaitingCard> createState() => _ApplicantWaitingCardState();
+}
+
+class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
   StreamSubscription? _gigsSub;
   StreamSubscription? _notifSub;
   // Open gigs (status still 'open') that have >=1 applicant waiting.
@@ -691,7 +587,7 @@ class _NewApplicantsCardState extends State<_NewApplicantsCard> {
     final db = FirebaseFirestore.instance;
     void onErr(Object e) {
       if (FirebaseAuth.instance.currentUser == null) return;
-      debugPrint('[_NewApplicantsCard] stream error: $e');
+      debugPrint('[_ApplicantWaitingCard] stream error: $e');
     }
 
     _gigsSub = db
@@ -749,124 +645,98 @@ class _NewApplicantsCardState extends State<_NewApplicantsCard> {
 
     final pendingGigIds = _pendingGigs.map((g) => g['id'] as String).toSet();
 
-    // Best-effort "earliest application" time: the oldest new_applicant
-    // notification whose gig is still in the pending set. Falls back to no
-    // time (still shows the card) if none match.
+    // Most recent applicant: the newest new_applicant notification whose gig
+    // is still in the pending set. Falls back to the last applicant appended
+    // to the pending gig with the most applicants waiting (no timestamp).
     final relevantNotifs = _applicantNotifs
         .where((n) => pendingGigIds.contains(n['gigId'] as String? ?? ''))
         .toList()
       ..sort((a, b) {
         final aTs = (a['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
         final bTs = (b['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
-        return aTs.compareTo(bTs);
+        return bTs.compareTo(aTs);
       });
-    final earliestNotif = relevantNotifs.isNotEmpty ? relevantNotifs.first : null;
-    final earliestTs = (earliestNotif?['createdAt'] as Timestamp?)?.toDate();
+    final mostRecentNotif = relevantNotifs.isNotEmpty ? relevantNotifs.first : null;
+    final mostRecentTs = (mostRecentNotif?['createdAt'] as Timestamp?)?.toDate();
 
-    // Reference gig for the title/Review target: the one behind the
-    // earliest notification if we found one, otherwise the pending gig with
-    // the most applicants waiting.
     final fallbackGig = [..._pendingGigs]..sort((a, b) {
         final aCount = (a['applicants'] as List).length;
         final bCount = (b['applicants'] as List).length;
         return bCount.compareTo(aCount);
       });
-    final refGigId = earliestNotif?['gigId'] as String? ?? fallbackGig.first['id'] as String;
-    final refGigTitle = earliestNotif?['gigTitle'] as String? ??
+    final fallbackApplicants = fallbackGig.first['applicants'] as List;
+    final fallbackApplicantName = fallbackApplicants.isNotEmpty
+        ? (fallbackApplicants.last as Map<String, dynamic>)['workerName']
+                as String? ??
+            'A worker'
+        : 'A worker';
+
+    final refGigId =
+        mostRecentNotif?['gigId'] as String? ?? fallbackGig.first['id'] as String;
+    final applicantName =
+        mostRecentNotif?['workerName'] as String? ?? fallbackApplicantName;
+    final refGigTitle = mostRecentNotif?['gigTitle'] as String? ??
         fallbackGig.first['title'] as String? ??
         'your gig';
 
     final totalApplicants = _pendingGigs.fold<int>(
         0, (acc, g) => acc + (g['applicants'] as List).length);
 
-    // Distinct applicants (by workerId) across all pending gigs, for the
-    // avatar stack.
-    final seen = <String>{};
-    final distinctNames = <String>[];
-    for (final gig in _pendingGigs) {
-      for (final a in (gig['applicants'] as List)) {
-        final map = a as Map<String, dynamic>;
-        final id = map['workerId'] as String? ?? '';
-        final name = map['workerName'] as String? ?? '?';
-        if (id.isNotEmpty && seen.add(id)) distinctNames.add(name);
-      }
-    }
-
-    const avatarColors = [
-      Color(0xFF2B6FB5),
-      Color(0xFF2E9E6B),
-      Color(0xFFB8622E),
-    ];
-    final shown = distinctNames.take(3).toList();
-    final overflow = distinctNames.length - shown.length;
-    final bubbleCount = shown.length + (overflow > 0 ? 1 : 0);
-    const avatarSize = 30.0;
-    const avatarStep = 20.0;
-    final stackWidth =
-        bubbleCount == 0 ? 0.0 : avatarSize + (bubbleCount - 1) * avatarStep;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: kGold.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: kGold.withValues(alpha: 0.35)),
-        ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: stackWidth,
-              height: avatarSize,
-              child: Stack(
-                children: [
-                  for (var i = 0; i < shown.length; i++)
-                    Positioned(
-                      left: i * avatarStep,
-                      child: _AvatarCircle(
-                        label: shown[i].isNotEmpty
-                            ? shown[i][0].toUpperCase()
-                            : '?',
-                        color: avatarColors[i % avatarColors.length],
-                      ),
-                    ),
-                  if (overflow > 0)
-                    Positioned(
-                      left: shown.length * avatarStep,
-                      child: _AvatarCircle(label: '+$overflow', color: kSub),
-                    ),
-                ],
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: _kBannerBg,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: _kBannerBorder),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 13,
+            backgroundColor: _kAvatarBlue,
+            child: Text(
+              applicantName.isNotEmpty ? applicantName[0].toUpperCase() : '?',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$totalApplicants ${totalApplicants == 1 ? 'applicant' : 'applicants'} '
-                    'waiting to be selected',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                    ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$totalApplicants ${totalApplicants == 1 ? 'applicant' : 'applicants'} '
+                  'waiting to be selected',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _kBannerTitle,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    earliestTs != null
-                        ? '$refGigTitle · ${_timeAgo(earliestTs)}'
-                        : refGigTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: kSub, fontSize: 11.5),
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  mostRecentTs != null
+                      ? '$refGigTitle · ${_timeAgo(mostRecentTs)}'
+                      : refGigTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _kBannerSub, fontSize: 10.5),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            ElevatedButton(
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            height: 30,
+            child: ElevatedButton(
               onPressed: () {
                 showModalBottomSheet(
                   context: context,
@@ -877,49 +747,20 @@ class _NewApplicantsCardState extends State<_NewApplicantsCard> {
                 );
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: kGold,
+                backgroundColor: _kGoldDark,
                 foregroundColor: Colors.white,
                 elevation: 0,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(15)),
               ),
               child: const Text(
                 'Review',
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AvatarCircle extends StatelessWidget {
-  final String label;
-  final Color color;
-  const _AvatarCircle({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 30,
-      height: 30,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        border: Border.all(color: Theme.of(context).cardColor, width: 2),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 10.5,
-          fontWeight: FontWeight.w700,
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1240,7 +1081,7 @@ class _WorkerCluster {
 
 class _WorkerMapSection extends StatefulWidget {
   final String hostName;
-  const _WorkerMapSection({required this.hostName});
+  const _WorkerMapSection({super.key, required this.hostName});
 
   @override
   State<_WorkerMapSection> createState() => _WorkerMapSectionState();
@@ -1254,15 +1095,79 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   double _zoom = 12.0;
   LatLng? _myLocation;
   bool _mapInteractive = false;
+  // All online + available workers with a location, unfiltered by distance.
+  List<_WorkerData> _allWorkers = [];
+  // Cached result of filtering _allWorkers to within 20km of _myLocation —
+  // recomputed only when either input changes (see _recomputeVisibleWorkers),
+  // NOT on every read. _buildClusters()'s nested loop indexes into this list
+  // many times per build; if this were a getter re-filtering from scratch on
+  // every access (as it briefly was), that nested-loop access pattern turns
+  // an O(n) filter into effectively O(n^3) and stalls the main thread badly
+  // enough to crash the app on a device with more than a handful of workers.
   List<_WorkerData> _workers = [];
   StreamSubscription? _workerSub;
   BuildContext? _context;
+  BitmapDescriptor? _blueCircleIcon;
+
+  static const double _kMaxWorkerDistanceMeters = 20000;
+
+  // Falls back to the unfiltered list while the host's own location hasn't
+  // resolved yet, so the map isn't empty just because location
+  // permission/fix is still pending.
+  void _recomputeVisibleWorkers() {
+    final loc = _myLocation;
+    _workers = loc == null
+        ? _allWorkers
+        : _allWorkers.where((w) {
+            final distance = Geolocator.distanceBetween(
+              loc.latitude,
+              loc.longitude,
+              w.position.latitude,
+              w.position.longitude,
+            );
+            return distance <= _kMaxWorkerDistanceMeters;
+          }).toList();
+  }
 
   @override
   void initState() {
     super.initState();
     _initMap();
     _startWorkersSub();
+    _loadBlueCircleIcon();
+  }
+
+  // Draws a fixed-size blue circle (blue fill, white ring) at runtime so
+  // single-worker pins render as a circle on Google Maps — there's no
+  // built-in circular hue for the default teardrop marker, and a `Circle`
+  // overlay is sized in real-world meters so it'd shrink/grow with zoom
+  // instead of staying a consistent marker size.
+  Future<void> _loadBlueCircleIcon() async {
+    const double size = 88;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    const center = Offset(size / 2, size / 2);
+    const radius = size / 2 - 6;
+    canvas.drawCircle(center, radius, Paint()..color = _kAvatarBlue);
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5,
+    );
+    final picture = recorder.endRecording();
+    final img = await picture.toImage(size.toInt(), size.toInt());
+    final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
+    if (bytes == null || !mounted) return;
+    setState(() {
+      _blueCircleIcon = BitmapDescriptor.bytes(
+        bytes.buffer.asUint8List(),
+        width: 32,
+        height: 32,
+      );
+    });
   }
 
   Future<void> _initMap() async {
@@ -1295,7 +1200,10 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
       );
       if (!mounted) return;
       final loc = LatLng(pos.latitude, pos.longitude);
-      setState(() => _myLocation = loc);
+      setState(() {
+        _myLocation = loc;
+        _recomputeVisibleWorkers();
+      });
       if (_useGoogleMaps) {
         _googleMapController?.animateCamera(
           CameraUpdate.newLatLngZoom(loc, 14.0),
@@ -1328,7 +1236,12 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
           ratingCount: (data['ratingCount'] as num?)?.toInt() ?? 0,
         );
       }).whereType<_WorkerData>().toList();
-      if (mounted) setState(() => _workers = workers);
+      if (mounted) {
+        setState(() {
+          _allWorkers = workers;
+          _recomputeVisibleWorkers();
+        });
+      }
     }, onError: (e) {
       if (FirebaseAuth.instance.currentUser == null) return;
       debugPrint('[_WorkerMapSection] stream error: $e');
@@ -1393,7 +1306,8 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         return Marker(
           markerId: MarkerId('worker_${worker.id}'),
           position: cluster.center,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          icon: _blueCircleIcon ??
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
           onTap: ctx != null ? () => _showWorkerSheet(ctx, worker) : null,
         );
       }
@@ -2512,7 +2426,9 @@ class _TemplatesSheet extends StatelessWidget {
   }
 }
 
-void _showModal(
+// Public so HostShell's speed dial can show the same "not verified" prompt
+// as the (now-removed) dashboard post-gig cards used to.
+void showUnverifiedHostModal(
   BuildContext context,
 ) {
   showDialog(

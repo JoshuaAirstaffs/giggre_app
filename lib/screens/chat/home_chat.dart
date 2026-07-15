@@ -11,7 +11,11 @@ import 'package:giggre_app/main.dart' show navigatorKey;
 import 'package:giggre_app/screens/chat/chat.dart';
 
 class HomeChat extends StatefulWidget {
-  const HomeChat({super.key});
+  // False when hosted as the Chat tab root inside WorkerShell — suppresses
+  // the auto back arrow since there's no route to pop within the tab.
+  final bool showBackButton;
+
+  const HomeChat({super.key, this.showBackButton = true});
 
   @override
   State<HomeChat> createState() => _HomeChatState();
@@ -149,6 +153,7 @@ class _HomeChatState extends State<HomeChat>
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        automaticallyImplyLeading: widget.showBackButton,
         title: Text(
           'Chats',
           style: TextStyle(

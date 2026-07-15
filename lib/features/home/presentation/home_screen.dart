@@ -14,7 +14,6 @@ import 'package:giggre_app/screens/app_contents/contact_us.dart';
 import 'package:giggre_app/screens/app_contents/help_faq.dart';
 import 'package:giggre_app/screens/app_contents/privacy_policy.dart';
 import 'package:giggre_app/screens/app_contents/terms_and_conditions.dart';
-import 'package:giggre_app/screens/chat/home_chat.dart';
 import 'package:provider/provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
@@ -25,8 +24,8 @@ import 'package:giggre_app/screens/giggre-updates.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../services/delete_acc_service.dart';
 import '../../auth/presentation/login_screen.dart';
-import '../../gig_host/presentation/gig_host_screen.dart';
-import '../../gig_worker/presentation/gig_worker_screen.dart';
+import '../../../screens/host/host_shell.dart';
+import '../../../screens/worker/worker_shell.dart';
 import '../../../widgets/active_gig_bar.dart';
 import '../../gig_worker/presentation/verification_screen.dart';
 
@@ -42,16 +41,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String _photoUrl = '';
   String? _selectedRole;
   bool _saving = false;
-  bool _hasUnreadMessages = false;
-  bool _hasUnreadGigMessages = false;
   bool _hasUpdate = false;
   bool _updateDismissed = false;
   bool _pendingDeletion = false;
   String _deletionStatus = 'pending_deletion';
-  StreamSubscription? _roomsStreamSub;
-  final List<StreamSubscription> _roomSubs = [];
-  StreamSubscription? _gigRoomsStreamSub;
-  final List<StreamSubscription> _gigRoomSubs = [];
   List<Map<String, dynamic>> _updates = [];
   bool _locationServiceEnabled = true;
   StreamSubscription<ServiceStatus>? _locationServiceSub;
@@ -64,15 +57,16 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadUser();
     _fetchUpdates();
-    _listenForUnreadMessages();
-    _listenForUnreadGigMessages();
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) _activeGigStream = watchActiveWorkerGig(uid);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAppUpdate();
       _initLocationServiceListener();
       _checkInternet();
-      _internetCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkInternet());
+      _internetCheckTimer = Timer.periodic(
+        const Duration(seconds: 30),
+        (_) => _checkInternet(),
+      );
     });
   }
 
@@ -89,8 +83,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _checkInternet() async {
     if (kIsWeb) return;
     try {
-      final result = await InternetAddress.lookup('google.com')
-          .timeout(const Duration(seconds: 5));
+      final result = await InternetAddress.lookup(
+        'google.com',
+      ).timeout(const Duration(seconds: 5));
       final ok = result.isNotEmpty && result.first.rawAddress.isNotEmpty;
       if (mounted) setState(() => _internetAvailable = ok);
     } catch (_) {
@@ -102,10 +97,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _internetCheckTimer?.cancel();
     _locationServiceSub?.cancel();
-    _roomsStreamSub?.cancel();
-    for (final sub in _roomSubs) sub.cancel();
-    _gigRoomsStreamSub?.cancel();
-    for (final sub in _gigRoomSubs) sub.cancel();
     super.dispose();
   }
 
@@ -158,7 +149,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
-                    child: Icon(Icons.system_update_rounded, color: kBlue, size: 32),
+                    child: Icon(
+                      Icons.system_update_rounded,
+                      color: kBlue,
+                      size: 32,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -199,7 +194,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: const Text(
                       'Update Now',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -209,7 +207,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     Navigator.of(ctx, rootNavigator: true).pop();
                     if (mounted) setState(() => _updateDismissed = true);
                   },
-                  child: const Text('Later', style: TextStyle(color: kSub, fontSize: 13)),
+                  child: const Text(
+                    'Later',
+                    style: TextStyle(color: kSub, fontSize: 13),
+                  ),
                 ),
               ],
             ),
@@ -250,115 +251,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _listenForUnreadMessages() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-
-    _roomsStreamSub = FirebaseFirestore.instance
-        .collection('chat_rooms')
-        .where('userId', isEqualTo: uid)
-        .where('isSupport', isEqualTo: true)
-        .snapshots()
-        .listen(
-          (roomsSnap) {
-            for (final sub in _roomSubs) sub.cancel();
-            _roomSubs.clear();
-
-            if (roomsSnap.docs.isEmpty) {
-              if (mounted) setState(() => _hasUnreadMessages = false);
-              return;
-            }
-
-            final Map<int, bool> roomUnread = {};
-
-            for (int i = 0; i < roomsSnap.docs.length; i++) {
-              final room = roomsSnap.docs[i];
-              final sub = FirebaseFirestore.instance
-                  .collection('chat_rooms')
-                  .doc(room.id)
-                  .collection('messages')
-                  .where('isSupport', isEqualTo: true)
-                  .where('hasSeen', isEqualTo: false)
-                  .limit(1)
-                  .snapshots()
-                  .map((s) => s.docs.isNotEmpty)
-                  .listen(
-                    (hasUnread) {
-                      roomUnread[i] = hasUnread;
-                      final anyUnread = roomUnread.values.any((v) => v);
-                      if (mounted) setState(() => _hasUnreadMessages = anyUnread);
-                      debugPrint('[Unread] Badge → $anyUnread');
-                    },
-                    onError: (e) => debugPrint('[HomeScreen] message stream error: $e'),
-                  );
-              _roomSubs.add(sub);
-            }
-          },
-          onError: (e) {
-            if (FirebaseAuth.instance.currentUser == null) return;
-            debugPrint('[HomeScreen] rooms stream error: $e');
-          },
-        );
-  }
-
-  void _listenForUnreadGigMessages() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-
-    _gigRoomsStreamSub = FirebaseFirestore.instance
-        .collection('chat_rooms')
-        .where('participants', arrayContains: uid)
-        .snapshots()
-        .listen(
-          (roomsSnap) {
-            for (final sub in _gigRoomSubs) sub.cancel();
-            _gigRoomSubs.clear();
-
-            if (roomsSnap.docs.isEmpty) {
-              if (mounted) setState(() => _hasUnreadGigMessages = false);
-              return;
-            }
-
-            final Map<int, bool> roomUnread = {};
-
-            for (int i = 0; i < roomsSnap.docs.length; i++) {
-              final room = roomsSnap.docs[i];
-              final participants =
-                  (room.data()['participants'] as List<dynamic>?) ?? [];
-              final otherUid =
-                  participants.firstWhere((p) => p != uid, orElse: () => '') as String;
-
-              if (otherUid.isEmpty) continue;
-
-              final sub = FirebaseFirestore.instance
-                  .collection('chat_rooms')
-                  .doc(room.id)
-                  .collection('messages')
-                  .where('senderId', isEqualTo: otherUid)
-                  .where('hasSeen', isEqualTo: false)
-                  .limit(1)
-                  .snapshots()
-                  .map((s) => s.docs.isNotEmpty)
-                  .listen(
-                    (hasUnread) {
-                      roomUnread[i] = hasUnread;
-                      final anyUnread = roomUnread.values.any((v) => v);
-                      if (mounted) setState(() => _hasUnreadGigMessages = anyUnread);
-                      debugPrint('[Unread] Gig Badge → $anyUnread');
-                    },
-                    onError: (e) =>
-                        debugPrint('[HomeScreen] gig message stream error: $e'),
-                  );
-              _gigRoomSubs.add(sub);
-            }
-          },
-          onError: (e) {
-            if (FirebaseAuth.instance.currentUser == null) return;
-            debugPrint('[HomeScreen] gig rooms stream error: $e');
-          },
-        );
-  }
-
   void _showBetaModal() {
     showDialog(
       context: context,
@@ -394,12 +286,19 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
-                    child: Icon(Icons.science_outlined, color: kAmber, size: 32),
+                    child: Icon(
+                      Icons.science_outlined,
+                      color: kAmber,
+                      size: 32,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: kAmber.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
@@ -447,7 +346,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: const Text(
                       'Got it, let\'s go!',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -462,7 +364,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadUser() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
     final data = doc.data();
     if (!mounted) return;
     setState(() {
@@ -494,9 +399,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _pendingDeletion = true;
         _deletionStatus = status;
       });
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) { if (mounted) _showPendingDeletionModal(); },
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showPendingDeletionModal();
+      });
     }
   }
 
@@ -535,13 +440,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
-                    child: Icon(Icons.delete_forever_outlined,
-                        color: Colors.redAccent, size: 32),
+                    child: Icon(
+                      Icons.delete_forever_outlined,
+                      color: Colors.redAccent,
+                      size: 32,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  isApproved ? 'Account Deletion Approved' : 'Account Pending Deletion',
+                  isApproved
+                      ? 'Account Deletion Approved'
+                      : 'Account Pending Deletion',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Theme.of(ctx).colorScheme.onSurface,
@@ -555,7 +465,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       ? 'Your account deletion request has been approved by the admin. The deletion process will be completed after 30 days from the date you submitted your request. After completion, your profile and account details cannot be restored. Your account will be permanently deactivated, and your identity will be anonymized in shared gig records and other related history data.'
                       : 'Your account deletion request is pending admin review. Once approved, the deletion process will be completed after 30 days from the date you submitted your request. You can cancel this request at any time to restore full access.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 14, color: Colors.grey, height: 1.5),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey,
+                    height: 1.5,
+                  ),
                 ),
                 const SizedBox(height: 24),
                 SizedBox(
@@ -575,10 +489,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       backgroundColor: const Color(0xFF1B6CA8),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                    child: const Text('Cancel Deletion',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                    child: const Text(
+                      'Cancel Deletion',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -594,8 +514,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
                     await FirebaseAuth.instance.signOut();
                   },
-                  child: const Text('Sign Out',
-                      style: TextStyle(color: Colors.grey, fontSize: 14)),
+                  child: const Text(
+                    'Sign Out',
+                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                  ),
                 ),
               ],
             ),
@@ -640,7 +562,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: Colors.red.shade50,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 22),
+                child: const Icon(
+                  Icons.logout_rounded,
+                  color: Colors.redAccent,
+                  size: 22,
+                ),
               ),
               const SizedBox(height: 14),
               Text(
@@ -673,7 +599,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                         onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel', style: TextStyle(color: kSub, fontSize: 15)),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(color: kSub, fontSize: 15),
+                        ),
                       ),
                     ),
                     const VerticalDivider(width: 0.5, thickness: 0.5),
@@ -708,9 +637,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (confirm == true) {
-      _roomsStreamSub?.cancel();
-      for (final sub in _roomSubs) sub.cancel();
-      _roomSubs.clear();
       if (mounted) {
         context.read<CurrentUserProvider>().clearUser();
         Navigator.of(context).pushAndRemoveUntil(
@@ -761,10 +687,17 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Container(
                 width: double.infinity,
                 color: Colors.orange.shade700,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
                 child: Row(
                   children: [
-                    const Icon(Icons.location_off_rounded, color: Colors.white, size: 20),
+                    const Icon(
+                      Icons.location_off_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
                     const Expanded(
                       child: Text(
@@ -779,33 +712,39 @@ class _HomeScreenState extends State<HomeScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                      child: const Text('Enable', style: TextStyle(fontWeight: FontWeight.bold)),
+                      child: const Text(
+                        'Enable',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ],
                 ),
               ),
             )
           : !_internetAvailable
-              ? SafeArea(
-                  child: Container(
-                    width: double.infinity,
-                    color: Colors.red.shade700,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.wifi_off_rounded, color: Colors.white, size: 20),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'No internet connection. Some features may not work.',
-                            style: TextStyle(color: Colors.white, fontSize: 13),
-                          ),
-                        ),
-                      ],
+          ? SafeArea(
+              child: Container(
+                width: double.infinity,
+                color: Colors.red.shade700,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.wifi_off_rounded, color: Colors.white, size: 20),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'No internet connection. Some features may not work.',
+                        style: TextStyle(color: Colors.white, fontSize: 13),
+                      ),
                     ),
-                  ),
-                )
-              : null,
+                  ],
+                ),
+              ),
+            )
+          : null,
       appBar: AppBar(
         backgroundColor: bgColor,
         elevation: 0,
@@ -831,10 +770,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(width: 10),
               Text(
-                'giggre',
+                'Giggre',
                 style: TextStyle(
                   color: onSurface,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w800,
                   fontSize: 20,
                   letterSpacing: -0.3,
                 ),
@@ -843,19 +782,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         actions: [
-          _IconSquareButton(
-            icon: Icons.message_outlined,
-            dot: _hasUnreadMessages || _hasUnreadGigMessages,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const HomeChat()),
-            ),
-          ),
-          const SizedBox(width: 8),
-          _IconSquareButton(
-            icon: Icons.logout_rounded,
-            onTap: _logout,
-          ),
+          _IconSquareButton(icon: Icons.logout_rounded, onTap: _logout),
           const SizedBox(width: 16),
         ],
       ),
@@ -866,7 +793,11 @@ class _HomeScreenState extends State<HomeScreen> {
             final activeGig = activeGigSnap.data;
             return Stack(
               children: [
-                _buildHomeContent(context, bottomPadding: activeGig != null ? 16 + 86 : 16, isVerified: isVerified),
+                _buildHomeContent(
+                  context,
+                  bottomPadding: activeGig != null ? 16 + 86 : 16,
+                  isVerified: isVerified,
+                ),
                 if (activeGig != null)
                   Positioned(
                     left: 0,
@@ -882,323 +813,351 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHomeContent(BuildContext context, {required double bottomPadding, required String? isVerified}) {
+  Widget _buildHomeContent(
+    BuildContext context, {
+    required double bottomPadding,
+    required String? isVerified,
+  }) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final firstName = _userName.split(' ').first;
     final currentYear = DateTime.now().year;
     return RefreshIndicator(
-          key: _refreshKey,
-          onRefresh: _refreshAll,
-          color: kGold,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: EdgeInsets.fromLTRB(20, 16, 20, bottomPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      key: _refreshKey,
+      onRefresh: _refreshAll,
+      color: kGold,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(20, 16, 20, bottomPadding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── 2. Profile strip ──────────────────────────
+            Row(
               children: [
-                // ── 2. Profile strip ──────────────────────────
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 26,
-                      backgroundColor: kGold.withValues(alpha: 0.15),
-                      backgroundImage: _photoUrl.isNotEmpty
-                          ? CachedNetworkImageProvider(_photoUrl)
-                          : null,
-                      child: _photoUrl.isEmpty
-                          ? const Icon(Icons.person_rounded, color: kGold, size: 28)
-                          : null,
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            firstName.isNotEmpty
-                                ? 'Hey, $firstName 👋'
-                                : 'Welcome back 👋',
-                            style: TextStyle(
-                              color: onSurface,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          const Text(
-                            'Choose a mode to get started',
-                            style: TextStyle(color: kSub, fontSize: 13),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                CircleAvatar(
+                  radius: 26,
+                  backgroundColor: kGold.withValues(alpha: 0.15),
+                  backgroundImage: _photoUrl.isNotEmpty
+                      ? CachedNetworkImageProvider(_photoUrl)
+                      : null,
+                  child: _photoUrl.isEmpty
+                      ? const Icon(Icons.person_rounded, color: kGold, size: 28)
+                      : null,
                 ),
-
-                // ── Update banner (preserved) ─────────────────
-                if (_hasUpdate) ...[
-                  const SizedBox(height: 14),
-                  GestureDetector(
-                    onTap: _showUpdateModal,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: kBlue.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: kBlue.withValues(alpha: 0.25)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.system_update_rounded,
-                              color: kBlue, size: 18),
-                          const SizedBox(width: 10),
-                          const Expanded(
-                            child: Text(
-                              'A new version of Giggre is available!',
-                              style: TextStyle(
-                                  color: kBlue,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: kBlue,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Text(
-                              'Update',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-
-                // ── Verification banner ───────────────────────
-                if (isVerified != 'verified') ...[
-                  const SizedBox(height: 14),
-                  GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const VerificationScreen()),
-                    ),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: Colors.amber.withValues(alpha: 0.4)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.verified_user_outlined,
-                              color: Colors.amber, size: 18),
-                          const SizedBox(width: 10),
-                          const Expanded(
-                            child: Text(
-                              'Your account is not yet verified.',
-                              style: TextStyle(
-                                  color: Colors.amber,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.amber,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Text(
-                              'Verify Now',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 20),
-
-                // ── 3. Image carousel ─────────────────────────
-                _TestimonialCarousel(key: ValueKey(_carouselRefreshKey)),
-
-                const SizedBox(height: 24),
-
-                // ── 4. Role segmented control ─────────────────
-                _RoleSegmentedControl(
-                  selectedRole: _selectedRole,
-                  onSelect: _selectRole,
-                ),
-
-                // ── 5. Gold continue button ───────────────────
-                if (_selectedRole != null) ...[
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton(
-                      onPressed: _saving
-                          ? null
-                          : () {
-                              if (_selectedRole == 'host') {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                      builder: (_) => const GigHostScreen()),
-                                );
-                              } else {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                      builder: (_) => const GigWorkerScreen()),
-                                );
-                              }
-                            },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _selectedRole == 'worker' ? kBlue : kGold,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      child: _saving
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2),
-                            )
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  _selectedRole == 'worker'
-                                      ? 'Continue as Gig Worker'
-                                      : 'Continue as Gig Host',
-                                  style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(width: 8),
-                                const Icon(Icons.arrow_forward_rounded,
-                                    size: 20),
-                              ],
-                            ),
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 28),
-
-                // ── 6. Giggre Updates section ─────────────────
-                Row(
-                  children: [
-                    Text(
-                      'Giggre Updates',
-                      style: TextStyle(
-                        color: onSurface,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => GiggreUpdates()),
-                      ),
-                      child: const Text(
-                        'See all',
-                        style: TextStyle(
-                            color: kGold,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-
-                ..._updates.take(3).map(
-                      (update) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: UpdateCard(
-                          title: update['title'] as String,
-                          date: update['dateCreated'] as DateTime,
-                          category: update['category'] as String,
-                          description: update['body'] as String,
-                        ),
-                      ),
-                    ),
-
-                const SizedBox(height: 16),
-
-                // ── Footer ────────────────────────────────────
-                Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Theme.of(context).dividerColor),
-                  ),
-                  padding: const EdgeInsets.all(16),
+                const SizedBox(width: 14),
+                Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Image.asset('assets/images/logo.png',
-                          width: 94, height: 64),
-                      const Text(
-                        'The fastest way to find gigs or hire workers near you.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12, color: kSub),
-                      ),
-                      const SizedBox(height: 8),
-                      const Divider(),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        alignment: WrapAlignment.center,
-                        spacing: 16,
-                        runSpacing: 8,
-                        children: [
-                          _FooterLink('About', AboutGiggre()),
-                          _FooterLink('Terms', TermsAndConditions()),
-                          _FooterLink('Privacy', PrivacyPolicy()),
-                          _FooterLink('Help/FAQ', HelpFaq()),
-                          _FooterLink('Contact Us', ContactUs()),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
                       Text(
-                        'Copyright © $currentYear Giggre. All rights reserved.',
-                        style: const TextStyle(fontSize: 12, color: kSub),
+                        firstName.isNotEmpty
+                            ? 'Hey, $firstName 👋'
+                            : 'Welcome back 👋',
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Choose a mode to get started',
+                        style: TextStyle(color: kSub, fontSize: 13),
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-          ),
+
+            // ── Update banner (preserved) ─────────────────
+            if (_hasUpdate) ...[
+              const SizedBox(height: 14),
+              GestureDetector(
+                onTap: _showUpdateModal,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: kBlue.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: kBlue.withValues(alpha: 0.25)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.system_update_rounded,
+                        color: kBlue,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'A new version of Giggre is available!',
+                          style: TextStyle(
+                            color: kBlue,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: kBlue,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          'Update',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+
+            // ── Verification banner ───────────────────────
+            if (isVerified != 'verified') ...[
+              const SizedBox(height: 14),
+              GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const VerificationScreen()),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.amber.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.verified_user_outlined,
+                        color: Colors.amber,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Your account is not yet verified.',
+                          style: TextStyle(
+                            color: Colors.amber,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.amber,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          'Verify Now',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 20),
+
+            // ── 3. Image carousel ─────────────────────────
+            _TestimonialCarousel(key: ValueKey(_carouselRefreshKey)),
+
+            const SizedBox(height: 24),
+
+            // ── 4. Role segmented control ─────────────────
+            _RoleSegmentedControl(
+              selectedRole: _selectedRole,
+              onSelect: _selectRole,
+            ),
+
+            // ── 5. Gold continue button ───────────────────
+            if (_selectedRole != null) ...[
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _saving
+                      ? null
+                      : () {
+                          if (_selectedRole == 'host') {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const HostShell(),
+                              ),
+                            );
+                          } else {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const WorkerShell(),
+                              ),
+                            );
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _selectedRole == 'worker' ? kBlue : kGold,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: _saving
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _selectedRole == 'worker'
+                                  ? 'Continue as Gig Worker'
+                                  : 'Continue as Gig Host',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Icon(Icons.arrow_forward_rounded, size: 20),
+                          ],
+                        ),
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 28),
+
+            // ── 6. Giggre Updates section ─────────────────
+            Row(
+              children: [
+                Text(
+                  'Giggre Updates',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => GiggreUpdates()),
+                  ),
+                  child: const Text(
+                    'See all',
+                    style: TextStyle(
+                      color: kGold,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            ..._updates
+                .take(3)
+                .map(
+                  (update) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: UpdateCard(
+                      title: update['title'] as String,
+                      date: update['dateCreated'] as DateTime,
+                      category: update['category'] as String,
+                      description: update['body'] as String,
+                    ),
+                  ),
+                ),
+
+            const SizedBox(height: 16),
+
+            // ── Footer ────────────────────────────────────
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Theme.of(context).dividerColor),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Image.asset('assets/images/logo.png', width: 94, height: 64),
+                  const Text(
+                    'The fastest way to find gigs or hire workers near you.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: kSub),
+                  ),
+                  const SizedBox(height: 8),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 16,
+                    runSpacing: 8,
+                    children: [
+                      _FooterLink('About', AboutGiggre()),
+                      _FooterLink('Terms', TermsAndConditions()),
+                      _FooterLink('Privacy', PrivacyPolicy()),
+                      _FooterLink('Help/FAQ', HelpFaq()),
+                      _FooterLink('Contact Us', ContactUs()),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Copyright © $currentYear Giggre. All rights reserved.',
+                    style: const TextStyle(fontSize: 12, color: kSub),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1209,13 +1168,8 @@ class _HomeScreenState extends State<HomeScreen> {
 class _IconSquareButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  final bool dot;
 
-  const _IconSquareButton({
-    required this.icon,
-    required this.onTap,
-    this.dot = false,
-  });
+  const _IconSquareButton({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1229,30 +1183,7 @@ class _IconSquareButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: Theme.of(context).dividerColor),
         ),
-        child: Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.center,
-          children: [
-            Icon(icon, color: kSub, size: 19),
-            if (dot)
-              Positioned(
-                top: -3,
-                right: -3,
-                child: Container(
-                  width: 9,
-                  height: 9,
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Theme.of(context).scaffoldBackgroundColor,
-                      width: 1.5,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
+        child: Icon(icon, color: kSub, size: 19),
       ),
     );
   }
@@ -1345,8 +1276,9 @@ class _RoleHalf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textColor =
-        isSelected ? Colors.white : Theme.of(context).colorScheme.onSurface;
+    final textColor = isSelected
+        ? Colors.white
+        : Theme.of(context).colorScheme.onSurface;
     final subColor = isSelected ? Colors.white70 : kSub;
 
     return GestureDetector(
@@ -1355,7 +1287,9 @@ class _RoleHalf extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
         decoration: BoxDecoration(
-          color: isSelected ? selectedColor : selectedColor.withValues(alpha: 0),
+          color: isSelected
+              ? selectedColor
+              : selectedColor.withValues(alpha: 0),
           borderRadius: borderRadius,
         ),
         child: Column(
@@ -1396,8 +1330,8 @@ class _FooterLink extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.push(
-          context, MaterialPageRoute(builder: (_) => screen)),
+      onTap: () =>
+          Navigator.push(context, MaterialPageRoute(builder: (_) => screen)),
       child: Text(label, style: const TextStyle(fontSize: 12, color: kBlue)),
     );
   }
@@ -1410,10 +1344,7 @@ class _GiggreMenu extends StatelessWidget {
   final bool hasPendingUpdate;
   final VoidCallback onUpdate;
 
-  const _GiggreMenu({
-    this.hasPendingUpdate = false,
-    required this.onUpdate,
-  });
+  const _GiggreMenu({this.hasPendingUpdate = false, required this.onUpdate});
 
   static final List<Map<String, dynamic>> gigMenuData = [
     {'title': 'About Giggre', 'icon': Icons.info, 'screen': AboutGiggre()},
@@ -1481,7 +1412,9 @@ class _GiggreMenu extends StatelessWidget {
                                 },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 4),
+                                    horizontal: 12,
+                                    vertical: 4,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: kBlue,
                                     borderRadius: BorderRadius.circular(20),
@@ -1489,16 +1422,19 @@ class _GiggreMenu extends StatelessWidget {
                                   child: const Text(
                                     'Update Available',
                                     style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold),
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
                               )
                             else
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 4),
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
                                 decoration: BoxDecoration(
                                   color: Colors.green.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(20),
@@ -1506,9 +1442,10 @@ class _GiggreMenu extends StatelessWidget {
                                 child: const Text(
                                   'Latest',
                                   style: TextStyle(
-                                      color: Colors.green,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600),
+                                    color: Colors.green,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
                           ],
@@ -1556,21 +1493,24 @@ class _GiggreMenu extends StatelessWidget {
                                     color: iconBg,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: Icon(item['icon'] as IconData,
-                                      color: kBlue),
+                                  child: Icon(
+                                    item['icon'] as IconData,
+                                    color: kBlue,
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
                                   item['title'] as String,
                                   style: TextStyle(
-                                    color:
-                                        isDark ? Colors.white : Colors.black,
+                                    color: isDark ? Colors.white : Colors.black,
                                   ),
                                 ),
                               ],
                             ),
-                            Icon(Icons.chevron_right,
-                                color: isDark ? Colors.white : Colors.black),
+                            Icon(
+                              Icons.chevron_right,
+                              color: isDark ? Colors.white : Colors.black,
+                            ),
                           ],
                         ),
                       );
@@ -1629,11 +1569,12 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
           .collection('items')
           .get();
 
-      final items = snapshot.docs
-          .map((doc) => _CarouselItem.fromMap(doc.data()))
-          .where((item) => item.sortNumber != 0 && item.picture.isNotEmpty)
-          .toList()
-        ..sort((a, b) => a.sortNumber.compareTo(b.sortNumber));
+      final items =
+          snapshot.docs
+              .map((doc) => _CarouselItem.fromMap(doc.data()))
+              .where((item) => item.sortNumber != 0 && item.picture.isNotEmpty)
+              .toList()
+            ..sort((a, b) => a.sortNumber.compareTo(b.sortNumber));
 
       if (mounted) {
         setState(() {
@@ -1679,8 +1620,7 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
               autoPlayInterval: const Duration(seconds: 5),
               autoPlayAnimationDuration: const Duration(milliseconds: 600),
               autoPlayCurve: Curves.easeInOut,
-              onPageChanged: (index, _) =>
-                  setState(() => _current = index),
+              onPageChanged: (index, _) => setState(() => _current = index),
             ),
             itemBuilder: (context, index, _) {
               return _SlideItem(pictureUrl: _slides[index].picture);

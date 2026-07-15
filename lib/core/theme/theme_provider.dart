@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_colors.dart';
 
@@ -40,6 +41,7 @@ class ThemeProvider extends ChangeNotifier {
         scaffoldBackgroundColor: const Color(0xFFF1F5F9),
         cardColor: Colors.white,
         dividerColor: const Color(0xFFE2E8F0),
+        fontFamily: GoogleFonts.inter().fontFamily,
       );
 
   static ThemeData get darkTheme => ThemeData(
@@ -51,5 +53,6 @@ class ThemeProvider extends ChangeNotifier {
         scaffoldBackgroundColor: kBg,
         cardColor: kCard,
         dividerColor: kBorder,
+        fontFamily: GoogleFonts.inter().fontFamily,
       );
 }

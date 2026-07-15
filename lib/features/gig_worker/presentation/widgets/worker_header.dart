@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../../../core/theme/app_colors.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Worker Header — blue gradient band (mirrors Gig Host gold band)
+//  Worker Header — blue gradient band
 // ─────────────────────────────────────────────────────────────────────────────
 class WorkerHeader extends StatelessWidget {
   final String userId;
@@ -17,8 +16,8 @@ class WorkerHeader extends StatelessWidget {
   final bool isDark;
   final VoidCallback onEdit;
   final String isVerified;
+  final bool showBackButton;
   final VoidCallback? onNotifications;
-  final VoidCallback? onLogout;
 
   const WorkerHeader({
     super.key,
@@ -33,38 +32,44 @@ class WorkerHeader extends StatelessWidget {
     required this.isDark,
     required this.onEdit,
     required this.isVerified,
+    this.showBackButton = true,
     this.onNotifications,
-    this.onLogout,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [kBlue, Color(0xFF034FA0)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+    // Even when a caller asks for the back arrow, don't render one with
+    // nothing to pop to (e.g. if ever shown at the root of the navigator).
+    final showBack = showBackButton && Navigator.canPop(context);
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.only(
+        bottomLeft: Radius.circular(26),
+        bottomRight: Radius.circular(26),
       ),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 4, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Action row ─────────────────────────────────────────────────
-              Row(
-                children: [
-                  // Left: back + "Gig Worker / Dashboard" label
-                  GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
+      child: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF2B6FB5), Color(0xFF1F4D80)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 44),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Title row ────────────────────────────────────────────
+                Row(
+                  children: [
+                    if (showBack) ...[
+                      GestureDetector(
+                        onTap: () => Navigator.pop(context),
+                        child: Container(
                           width: 34,
                           height: 34,
                           decoration: BoxDecoration(
@@ -77,150 +82,92 @@ class WorkerHeader extends StatelessWidget {
                             size: 15,
                           ),
                         ),
-                        const SizedBox(width: 10),
-                        const Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Gig Worker',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              'Dashboard',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 10,
-                              ),
-                            ),
-                          ],
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    const Expanded(
+                      child: Text(
+                        'Worker Dashboard',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  // Right: action icons (white)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (onNotifications != null)
-                        IconButton(
-                          tooltip: 'Notifications',
-                          icon: const Icon(
+                    if (onNotifications != null)
+                      GestureDetector(
+                        onTap: onNotifications,
+                        child: Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.18),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
                             Icons.notifications_outlined,
                             color: Colors.white,
+                            size: 19,
                           ),
-                          onPressed: onNotifications,
-                          style: IconButton.styleFrom(
-                              foregroundColor: Colors.white),
                         ),
-                      IconButton(
-                        tooltip: 'Edit Profile',
-                        icon: const Icon(
-                          Icons.edit_outlined,
-                          color: Colors.white,
-                        ),
-                        onPressed: onEdit,
-                        style: IconButton.styleFrom(
-                            foregroundColor: Colors.white),
                       ),
-                      if (onLogout != null)
-                        IconButton(
-                          tooltip: 'Log Out',
-                          icon: const Icon(
-                            Icons.logout_rounded,
-                            color: Colors.white,
-                          ),
-                          onPressed: onLogout,
-                          style: IconButton.styleFrom(
-                              foregroundColor: Colors.white),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              // ── Profile strip ───────────────────────────────────────────────
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Stack(
-                    children: [
-                      _WorkerAvatar(photoUrl: photoUrl, size: 50),
-                      if (isVerified == 'verified')
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: Container(
-                            width: 17,
-                            height: 17,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2BB673),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: const Color(0xFF034FA0),
-                                width: 2,
-                              ),
-                            ),
-                            child: const Icon(
-                              Icons.check_rounded,
-                              color: Colors.white,
-                              size: 10,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  ],
+                ),
+                const SizedBox(height: 14),
+                // ── Profile row ──────────────────────────────────────────
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
                       children: [
-                        Text(
-                          name.isNotEmpty ? name : 'Worker',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.star_rounded,
-                              color: kAmber,
-                              size: 14,
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              rating.toStringAsFixed(1),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (userId.isNotEmpty)
-                              Text(
-                                '  ·  ID $userId',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.7),
-                                  fontSize: 12,
+                        _WorkerAvatar(photoUrl: photoUrl, name: name, size: 50),
+                        if (isVerified == 'verified')
+                          Positioned(
+                            bottom: -1,
+                            right: -1,
+                            child: Container(
+                              width: 18,
+                              height: 18,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2E9E6B),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 2,
                                 ),
                               ),
-                          ],
-                        ),
+                              child: const Icon(
+                                Icons.check_rounded,
+                                color: Colors.white,
+                                size: 11,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
-                  ),
-                ],
-              ),
-            ],
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        name.isNotEmpty ? name : 'Worker',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -233,8 +180,13 @@ class WorkerHeader extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _WorkerAvatar extends StatelessWidget {
   final String photoUrl;
+  final String name;
   final double size;
-  const _WorkerAvatar({required this.photoUrl, required this.size});
+  const _WorkerAvatar({
+    required this.photoUrl,
+    required this.name,
+    required this.size,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -245,36 +197,40 @@ class _WorkerAvatar extends StatelessWidget {
           width: size,
           height: size,
           fit: BoxFit.cover,
-          placeholder: (ctx, url) => _DefaultWorkerAvatar(size: size),
-          errorWidget: (ctx, url, err) => _DefaultWorkerAvatar(size: size),
+          placeholder: (ctx, url) => _InitialAvatar(name: name, size: size),
+          errorWidget: (ctx, url, err) =>
+              _InitialAvatar(name: name, size: size),
         ),
       );
     }
-    return _DefaultWorkerAvatar(size: size);
+    return _InitialAvatar(name: name, size: size);
   }
 }
 
-class _DefaultWorkerAvatar extends StatelessWidget {
+class _InitialAvatar extends StatelessWidget {
+  final String name;
   final double size;
-  const _DefaultWorkerAvatar({required this.size});
+  const _InitialAvatar({required this.name, required this.size});
 
   @override
   Widget build(BuildContext context) {
+    final trimmed = name.trim();
+    final initial = trimmed.isNotEmpty ? trimmed[0].toUpperCase() : '?';
     return Container(
       width: size,
       height: size,
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.3),
-          width: 1.5,
-        ),
-      ),
-      child: Icon(
-        Icons.person_rounded,
+      decoration: const BoxDecoration(
         color: Colors.white,
-        size: size * 0.5,
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initial,
+        style: const TextStyle(
+          color: Color(0xFF33475E),
+          fontSize: 18,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     );
   }

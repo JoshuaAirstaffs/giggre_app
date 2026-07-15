@@ -13,7 +13,14 @@ import 'widgets/gig_detail_sheet.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 class HostGigsScreen extends StatefulWidget {
   final String uid;
-  const HostGigsScreen({super.key, required this.uid});
+  // True when hosted as the "My gigs" tab root inside HostShell — suppresses
+  // the AppBar's back arrow since there's no dashboard-level route to pop to.
+  final bool isTabRoot;
+  const HostGigsScreen({
+    super.key,
+    required this.uid,
+    this.isTabRoot = false,
+  });
 
   @override
   State<HostGigsScreen> createState() => _HostGigsScreenState();
@@ -161,14 +168,17 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
       appBar: AppBar(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
-        leading: IconButton(
-          icon: Icon(
-            Icons.arrow_back_ios_new_rounded,
-            color: onSurface,
-            size: 20,
-          ),
-          onPressed: () => Navigator.pop(context),
-        ),
+        automaticallyImplyLeading: !widget.isTabRoot,
+        leading: widget.isTabRoot
+            ? null
+            : IconButton(
+                icon: Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  color: onSurface,
+                  size: 20,
+                ),
+                onPressed: () => Navigator.pop(context),
+              ),
         title: Text(
           'My Gigs',
           style: TextStyle(

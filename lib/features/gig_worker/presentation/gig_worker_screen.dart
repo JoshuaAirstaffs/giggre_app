@@ -1,9 +1,5 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -15,20 +11,16 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/worker_active_gig.dart';
 import '../../auth/presentation/login_screen.dart';
+import '../../../screens/host/host_shell.dart';
+import '../../home/presentation/profile_tab.dart';
+import 'widgets/dashboard_summary_card.dart';
 import 'widgets/dispatch_offer_card.dart';
-import 'widgets/earnings_card.dart';
 import 'widgets/gig_map_section.dart';
-import 'widgets/toggles_card.dart';
 import 'widgets/worker_header.dart';
-import 'widgets/worker_widgets.dart';
+import 'widgets/worker_notifications_sheet.dart';
 import 'widgets/working_ui.dart';
 import 'widgets/offered_gig_offer_card.dart';
 import 'widgets/gig_assigned_popup.dart'; // exports GigAssignedDialog
-import 'widgets/toolchest_sheet.dart';
-import 'gig_history_screen.dart';
-import 'worker_ratings_screen.dart';
-import 'widgets/worker_notifications_sheet.dart';
-import 'worker_settings_screen.dart';
 import '../../../widgets/active_gig_bar.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,7 +33,15 @@ class GigWorkerScreen extends StatefulWidget {
   // regular dashboard — the bar is the only entry point into the restore.
   final bool restoreActiveGigOnEntry;
 
-  const GigWorkerScreen({super.key, this.restoreActiveGigOnEntry = false});
+  // True when hosted as the Home tab root inside WorkerShell — suppresses the
+  // header's back arrow since there's no dashboard-level route to pop to.
+  final bool isTabRoot;
+
+  const GigWorkerScreen({
+    super.key,
+    this.restoreActiveGigOnEntry = false,
+    this.isTabRoot = false,
+  });
 
   @override
   State<GigWorkerScreen> createState() => _GigWorkerScreenState();
@@ -61,7 +61,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   String _name = '';
   String _email = '';
   String _phone = '';
-  String _bio = '';
   String _photoUrl = '';
   List<String> _skills = [];
   double _ratingAsWorker = 5.0;
@@ -136,7 +135,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       _setOnlineStatus(true);
       // Restore WorkingUI if worker has an ongoing gig they came back to
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid != null && widget.restoreActiveGigOnEntry) _checkForActiveGig(uid);
+      if (uid != null && widget.restoreActiveGigOnEntry)
+        _checkForActiveGig(uid);
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _setOnlineStatus(false);
@@ -147,10 +147,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .update({'isOnline': online});
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'isOnline': online,
+      });
     } catch (_) {}
   }
 
@@ -164,90 +163,98 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .doc(uid)
         .snapshots()
         .listen((doc) {
-      final data = doc.data() ?? {};
+          final data = doc.data() ?? {};
 
-      final createdAt = data['createdAt'];
-      String memberSince = '';
-      if (createdAt is Timestamp) {
-        final d = createdAt.toDate();
-        memberSince = '${_monthName(d.month)} ${d.year}';
-      }
+          final createdAt = data['createdAt'];
+          String memberSince = '';
+          if (createdAt is Timestamp) {
+            final d = createdAt.toDate();
+            memberSince = '${_monthName(d.month)} ${d.year}';
+          }
 
-      final suspendedUntilTs = data['suspended_until'] as Timestamp?;
-      DateTime? suspendedUntil;
-      if (suspendedUntilTs != null) {
-        final dt = suspendedUntilTs.toDate();
-        if (dt.isAfter(DateTime.now())) suspendedUntil = dt;
-      }
+          final suspendedUntilTs = data['suspended_until'] as Timestamp?;
+          DateTime? suspendedUntil;
+          if (suspendedUntilTs != null) {
+            final dt = suspendedUntilTs.toDate();
+            if (dt.isAfter(DateTime.now())) suspendedUntil = dt;
+          }
 
-      if (!mounted) return;
+          if (!mounted) return;
 
-      final isFirstLoad = _loading;
-      final wasNotSuspended = _suspendedUntil == null;
+          final isFirstLoad = _loading;
+          final wasNotSuspended = _suspendedUntil == null;
 
-      setState(() {
-        _userId = data['userId'] as String? ?? '';
-        _name = data['name'] as String? ?? '';
-        _email = data['email'] as String? ?? '';
-        _phone = data['phone'] as String? ?? '';
-        _bio = data['bio'] as String? ?? '';
-        _photoUrl = data['photoUrl'] as String? ?? '';
-        final skillsXP = data['skillsXP'] as Map<String, dynamic>? ?? {};
-        _skills = skillsXP.keys.toList();
-        _ratingAsWorker =
-            (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
-        _ratingCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
-        _availableForGigs = data['availableForGigs'] as bool? ?? false;
-        _autoAccept = data['autoAccept'] as bool? ?? false;
-        _seekingQuickGigs = data['seekingQuickGigs'] as bool? ?? false;
-        _memberSince = memberSince;
-        _suspendedUntil = suspendedUntil;
-        _loading = false;
-        _isVerified = data['isVerified'] as String? ?? '';
+          setState(() {
+            _userId = data['userId'] as String? ?? '';
+            _name = data['name'] as String? ?? '';
+            _email = data['email'] as String? ?? '';
+            _phone = data['phone'] as String? ?? '';
+            _photoUrl = data['photoUrl'] as String? ?? '';
+            final skillsXP = data['skillsXP'] as Map<String, dynamic>? ?? {};
+            _skills = skillsXP.keys.toList();
+            _ratingAsWorker =
+                (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
+            _ratingCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
+            _availableForGigs = data['availableForGigs'] as bool? ?? false;
+            _autoAccept = data['autoAccept'] as bool? ?? false;
+            _seekingQuickGigs = data['seekingQuickGigs'] as bool? ?? false;
+            _memberSince = memberSince;
+            _suspendedUntil = suspendedUntil;
+            _loading = false;
+            _isVerified = data['isVerified'] as String? ?? '';
 
-        // Earnings — read directly from the aggregated field on the user doc.
-        final earningsData =
-            (data['earnings'] as Map<String, dynamic>?) ?? {};
-        final storedWeek = earningsData['currentWeek'] as String? ?? '';
-        final currentWeek = EarningsService.currentWeekLabel();
-        final rawTotal =
-            (earningsData['total'] as Map<String, dynamic>?) ?? {};
-        final rawWeekly = storedWeek == currentWeek
-            ? (earningsData['weekly'] as Map<String, dynamic>?) ?? {}
-            : <String, dynamic>{};
-        _earningsByCode = rawTotal.map(
-            (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0));
-        _weeklyByCode = rawWeekly.map(
-            (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0));
-        _completedGigs =
-            (earningsData['completedGigs'] as num?)?.toInt() ?? 0;
-      });
+            // Earnings — read directly from the aggregated field on the user doc.
+            final earningsData =
+                (data['earnings'] as Map<String, dynamic>?) ?? {};
+            final storedWeek = earningsData['currentWeek'] as String? ?? '';
+            final currentWeek = EarningsService.currentWeekLabel();
+            final rawTotal =
+                (earningsData['total'] as Map<String, dynamic>?) ?? {};
+            final rawWeekly = storedWeek == currentWeek
+                ? (earningsData['weekly'] as Map<String, dynamic>?) ?? {}
+                : <String, dynamic>{};
+            _earningsByCode = rawTotal.map(
+              (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0),
+            );
+            _weeklyByCode = rawWeekly.map(
+              (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0),
+            );
+            _completedGigs =
+                (earningsData['completedGigs'] as num?)?.toInt() ?? 0;
+          });
 
-      if (isFirstLoad) {
-        _saveLocationToFirestore();
-        _startDispatchSub(uid);
-        _startOfferedGigSub(uid);
-        _startOpenGigAssignSub(uid);
-        if (widget.restoreActiveGigOnEntry) _checkForActiveGig(uid);
-      }
+          if (isFirstLoad) {
+            _saveLocationToFirestore();
+            _startDispatchSub(uid);
+            _startOfferedGigSub(uid);
+            _startOpenGigAssignSub(uid);
+            if (widget.restoreActiveGigOnEntry) _checkForActiveGig(uid);
+          }
 
-      if (suspendedUntil != null) {
-        _startSuspensionTimer();
-        if (wasNotSuspended) {
-          WidgetsBinding.instance.addPostFrameCallback(
-              (_) => _showSuspensionDialog());
-        }
-      }
-    }, onError: (e) => debugPrint('[GigWorker] profile stream error: $e'));
+          if (suspendedUntil != null) {
+            _startSuspensionTimer();
+            if (wasNotSuspended) {
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => _showSuspensionDialog(),
+              );
+            }
+          }
+        }, onError: (e) => debugPrint('[GigWorker] profile stream error: $e'));
   }
 
   /// On app resume/init, restore WorkingUI if worker has an ongoing gig.
   Future<void> _checkForActiveGig(String uid) async {
     if (_activeQuickGig != null ||
         _activeOpenGig != null ||
-        _activeOfferedGig != null) return;
+        _activeOfferedGig != null)
+      return;
     const activeStatuses = [
-      'navigating', 'arrived', 'working', 'task_complete', 'payment', 'cancellation_requested', 
+      'navigating',
+      'arrived',
+      'working',
+      'task_complete',
+      'payment',
+      'cancellation_requested',
     ];
     try {
       // Check quick gigs first
@@ -262,18 +269,20 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         final data = doc.data();
         final geo = data['location'] as GeoPoint?;
         if (geo != null && mounted) {
-          setState(() => _activeQuickGig = GigMarkerData(
-            id: doc.id,
-            title: data['title'] as String? ?? 'Quick Gig',
-            gigType: 'quick',
-            budget: (data['budget'] as num?)?.toDouble() ?? 0,
-            status: data['status'] as String? ?? 'navigating',
-            hostName: data['hostName'] as String? ?? '',
-            address: data['address'] as String? ?? '',
-            position: LatLng(geo.latitude, geo.longitude),
-            assignedWorkerId: uid,
-            hostId: data['hostId'] as String? ?? '',
-          ));
+          setState(
+            () => _activeQuickGig = GigMarkerData(
+              id: doc.id,
+              title: data['title'] as String? ?? 'Quick Gig',
+              gigType: 'quick',
+              budget: (data['budget'] as num?)?.toDouble() ?? 0,
+              status: data['status'] as String? ?? 'navigating',
+              hostName: data['hostName'] as String? ?? '',
+              address: data['address'] as String? ?? '',
+              position: LatLng(geo.latitude, geo.longitude),
+              assignedWorkerId: uid,
+              hostId: data['hostId'] as String? ?? '',
+            ),
+          );
         }
         return;
       }
@@ -290,18 +299,20 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         debugPrint('Open Data $data');
         final geo = data['location'] as GeoPoint?;
         if (geo != null && mounted) {
-          setState(() => _activeOpenGig = GigMarkerData(
-            id: doc.id,
-            title: data['title'] as String? ?? 'Open Gig',
-            gigType: 'open',
-            budget: (data['budget'] as num?)?.toDouble() ?? 0,
-            status: data['status'] as String? ?? 'navigating',
-            hostName: data['hostName'] as String? ?? '',
-            address: data['address'] as String? ?? '',
-            position: LatLng(geo.latitude, geo.longitude),
-            assignedWorkerId: uid,
-            hostId: data['hostId'] as String? ?? '',
-          ));
+          setState(
+            () => _activeOpenGig = GigMarkerData(
+              id: doc.id,
+              title: data['title'] as String? ?? 'Open Gig',
+              gigType: 'open',
+              budget: (data['budget'] as num?)?.toDouble() ?? 0,
+              status: data['status'] as String? ?? 'navigating',
+              hostName: data['hostName'] as String? ?? '',
+              address: data['address'] as String? ?? '',
+              position: LatLng(geo.latitude, geo.longitude),
+              assignedWorkerId: uid,
+              hostId: data['hostId'] as String? ?? '',
+            ),
+          );
         }
         return;
       }
@@ -317,22 +328,24 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         final data = doc.data();
         final geo = data['location'] as GeoPoint?;
         if (geo != null && mounted) {
-          setState(() => _activeOfferedGig = GigMarkerData(
-            id: doc.id,
-            title: data['title'] as String? ?? 'Offered Gig',
-            gigType: 'offered',
-            budget: (data['budget'] as num?)?.toDouble() ?? 0,
-            status: data['status'] as String? ?? 'navigating',
-            hostName: data['hostName'] as String? ?? '',
-            address: data['address'] as String? ?? '',
-            position: LatLng(geo.latitude, geo.longitude),
-            assignedWorkerId: uid,
-            experienceLevel: data['experienceLevel'] as String? ?? '',
-            requiredSkills: data['skillRequired'] != null
-                ? [data['skillRequired'] as String]
-                : [],
-            hostId: data['hostId'] as String? ?? '',
-          ));
+          setState(
+            () => _activeOfferedGig = GigMarkerData(
+              id: doc.id,
+              title: data['title'] as String? ?? 'Offered Gig',
+              gigType: 'offered',
+              budget: (data['budget'] as num?)?.toDouble() ?? 0,
+              status: data['status'] as String? ?? 'navigating',
+              hostName: data['hostName'] as String? ?? '',
+              address: data['address'] as String? ?? '',
+              position: LatLng(geo.latitude, geo.longitude),
+              assignedWorkerId: uid,
+              experienceLevel: data['experienceLevel'] as String? ?? '',
+              requiredSkills: data['skillRequired'] != null
+                  ? [data['skillRequired'] as String]
+                  : [],
+              hostId: data['hostId'] as String? ?? '',
+            ),
+          );
         }
       }
     } catch (_) {
@@ -351,38 +364,42 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .where('workerId', isEqualTo: uid)
         .where('status', isEqualTo: 'offered')
         .snapshots()
-        .listen((snap) {
-      if (!mounted) return;
-      if (snap.docs.isEmpty) {
-        setState(() => _pendingOfferedGig = null);
-        return;
-      }
-      final doc = snap.docs.first;
-      final data = doc.data();
-      final geo = data['location'] as GeoPoint?;
-      if (geo == null) return;
-      setState(() {
-        _pendingOfferedGig = GigMarkerData(
-          id: doc.id,
-          title: data['title'] as String? ?? 'Offered Gig',
-          gigType: 'offered',
-          budget: (data['budget'] as num?)?.toDouble() ?? 0,
-          status: 'offered',
-          hostName: data['hostName'] as String? ?? '',
-          address: data['address'] as String? ?? '',
-          position: LatLng(geo.latitude, geo.longitude),
-          assignedWorkerId: uid,
-          experienceLevel: data['experienceLevel'] as String? ?? '',
-          requiredSkills: data['skillRequired'] != null
-              ? [data['skillRequired'] as String]
-              : [],
-          hostId: data['hostId'] as String? ?? '',
-          scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
+        .listen(
+          (snap) {
+            if (!mounted) return;
+            if (snap.docs.isEmpty) {
+              setState(() => _pendingOfferedGig = null);
+              return;
+            }
+            final doc = snap.docs.first;
+            final data = doc.data();
+            final geo = data['location'] as GeoPoint?;
+            if (geo == null) return;
+            setState(() {
+              _pendingOfferedGig = GigMarkerData(
+                id: doc.id,
+                title: data['title'] as String? ?? 'Offered Gig',
+                gigType: 'offered',
+                budget: (data['budget'] as num?)?.toDouble() ?? 0,
+                status: 'offered',
+                hostName: data['hostName'] as String? ?? '',
+                address: data['address'] as String? ?? '',
+                position: LatLng(geo.latitude, geo.longitude),
+                assignedWorkerId: uid,
+                experienceLevel: data['experienceLevel'] as String? ?? '',
+                requiredSkills: data['skillRequired'] != null
+                    ? [data['skillRequired'] as String]
+                    : [],
+                hostId: data['hostId'] as String? ?? '',
+                scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
+              );
+              _pendingOfferedGigDesc = data['description'] as String? ?? '';
+              _pendingOfferedGigSkill = data['skillRequired'] as String? ?? '';
+            });
+          },
+          onError: (e) =>
+              debugPrint('[GigWorker] offered gig stream error: $e'),
         );
-        _pendingOfferedGigDesc = data['description'] as String? ?? '';
-        _pendingOfferedGigSkill = data['skillRequired'] as String? ?? '';
-      });
-    }, onError: (e) => debugPrint('[GigWorker] offered gig stream error: $e'));
   }
 
   // Watches for open gig assignments initiated by the host (worker doesn't tap accept).
@@ -394,35 +411,40 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .where('workerId', isEqualTo: uid)
         .where('status', isEqualTo: 'navigating')
         .snapshots()
-        .listen((snap) {
-      if (firstLoad) {
-        firstLoad = false;
-        return;
-      }
-      if (!mounted) return;
-      for (final change in snap.docChanges) {
-        if (change.type == DocumentChangeType.added) {
-          final data = change.doc.data()!;
-          final geo = data['location'] as GeoPoint?;
-          if (geo == null) continue;
-          final gig = GigMarkerData(
-            id: change.doc.id,
-            title: data['title'] as String? ?? 'Open Gig',
-            gigType: 'open',
-            budget: (data['budget'] as num?)?.toDouble() ?? 0,
-            status: 'navigating',
-            hostName: data['hostName'] as String? ?? '',
-            address: data['address'] as String? ?? '',
-            position: LatLng(geo.latitude, geo.longitude),
-            assignedWorkerId: uid,
-            hostId: data['hostId'] as String? ?? '',
-            scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
-          );
-          _showAssignedPopup(gig);
-          break;
-        }
-      }
-    }, onError: (e) => debugPrint('[GigWorker] open gig assign stream error: $e'));
+        .listen(
+          (snap) {
+            if (firstLoad) {
+              firstLoad = false;
+              return;
+            }
+            if (!mounted) return;
+            for (final change in snap.docChanges) {
+              if (change.type == DocumentChangeType.added) {
+                final data = change.doc.data()!;
+                final geo = data['location'] as GeoPoint?;
+                if (geo == null) continue;
+                final gig = GigMarkerData(
+                  id: change.doc.id,
+                  title: data['title'] as String? ?? 'Open Gig',
+                  gigType: 'open',
+                  budget: (data['budget'] as num?)?.toDouble() ?? 0,
+                  status: 'navigating',
+                  hostName: data['hostName'] as String? ?? '',
+                  address: data['address'] as String? ?? '',
+                  position: LatLng(geo.latitude, geo.longitude),
+                  assignedWorkerId: uid,
+                  hostId: data['hostId'] as String? ?? '',
+                  scheduledDate: (data['scheduledDate'] as Timestamp?)
+                      ?.toDate(),
+                );
+                _showAssignedPopup(gig);
+                break;
+              }
+            }
+          },
+          onError: (e) =>
+              debugPrint('[GigWorker] open gig assign stream error: $e'),
+        );
   }
 
   void _showAssignedPopup(GigMarkerData gig) {
@@ -466,31 +488,33 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
     setState(() => _workingUIRouteActive = true);
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => WorkingUI(
-          gig: gig,
-          gigCollection: collection,
-          onComplete: () async {
-            await onComplete();
-            if (mounted) {
-              setState(() => _workingUIRouteActive = false);
-              Navigator.of(context).maybePop();
-            }
-          },
-          onCancel: () async {
-            await onCancel();
-            if (mounted) {
-              setState(() => _workingUIRouteActive = false);
-              Navigator.of(context).maybePop();
-            }
-          },
-        ),
-      ),
-    ).then((_) {
-      // Reset if the route was dismissed via back gesture / hardware back button.
-      if (mounted) setState(() => _workingUIRouteActive = false);
-    });
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => WorkingUI(
+              gig: gig,
+              gigCollection: collection,
+              onComplete: () async {
+                await onComplete();
+                if (mounted) {
+                  setState(() => _workingUIRouteActive = false);
+                  Navigator.of(context).maybePop();
+                }
+              },
+              onCancel: () async {
+                await onCancel();
+                if (mounted) {
+                  setState(() => _workingUIRouteActive = false);
+                  Navigator.of(context).maybePop();
+                }
+              },
+            ),
+          ),
+        )
+        .then((_) {
+          // Reset if the route was dismissed via back gesture / hardware back button.
+          if (mounted) setState(() => _workingUIRouteActive = false);
+        });
   }
 
   Future<void> _acceptOfferedGig(GigMarkerData gig) async {
@@ -507,9 +531,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .collection('offered_gigs')
         .doc(gig.id)
         .update({
-      'status': 'navigating',
-      'acceptedAt': FieldValue.serverTimestamp(),
-    });
+          'status': 'navigating',
+          'acceptedAt': FieldValue.serverTimestamp(),
+        });
     if (mounted) {
       setState(() {
         _pendingOfferedGig = null;
@@ -543,36 +567,35 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .where('status', isEqualTo: 'in_progress')
         .snapshots()
         .listen((snap) {
-
-      if (!mounted) return;
-      if (snap.docs.isEmpty) {
-        setState(() => _dispatchedGig = null);
-        return;
-      }
-      final doc = snap.docs.first;
-      final data = doc.data();
-      final geo = data['location'] as GeoPoint?;
-      if (geo == null) return;
-      final gig = GigMarkerData(
-        id: doc.id,
-        title: data['title'] as String? ?? 'Quick Gig',
-        gigType: 'quick',
-        budget: (data['budget'] as num?)?.toDouble() ?? 0,
-        status: 'in_progress',
-        hostName: data['hostName'] as String? ?? '',
-        address: data['address'] as String? ?? '',
-        position: LatLng(geo.latitude, geo.longitude),
-        assignedWorkerId: uid,
-        hostId: data['hostId'] as String? ?? '',
-        scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
-      );
-      // Auto-accept: skip review window and accept immediately
-      if (_autoAccept) {
-        _acceptDispatch(gig);
-        return;
-      }
-      setState(() => _dispatchedGig = gig);
-    }, onError: (e) => debugPrint('[GigWorker] dispatch stream error: $e'));
+          if (!mounted) return;
+          if (snap.docs.isEmpty) {
+            setState(() => _dispatchedGig = null);
+            return;
+          }
+          final doc = snap.docs.first;
+          final data = doc.data();
+          final geo = data['location'] as GeoPoint?;
+          if (geo == null) return;
+          final gig = GigMarkerData(
+            id: doc.id,
+            title: data['title'] as String? ?? 'Quick Gig',
+            gigType: 'quick',
+            budget: (data['budget'] as num?)?.toDouble() ?? 0,
+            status: 'in_progress',
+            hostName: data['hostName'] as String? ?? '',
+            address: data['address'] as String? ?? '',
+            position: LatLng(geo.latitude, geo.longitude),
+            assignedWorkerId: uid,
+            hostId: data['hostId'] as String? ?? '',
+            scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
+          );
+          // Auto-accept: skip review window and accept immediately
+          if (_autoAccept) {
+            _acceptDispatch(gig);
+            return;
+          }
+          setState(() => _dispatchedGig = gig);
+        }, onError: (e) => debugPrint('[GigWorker] dispatch stream error: $e'));
   }
 
   Future<void> _saveLocationToFirestore() async {
@@ -586,10 +609,13 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) { return; }
+          perm == LocationPermission.deniedForever) {
+        return;
+      }
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'location': GeoPoint(pos.latitude, pos.longitude),
@@ -600,10 +626,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   Future<void> _setToggle(String field, bool value) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .update({field: value});
+    await FirebaseFirestore.instance.collection('users').doc(uid).update({
+      field: value,
+    });
   }
 
   Future<void> _toggleQuickGigs(bool value) async {
@@ -705,8 +730,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     final storedDate = data['decline_count_date'] as String? ?? '';
     final isNewDay = storedDate != todayStr;
 
-    final currentDeclineCount =
-        isNewDay ? 0 : (data['decline_count'] as num?)?.toInt() ?? 0;
+    final currentDeclineCount = isNewDay
+        ? 0
+        : (data['decline_count'] as num?)?.toInt() ?? 0;
     final newDeclineCount = currentDeclineCount + 1;
 
     await Future.wait([
@@ -732,10 +758,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   Future<void> _finishQuickGig() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .update({'slot': 'AVAILABLE'});
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'slot': 'AVAILABLE',
+      });
     }
     if (mounted) setState(() => _activeQuickGig = null);
     _toggleQuickGigs(false);
@@ -748,29 +773,25 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           .collection('quick_gigs')
           .doc(_activeQuickGig!.id)
           .update({'status': 'cancelled'});
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .update({'slot': 'AVAILABLE'});
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'slot': 'AVAILABLE',
+      });
     }
     if (mounted) setState(() => _activeQuickGig = null);
   }
 
-  Future<void> _checkAndApplySuspension(
-      String uid, int newDeclineCount) async {
+  Future<void> _checkAndApplySuspension(String uid, int newDeclineCount) async {
     try {
       final doc = await FirebaseFirestore.instance
           .collection('quick_gig_config')
           .doc('decline_suspension')
           .get();
       final data = doc.data() ?? {};
-      final freeLimit =
-          (data['free_decline_limit'] as num?)?.toInt() ?? 0;
+      final freeLimit = (data['free_decline_limit'] as num?)?.toInt() ?? 0;
 
       if (newDeclineCount <= freeLimit) return;
 
-      final tierTable =
-          data['suspension_tier_table'] as List<dynamic>? ?? [];
+      final tierTable = data['suspension_tier_table'] as List<dynamic>? ?? [];
       if (tierTable.isEmpty) return;
 
       // Triggers are relative to the free limit.
@@ -780,8 +801,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       int? suspensionMinutes;
       int highestTrigger = 0;
       for (final tier in tierTable) {
-        final trigger =
-            (tier['decline_count_trigger'] as num?)?.toInt() ?? 0;
+        final trigger = (tier['decline_count_trigger'] as num?)?.toInt() ?? 0;
         final mins =
             (tier['suspension_duration_minutes'] as num?)?.toInt() ?? 0;
         if (declinesOverLimit >= trigger && trigger >= highestTrigger) {
@@ -792,8 +812,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
       if (suspensionMinutes == null || suspensionMinutes <= 0) return;
 
-      final suspendedUntil =
-          DateTime.now().add(Duration(minutes: suspensionMinutes));
+      final suspendedUntil = DateTime.now().add(
+        Duration(minutes: suspensionMinutes),
+      );
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'suspended_until': Timestamp.fromDate(suspendedUntil),
         'seekingQuickGigs': false,
@@ -810,11 +831,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
   void _startSuspensionTimer() {
     _suspensionTimer?.cancel();
-    _suspensionTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) {
+    _suspensionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      if (_suspendedUntil == null ||
-          DateTime.now().isAfter(_suspendedUntil!)) {
+      if (_suspendedUntil == null || DateTime.now().isAfter(_suspendedUntil!)) {
         _suspensionTimer?.cancel();
         if (mounted) setState(() => _suspendedUntil = null);
         return;
@@ -830,8 +849,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       barrierDismissible: true,
       builder: (ctx) => AlertDialog(
         backgroundColor: Theme.of(ctx).cardColor,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         icon: Container(
           width: 52,
           height: 52,
@@ -839,15 +857,19 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             color: Color(0xFFFFF3CD),
             shape: BoxShape.circle,
           ),
-          child: const Icon(Icons.info_outline_rounded,
-              color: Colors.orange, size: 28),
+          child: const Icon(
+            Icons.info_outline_rounded,
+            color: Colors.orange,
+            size: 28,
+          ),
         ),
         title: Text(
           'Finish Your Current Gig First',
           textAlign: TextAlign.center,
           style: TextStyle(
-              color: Theme.of(ctx).colorScheme.onSurface,
-              fontWeight: FontWeight.bold),
+            color: Theme.of(ctx).colorScheme.onSurface,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         content: const Text(
           "You need to finish your current gig before applying to or accepting another one.",
@@ -865,7 +887,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               child: const Text('Got it'),
@@ -888,8 +911,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: Theme.of(ctx).cardColor,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         icon: Container(
           width: 52,
           height: 52,
@@ -897,15 +919,19 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             color: Color(0xFFFFEDED),
             shape: BoxShape.circle,
           ),
-          child: const Icon(Icons.block_rounded,
-              color: Colors.redAccent, size: 28),
+          child: const Icon(
+            Icons.block_rounded,
+            color: Colors.redAccent,
+            size: 28,
+          ),
         ),
         title: Text(
           'Account Suspended',
           textAlign: TextAlign.center,
           style: TextStyle(
-              color: Theme.of(ctx).colorScheme.onSurface,
-              fontWeight: FontWeight.bold),
+            color: Theme.of(ctx).colorScheme.onSurface,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         content: Text(
           'Your account has been temporarily suspended due to excessive gig declines.\n\n'
@@ -929,7 +955,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               child: const Text('Understood'),
@@ -940,338 +967,55 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     );
   }
 
-
-  Future<void> _pickAvatar(void Function(void Function()) setModal,
-      void Function(XFile) onPicked) async {
-    final source = await showDialog<ImageSource>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Change Profile Photo',
-            style: TextStyle(
-                color: Theme.of(ctx).colorScheme.onSurface, fontSize: 15)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt_rounded, color: kBlue),
-              title: const Text('Take Photo'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('Profile'), elevation: 0),
+          body: ProfileTab(
+            initialRole: 'worker',
+            onSwitchRole: () => Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const HostShell()),
             ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_rounded, color: kBlue),
-              title: const Text('Choose from Library'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-          ],
+            onLogout: _performLogout,
+          ),
         ),
       ),
     );
-    if (source == null) return;
-    final picked = await ImagePicker()
-        .pickImage(source: source, imageQuality: 80, maxWidth: 512);
-    if (picked != null) setModal(() => onPicked(picked));
   }
 
-  void _showEditPersonalInfo() {
-    final nameCtrl = TextEditingController(text: _name);
-    final phoneCtrl = TextEditingController(text: _phone);
-    final bioCtrl = TextEditingController(text: _bio);
-    bool saving = false;
-    XFile? pickedImage;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModal) {
-          final isDark = Theme.of(ctx).brightness == Brightness.dark;
-          final cardColor =
-              isDark ? const Color(0xFF1E2533) : Colors.white;
-          final onSurface = Theme.of(ctx).colorScheme.onSurface;
-
-          return Padding(
-            padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom),
-            child: Container(
-              margin: const EdgeInsets.all(16),
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Theme.of(ctx).dividerColor),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text('Edit Profile',
-                          style: TextStyle(
-                              color: onSurface,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold)),
-                      const Spacer(),
-                      GestureDetector(
-                        onTap: () => Navigator.pop(ctx),
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.08)
-                                : Colors.grey.withValues(alpha: 0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(Icons.close_rounded,
-                              color: onSurface, size: 16),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // ── Avatar picker ───────────────────────────────────────
-                  Center(
-                    child: GestureDetector(
-                      onTap: saving
-                          ? null
-                          : () => _pickAvatar(
-                                setModal,
-                                (img) => pickedImage = img,
-                              ),
-                      child: Stack(
-                        children: [
-                          Container(
-                            width: 80,
-                            height: 80,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                  color: kBlue.withValues(alpha: 0.5),
-                                  width: 2),
-                            ),
-                            child: ClipOval(
-                              child: pickedImage != null
-                                  ? Image.file(File(pickedImage!.path),
-                                      fit: BoxFit.cover)
-                                  : _photoUrl.isNotEmpty
-                                      ? CachedNetworkImage(
-                                          imageUrl: _photoUrl,
-                                          fit: BoxFit.cover,
-                                          placeholder: (c, u) => _workerDefaultAvatar(),
-                                          errorWidget: (c, u, e) => _workerDefaultAvatar(),
-                                        )
-                                      : _workerDefaultAvatar(),
-                            ),
-                          ),
-                          Positioned(
-                            bottom: 0,
-                            right: 0,
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: kBlue,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: cardColor, width: 2),
-                              ),
-                              child: const Icon(Icons.camera_alt_rounded,
-                                  color: Colors.white, size: 14),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  _EditField(
-                      label: 'Name',
-                      controller: nameCtrl,
-                      isDark: isDark),
-                  const SizedBox(height: 12),
-                  _EditField(
-                      label: 'Phone',
-                      controller: phoneCtrl,
-                      isDark: isDark,
-                      keyboardType: TextInputType.phone),
-                  const SizedBox(height: 12),
-                  _EditField(
-                      label: 'Bio',
-                      controller: bioCtrl,
-                      isDark: isDark,
-                      maxLines: 3),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: saving
-                          ? null
-                          : () async {
-                              setModal(() => saving = true);
-                              final uid =
-                                  FirebaseAuth.instance.currentUser?.uid;
-                              if (uid == null) return;
-                              try {
-                                String? newPhotoUrl;
-                                if (pickedImage != null) {
-                                  final ref = FirebaseStorage.instance
-                                      .ref()
-                                      .child('profile_images/$uid.jpg');
-                                  await ref.putFile(
-                                      File(pickedImage!.path));
-                                  newPhotoUrl =
-                                      await ref.getDownloadURL();
-                                }
-                                final updates = <String, dynamic>{
-                                  'name': nameCtrl.text.trim(),
-                                  'phone': phoneCtrl.text.trim(),
-                                  'bio': bioCtrl.text.trim(),
-                                };
-                                if (newPhotoUrl != null) {
-                                  updates['photoUrl'] = newPhotoUrl;
-                                }
-                                await FirebaseFirestore.instance
-                                    .collection('users')
-                                    .doc(uid)
-                                    .update(updates);
-                                if (ctx.mounted) Navigator.pop(ctx);
-                              } catch (e) {
-                                setModal(() => saving = false);
-                              }
-                            },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kBlue,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      child: saving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2))
-                          : const Text('Save Changes',
-                              style:
-                                  TextStyle(fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+  Future<void> _performLogout() async {
+    _profileSub?.cancel();
+    _dispatchSub?.cancel();
+    _offeredGigSub?.cancel();
+    if (!mounted) return;
+    context.read<CurrentUserProvider>().clearUser();
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
     );
+    await WidgetsBinding.instance.endOfFrame;
+    await GoogleSignIn().disconnect();
+    await FirebaseAuth.instance.signOut();
   }
-
-  Widget _workerDefaultAvatar() {
-    return Container(
-      color: kBlue.withValues(alpha: 0.12),
-      child: const Icon(Icons.account_circle_rounded,
-          color: kBlue, size: 48),
-    );
-  }
-
-  void _confirmLogout() {
-  showDialog(
-    context: context,
-    builder: (ctx) => Dialog(
-      backgroundColor: Theme.of(ctx).cardColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 54, height: 54,
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 22),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Log out?',
-              style: TextStyle(
-                fontSize: 17, fontWeight: FontWeight.w600,
-                color: Theme.of(ctx).colorScheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              "You'll be returned to the login screen and will need to sign in again.",
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
-            ),
-            const SizedBox(height: 22),
-            const Divider(height: 0.5, thickness: 0.5),
-            IntrinsicHeight(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20)),
-                        ),
-                      ),
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Cancel', style: TextStyle(color: kSub, fontSize: 15)),
-                    ),
-                  ),
-                  const VerticalDivider(width: 0.5, thickness: 0.5),
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.only(bottomRight: Radius.circular(20)),
-                        ),
-                      ),
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        _profileSub?.cancel();
-                        _dispatchSub?.cancel();
-                        _offeredGigSub?.cancel();
-                        if (!mounted) return;
-                        context.read<CurrentUserProvider>().clearUser();
-                        Navigator.of(context).pushAndRemoveUntil(
-                          MaterialPageRoute(builder: (_) => const LoginScreen()),
-                          (_) => false,
-                        );
-                        await WidgetsBinding.instance.endOfFrame;
-                        await GoogleSignIn().disconnect();
-                        await FirebaseAuth.instance.signOut();
-                      },
-                      child: const Text('Log out',
-                        style: TextStyle(color: Colors.redAccent, fontSize: 15, fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
 
   String _monthName(int m) {
     const months = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return months[m];
   }
@@ -1285,8 +1029,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: (_loading || _awaitingActiveGigRestore)
           ? const Center(
-              child: CircularProgressIndicator(
-                  color: kBlue, strokeWidth: 2))
+              child: CircularProgressIndicator(color: kBlue, strokeWidth: 2),
+            )
           : !_workingUIRouteActive && _activeQuickGig != null
           ? WorkingUI(
               gig: _activeQuickGig!,
@@ -1312,297 +1056,147 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               stream: _activeGigBarStream,
               builder: (context, activeGigBarSnap) {
                 final activeGigForBar = activeGigBarSnap.data;
-                final showActiveGigBar = activeGigForBar != null &&
+                final showActiveGigBar =
+                    activeGigForBar != null &&
                     _dispatchedGig == null &&
                     _pendingOfferedGig == null;
                 return Stack(
-              children: [
-                CustomScrollView(
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: WorkerHeader(
-                        userId: _userId,
-                        name: _name,
-                        email: _email,
-                        phone: _phone,
-                        photoUrl: _photoUrl,
-                        rating: _ratingAsWorker,
-                        ratingCount: _ratingCount,
-                        memberSince: _memberSince,
-                        isDark: isDark,
-                        onEdit: _showEditPersonalInfo,
-                        isVerified: _isVerified,
-                        onNotifications: () =>
-                            WorkerNotificationsSheet.show(context),
-                        onLogout: _confirmLogout,
-                      ),
+                  children: [
+                    CustomScrollView(
+                      slivers: [
+                        // Header + Availability card share one sliver so the
+                        // card's Transform.translate can visually overlap the
+                        // header's bottom edge — a Transform can't bleed
+                        // across a sliver boundary into a neighboring sliver.
+                        SliverToBoxAdapter(
+                          child: Column(
+                            children: [
+                              WorkerHeader(
+                                userId: _userId,
+                                name: _name,
+                                email: _email,
+                                phone: _phone,
+                                photoUrl: _photoUrl,
+                                rating: _ratingAsWorker,
+                                ratingCount: _ratingCount,
+                                memberSince: _memberSince,
+                                isDark: isDark,
+                                onEdit: _openProfile,
+                                isVerified: _isVerified,
+                                showBackButton: !widget.isTabRoot,
+                                onNotifications: () =>
+                                    WorkerNotificationsSheet.show(context),
+                              ),
+                              Transform.translate(
+                                offset: const Offset(0, -24),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: AvailabilityCard(
+                                    isOnline: _availableForGigs,
+                                    onChanged: (v) {
+                                      setState(() => _availableForGigs = v);
+                                      _setToggle('availableForGigs', v);
+                                    },
+                                    isVerified: _isVerified,
+                                    onVerificationRequired: () =>
+                                        _showWorkerVerificationModal(context),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        SliverPadding(
+                          padding: EdgeInsets.fromLTRB(
+                            16,
+                            0,
+                            16,
+                            showActiveGigBar ? 32 + 86 : 32,
+                          ),
+                          sliver: SliverList(
+                            delegate: SliverChildListDelegate([
+                              // No leading spacer — the availability card's
+                              // Transform.translate above already leaves its
+                              // own ~24px reserved (unpainted) gap before this.
+
+                              // ── Earnings ───────────────────────────────────
+                              EarningsSummaryCard(
+                                totalByCurrency: _earningsByCode,
+                                weeklyByCurrency: _weeklyByCode,
+                                completedGigs: _completedGigs,
+                              ),
+                              const SizedBox(height: 16),
+
+                              // ── Work preferences ──────────────────────────
+                              WorkPreferencesCard(
+                                seekingQuickGigs: _seekingQuickGigs,
+                                onQuickGigsChanged: _toggleQuickGigs,
+                                autoAccept: _autoAccept,
+                                onAutoAcceptChanged: (v) {
+                                  setState(() => _autoAccept = v);
+                                  _setToggle('autoAccept', v);
+                                },
+                                isVerified: _isVerified,
+                                onVerificationRequired: () =>
+                                    _showWorkerVerificationModal(context),
+                              ),
+                              const SizedBox(height: 20),
+
+                              // ── Gig Map ───────────────────────────────────
+                              GigMapSection(
+                                uid: uid,
+                                workerName: _name,
+                                seekingQuickGigs: _seekingQuickGigs,
+                                onQuickGigStarted: _onQuickGigStarted,
+                                onOpenGigApplied: _onOpenGigApplied,
+                                isVerified: _isVerified,
+                                workerSkills: _skills,
+                              ),
+                              const SizedBox(height: 16),
+                            ]),
+                          ),
+                        ),
+                      ],
                     ),
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(
-                          16, 0, 16, showActiveGigBar ? 32 + 86 : 32),
-                      sliver: SliverList(
-                        delegate: SliverChildListDelegate([
-                          const SizedBox(height: 16),
-
-                          // ── Availability hero card ────────────────────
-                          _AvailabilityHeroCard(
-                            isOnline: _availableForGigs,
-                            onChanged: (v) {
-                              setState(() => _availableForGigs = v);
-                              _setToggle('availableForGigs', v);
-                            },
-                            isVerified: _isVerified,
-                          ),
-                          const SizedBox(height: 16),
-
-                          // ── Earnings (2-col) ──────────────────────────
-                          EarningsCard(
-                            totalByCurrency: _earningsByCode,
-                            weeklyByCurrency: _weeklyByCode,
-                            completedGigs: _completedGigs,
-                          ),
-                          const SizedBox(height: 20),
-
-                          // ── Work preferences ──────────────────────────
-                          const SectionLabel('Work preferences'),
-                          const SizedBox(height: 8),
-                          TogglesCard(
-                            seekingQuickGigs: _seekingQuickGigs,
-                            autoAccept: _autoAccept,
-                            onQuickGigsChanged: _toggleQuickGigs,
-                            onAutoAcceptChanged: (v) {
-                              setState(() => _autoAccept = v);
-                              _setToggle('autoAccept', v);
-                            },
-                            isVerified: _isVerified,
-                          ),
-                          const SizedBox(height: 20),
-
-                          // ── Gig Map ───────────────────────────────────
-                          GigMapSection(
-                            uid: uid,
-                            workerName: _name,
-                            seekingQuickGigs: _seekingQuickGigs,
-                            onQuickGigStarted: _onQuickGigStarted,
-                            onOpenGigApplied: _onOpenGigApplied,
-                            isVerified: _isVerified,
-                            workerSkills: _skills,
-                          ),
-                          const SizedBox(height: 20),
-
-                          // ── Account ───────────────────────────────────
-                          const SectionLabel('Account'),
-                          const SizedBox(height: 8),
-                          MenuCard(children: [
-                            MenuRow(
-                              icon: Icons.construction_rounded,
-                              iconColor: kGold,
-                              label: 'My Toolchest',
-                              subtitle: _skills.isNotEmpty
-                                  ? _skills.take(2).join(', ') +
-                                      (_skills.length > 2
-                                          ? ' +${_skills.length - 2} more'
-                                          : '')
-                                  : 'Add your skills & tools',
-                              badge: _skills.isNotEmpty ? _skills.length : null,
-                              onTap: () => ToolchestSheet.show(context, uid),
-                            ),
-                            const WorkerDivider(),
-                            MenuRow(
-                              icon: Icons.history_rounded,
-                              iconColor: kBlue,
-                              label: 'Gig History',
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const GigHistoryScreen(),
-                                ),
-                              ),
-                            ),
-                            const WorkerDivider(),
-                            MenuRow(
-                              icon: Icons.star_rounded,
-                              iconColor: kGold,
-                              label: 'Ratings & Reviews',
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const WorkerRatingsScreen(),
-                                ),
-                              ),
-                            ),
-                            const WorkerDivider(),
-                            MenuRow(
-                              icon: Icons.notifications_outlined,
-                              iconColor: const Color(0xFF8B5CF6),
-                              label: 'Notifications',
-                              onTap: () =>
-                                  WorkerNotificationsSheet.show(context),
-                            ),
-                          ]),
-                          const SizedBox(height: 16),
-
-                          // ── Settings ──────────────────────────────────
-                          const SectionLabel('Settings'),
-                          const SizedBox(height: 8),
-                          MenuCard(children: [
-                            MenuRow(
-                              icon: Icons.settings_outlined,
-                              iconColor: kSub,
-                              label: 'Settings',
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const WorkerSettingsScreen(),
-                                ),
-                              ),
-                            ),
-                          ]),
-                          const SizedBox(height: 12),
-
-                          // ── Logout ────────────────────────────────────
-                          MenuCard(children: [
-                            MenuRow(
-                              icon: Icons.logout_rounded,
-                              iconColor: Colors.redAccent,
-                              label: 'Log out',
-                              labelColor: Colors.redAccent,
-                              onTap: _confirmLogout,
-                              showArrow: false,
-                            ),
-                          ]),
-                          const SizedBox(height: 16),
-                        ]),
+                    if (_dispatchedGig != null)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: DispatchOfferCard(
+                          gig: _dispatchedGig!,
+                          onAccept: () => _acceptDispatch(_dispatchedGig!),
+                          onDecline: () => _declineDispatch(_dispatchedGig!),
+                        ),
                       ),
-                    ),
+                    if (_pendingOfferedGig != null && _dispatchedGig == null)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: OfferedGigOfferCard(
+                          gig: _pendingOfferedGig!,
+                          description: _pendingOfferedGigDesc,
+                          skillRequired: _pendingOfferedGigSkill,
+                          onAccept: () =>
+                              _acceptOfferedGig(_pendingOfferedGig!),
+                          onDecline: () =>
+                              _declineOfferedGig(_pendingOfferedGig!),
+                        ),
+                      ),
+                    if (showActiveGigBar)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: ActiveGigBar(gig: activeGigForBar),
+                      ),
                   ],
-                ),
-                if (_dispatchedGig != null)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: DispatchOfferCard(
-                      gig: _dispatchedGig!,
-                      onAccept: () => _acceptDispatch(_dispatchedGig!),
-                      onDecline: () => _declineDispatch(_dispatchedGig!),
-                    ),
-                  ),
-                if (_pendingOfferedGig != null && _dispatchedGig == null)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: OfferedGigOfferCard(
-                      gig: _pendingOfferedGig!,
-                      description: _pendingOfferedGigDesc,
-                      skillRequired: _pendingOfferedGigSkill,
-                      onAccept: () => _acceptOfferedGig(_pendingOfferedGig!),
-                      onDecline: () => _declineOfferedGig(_pendingOfferedGig!),
-                    ),
-                  ),
-                if (showActiveGigBar)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: ActiveGigBar(gig: activeGigForBar),
-                  ),
-              ],
                 );
               },
             ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Availability hero card — green gradient, wired to existing handler
-// ─────────────────────────────────────────────────────────────────────────────
-class _AvailabilityHeroCard extends StatelessWidget {
-  final bool isOnline;
-  final ValueChanged<bool> onChanged;
-  final String isVerified;
-
-  const _AvailabilityHeroCard({
-    required this.isOnline,
-    required this.onChanged,
-    required this.isVerified,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF2BB673), Color(0xFF1D9E5E)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color:
-                            isOnline ? Colors.white : Colors.white60,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      isOnline ? "You're online" : "You're offline",
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 12),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Available for gigs',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  isOnline
-                      ? 'You appear online to hosts'
-                      : 'You are hidden from hosts',
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          Switch(
-            value: isOnline,
-            onChanged: (v) {
-              if (isVerified == 'verified') {
-                onChanged(v);
-              } else {
-                _showWorkerVerificationModal(context);
-              }
-            },
-            activeThumbColor: Colors.white,
-            activeTrackColor: Colors.white30,
-            inactiveThumbColor: Colors.white60,
-            inactiveTrackColor: Colors.white24,
-          ),
-        ],
-      ),
     );
   }
 }
@@ -1622,8 +1216,7 @@ void _showWorkerVerificationModal(BuildContext context) {
               color: Colors.red.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child:
-                const Icon(Icons.error_outline, color: Colors.red, size: 40),
+            child: const Icon(Icons.error_outline, color: Colors.red, size: 40),
           ),
           const SizedBox(height: 16),
           const Text(
@@ -1645,85 +1238,16 @@ void _showWorkerVerificationModal(BuildContext context) {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK',
-                  style: TextStyle(color: Colors.white)),
+              child: const Text('OK', style: TextStyle(color: Colors.white)),
             ),
           ),
         ],
       ),
     ),
   );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Reusable labeled text field for the edit profile sheet
-// ─────────────────────────────────────────────────────────────────────────────
-class _EditField extends StatelessWidget {
-  final String label;
-  final TextEditingController controller;
-  final bool isDark;
-  final TextInputType keyboardType;
-  final int maxLines;
-
-  const _EditField({
-    required this.label,
-    required this.controller,
-    required this.isDark,
-    this.keyboardType = TextInputType.text,
-    this.maxLines = 1,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(
-                color: kSub,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.4)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          keyboardType: keyboardType,
-          maxLines: maxLines,
-          style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontSize: 14),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: isDark
-                ? Colors.white.withValues(alpha: 0.06)
-                : Colors.grey.withValues(alpha: 0.07),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.12)
-                      : Colors.grey.withValues(alpha: 0.2)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.12)
-                      : Colors.grey.withValues(alpha: 0.2)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: kBlue),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 }
