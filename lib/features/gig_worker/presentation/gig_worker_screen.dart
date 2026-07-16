@@ -991,12 +991,13 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _dispatchSub?.cancel();
     _offeredGigSub?.cancel();
     if (!mounted) return;
-    context.read<CurrentUserProvider>().clearUser();
+    final clearing = context.read<CurrentUserProvider>().clearUser();
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
       (_) => false,
     );
     await WidgetsBinding.instance.endOfFrame;
+    await clearing;
     await GoogleSignIn().disconnect();
     await FirebaseAuth.instance.signOut();
   }

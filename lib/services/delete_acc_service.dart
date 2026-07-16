@@ -65,13 +65,15 @@ class DeleteAccountService {
         'scheduledDeleteAt': Timestamp.fromDate(scheduledAt),
       });
 
+      Future<void>? clearing;
       if (context.mounted) {
-        context.read<CurrentUserProvider>().clearUser();
+        clearing = context.read<CurrentUserProvider>().clearUser();
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),
           (route) => false,
         );
       }
+      await clearing;
       await FirebaseAuth.instance.signOut();
     } catch (e) {
       debugPrint('[DeleteAccountService] deleteAccount error: $e');

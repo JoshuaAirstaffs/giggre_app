@@ -37,6 +37,61 @@ const _kBadgeColors = {
   'rejected': Colors.red,
 };
 
+// Profile header card — light design system tokens (scoped to _ProfileCard only)
+const _kPCardBg = Color(0xFFFFFFFF);
+const _kPCardBorder = Color(0xFFE4E9F0);
+const _kPCoverStart = Color(0xFF2B6FB5);
+const _kPCoverEnd = Color(0xFF1F4D80);
+const _kPTextPrimary = Color(0xFF17263D);
+const _kPTextSecondary = Color(0xFF5A6778);
+const _kPTextMuted = Color(0xFF94A0B0);
+const _kPGreen = Color(0xFF2E9E6B);
+const _kPDivider = Color(0xFFEEF2F7);
+const _kPIconBg = Color(0xFFF1F5F9);
+const _kPAboutBg = Color(0xFFFAFBFD);
+
+// ...and their dark-mode counterparts
+const _kPTextPrimaryDark = Color(0xFFF1F5F9);
+const _kPTextSecondaryDark = Color(0xFF94A3B8);
+const _kPTextMutedDark = Color(0xFF64748B);
+const _kPIconBgDark = Color(0xFF243247);
+const _kPAboutBgDark = Color(0xFF19222F);
+
+// Formats a phone number for display only — never mutates the stored value.
+String _formatPhoneForDisplay(String raw) {
+  if (raw.trim().isEmpty) return raw;
+  final hasPlus = raw.trim().startsWith('+');
+  final digits = raw.replaceAll(RegExp(r'\D'), '');
+  if (digits.isEmpty) return raw;
+
+  var countryCode = '';
+  var rest = digits;
+  if (hasPlus) {
+    final codeLen = digits.length > 10 ? digits.length - 10 : 1;
+    countryCode = digits.substring(0, codeLen.clamp(1, 3));
+    rest = digits.substring(countryCode.length);
+  }
+
+  final groups = <String>[];
+  final chunkSizes = rest.length == 10 ? const [3, 3, 4] : null;
+  var i = 0;
+  if (chunkSizes != null) {
+    for (final size in chunkSizes) {
+      groups.add(rest.substring(i, i + size));
+      i += size;
+    }
+  } else {
+    while (i < rest.length) {
+      final end = (i + 3 < rest.length) ? i + 3 : rest.length;
+      groups.add(rest.substring(i, end));
+      i = end;
+    }
+  }
+
+  final formatted = groups.join(' ');
+  return hasPlus ? '+$countryCode $formatted' : formatted;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  ProfileTab — shared profile tab for both Worker and Host screens
 // ─────────────────────────────────────────────────────────────────────────────
@@ -699,13 +754,10 @@ class _ProfileTabState extends State<ProfileTab> {
             email: _email,
             phone: _phone,
             bio: _bio,
-            company: _company,
             photoUrl: _photoUrl,
             createdAt: _createdAt,
             isVerified: _isVerified,
             isDark: isDark,
-            cardColor: cardColor,
-            onSurface: onSurface,
             onEdit: _showEditProfile,
           ),
           const SizedBox(height: 20),
@@ -1046,100 +1098,100 @@ class _ProfileTabState extends State<ProfileTab> {
 //  Profile Header Card
 // ─────────────────────────────────────────────────────────────────────────────
 class _ProfileCard extends StatelessWidget {
-  final String name,
-      email,
-      phone,
-      bio,
-      company,
-      photoUrl,
-      createdAt,
-      isVerified;
+  final String name, email, phone, bio, photoUrl, createdAt, isVerified;
   final bool isDark;
-  final Color cardColor, onSurface;
   final VoidCallback onEdit;
+  final bool isOwner;
 
   const _ProfileCard({
     required this.name,
     required this.email,
     required this.phone,
     required this.bio,
-    required this.company,
     required this.photoUrl,
     required this.createdAt,
     required this.isVerified,
     required this.isDark,
-    required this.cardColor,
-    required this.onSurface,
     required this.onEdit,
+    this.isOwner = true,
   });
+
+  bool get _verified => isVerified == 'verified';
+
+  String get _subtitle {
+    final joined = createdAt.replaceFirst('Member since ', '');
+    if (joined.isEmpty) return _verified ? 'Verified account' : '';
+    return _verified
+        ? 'Verified account · member since $joined'
+        : 'Member since $joined';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final showAbout = isOwner || bio.isNotEmpty;
+
+    final cardBg = isDark ? kCard : _kPCardBg;
+    final cardBorder = isDark ? kBorder : _kPCardBorder;
+    final textPrimary = isDark ? _kPTextPrimaryDark : _kPTextPrimary;
+    final textSecondary = isDark ? _kPTextSecondaryDark : _kPTextSecondary;
+    final textMuted = isDark ? _kPTextMutedDark : _kPTextMuted;
+    final divider = isDark ? kBorder : _kPDivider;
+    final iconBg = isDark ? _kPIconBgDark : _kPIconBg;
+    final aboutBg = isDark ? _kPAboutBgDark : _kPAboutBg;
+
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: cardColor,
+        color: cardBg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.15),
-        ),
-        boxShadow: isDark
-            ? null
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+        border: Border.all(color: cardBorder),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Gradient banner ──
+          // ── Cover ──
           Stack(
             clipBehavior: Clip.none,
             children: [
               Container(
-                height: 90,
+                height: 88,
+                width: double.infinity,
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [kBlue, Color(0xFF6366F1)],
+                    colors: [_kPCoverStart, _kPCoverEnd],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                 ),
               ),
-              // Edit button
               Positioned(
                 top: 12,
                 right: 14,
                 child: GestureDetector(
                   onTap: onEdit,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.35),
-                      ),
+                      color: Colors.white.withValues(alpha: 0.94),
+                      borderRadius: BorderRadius.circular(16),
                     ),
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.edit_outlined, color: Colors.white, size: 13),
+                        Icon(
+                          Icons.edit_outlined,
+                          color: _kPCoverEnd,
+                          size: 13,
+                        ),
                         SizedBox(width: 5),
                         Text(
                           'Edit',
                           style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                            color: _kPCoverEnd,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ],
@@ -1147,152 +1199,154 @@ class _ProfileCard extends StatelessWidget {
                   ),
                 ),
               ),
-              // Avatar overlapping banner
+              // Avatar overlapping the cover
               Positioned(
-                bottom: -36,
-                left: 18,
-                child: Container(
-                  width: 76,
-                  height: 76,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: cardColor, width: 3),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.15),
-                        blurRadius: 8,
+                bottom: -38,
+                left: 20,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 76,
+                      height: 76,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: cardBg, width: 3.5),
                       ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: photoUrl.isNotEmpty
-                        ? CachedNetworkImage(
-                            imageUrl: photoUrl,
-                            fit: BoxFit.cover,
-                            placeholder: (_, _) =>
-                                const _DefaultAvatar(size: 76),
-                            errorWidget: (_, _, _) =>
-                                const _DefaultAvatar(size: 76),
-                          )
-                        : const _DefaultAvatar(size: 76),
-                  ),
+                      child: ClipOval(
+                        child: photoUrl.isNotEmpty
+                            ? CachedNetworkImage(
+                                imageUrl: photoUrl,
+                                fit: BoxFit.cover,
+                                placeholder: (_, _) => _DefaultAvatar(
+                                  size: 76,
+                                  name: name,
+                                  bgColor: iconBg,
+                                  fgColor: textSecondary,
+                                ),
+                                errorWidget: (_, _, _) => _DefaultAvatar(
+                                  size: 76,
+                                  name: name,
+                                  bgColor: iconBg,
+                                  fgColor: textSecondary,
+                                ),
+                              )
+                            : _DefaultAvatar(
+                                size: 76,
+                                name: name,
+                                bgColor: iconBg,
+                                fgColor: textSecondary,
+                              ),
+                      ),
+                    ),
+                    if (_verified)
+                      Positioned(
+                        bottom: -2,
+                        right: -2,
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: _kPGreen,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: cardBg, width: 2.5),
+                          ),
+                          child: const Icon(
+                            Icons.check,
+                            color: Colors.white,
+                            size: 12,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 44),
-          // ── Name / badge ──
+          const SizedBox(height: 46),
+          // ── Identity / contact / about ──
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        name.isNotEmpty ? name : 'User',
-                        style: TextStyle(
-                          color: onSurface,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (isVerified == 'verified') ...[
-                      const SizedBox(width: 6),
-                      const Icon(Icons.verified, color: kBlue, size: 17),
-                    ],
-                  ],
-                ),
-                if (company.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    company,
-                    style: const TextStyle(color: kSub, fontSize: 12),
-                    overflow: TextOverflow.ellipsis,
+                Text(
+                  name.isNotEmpty ? name : 'User',
+                  style: TextStyle(
+                    color: textPrimary,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
                   ),
-                ],
-                if (isVerified.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: (_kBadgeColors[isVerified] ?? Colors.grey)
-                          .withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: (_kBadgeColors[isVerified] ?? Colors.grey)
-                            .withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Text(
-                      _kBadgeLabels[isVerified] ?? isVerified,
-                      style: TextStyle(
-                        color: _kBadgeColors[isVerified] ?? Colors.grey,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+                if (_subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    _subtitle,
+                    style: TextStyle(color: textMuted, fontSize: 11),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                 ],
                 const SizedBox(height: 14),
-                Divider(
-                  color: isDark
-                      ? kBorder
-                      : Colors.grey.withValues(alpha: 0.15),
-                  height: 1,
-                ),
-                const SizedBox(height: 12),
-                _InfoRow(
-                  icon: Icons.email_outlined,
-                  label: 'Email',
-                  value: email,
-                ),
-                if (phone.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  _InfoRow(
-                    icon: Icons.phone_outlined,
-                    label: 'Phone',
-                    value: phone,
+                Container(height: 1, color: divider),
+                if (isOwner) ...[
+                  const SizedBox(height: 14),
+                  _ContactRow(
+                    icon: Icons.email_outlined,
+                    label: 'EMAIL',
+                    value: email,
+                    iconBg: iconBg,
+                    textMuted: textMuted,
+                    textPrimary: textPrimary,
+                    textSecondary: textSecondary,
                   ),
-                ],
-                if (createdAt.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  _InfoRow(
-                    icon: Icons.calendar_today_outlined,
-                    label: 'Joined',
-                    value: createdAt.replaceFirst('Member since ', ''),
-                  ),
-                ],
-                if (bio.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.04)
-                          : Colors.grey.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: isDark
-                            ? kBorder
-                            : Colors.grey.withValues(alpha: 0.12),
-                      ),
+                  if (phone.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _ContactRow(
+                      icon: Icons.phone_outlined,
+                      label: 'PHONE',
+                      value: _formatPhoneForDisplay(phone),
+                      iconBg: iconBg,
+                      textMuted: textMuted,
+                      textPrimary: textPrimary,
+                      textSecondary: textSecondary,
                     ),
-                    child: Text(
-                      bio,
-                      style: TextStyle(
-                        color: onSurface,
-                        fontSize: 13,
-                        height: 1.55,
+                  ],
+                ],
+                if (showAbout) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'ABOUT',
+                    style: TextStyle(
+                      color: textMuted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: bio.isEmpty ? onEdit : null,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: aboutBg,
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(color: cardBorder),
+                      ),
+                      child: Text(
+                        bio.isNotEmpty
+                            ? bio
+                            : 'Add a short bio so hosts know you',
+                        style: TextStyle(
+                          color: bio.isNotEmpty ? textSecondary : textMuted,
+                          fontSize: 12,
+                          height: 1.5,
+                        ),
                       ),
                     ),
                   ),
@@ -1302,6 +1356,68 @@ class _ProfileCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ContactRow extends StatelessWidget {
+  final IconData icon;
+  final String label, value;
+  final Color iconBg, textMuted, textPrimary, textSecondary;
+
+  const _ContactRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.iconBg,
+    required this.textMuted,
+    required this.textPrimary,
+    required this.textSecondary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: iconBg,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(icon, color: textSecondary, size: 16),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: textMuted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                value,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                style: TextStyle(
+                  color: textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1979,54 +2095,34 @@ class _ActionDivider extends StatelessWidget {
   }
 }
 
-class _InfoRow extends StatelessWidget {
-  final IconData icon;
-  final String label, value;
-  const _InfoRow({
-    required this.icon,
-    required this.label,
-    required this.value,
+class _DefaultAvatar extends StatelessWidget {
+  final double size;
+  final String name;
+  final Color bgColor, fgColor;
+  const _DefaultAvatar({
+    required this.size,
+    this.name = '',
+    this.bgColor = _kPIconBg,
+    this.fgColor = _kPTextSecondary,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: kSub, size: 15),
-        const SizedBox(width: 8),
-        Text('$label: ', style: const TextStyle(color: kSub, fontSize: 12)),
-        Expanded(
-          child: Text(
-            value,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontSize: 13,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _DefaultAvatar extends StatelessWidget {
-  final double size;
-  const _DefaultAvatar({required this.size});
-
-  @override
-  Widget build(BuildContext context) {
+    final initial = name.trim().isNotEmpty
+        ? name.trim()[0].toUpperCase()
+        : '?';
     return Container(
       width: size,
       height: size,
-      decoration: BoxDecoration(
-        color: kBlue.withValues(alpha: 0.15),
-        shape: BoxShape.circle,
-      ),
-      child: Icon(
-        Icons.account_circle_rounded,
-        color: kBlue,
-        size: size * 0.6,
+      decoration: BoxDecoration(color: bgColor, shape: BoxShape.circle),
+      alignment: Alignment.center,
+      child: Text(
+        initial,
+        style: TextStyle(
+          color: fgColor,
+          fontSize: size * 0.4,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }

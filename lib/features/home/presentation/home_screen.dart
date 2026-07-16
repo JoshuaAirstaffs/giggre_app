@@ -28,6 +28,7 @@ import '../../../screens/host/host_shell.dart';
 import '../../../screens/worker/worker_shell.dart';
 import '../../../widgets/active_gig_bar.dart';
 import '../../gig_worker/presentation/verification_screen.dart';
+import 'profile_tab.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -505,13 +506,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 TextButton(
                   onPressed: () async {
                     Navigator.pop(ctx);
+                    Future<void>? clearing;
                     if (mounted) {
-                      context.read<CurrentUserProvider>().clearUser();
+                      clearing = context
+                          .read<CurrentUserProvider>()
+                          .clearUser();
                       Navigator.of(context).pushAndRemoveUntil(
                         MaterialPageRoute(builder: (_) => const LoginScreen()),
                         (route) => false,
                       );
                     }
+                    await clearing;
                     await FirebaseAuth.instance.signOut();
                   },
                   child: const Text(
@@ -542,6 +547,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (mounted) setState(() => _saving = false);
+  }
+
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('Profile'), elevation: 0),
+          body: ProfileTab(
+            initialRole: _selectedRole ?? 'worker',
+            onLogout: _logout,
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _logout() async {
@@ -637,13 +657,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (confirm == true) {
+      Future<void>? clearing;
       if (mounted) {
-        context.read<CurrentUserProvider>().clearUser();
+        clearing = context.read<CurrentUserProvider>().clearUser();
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),
           (route) => false,
         );
       }
+      await clearing;
       await GoogleSignIn().disconnect();
       await FirebaseAuth.instance.signOut();
     }
@@ -782,8 +804,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         actions: [
-          _IconSquareButton(icon: Icons.logout_rounded, onTap: _logout),
+          _IconSquareButton(icon: Icons.person_rounded, onTap: _openProfile),
           const SizedBox(width: 16),
+          _IconSquareButton(icon: Icons.logout_rounded, onTap: _logout),
+          const SizedBox(width: 10),
         ],
       ),
       body: SafeArea(

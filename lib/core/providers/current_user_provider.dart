@@ -325,7 +325,12 @@ class CurrentUserProvider extends ChangeNotifier {
   static Future<void> unregisterPushForUid(String uid) =>
       _pushService.unregisterForUser(uid);
 
-  void clearUser() {
+  // Awaited by every logout call site so the FCM token removal below
+  // reaches Firestore (isAuth() rule) before signOut() invalidates the
+  // session — otherwise the write silently fails as permission-denied and
+  // the token stays attached to this account, so the next account to log
+  // in on this device keeps receiving this account's pushes too.
+  Future<void> clearUser() async {
     final previousUid = _uid;
     _currentEmail = null;
     _currentName = null;
@@ -336,10 +341,10 @@ class CurrentUserProvider extends ChangeNotifier {
     _callSubscription = null;
     _stopRingtone();
     _audioPlayer.dispose(); // ← clean up
-    if (previousUid != null) {
-      _pushService.unregisterForUser(previousUid);
-    }
     notifyListeners();
+    if (previousUid != null) {
+      await _pushService.unregisterForUser(previousUid);
+    }
   }
 
   // ── Ringtone ──────────────────────────────────────────────────────────────

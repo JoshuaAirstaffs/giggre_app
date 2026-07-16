@@ -42,6 +42,22 @@ class PushNotificationService {
 
   Future<void> _saveToken(String uid, String token) async {
     try {
+      // Self-heals stale registrations left by earlier logout races (or any
+      // account still holding this token from before this device was
+      // reassigned) — a physical device token should only ever live on the
+      // currently signed-in user's doc, otherwise every account that ever
+      // logged in here keeps getting this device's pushes too.
+      final stale = await FirebaseFirestore.instance
+          .collection('users')
+          .where('fcmTokens', arrayContains: token)
+          .get();
+      for (final doc in stale.docs) {
+        if (doc.id == uid) continue;
+        await doc.reference.update({
+          'fcmTokens': FieldValue.arrayRemove([token]),
+        });
+      }
+
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'fcmTokens': FieldValue.arrayUnion([token]),
       });

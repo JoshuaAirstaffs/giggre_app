@@ -232,12 +232,13 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
 
   Future<void> _performLogout() async {
     if (!mounted) return;
-    context.read<CurrentUserProvider>().clearUser();
+    final clearing = context.read<CurrentUserProvider>().clearUser();
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
       (route) => false,
     );
     await WidgetsBinding.instance.endOfFrame;
+    await clearing;
     await GoogleSignIn().disconnect();
     await FirebaseAuth.instance.signOut();
   }

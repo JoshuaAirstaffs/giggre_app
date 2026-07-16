@@ -49,6 +49,11 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
   Map<String, dynamic>? _data;
   StreamSubscription? _gigSub;
   bool _cancelledHandled = false;
+  // Firestore's snapshots() always fires once immediately with the current
+  // doc state — without this, opening a gig that's already cancelled looks
+  // identical to watching it become cancelled live, and the sheet would
+  // auto-close with a snackbar before the host ever sees the details.
+  bool _isFirstSnapshot = true;
   // Loaded once for the "favorite this worker" toggle shown on completed
   // gigs — mirrors the same users/{hostId}.favoriteWorkerIds field the
   // Profile > Gig History sheet reads/writes (gig_host_profile_screen.dart).
@@ -86,9 +91,13 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         .listen((snap) {
           if (!mounted || !snap.exists) return;
           final data = snap.data()!;
+          final wasFirstSnapshot = _isFirstSnapshot;
+          _isFirstSnapshot = false;
           setState(() => _data = data);
 
-          if (data['status'] == 'cancelled' && !_cancelledHandled) {
+          if (!wasFirstSnapshot &&
+              data['status'] == 'cancelled' &&
+              !_cancelledHandled) {
             _cancelledHandled = true;
             final reasons = data['cancellation_reason'] as List?;
             final lastReason = reasons != null && reasons.isNotEmpty
