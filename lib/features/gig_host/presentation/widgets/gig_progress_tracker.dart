@@ -13,6 +13,7 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/map_style.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/widgets/gig_completion_celebration.dart';
 import 'host_payment_code_sheet.dart';
@@ -1138,6 +1139,9 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
 
     if (_useGoogleMaps) {
       return GoogleMap(
+        style: Theme.of(context).brightness == Brightness.dark
+            ? kDarkMapStyle
+            : null,
         onMapCreated: (c) => _googleController = c,
         initialCameraPosition: CameraPosition(
           target: workerPos != null
@@ -1529,6 +1533,9 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
         children: [
           widget.useGoogleMaps
               ? GoogleMap(
+                  style: Theme.of(context).brightness == Brightness.dark
+                      ? kDarkMapStyle
+                      : null,
                   onMapCreated: (c) => _googleController = c,
                   initialCameraPosition: CameraPosition(
                     target: initialTarget,

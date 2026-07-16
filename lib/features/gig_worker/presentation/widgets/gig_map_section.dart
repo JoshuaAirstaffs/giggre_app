@@ -11,6 +11,7 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/map_style.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -2215,6 +2216,9 @@ class _GigMapSectionState extends State<GigMapSection> {
             ),
             child: _useGoogleMaps
                 ? GoogleMap(
+                    style: Theme.of(context).brightness == Brightness.dark
+                        ? kDarkMapStyle
+                        : null,
                     gestureRecognizers: _mapInteractive
                         ? <Factory<OneSequenceGestureRecognizer>>{
                             Factory<OneSequenceGestureRecognizer>(
@@ -2657,6 +2661,9 @@ class _GigMapSectionState extends State<GigMapSection> {
         Positioned.fill(
           child: _useGoogleMaps
               ? GoogleMap(
+                  style: Theme.of(context).brightness == Brightness.dark
+                      ? kDarkMapStyle
+                      : null,
                   gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
                     Factory<OneSequenceGestureRecognizer>(
                       () => EagerGestureRecognizer(),

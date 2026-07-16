@@ -12,7 +12,6 @@ import '../../features/gig_worker/presentation/gig_worker_screen.dart';
 import '../../features/home/presentation/profile_tab.dart';
 import '../chat/home_chat.dart';
 import '../host/host_shell.dart';
-import 'browse_placeholder.dart';
 import 'saved_placeholder.dart';
 
 const _kNavActive = Color(0xFF2B6FB5);
@@ -171,7 +170,6 @@ class _WorkerShellState extends State<WorkerShell> {
   Widget build(BuildContext context) {
     final tabs = [
       const GigWorkerScreen(isTabRoot: true),
-      BrowsePlaceholder(onGoToDashboard: _goToHome),
       SavedPlaceholder(onGoToDashboard: _goToHome),
       const HomeChat(showBackButton: false),
       Scaffold(
@@ -213,7 +211,6 @@ class _NavItem {
 
 const _kNavItems = [
   _NavItem(Icons.home_outlined, 'Home'),
-  _NavItem(Icons.search_rounded, 'Browse'),
   _NavItem(Icons.bookmark_outline_rounded, 'Saved'),
   _NavItem(Icons.chat_bubble_outline_rounded, 'Chat'),
   _NavItem(Icons.person_outline_rounded, 'Profile'),
@@ -246,7 +243,7 @@ class _WorkerBottomNavBar extends StatelessWidget {
               final item = _kNavItems[i];
               final active = i == currentIndex;
               final color = active ? _kNavActive : _kNavInactive;
-              final showDot = i == 3 && hasUnreadChat;
+              final showDot = i == 2 && hasUnreadChat;
 
               return Expanded(
                 child: InkWell(

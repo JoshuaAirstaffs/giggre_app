@@ -13,6 +13,7 @@ import 'core/widgets/main_navigation.dart';
 import 'core/widgets/app_update_checker.dart';
 import 'core/theme/theme_provider.dart';
 import 'services/delete_acc_service.dart';
+import 'core/services/session_tracker_service.dart'; // TEMPORARY — testing only, see file header
 import 'firebase_options_dev.dart' as dev;
 import 'firebase_options_prod.dart' as prod;
 
@@ -32,6 +33,7 @@ void main() async {
     await CurrentUserProvider.initNotifications();
     FilePicker.platform;
     CurrentUserProvider.navigatorKey = navigatorKey;
+    SessionTrackerService.instance.start(); // TEMPORARY — testing only
   } catch (e) {
     firebaseError = e.toString();
   }

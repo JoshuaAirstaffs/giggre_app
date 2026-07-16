@@ -19,6 +19,7 @@ import '../../../core/utils/country_check.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/map_style.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../models/gig_template_model.dart';
@@ -1810,6 +1811,9 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         children: [
           _useGoogleMaps
               ? GoogleMap(
+                  style: Theme.of(context).brightness == Brightness.dark
+                      ? kDarkMapStyle
+                      : null,
                   onMapCreated: (controller) => _googleMapController = controller,
                   initialCameraPosition: CameraPosition(
                     target: _picked,

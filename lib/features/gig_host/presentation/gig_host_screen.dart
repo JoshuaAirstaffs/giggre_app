@@ -6,12 +6,14 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:geolocator/geolocator.dart';
 import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/map_style.dart';
 import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
@@ -20,6 +22,7 @@ import '../../../core/utils/currency_formatter.dart';
 import 'widgets/admin_gig_config_sheet.dart';
 import 'widgets/notifications_sheet.dart';
 import 'widgets/gig_detail_sheet.dart';
+import 'widgets/host_gig_card.dart';
 import 'host_gigs_screen.dart';
 
 class GigHostScreen extends StatefulWidget {
@@ -639,48 +642,61 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
     return '${diff.inDays}d ago';
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_pendingGigs.isEmpty) return const SizedBox.shrink();
-
-    final pendingGigIds = _pendingGigs.map((g) => g['id'] as String).toSet();
-
-    // Most recent applicant: the newest new_applicant notification whose gig
-    // is still in the pending set. Falls back to the last applicant appended
-    // to the pending gig with the most applicants waiting (no timestamp).
-    final relevantNotifs = _applicantNotifs
-        .where((n) => pendingGigIds.contains(n['gigId'] as String? ?? ''))
+  // Newest new_applicant notification for one specific gig, if any.
+  Map<String, dynamic>? _mostRecentNotifFor(String gigId) {
+    final matches = _applicantNotifs
+        .where((n) => (n['gigId'] as String?) == gigId)
         .toList()
       ..sort((a, b) {
         final aTs = (a['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
         final bTs = (b['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
         return bTs.compareTo(aTs);
       });
-    final mostRecentNotif = relevantNotifs.isNotEmpty ? relevantNotifs.first : null;
-    final mostRecentTs = (mostRecentNotif?['createdAt'] as Timestamp?)?.toDate();
+    return matches.isNotEmpty ? matches.first : null;
+  }
 
-    final fallbackGig = [..._pendingGigs]..sort((a, b) {
-        final aCount = (a['applicants'] as List).length;
-        final bCount = (b['applicants'] as List).length;
-        return bCount.compareTo(aCount);
+  @override
+  Widget build(BuildContext context) {
+    if (_pendingGigs.isEmpty) return const SizedBox.shrink();
+
+    // One banner per pending gig — a worker who applied to 2 different gigs
+    // must surface 2 banners, not collapse into a single aggregate one.
+    // Freshest activity (by that gig's own most recent applicant notif) first.
+    final gigs = [..._pendingGigs]..sort((a, b) {
+        final aTs =
+            (_mostRecentNotifFor(a['id'] as String)?['createdAt'] as Timestamp?)
+                ?.toDate() ??
+            DateTime(0);
+        final bTs =
+            (_mostRecentNotifFor(b['id'] as String)?['createdAt'] as Timestamp?)
+                ?.toDate() ??
+            DateTime(0);
+        return bTs.compareTo(aTs);
       });
-    final fallbackApplicants = fallbackGig.first['applicants'] as List;
-    final fallbackApplicantName = fallbackApplicants.isNotEmpty
-        ? (fallbackApplicants.last as Map<String, dynamic>)['workerName']
-                as String? ??
-            'A worker'
-        : 'A worker';
 
-    final refGigId =
-        mostRecentNotif?['gigId'] as String? ?? fallbackGig.first['id'] as String;
-    final applicantName =
-        mostRecentNotif?['workerName'] as String? ?? fallbackApplicantName;
-    final refGigTitle = mostRecentNotif?['gigTitle'] as String? ??
-        fallbackGig.first['title'] as String? ??
-        'your gig';
+    return Column(
+      children: [
+        for (var i = 0; i < gigs.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _buildBanner(gigs[i]),
+        ],
+      ],
+    );
+  }
 
-    final totalApplicants = _pendingGigs.fold<int>(
-        0, (acc, g) => acc + (g['applicants'] as List).length);
+  Widget _buildBanner(Map<String, dynamic> gig) {
+    final gigId = gig['id'] as String;
+    final applicants = gig['applicants'] as List;
+    final applicantCount = applicants.length;
+    final notif = _mostRecentNotifFor(gigId);
+    final mostRecentTs = (notif?['createdAt'] as Timestamp?)?.toDate();
+    final applicantName = notif?['workerName'] as String? ??
+        (applicants.isNotEmpty
+            ? (applicants.last as Map<String, dynamic>)['workerName']
+                    as String? ??
+                'A worker'
+            : 'A worker');
+    final gigTitle = gig['title'] as String? ?? 'your gig';
 
     return Container(
       height: 52,
@@ -711,7 +727,7 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '$totalApplicants ${totalApplicants == 1 ? 'applicant' : 'applicants'} '
+                  '$applicantCount ${applicantCount == 1 ? 'applicant' : 'applicants'} '
                   'waiting to be selected',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -724,8 +740,8 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
                 const SizedBox(height: 2),
                 Text(
                   mostRecentTs != null
-                      ? '$refGigTitle · ${_timeAgo(mostRecentTs)}'
-                      : refGigTitle,
+                      ? '$gigTitle · ${_timeAgo(mostRecentTs)}'
+                      : gigTitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: _kBannerSub, fontSize: 10.5),
@@ -742,8 +758,7 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
                   context: context,
                   isScrollControlled: true,
                   backgroundColor: Colors.transparent,
-                  builder: (_) =>
-                      GigDetailSheet(gigId: refGigId, gigType: 'open'),
+                  builder: (_) => GigDetailSheet(gigId: gigId, gigType: 'open'),
                 );
               },
               style: ElevatedButton.styleFrom(
@@ -1034,7 +1049,7 @@ class _GigPreviewListState extends State<_GigPreviewList> {
     }
 
     return Column(
-      children: preview.map((d) => GigTile(data: d, showActions: false)).toList(),
+      children: preview.map((d) => HostGigCard(data: d, showActions: false)).toList(),
     );
   }
 }
@@ -1107,7 +1122,22 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   List<_WorkerData> _workers = [];
   StreamSubscription? _workerSub;
   BuildContext? _context;
+  // Generic "W" fallback shown before a worker's own photo icon has loaded,
+  // and for workers without a photoUrl at all.
   BitmapDescriptor? _blueCircleIcon;
+  // Per-worker profile-photo marker icons, keyed by worker id — built lazily
+  // (see _ensureWorkerAvatarIcons/_loadWorkerPhotoIcon) so the map doesn't
+  // block on fetching every online worker's photo up front.
+  final Map<String, BitmapDescriptor> _workerAvatarIcons = {};
+  final Set<String> _fetchingAvatarFor = {};
+  // Separate controller for the full-screen map route (a distinct GoogleMap
+  // widget instance from the inline preview's, so each needs its own).
+  GoogleMapController? _fullScreenGoogleMapController;
+  // Bumped whenever live map data changes so the full-screen route (pushed
+  // via Navigator, so outside this State's own rebuild scope) can rebuild
+  // via ValueListenableBuilder without duplicating the worker/location
+  // subscriptions that already live in this State.
+  final ValueNotifier<int> _fullScreenTick = ValueNotifier(0);
 
   static const double _kMaxWorkerDistanceMeters = 20000;
 
@@ -1137,11 +1167,12 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     _loadBlueCircleIcon();
   }
 
-  // Draws a fixed-size blue circle (blue fill, white ring) at runtime so
-  // single-worker pins render as a circle on Google Maps — there's no
-  // built-in circular hue for the default teardrop marker, and a `Circle`
-  // overlay is sized in real-world meters so it'd shrink/grow with zoom
-  // instead of staying a consistent marker size.
+  // Draws a fixed-size blue circle with a "W" letter (blue fill, white
+  // ring) at runtime — the fallback shown for a worker pin until that
+  // worker's own profile-photo icon has loaded (or permanently, if they have
+  // no photo). There's no built-in circular hue for the default teardrop
+  // marker, and a `Circle` overlay is sized in real-world meters so it'd
+  // shrink/grow with zoom instead of staying a consistent marker size.
   Future<void> _loadBlueCircleIcon() async {
     const double size = 88;
     final recorder = ui.PictureRecorder();
@@ -1157,6 +1188,28 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 5,
     );
+    final pb =
+        ui.ParagraphBuilder(
+            ui.ParagraphStyle(
+              textAlign: TextAlign.center,
+              fontWeight: FontWeight.bold,
+              fontSize: radius,
+            ),
+          )
+          ..pushStyle(
+            ui.TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: radius,
+            ),
+          )
+          ..addText('W');
+    final paragraph = pb.build()
+      ..layout(const ui.ParagraphConstraints(width: size));
+    canvas.drawParagraph(
+      paragraph,
+      Offset(0, center.dy - paragraph.height / 2),
+    );
     final picture = recorder.endRecording();
     final img = await picture.toImage(size.toInt(), size.toInt());
     final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
@@ -1164,10 +1217,76 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     setState(() {
       _blueCircleIcon = BitmapDescriptor.bytes(
         bytes.buffer.asUint8List(),
-        width: 32,
-        height: 32,
+        width: 20,
+        height: 20,
       );
     });
+  }
+
+  // Kicks off a photo fetch for every worker with a photoUrl that doesn't
+  // have a cached (or in-flight) marker icon yet. Fire-and-forget by design —
+  // each call independently updates _workerAvatarIcons and setState()s once
+  // it resolves, so markers upgrade from the "W" fallback to the real photo
+  // as fetches complete rather than blocking the map on all of them at once.
+  void _ensureWorkerAvatarIcons(List<_WorkerData> workers) {
+    for (final w in workers) {
+      if (w.photoUrl.isEmpty) continue;
+      if (_workerAvatarIcons.containsKey(w.id)) continue;
+      if (_fetchingAvatarFor.contains(w.id)) continue;
+      _fetchingAvatarFor.add(w.id);
+      _loadWorkerPhotoIcon(w);
+    }
+  }
+
+  Future<void> _loadWorkerPhotoIcon(_WorkerData worker) async {
+    const double size = 64;
+    const double border = 4;
+    const double radius = size / 2 - border;
+    const center = Offset(size / 2, size / 2);
+
+    ui.Image? photo;
+    try {
+      final res = await http.get(Uri.parse(worker.photoUrl));
+      if (res.statusCode == 200) {
+        final codec = await ui.instantiateImageCodec(
+          res.bodyBytes,
+          targetWidth: size.toInt(),
+        );
+        final frame = await codec.getNextFrame();
+        photo = frame.image;
+      }
+    } catch (_) {}
+
+    _fetchingAvatarFor.remove(worker.id);
+    if (photo == null || !mounted) return;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawCircle(center, size / 2, Paint()..color = Colors.white);
+    canvas.save();
+    canvas.clipPath(
+      Path()..addOval(Rect.fromCircle(center: center, radius: radius)),
+    );
+    paintImage(
+      canvas: canvas,
+      rect: Rect.fromCircle(center: center, radius: radius),
+      image: photo,
+      fit: BoxFit.cover,
+    );
+    canvas.restore();
+
+    final picture = recorder.endRecording();
+    final img = await picture.toImage(size.toInt(), size.toInt());
+    final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
+    if (bytes == null || !mounted) return;
+    setState(() {
+      _workerAvatarIcons[worker.id] = BitmapDescriptor.bytes(
+        bytes.buffer.asUint8List(),
+        width: 20,
+        height: 20,
+      );
+    });
+    _fullScreenTick.value++;
   }
 
   Future<void> _initMap() async {
@@ -1176,11 +1295,28 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     _fetchAndCenterMap();
   }
 
+  // OSM-path equivalent of the "W" fallback baked into _blueCircleIcon for
+  // Google Maps — shown while a worker's photo loads, or if they have none.
+  static Widget _workerFallbackAvatar() => Container(
+        color: _kAvatarBlue,
+        alignment: Alignment.center,
+        child: const Text(
+          'W',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
+
   @override
   void dispose() {
     _workerSub?.cancel();
     _googleMapController?.dispose();
+    _fullScreenGoogleMapController?.dispose();
     _osmController.dispose();
+    _fullScreenTick.dispose();
     super.dispose();
   }
 
@@ -1204,8 +1340,13 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         _myLocation = loc;
         _recomputeVisibleWorkers();
       });
+      _fullScreenTick.value++;
+      _ensureWorkerAvatarIcons(_workers);
       if (_useGoogleMaps) {
         _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(loc, 14.0),
+        );
+        _fullScreenGoogleMapController?.animateCamera(
           CameraUpdate.newLatLngZoom(loc, 14.0),
         );
       } else if (_osmMapReady) {
@@ -1241,6 +1382,8 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
           _allWorkers = workers;
           _recomputeVisibleWorkers();
         });
+        _fullScreenTick.value++;
+        _ensureWorkerAvatarIcons(_workers);
       }
     }, onError: (e) {
       if (FirebaseAuth.instance.currentUser == null) return;
@@ -1306,7 +1449,8 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         return Marker(
           markerId: MarkerId('worker_${worker.id}'),
           position: cluster.center,
-          icon: _blueCircleIcon ??
+          icon: _workerAvatarIcons[worker.id] ??
+              _blueCircleIcon ??
               BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
           onTap: ctx != null ? () => _showWorkerSheet(ctx, worker) : null,
         );
@@ -1330,18 +1474,26 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         final worker = cluster.singleWorker!;
         osmMarkers.add(fm.Marker(
           point: ll.LatLng(cluster.center.latitude, cluster.center.longitude),
-          width: 32,
-          height: 32,
+          width: 20,
+          height: 20,
           child: GestureDetector(
             onTap: ctx != null ? () => _showWorkerSheet(ctx, worker) : null,
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.lightBlue,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
+                border: Border.all(color: Colors.white, width: 1.5),
                 boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
               ),
-              child: const Icon(Icons.person_rounded, color: Colors.white, size: 16),
+              child: ClipOval(
+                child: worker.photoUrl.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: worker.photoUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (_, _) => _workerFallbackAvatar(),
+                        errorWidget: (_, _, _) => _workerFallbackAvatar(),
+                      )
+                    : _workerFallbackAvatar(),
+              ),
             ),
           ),
         ));
@@ -1680,11 +1832,238 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     );
   }
 
+  // Pushes a full-screen route showing the same live map — back button/
+  // gesture pops it naturally since it's a real route, and _fullScreenTick
+  // (bumped alongside every existing worker/location setState in this
+  // State) keeps it in sync without a second Firestore subscription.
+  void _openFullScreen() {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => ValueListenableBuilder<int>(
+          valueListenable: _fullScreenTick,
+          builder: (_, _, _) => Scaffold(
+            backgroundColor: Colors.black,
+            body: SafeArea(child: _buildMapStack(isFullScreen: true)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _closeFullScreen() {
+    Navigator.of(context, rootNavigator: true).pop();
+    _fullScreenGoogleMapController?.dispose();
+    _fullScreenGoogleMapController = null;
+  }
+
+  Widget _buildMapStack({required bool isFullScreen}) {
+    final borderColor = Theme.of(context).dividerColor;
+    final height = isFullScreen ? MediaQuery.of(context).size.height : 280.0;
+    final radius = isFullScreen ? 0.0 : 16.0;
+    final interactive = isFullScreen || _mapInteractive;
+
+    return Stack(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: Container(
+            height: height,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(radius),
+              border: isFullScreen ? null : Border.all(color: borderColor),
+            ),
+            child: _useGoogleMaps
+                ? GoogleMap(
+                    style: Theme.of(context).brightness == Brightness.dark
+                        ? kDarkMapStyle
+                        : null,
+                    gestureRecognizers: interactive
+                        ? <Factory<OneSequenceGestureRecognizer>>{
+                            Factory<OneSequenceGestureRecognizer>(
+                              () => EagerGestureRecognizer(),
+                            ),
+                          }
+                        : const <Factory<OneSequenceGestureRecognizer>>{},
+                    onMapCreated: (controller) {
+                      if (isFullScreen) {
+                        _fullScreenGoogleMapController = controller;
+                      } else {
+                        _googleMapController = controller;
+                      }
+                      if (_myLocation != null) {
+                        controller.animateCamera(
+                          CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
+                        );
+                      }
+                    },
+                    initialCameraPosition: const CameraPosition(
+                      target: LatLng(14.5995, 120.9842),
+                      zoom: 12.0,
+                    ),
+                    myLocationEnabled: true,
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled: false,
+                    markers: _buildMarkers(),
+                    onCameraMove: (position) {
+                      final newZoom = position.zoom;
+                      if ((newZoom - _zoom).abs() >= 0.3) {
+                        setState(() => _zoom = newZoom);
+                        _fullScreenTick.value++;
+                      }
+                    },
+                  )
+                : _buildOsmMap(),
+          ),
+        ),
+        // Tap-to-interact overlay — inline map only; full screen is always
+        // interactive since that's the entire point of switching to it.
+        if (!isFullScreen && !_mapInteractive)
+          Positioned.fill(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(radius),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _mapInteractive = true),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.touch_app_rounded,
+                          color: Colors.white,
+                          size: 13,
+                        ),
+                        SizedBox(width: 5),
+                        Text(
+                          'Tap to interact with map',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        // Lock-map button shown while the inline map is interactive
+        if (!isFullScreen && _mapInteractive)
+          Positioned(
+            top: 8,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: GestureDetector(
+                onTap: () => setState(() => _mapInteractive = false),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.lock_open_rounded,
+                        color: Colors.white,
+                        size: 13,
+                      ),
+                      SizedBox(width: 5),
+                      Text(
+                        'Tap to lock map',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        // Recenter button
+        Positioned(
+          bottom: 12,
+          right: 12,
+          child: GestureDetector(
+            onTap: _fetchAndCenterMap,
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.my_location_rounded,
+                size: 18,
+                color: _myLocation != null ? const Color(0xFF22C55E) : kSub,
+              ),
+            ),
+          ),
+        ),
+        // Full-screen toggle button
+        Positioned(
+          bottom: 12,
+          left: 12,
+          child: GestureDetector(
+            onTap: isFullScreen ? _closeFullScreen : _openFullScreen,
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(
+                isFullScreen
+                    ? Icons.fullscreen_exit_rounded
+                    : Icons.fullscreen_rounded,
+                size: 18,
+                color: kSub,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     _context = context;
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final borderColor = Theme.of(context).dividerColor;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1737,164 +2116,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         const SizedBox(height: 12),
 
         // Map
-        Stack(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                height: 280,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: borderColor),
-                ),
-                child: _useGoogleMaps
-                    ? GoogleMap(
-                        gestureRecognizers: _mapInteractive
-                            ? <Factory<OneSequenceGestureRecognizer>>{
-                                Factory<OneSequenceGestureRecognizer>(
-                                  () => EagerGestureRecognizer(),
-                                ),
-                              }
-                            : const <Factory<OneSequenceGestureRecognizer>>{},
-                        onMapCreated: (controller) {
-                          _googleMapController = controller;
-                          if (_myLocation != null) {
-                            _googleMapController?.animateCamera(
-                              CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
-                            );
-                          }
-                        },
-                        initialCameraPosition: const CameraPosition(
-                          target: LatLng(14.5995, 120.9842),
-                          zoom: 12.0,
-                        ),
-                        myLocationEnabled: true,
-                        myLocationButtonEnabled: false,
-                        zoomControlsEnabled: false,
-                        markers: _buildMarkers(),
-                        onCameraMove: (position) {
-                          final newZoom = position.zoom;
-                          if ((newZoom - _zoom).abs() >= 0.3) {
-                            setState(() => _zoom = newZoom);
-                          }
-                        },
-                      )
-                    : _buildOsmMap(),
-              ),
-            ),
-            // Tap-to-interact overlay
-            if (!_mapInteractive)
-              Positioned.fill(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() => _mapInteractive = true),
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.touch_app_rounded,
-                              color: Colors.white,
-                              size: 13,
-                            ),
-                            SizedBox(width: 5),
-                            Text(
-                              'Tap to interact with map',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            // Lock-map button shown while map is interactive
-            if (_mapInteractive)
-              Positioned(
-                top: 8,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: GestureDetector(
-                    onTap: () => setState(() => _mapInteractive = false),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.55),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.lock_open_rounded,
-                            color: Colors.white,
-                            size: 13,
-                          ),
-                          SizedBox(width: 5),
-                          Text(
-                            'Tap to lock map',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            // Recenter button
-            Positioned(
-              bottom: 12,
-              right: 12,
-              child: GestureDetector(
-                onTap: _fetchAndCenterMap,
-                child: Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.18),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    Icons.my_location_rounded,
-                    size: 18,
-                    color: _myLocation != null
-                        ? const Color(0xFF22C55E)
-                        : kSub,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+        _buildMapStack(isFullScreen: false),
         const SizedBox(height: 8),
         Center(
           child: Text(

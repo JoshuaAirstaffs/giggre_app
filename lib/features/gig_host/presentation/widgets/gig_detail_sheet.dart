@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show Factory;
 import 'package:flutter/gestures.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
@@ -15,6 +16,7 @@ import '../../../../core/services/gms_availability.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:giggre_app/features/chat/gig_chat_action.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/map_style.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../services/quick_gig_matching_service.dart';
 import 'host_payment_code_sheet.dart';
@@ -47,6 +49,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
   Map<String, dynamic>? _data;
   StreamSubscription? _gigSub;
   bool _cancelledHandled = false;
+  // Loaded once for the "favorite this worker" toggle shown on completed
+  // gigs — mirrors the same users/{hostId}.favoriteWorkerIds field the
+  // Profile > Gig History sheet reads/writes (gig_host_profile_screen.dart).
+  Set<String> _favoriteWorkerIds = {};
 
   String get _collection {
     switch (widget.gigType) {
@@ -108,12 +114,44 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             return;
           }
         }, onError: (e) => debugPrint('[GigDetailSheet] gig stream error: $e'));
+    _loadFavoriteWorkerIds();
   }
 
   @override
   void dispose() {
     _gigSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadFavoriteWorkerIds() async {
+    final hostId = FirebaseAuth.instance.currentUser?.uid;
+    if (hostId == null) return;
+    final doc =
+        await FirebaseFirestore.instance.collection('users').doc(hostId).get();
+    if (!mounted) return;
+    final list = (doc.data()?['favoriteWorkerIds'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        [];
+    setState(() => _favoriteWorkerIds = list.toSet());
+  }
+
+  Future<void> _toggleFavoriteWorker(String workerId) async {
+    final hostId = FirebaseAuth.instance.currentUser?.uid;
+    if (hostId == null || workerId.isEmpty) return;
+    final isFav = _favoriteWorkerIds.contains(workerId);
+    setState(() {
+      if (isFav) {
+        _favoriteWorkerIds.remove(workerId);
+      } else {
+        _favoriteWorkerIds.add(workerId);
+      }
+    });
+    await FirebaseFirestore.instance.collection('users').doc(hostId).set({
+      'favoriteWorkerIds': isFav
+          ? FieldValue.arrayRemove([workerId])
+          : FieldValue.arrayUnion([workerId]),
+    }, SetOptions(merge: true));
   }
 
   void _openFullScreenTrackingMap(
@@ -951,6 +989,76 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ],
                 const SizedBox(height: 16),
 
+                // ── Worker (offered/completed/etc. — the active branch above
+                // shows this same card for in-progress gigs; this branch
+                // covers every other status, so an offered gig still shows
+                // who it was offered to) ────────────────────────────────
+                if (workerId.isNotEmpty) ...[
+                  _WorkerProfileCard(
+                    key: ValueKey('worker_$workerId'),
+                    gigId: widget.gigId,
+                    workerId: workerId,
+                    workerName: resolvedWorkerName,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
+                // ── Favorite worker (completed gigs) ────────────────────
+                if (status == 'completed' && workerId.isNotEmpty) ...[
+                  Builder(builder: (_) {
+                    final isFavorite = _favoriteWorkerIds.contains(workerId);
+                    return GestureDetector(
+                      onTap: () => _toggleFavoriteWorker(workerId),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 14,
+                          horizontal: 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isFavorite
+                              ? Colors.redAccent.withValues(alpha: 0.08)
+                              : isDark
+                                  ? Colors.white.withValues(alpha: 0.04)
+                                  : Colors.grey.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: isFavorite
+                                ? Colors.redAccent.withValues(alpha: 0.4)
+                                : activeGigCardBorder(isDark),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              isFavorite
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              color: isFavorite ? Colors.redAccent : kSub,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              isFavorite
+                                  ? 'In Favorites'
+                                  : 'Add $resolvedWorkerName to Favorites',
+                              style: TextStyle(
+                                color: isFavorite
+                                    ? Colors.redAccent
+                                    : activeGigTextPrimary(isDark),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 16),
+                ],
+
                 // ── Cancel gig ──────────────────────────────────────────
                 if (showCancelGig) ...[
                   SizedBox(
@@ -1387,6 +1495,9 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
       children: [
         _useGoogleMaps
             ? GoogleMap(
+                style: Theme.of(context).brightness == Brightness.dark
+                    ? kDarkMapStyle
+                    : null,
                 onMapCreated: (controller) {
                   _googleMapController = controller;
                   WidgetsBinding.instance.addPostFrameCallback((_) {

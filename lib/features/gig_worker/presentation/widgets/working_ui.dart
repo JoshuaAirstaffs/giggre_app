@@ -16,6 +16,7 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/map_style.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
 import 'worker_payment_confirm_sheet.dart';
@@ -1046,6 +1047,9 @@ class _NavMapCoreState extends State<_NavMapCore> {
 
     final mapWidget = _useGoogleMaps
         ? GoogleMap(
+            style: Theme.of(context).brightness == Brightness.dark
+                ? kDarkMapStyle
+                : null,
             onMapCreated: (controller) {
               _googleMapController = controller;
               WidgetsBinding.instance.addPostFrameCallback((_) {
