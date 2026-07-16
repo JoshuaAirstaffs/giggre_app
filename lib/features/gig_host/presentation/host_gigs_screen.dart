@@ -822,7 +822,7 @@ class _GigTileState extends State<GigTile> {
       case 'scanning':
         return kAmber;
       case 'in_progress':
-        return kBlue;
+        return kAmber;
       case 'accepted':
         return const Color(0xFF22C55E);
       case 'open':
@@ -849,7 +849,7 @@ class _GigTileState extends State<GigTile> {
       case 'scanning':
         return 'SCANNING';
       case 'in_progress':
-        return 'IN PROGRESS';
+        return 'SEARCHING';
       case 'accepted':
         return 'ACCEPTED';
       case 'no_worker':
@@ -910,12 +910,7 @@ class _GigTileState extends State<GigTile> {
       final workerName = data['workerName'] as String? ?? '';
       if (workerName.isNotEmpty) subtitle = '→ $workerName';
     } else {
-      final assignedWorkerName = data['assignedWorkerName'] as String?;
-      if (status == 'in_progress' &&
-          assignedWorkerName != null &&
-          assignedWorkerName.isNotEmpty) {
-        subtitle = '→ $assignedWorkerName';
-      } else if (status == 'no_worker') {
+      if (status == 'no_worker') {
         subtitle = 'No worker found';
       } else {
         subtitle = data['category'] as String? ?? '';

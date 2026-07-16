@@ -83,15 +83,10 @@ class QuickGigMatchingService {
   }
 
   // ── Find best available worker ──────────────────────────────────────────────
-  // alwaysExclude: host + workers who declined even as fallback (never dispatched)
-  // softExclude:   workers who declined in first pass (skipped normally, eligible as fallback)
-  // fallback:      when true, ONLY considers softExclude workers as last resort
   static Future<Map<String, dynamic>?> _findBestWorker({
     required GeoPoint gigLocation,
-    required List<String> alwaysExclude,
+    required List<String> exclude,
     required double maxSearchRadiusKm,
-    List<String> softExclude = const [],
-    bool fallback = false,
   }) async {
     final snap = await FirebaseFirestore.instance
         .collection('users')
@@ -105,19 +100,13 @@ class QuickGigMatchingService {
     double bestScore = double.negativeInfinity;
 
     for (final doc in snap.docs) {
-      if (alwaysExclude.contains(doc.id)) continue;
-      // Normal pass: skip declined workers
-      // Fallback pass: ONLY consider declined workers
-      if (!fallback && softExclude.contains(doc.id)) continue;
-      if (fallback && !softExclude.contains(doc.id)) continue;
+      if (exclude.contains(doc.id)) continue;
 
       final data = doc.data();
       final geo = data['location'] as GeoPoint?;
       if (geo == null) continue;
 
       final dist = _distanceKm(gigLocation, geo);
-
-      // Skip workers outside the configured radius
       if (dist > maxSearchRadiusKm) continue;
 
       final rate = (data['acceptanceRate'] as num?)?.toDouble() ?? 1.0;
@@ -162,23 +151,48 @@ class QuickGigMatchingService {
 
     final db = FirebaseFirestore.instance;
     final gigRef = db.collection('quick_gigs').doc(gigId);
-    final searchStart = DateTime.now();
 
     final config = await _fetchConfig();
 
     int dispatchAttempts = 0;
 
     try {
-      // Initialise search metadata on the gig doc
-      await gigRef.update({
-        'searchStartedAt': FieldValue.serverTimestamp(),
-        'exclusionList': FieldValue.arrayUnion([]),
-        'hardExcludeList': FieldValue.arrayUnion([]),
-      });
+      // ── Authoritative search deadline ───────────────────────────────────────
+      // Read the gig first so we can reuse an existing searchStartedAt when
+      // resuming after an app restart, rather than resetting the 5-minute clock.
+      final initSnap = await gigRef.get();
+      if (!initSnap.exists) return;
+      final initData = initSnap.data()!;
+      final initStatus = initData['status'] as String? ?? '';
+      final existingStartedAt =
+          (initData['searchStartedAt'] as Timestamp?)?.toDate();
+
+      final bool isResuming = existingStartedAt != null &&
+          (initStatus == 'scanning' || initStatus == 'in_progress');
+
+      DateTime searchStartedAt;
+      if (isResuming) {
+        // Continuing after an app restart — keep the original server clock.
+        searchStartedAt = existingStartedAt;
+      } else {
+        // Fresh search: write the server timestamp then read it back.
+        await gigRef.update({
+          'searchStartedAt': FieldValue.serverTimestamp(),
+          'exclusionList': [],
+        });
+        final freshSnap = await gigRef.get();
+        searchStartedAt =
+            (freshSnap.data()!['searchStartedAt'] as Timestamp?)?.toDate() ??
+            DateTime.now();
+      }
+
+      final searchDeadline = searchStartedAt.add(config.searchTimeout);
 
       while (true) {
-        // ── Global timeout ─────────────────────────────────
-        if (DateTime.now().difference(searchStart) >= config.searchTimeout) {
+        // ── Global deadline — checked BEFORE dispatching ────────────────────
+        // Allows any in-flight review window to complete even if the deadline
+        // passes mid-offer; the next iteration writes no_worker immediately.
+        if (!DateTime.now().isBefore(searchDeadline)) {
           await gigRef.update({
             'status': 'no_worker',
             'assignedWorkerId': null,
@@ -209,39 +223,20 @@ class QuickGigMatchingService {
         }
 
         final hostId = gigData['hostId'] as String? ?? '';
-        // hardExclude: host + workers who already declined a fallback dispatch
-        final hardExclude = [
-          ...List<String>.from(gigData['hardExcludeList'] ?? []),
+        final excluded = [
+          ...List<String>.from(gigData['exclusionList'] ?? []),
           if (hostId.isNotEmpty) hostId,
         ];
-        // softExclude: workers who declined once — skipped on first pass,
-        // eligible as last-resort fallback
-        final softExclude =
-            List<String>.from(gigData['exclusionList'] ?? []);
 
-        // ── Find best worker (first pass: skip declined workers) ──
-        var worker = await _findBestWorker(
+        // ── Find best eligible worker ──────────────────────
+        final worker = await _findBestWorker(
           gigLocation: gigLocation,
-          alwaysExclude: hardExclude,
-          softExclude: softExclude,
+          exclude: excluded,
           maxSearchRadiusKm: config.maxSearchRadiusKm,
         );
 
-        // ── Fallback pass: no fresh workers — try declined ones ───
-        bool isFallbackDispatch = false;
-        if (worker == null && softExclude.isNotEmpty) {
-          worker = await _findBestWorker(
-            gigLocation: gigLocation,
-            alwaysExclude: hardExclude,
-            softExclude: softExclude,
-            maxSearchRadiusKm: config.maxSearchRadiusKm,
-            fallback: true,
-          );
-          if (worker != null) isFallbackDispatch = true;
-        }
-
         if (worker == null) {
-          // Truly no available workers right now — wait and retry
+          // No eligible workers right now — wait for a new one to come online
           await Future.delayed(_retryInterval);
           continue;
         }
@@ -255,10 +250,10 @@ class QuickGigMatchingService {
         );
 
         // ── Wait for worker response ───────────────────────
-        final deadline = DateTime.now().add(config.reviewWindow);
+        final reviewDeadline = DateTime.now().add(config.reviewWindow);
         String finalStatus = 'in_progress';
 
-        while (DateTime.now().isBefore(deadline)) {
+        while (DateTime.now().isBefore(reviewDeadline)) {
           await Future.delayed(_pollInterval);
           final check = await gigRef.get();
           if (!check.exists) return;
@@ -274,26 +269,35 @@ class QuickGigMatchingService {
           return;
         }
 
-        // Worker declined
+        // Worker declined (client wrote status back to 'scanning')
         if (finalStatus == 'scanning') {
-          final declinedWorkerId = worker['id'] as String;
-          if (isFallbackDispatch) {
-            // Declined even as last resort — hard exclude permanently
-            await gigRef.update({
-              'hardExcludeList': FieldValue.arrayUnion([declinedWorkerId]),
-              'exclusionList': FieldValue.arrayRemove([declinedWorkerId]),
-            });
-          } else {
-            // First decline — soft exclude, still eligible as fallback later
-            await gigRef.update({
-              'exclusionList': FieldValue.arrayUnion([declinedWorkerId]),
-            });
-          }
+          // exclusionList already updated by the worker's _declineDispatch call;
+          // no additional write needed here.
           continue;
         }
 
-        // Timed out — soft exclude worker and try next
+        // Review timed out — clean up the worker's slot.
         final timedOutWorkerId = worker['id'] as String;
+
+        // If the global deadline has now passed, write no_worker directly
+        // instead of bouncing through scanning and waiting one more iteration.
+        if (!DateTime.now().isBefore(searchDeadline)) {
+          await Future.wait([
+            gigRef.update({
+              'status': 'no_worker',
+              'assignedWorkerId': null,
+              'assignedWorkerName': null,
+              'exclusionList': FieldValue.arrayUnion([timedOutWorkerId]),
+            }),
+            db.collection('users').doc(timedOutWorkerId).update({
+              'slot': 'AVAILABLE',
+              'acceptanceRate': FieldValue.increment(-0.05),
+            }),
+          ]);
+          return;
+        }
+
+        // Deadline not yet passed — reset to scanning and try the next worker.
         await Future.wait([
           gigRef.update({
             'status': 'scanning',

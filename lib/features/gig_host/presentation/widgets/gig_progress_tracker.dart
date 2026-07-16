@@ -38,7 +38,6 @@ class GigProgressTracker extends StatefulWidget {
 
 class _GigProgressTrackerState extends State<GigProgressTracker> {
   static const _activeStatuses = [
-    'in_progress',
     'navigating',
     'arrived',
     'working',
@@ -47,9 +46,11 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
     'cancellation_requested',
   ];
 
+  List<QueryDocumentSnapshot> _searchingDocs = [];
   List<({QueryDocumentSnapshot doc, String collection})> _quickDocs = [];
   List<({QueryDocumentSnapshot doc, String collection})> _openDocs = [];
   List<({QueryDocumentSnapshot doc, String collection})> _offeredDocs = [];
+  StreamSubscription? _searchSub;
   StreamSubscription? _quickSub;
   StreamSubscription? _openSub;
   StreamSubscription? _offeredSub;
@@ -57,6 +58,16 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
   @override
   void initState() {
     super.initState();
+    _searchSub = FirebaseFirestore.instance
+        .collection('quick_gigs')
+        .where('hostId', isEqualTo: widget.hostId)
+        .where('status', whereIn: ['scanning', 'in_progress'])
+        .snapshots()
+        .listen((snap) {
+          if (!mounted) return;
+          setState(() => _searchingDocs = snap.docs);
+        }, onError: (e) => debugPrint('[GigProgressTracker] search stream: $e'));
+
     _quickSub = FirebaseFirestore.instance
         .collection('quick_gigs')
         .where('hostId', isEqualTo: widget.hostId)
@@ -132,6 +143,7 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
 
   @override
   void dispose() {
+    _searchSub?.cancel();
     _quickSub?.cancel();
     _openSub?.cancel();
     _offeredSub?.cancel();
@@ -140,8 +152,9 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
 
   @override
   Widget build(BuildContext context) {
-    final allDocs = [..._quickDocs, ..._openDocs, ..._offeredDocs];
-    if (allDocs.isEmpty) return const SizedBox.shrink();
+    final activeDocs = [..._quickDocs, ..._openDocs, ..._offeredDocs];
+    final totalCount = _searchingDocs.length + activeDocs.length;
+    if (totalCount == 0) return const SizedBox.shrink();
 
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
@@ -169,7 +182,7 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
                 border: Border.all(color: kAmber.withValues(alpha: 0.4)),
               ),
               child: Text(
-                '${allDocs.length} Active',
+                '$totalCount Active',
                 style: const TextStyle(
                   color: kAmber,
                   fontSize: 11,
@@ -180,7 +193,8 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
           ],
         ),
         const SizedBox(height: 12),
-        ...allDocs.map(
+        ..._searchingDocs.map((doc) => _SearchingCard(doc: doc)),
+        ...activeDocs.map(
           (item) => _GigProgressCard(
             doc: item.doc,
             gigCollection: item.collection,
@@ -188,6 +202,223 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Searching card — shown while status is 'scanning' or 'in_progress'.
+//  Replaces the progress tracker until a worker accepts.
+// ─────────────────────────────────────────────────────────────────────────────
+class _SearchingCard extends StatefulWidget {
+  final QueryDocumentSnapshot doc;
+  const _SearchingCard({required this.doc});
+
+  @override
+  State<_SearchingCard> createState() => _SearchingCardState();
+}
+
+class _SearchingCardState extends State<_SearchingCard>
+    with SingleTickerProviderStateMixin {
+  static const _searchDurationSeconds = 300; // 5 minutes
+
+  late final AnimationController _pulse;
+  late final Animation<double> _opacity;
+  Timer? _countdownTimer;
+  int _secondsRemaining = _searchDurationSeconds;
+  bool _expired = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _opacity = Tween(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
+    );
+    _initCountdown();
+  }
+
+  void _initCountdown() {
+    final data = widget.doc.data() as Map<String, dynamic>;
+    final searchStartedAt = (data['searchStartedAt'] as Timestamp?)?.toDate();
+    if (searchStartedAt != null) {
+      final elapsed = DateTime.now().difference(searchStartedAt).inSeconds;
+      _secondsRemaining = (_searchDurationSeconds - elapsed).clamp(0, _searchDurationSeconds);
+    }
+    if (_secondsRemaining <= 0) {
+      _expireSearch();
+      return;
+    }
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _secondsRemaining--);
+      if (_secondsRemaining <= 0) {
+        _countdownTimer?.cancel();
+        _expireSearch();
+      }
+    });
+  }
+
+  Future<void> _expireSearch() async {
+    if (_expired) return;
+    _expired = true;
+    try {
+      await FirebaseFirestore.instance
+          .collection('quick_gigs')
+          .doc(widget.doc.id)
+          .update({
+            'status': 'no_worker',
+            'assignedWorkerId': null,
+            'assignedWorkerName': null,
+          });
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  String get _timeLabel {
+    final m = _secondsRemaining ~/ 60;
+    final s = _secondsRemaining % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = widget.doc.data() as Map<String, dynamic>;
+    final title = data['title'] as String? ?? 'Quick Gig';
+    final budget = (data['budget'] as num?)?.toDouble() ?? 0;
+    final currencyCode = data['currencyCode'] as String? ?? 'PHP';
+    final status = data['status'] as String? ?? 'scanning';
+
+    final cardColor = Theme.of(context).cardColor;
+    final divider = Theme.of(context).dividerColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: kAmber.withValues(alpha: 0.4)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: kAmber.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.flash_on_rounded, color: kAmber, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        const Icon(Icons.attach_money_rounded, color: kAmber, size: 12),
+                        Text(
+                          CurrencyFormatter.format(budget, currencyCode),
+                          style: const TextStyle(
+                            color: kAmber,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    _timeLabel,
+                    style: const TextStyle(
+                      color: kAmber,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const Text(
+                    'remaining',
+                    style: TextStyle(color: kSub, fontSize: 9),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Divider(color: divider, height: 1),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              FadeTransition(
+                opacity: _opacity,
+                child: const Icon(Icons.person_search_rounded, color: kAmber, size: 16),
+              ),
+              const SizedBox(width: 8),
+              FadeTransition(
+                opacity: _opacity,
+                child: Text(
+                  status == 'in_progress'
+                      ? 'Waiting for worker to respond…'
+                      : 'Searching for a worker…',
+                  style: const TextStyle(
+                    color: kAmber,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: kAmber.withValues(alpha: 0.7),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -212,61 +443,32 @@ class _GigProgressCard extends StatelessWidget {
     this.onPaymentConfirmed,
   });
 
-  // Steps differ only in the first entry: quick gigs start at 'in_progress',
-  // open/offered gigs start at 'navigating'.
-  List<String> get _steps => gigCollection == 'quick_gigs'
-      ? const [
-          'in_progress',
-          'arrived',
-          'working',
-          'task_complete',
-          'payment',
-          'completed',
-        ]
-      : const [
-          'navigating',
-          'arrived',
-          'working',
-          'task_complete',
-          'payment',
-          'completed',
-        ];
+  static const _steps = [
+    'navigating',
+    'arrived',
+    'working',
+    'task_complete',
+    'payment',
+    'completed',
+  ];
 
-  List<String> get _stepLabels => gigCollection == 'quick_gigs'
-      ? const [
-          'Searching',
-          'Arrived',
-          'Working',
-          'Done',
-          'Payment',
-          'Completed',
-        ]
-      : const [
-          'On the way',
-          'Arrived',
-          'Working',
-          'Done',
-          'Payment',
-          'Completed',
-        ];
+  static const _stepLabels = [
+    'On the way',
+    'Arrived',
+    'Working',
+    'Done',
+    'Payment',
+    'Completed',
+  ];
 
-  List<IconData> get _stepIcons => gigCollection == 'quick_gigs'
-      ? const [
-          Icons.person_search_rounded,
-          Icons.location_on_rounded,
-          Icons.work_rounded,
-          Icons.check_circle_outline_rounded,
-          Icons.payment_rounded,
-          Icons.verified_rounded,
-        ]
-      : const [
-          Icons.directions_rounded,
-          Icons.location_on_rounded,
-          Icons.work_rounded,
-          Icons.check_circle_outline_rounded,
-          Icons.payment_rounded,
-          Icons.verified_rounded,
-        ];
+  static const _stepIcons = [
+    Icons.directions_rounded,
+    Icons.location_on_rounded,
+    Icons.work_rounded,
+    Icons.check_circle_outline_rounded,
+    Icons.payment_rounded,
+    Icons.verified_rounded,
+  ];
 
   Future<void> _showPaymentAndComplete(
     BuildContext context,
@@ -332,13 +534,10 @@ class _GigProgressCard extends StatelessWidget {
     final title = data['title'] as String? ?? 'Gig';
     final status = data['status'] as String? ?? 'navigating';
     // offered_gigs use 'workerName'/'workerId'; quick/open use 'assignedWorkerName'/'assignedWorkerId'
-    // During 'in_progress' a worker has been dispatched but not yet accepted —
-    // hide their name so the host isn't misled into thinking they're assigned.
-    final rawWorkerName =
+    final workerName =
         data['assignedWorkerName'] as String? ??
         data['workerName'] as String? ??
         'Worker';
-    final workerName = status == 'in_progress' ? 'Searching for worker…' : rawWorkerName;
     final workerId =
         data['assignedWorkerId'] as String? ?? data['workerId'] as String?;
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;

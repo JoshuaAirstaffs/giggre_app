@@ -60,6 +60,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
   }
 
   static const _activeStatuses = [
+    'scanning',
     'in_progress',
     'navigating',
     'arrived',
@@ -553,18 +554,27 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             '';
         final isActive = _activeStatuses.contains(status);
         final isTaskComplete = status == 'task_complete';
+        // scanning = no worker dispatched yet; in_progress = dispatched, awaiting response
+        final isSearching = status == 'scanning' || status == 'in_progress';
         final progressStatus = status == 'cancellation_requested'
             ? (data['lastProgressStatus'] as String? ?? 'working')
             : status;
-        final resolvedWorkerName = workerName.isNotEmpty ? workerName : 'Worker';
+        final resolvedWorkerName = isSearching
+            ? 'Searching for worker…'
+            : (workerName.isNotEmpty ? workerName : 'Worker');
         final hostStep = gigStepFromStatus(progressStatus);
         final hostStepIndex = GigStep.values.indexOf(hostStep);
-        final hostCopy = hostInstructionFor(
-          hostStep,
-          workerName: resolvedWorkerName,
-          amount: budget,
-          currencyCode: currencyCode,
-        );
+        final hostCopy = isSearching
+            ? const GigStepCopy(
+                'Finding the best nearby worker',
+                "Hold tight — you’ll be notified the moment someone accepts.",
+              )
+            : hostInstructionFor(
+                hostStep,
+                workerName: resolvedWorkerName,
+                amount: budget,
+                currencyCode: currencyCode,
+              );
         final showCancelGig = ![
           'completed',
           'cancelled',
@@ -611,8 +621,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               if (isActive) ...[
                 // ── Gold "Gig in Progress" header (mirrors worker's Figure 9) ──
                 ActiveGigHeader(
-                  title: 'Gig in Progress',
-                  statusLabel: _hostStatusChipLabel(hostStep, resolvedWorkerName),
+                  title: isSearching ? 'Finding a Worker' : 'Gig in Progress',
+                  statusLabel: isSearching
+                      ? 'Searching for worker…'
+                      : _hostStatusChipLabel(hostStep, resolvedWorkerName),
                   onBack: () => Navigator.pop(context),
                   accent: kHostAccent,
                 ),
@@ -669,20 +681,23 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ],
 
                 // ── Progress card: stepper + host-perspective instructions ──
-                ActiveGigProgressCard(
-                  stepIndex: hostStepIndex,
-                  title: hostCopy.title,
-                  body: hostCopy.body,
-                  arrivedPromptVisible: false,
-                  onConfirmArrival: () {},
-                  isCancelPending: status == 'cancellation_requested',
-                  showStartGig: false,
-                  onStartGig: () {},
-                  showGigComplete: isTaskComplete,
-                  onGigComplete: _confirmCompleted,
-                  accent: kHostAccent,
-                ),
-                const SizedBox(height: 16),
+                // Hidden while searching — shown only after a worker accepts.
+                if (!isSearching) ...[
+                  ActiveGigProgressCard(
+                    stepIndex: hostStepIndex,
+                    title: hostCopy.title,
+                    body: hostCopy.body,
+                    arrivedPromptVisible: false,
+                    onConfirmArrival: () {},
+                    isCancelPending: status == 'cancellation_requested',
+                    showStartGig: false,
+                    onStartGig: () {},
+                    showGigComplete: isTaskComplete,
+                    onGigComplete: _confirmCompleted,
+                    accent: kHostAccent,
+                  ),
+                  const SizedBox(height: 16),
+                ],
 
                 // ── Gig + worker card ────────────────────────────────
                 Container(
@@ -756,7 +771,8 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                           ],
                         ),
                       ],
-                      if (workerId.isNotEmpty) ...[
+                      // Worker profile only shown after acceptance — not during dispatch.
+                      if (workerId.isNotEmpty && !isSearching) ...[
                         const SizedBox(height: 14),
                         Divider(height: 0, thickness: 1, color: activeGigDividerColor(isDark)),
                         const SizedBox(height: 14),
@@ -1554,7 +1570,7 @@ String _hostSheetStatusLabel(String status) {
     case 'scanning':
       return 'Scanning';
     case 'in_progress':
-      return 'In progress';
+      return 'Searching';
     case 'open':
       return 'Open';
     case 'offered':
