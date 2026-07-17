@@ -5,7 +5,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../../../main.dart';
 import '../../../utils/user_utils.dart';
 import 'dashboard_screen.dart';
-import 'login_screen.dart';
+import 'welcome_screen.dart';
 import '../../../services/sound_service.dart';
 import 'dart:math';
 
@@ -641,7 +641,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
-            builder: (_) => const LoginScreen(
+            builder: (_) => const WelcomeScreen(
               errorMessage: 'Account setup failed. Please sign in again.',
             ),
           ),

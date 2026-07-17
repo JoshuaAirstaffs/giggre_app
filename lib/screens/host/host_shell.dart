@@ -7,7 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/providers/current_user_provider.dart';
-import '../../features/auth/presentation/login_screen.dart';
+import '../../features/auth/presentation/welcome_screen.dart';
 import '../../features/gig_host/presentation/gig_host_screen.dart';
 import '../../features/gig_host/presentation/host_gigs_screen.dart';
 import '../../features/gig_host/presentation/post_quick_gig_screen.dart';
@@ -234,7 +234,7 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
     if (!mounted) return;
     final clearing = context.read<CurrentUserProvider>().clearUser();
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      MaterialPageRoute(builder: (_) => const WelcomeScreen()),
       (route) => false,
     );
     await WidgetsBinding.instance.endOfFrame;
@@ -253,13 +253,9 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
       HostGigsScreen(uid: uid, isTabRoot: true),
       const HomeChat(showBackButton: false),
       Scaffold(
-        appBar: AppBar(
-          title: const Text('Profile'),
-          elevation: 0,
-          automaticallyImplyLeading: false,
-        ),
         body: ProfileTab(
           initialRole: 'host',
+          isTabRoot: true,
           onSwitchRole: () => Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const WorkerShell()),

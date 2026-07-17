@@ -9,6 +9,7 @@ import 'package:giggre_app/screens/maintenance_screen.dart';
 import 'package:provider/provider.dart';
 import 'features/auth/presentation/login_screen.dart';
 import 'features/auth/presentation/register_screen.dart';
+import 'features/auth/presentation/welcome_screen.dart';
 import 'core/widgets/main_navigation.dart';
 import 'core/widgets/app_update_checker.dart';
 import 'core/theme/theme_provider.dart';
@@ -209,7 +210,7 @@ class _AuthGateState extends State<AuthGate> {
               }),
             );
           }
-          return LoginScreen(errorMessage: _accountError);
+          return WelcomeScreen(errorMessage: _accountError);
         }
 
         if (_pendingDeletion) {
@@ -250,7 +251,7 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        return LoginScreen(errorMessage: _accountError);
+        return WelcomeScreen(errorMessage: _accountError);
       },
     );
   }
@@ -503,6 +504,7 @@ class GiggreApp extends StatelessWidget {
       themeMode: themeProvider.mode,
       builder: (context, child) =>
           AppUpdateChecker(child: child ?? const SizedBox()),
+      navigatorObservers: [welcomeRouteObserver],
       home: firebaseError != null
           ? _FirebaseErrorScreen(firebaseError!)
           : const _MaintenanceGate(),

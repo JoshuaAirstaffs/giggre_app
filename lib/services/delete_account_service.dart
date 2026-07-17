@@ -6,7 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../main.dart';
 import '../core/theme/app_colors.dart';
-import '../features/auth/presentation/login_screen.dart';
+import '../features/auth/presentation/welcome_screen.dart';
 
 class DeleteAccountService {
   static Future<void> deleteAccount(BuildContext context) async {
@@ -29,7 +29,7 @@ class DeleteAccountService {
 
     if (context.mounted) {
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        MaterialPageRoute(builder: (_) => const WelcomeScreen()),
         (_) => false,
       );
     }

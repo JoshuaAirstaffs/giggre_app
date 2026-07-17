@@ -10,7 +10,7 @@ import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/worker_active_gig.dart';
-import '../../auth/presentation/login_screen.dart';
+import '../../auth/presentation/welcome_screen.dart';
 import '../../../screens/host/host_shell.dart';
 import '../../home/presentation/profile_tab.dart';
 import 'widgets/dashboard_summary_card.dart';
@@ -972,9 +972,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       context,
       MaterialPageRoute(
         builder: (_) => Scaffold(
-          appBar: AppBar(title: const Text('Profile'), elevation: 0),
           body: ProfileTab(
             initialRole: 'worker',
+            isTabRoot: false,
             onSwitchRole: () => Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (_) => const HostShell()),
@@ -993,7 +993,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     if (!mounted) return;
     final clearing = context.read<CurrentUserProvider>().clearUser();
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      MaterialPageRoute(builder: (_) => const WelcomeScreen()),
       (_) => false,
     );
     await WidgetsBinding.instance.endOfFrame;

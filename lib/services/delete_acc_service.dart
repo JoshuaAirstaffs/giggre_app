@@ -8,7 +8,7 @@ import '../main.dart';
 import '../core/providers/current_user_provider.dart';
 import '../core/theme/app_colors.dart';
 import '../features/auth/models/delete_request_model.dart';
-import '../features/auth/presentation/login_screen.dart';
+import '../features/auth/presentation/welcome_screen.dart';
 
 class DeleteAccountService {
   // ─────────────────────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ class DeleteAccountService {
       if (context.mounted) {
         clearing = context.read<CurrentUserProvider>().clearUser();
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          MaterialPageRoute(builder: (_) => const WelcomeScreen()),
           (route) => false,
         );
       }

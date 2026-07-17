@@ -7,7 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/providers/current_user_provider.dart';
-import '../../features/auth/presentation/login_screen.dart';
+import '../../features/auth/presentation/welcome_screen.dart';
 import '../../features/gig_worker/presentation/gig_worker_screen.dart';
 import '../../features/home/presentation/profile_tab.dart';
 import '../chat/home_chat.dart';
@@ -158,7 +158,7 @@ class _WorkerShellState extends State<WorkerShell> {
     if (!mounted) return;
     final clearing = context.read<CurrentUserProvider>().clearUser();
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      MaterialPageRoute(builder: (_) => const WelcomeScreen()),
       (route) => false,
     );
     await WidgetsBinding.instance.endOfFrame;
@@ -174,13 +174,9 @@ class _WorkerShellState extends State<WorkerShell> {
       SavedPlaceholder(onGoToDashboard: _goToHome),
       const HomeChat(showBackButton: false),
       Scaffold(
-        appBar: AppBar(
-          title: const Text('Profile'),
-          elevation: 0,
-          automaticallyImplyLeading: false,
-        ),
         body: ProfileTab(
           initialRole: 'worker',
+          isTabRoot: true,
           onSwitchRole: () => Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const HostShell()),

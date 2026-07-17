@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_colors.dart';
+import 'profile_tab_theme.dart';
 
 class ThemeProvider extends ChangeNotifier {
   static const _prefsKey = 'isDarkMode';
@@ -42,6 +43,7 @@ class ThemeProvider extends ChangeNotifier {
         cardColor: Colors.white,
         dividerColor: const Color(0xFFE2E8F0),
         fontFamily: GoogleFonts.inter().fontFamily,
+        extensions: const [ProfileTabTokens.light],
       );
 
   static ThemeData get darkTheme => ThemeData(
@@ -54,5 +56,6 @@ class ThemeProvider extends ChangeNotifier {
         cardColor: kCard,
         dividerColor: kBorder,
         fontFamily: GoogleFonts.inter().fontFamily,
+        extensions: const [ProfileTabTokens.dark],
       );
 }

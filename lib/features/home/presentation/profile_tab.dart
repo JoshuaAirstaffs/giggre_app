@@ -6,11 +6,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:giggre_app/services/delete_acc_service.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/profile_tab_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../gig_worker/presentation/gig_history_screen.dart';
 import '../../gig_worker/presentation/worker_ratings_screen.dart';
@@ -23,6 +26,8 @@ import '../../gig_host/presentation/widgets/payment_history_sheet.dart';
 import '../../gig_host/presentation/widgets/ratings_given_sheet.dart';
 import '../../gig_host/presentation/host_gigs_screen.dart';
 
+const _kProfileStatsModeKey = 'profile_stats_mode';
+
 const _kBadgeLabels = {
   'unverified': 'Unverified',
   'verified': 'Verified',
@@ -32,30 +37,21 @@ const _kBadgeLabels = {
 
 const _kBadgeColors = {
   'unverified': Colors.blue,
-  'verified': Colors.green,
+  'verified': _kGreen,
   'pending': Colors.orangeAccent,
   'rejected': Colors.red,
 };
 
-// Profile header card — light design system tokens (scoped to _ProfileCard only)
-const _kPCardBg = Color(0xFFFFFFFF);
-const _kPCardBorder = Color(0xFFE4E9F0);
-const _kPCoverStart = Color(0xFF2B6FB5);
-const _kPCoverEnd = Color(0xFF1F4D80);
-const _kPTextPrimary = Color(0xFF17263D);
-const _kPTextSecondary = Color(0xFF5A6778);
-const _kPTextMuted = Color(0xFF94A0B0);
-const _kPGreen = Color(0xFF2E9E6B);
-const _kPDivider = Color(0xFFEEF2F7);
-const _kPIconBg = Color(0xFFF1F5F9);
-const _kPAboutBg = Color(0xFFFAFBFD);
-
-// ...and their dark-mode counterparts
-const _kPTextPrimaryDark = Color(0xFFF1F5F9);
-const _kPTextSecondaryDark = Color(0xFF94A3B8);
-const _kPTextMutedDark = Color(0xFF64748B);
-const _kPIconBgDark = Color(0xFF243247);
-const _kPAboutBgDark = Color(0xFF19222F);
+// ── Shared accents (identical across light/dark per the design system) ──────
+const _kCoverStart = Color(0xFF2B6FB5);
+const _kCoverEnd = Color(0xFF1F4D80);
+const _kGreen = Color(0xFF2E9E6B);
+const _kRed = Color(0xFFE5484D);
+const _kPurple = Color(0xFF8B6FD8);
+const _kGoldDeep = Color(0xFFD88810);
+// Gold read as flat text needs a deeper shade on light surfaces for contrast;
+// the brand gold (kGold) already contrasts fine on dark surfaces/icon tints.
+const _kGoldTextLight = Color(0xFFB06E00);
 
 // Formats a phone number for display only — never mutates the stored value.
 String _formatPhoneForDisplay(String raw) {
@@ -92,6 +88,15 @@ String _formatPhoneForDisplay(String raw) {
   return hasPlus ? '+$countryCode $formatted' : formatted;
 }
 
+// Joins a per-currency-code amount map into a display string using the
+// existing CurrencyFormatter — unchanged calculation, just centralized.
+String _formatByCode(Map<String, double> byCode) {
+  if (byCode.isEmpty) return CurrencyFormatter.format(0, 'PHP');
+  return (byCode.entries.toList()..sort((a, b) => a.key.compareTo(b.key)))
+      .map((e) => CurrencyFormatter.format(e.value, e.key))
+      .join('  ');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  ProfileTab — shared profile tab for both Worker and Host screens
 // ─────────────────────────────────────────────────────────────────────────────
@@ -99,12 +104,19 @@ class ProfileTab extends StatefulWidget {
   final String initialRole; // 'worker' or 'host'
   final VoidCallback? onSwitchRole; // navigates to the other role screen
   final VoidCallback? onLogout;
+  // True when this widget is the root of a bottom-nav tab (WorkerShell /
+  // HostShell) — those shells can themselves be pushed on top of another
+  // route (e.g. from the home screen's role picker), so Navigator.canPop()
+  // can't reliably tell "tab root" apart from "pushed as its own screen".
+  // Callers that push ProfileTab as a standalone screen should pass false.
+  final bool isTabRoot;
 
   const ProfileTab({
     super.key,
     required this.initialRole,
     this.onSwitchRole,
     this.onLogout,
+    this.isTabRoot = true,
   });
 
   @override
@@ -166,6 +178,7 @@ class _ProfileTabState extends State<ProfileTab> {
     super.initState();
     _viewRole = widget.initialRole;
     _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    _loadViewRole();
     _listenToProfile();
     _listenToHostGigs();
   }
@@ -177,6 +190,22 @@ class _ProfileTabState extends State<ProfileTab> {
     _openGigsSub?.cancel();
     _offeredGigsSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadViewRole() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_kProfileStatsModeKey);
+    if ((saved == 'worker' || saved == 'host') && mounted) {
+      setState(() => _viewRole = saved!);
+    }
+  }
+
+  void _setViewRole(String role) {
+    if (role == _viewRole) return;
+    setState(() => _viewRole = role);
+    SharedPreferences.getInstance().then(
+      (prefs) => prefs.setString(_kProfileStatsModeKey, role),
+    );
   }
 
   void _listenToProfile() {
@@ -733,362 +762,438 @@ class _ProfileTabState extends State<ProfileTab> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = Theme.of(context).cardColor;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    final accentColor = _viewRole == 'worker' ? kBlue : kGold;
+    final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
+    final goldText = isDark ? kGold : _kGoldTextLight;
 
     if (_loading) {
+      final accentColor = _viewRole == 'worker' ? kBlue : kGold;
       return Center(
         child: CircularProgressIndicator(color: accentColor, strokeWidth: 2),
       );
     }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Profile Header Card ──────────────────────────────────────
-          _ProfileCard(
-            name: _name,
-            email: _email,
-            phone: _phone,
-            bio: _bio,
-            photoUrl: _photoUrl,
-            createdAt: _createdAt,
-            isVerified: _isVerified,
-            isDark: isDark,
-            onEdit: _showEditProfile,
-          ),
-          const SizedBox(height: 20),
+    final totalStr = _formatByCode(_earningsByCode);
+    final weeklyStr = _formatByCode(_weeklyByCode);
+    final spentStr = _formatByCode(_spentByCurrency);
 
-          // ── Role Switcher ────────────────────────────────────────────
-          _RoleSwitcher(
-            selected: _viewRole,
-            onChanged: (r) => setState(() => _viewRole = r),
-            isDark: isDark,
-            cardColor: cardColor,
-            onSurface: onSurface,
-          ),
-          const SizedBox(height: 16),
+    final workerColumns = <_StatColumn>[
+      if (_workerRatingCount > 0)
+        _StatColumn(
+          value: '${_ratingAsWorker.toStringAsFixed(1)} ★',
+          label: 'Worker rating ($_workerRatingCount)',
+          valueColor: goldText,
+        ),
+      _StatColumn(value: '$_completedGigsWorker', label: 'Gigs done'),
+      _StatColumn(value: totalStr, label: 'Total earned', valueColor: kBlue),
+    ];
 
-          // ── Role-specific Stats ──────────────────────────────────────
-          if (_viewRole == 'worker')
-            _WorkerStats(
-              rating: _ratingAsWorker,
-              ratingCount: _workerRatingCount,
-              earningsByCode: _earningsByCode,
-              weeklyByCode: _weeklyByCode,
-              completedGigs: _completedGigsWorker,
-              isDark: isDark,
-              cardColor: cardColor,
-              onSurface: onSurface,
-            )
-          else
-            _HostStats(
-              rating: _ratingAsHost,
-              ratingCount: _hostRatingCount,
-              gigsPosted: _gigsPosted,
-              activeGigs: _activeGigs,
-              completedGigs: _completedGigsHost,
-              spentByCurrency: _spentByCurrency,
-              completionRate: _completionRate,
-              isDark: isDark,
-              cardColor: cardColor,
-              onSurface: onSurface,
-            ),
-          const SizedBox(height: 20),
+    final hostColumns = <_StatColumn>[
+      if (_hostRatingCount > 0)
+        _StatColumn(
+          value: '${_ratingAsHost.toStringAsFixed(1)} ★',
+          label: 'Host rating ($_hostRatingCount)',
+          valueColor: goldText,
+        ),
+      _StatColumn(
+        value: '$_gigsPosted',
+        label: 'Gigs posted',
+        valueColor: goldText,
+      ),
+      _StatColumn(
+        value: '$_completedGigsHost',
+        label: 'Completed',
+        valueColor: goldText,
+      ),
+    ];
 
-          // ── Account actions ──────────────────────────────────────────
-          _SectionHeader(label: 'Account', onSurface: onSurface),
-          const SizedBox(height: 10),
-          _ActionCard(
-            isDark: isDark,
-            cardColor: cardColor,
-            children: _viewRole == 'worker'
-                ? [
-                    _ActionRow(
-                      icon: Icons.construction_rounded,
-                      iconColor: kGold,
-                      label: 'My Toolchest',
-                      badge: _skills.isNotEmpty ? '${_skills.length}' : null,
-                      badgeColor: kGold,
-                      onTap: () => ToolchestSheet.show(context, _uid),
-                    ),
-                    _ActionDivider(isDark: isDark),
-                    _ActionRow(
-                      icon: Icons.history_rounded,
-                      iconColor: kBlue,
-                      label: 'Gig History',
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const GigHistoryScreen(),
-                        ),
-                      ),
-                    ),
-                    _ActionDivider(isDark: isDark),
-                    _ActionRow(
-                      icon: Icons.star_outline_rounded,
-                      iconColor: kGold,
-                      label: 'Ratings & Reviews',
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const WorkerRatingsScreen(),
-                        ),
-                      ),
-                    ),
-                  ]
-                : [
-                    _ActionRow(
-                      icon: Icons.history_rounded,
-                      iconColor: kBlue,
-                      label: 'Gig History',
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => HostGigsScreen(uid: _uid),
-                        ),
-                      ),
-                    ),
-                    _ActionDivider(isDark: isDark),
-                    _ActionRow(
-                      icon: Icons.favorite_outline_rounded,
-                      iconColor: const Color(0xFFEC4899),
-                      label: 'Favorite Workers',
-                      onTap: () => showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (_) =>
-                            FavoriteWorkersSheet(hostId: _uid),
-                      ),
-                    ),
-                    _ActionDivider(isDark: isDark),
-                    _ActionRow(
-                      icon: Icons.star_outline_rounded,
-                      iconColor: kGold,
-                      label: 'Ratings Given',
-                      onTap: () => showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (_) => const RatingsGivenSheet(),
-                      ),
-                    ),
-                    _ActionDivider(isDark: isDark),
-                    _ActionRow(
-                      icon: Icons.receipt_long_outlined,
-                      iconColor: const Color(0xFF10B981),
-                      label: 'Payment History',
-                      onTap: () {
-                        final completed = [
-                          ..._quickGigsDocs,
-                          ..._openGigsDocs,
-                          ..._offeredGigsDocs,
-                        ]
-                            .where(
-                              (g) =>
-                                  (g['status'] as String?) ==
-                                  'completed',
-                            )
-                            .toList();
-                        PaymentHistorySheet.show(
-                          context: context,
-                          completedGigs: completed,
-                        );
-                      },
-                    ),
-                  ],
-          ),
-          const SizedBox(height: 16),
-
-          // ── Settings ─────────────────────────────────────────────────
-          _SectionHeader(label: 'Settings', onSurface: onSurface),
-          const SizedBox(height: 10),
-          _ActionCard(
-            isDark: isDark,
-            cardColor: cardColor,
+    return Container(
+      color: tokens.screenBg,
+      child: SafeArea(
+        bottom: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _ActionRow(
-                icon: Icons.notifications_outlined,
-                iconColor: const Color(0xFF8B5CF6),
-                label: 'Notifications',
-                onTap: () => _viewRole == 'worker'
-                    ? WorkerNotificationsSheet.show(context)
-                    : host_notif.NotificationsSheet.show(context),
-              ),
-              _ActionDivider(isDark: isDark),
-              _ActionRow(
-                icon: Icons.description_rounded,
-                iconColor: const Color(0xFF8B5CF6),
-                label: 'My Documents',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => MyDocumentsScreen(userId: _uid),
+              // ── Title ──────────────────────────────────────────────────
+              Row(
+                children: [
+                  if (!widget.isTabRoot)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: GestureDetector(
+                        onTap: () => Navigator.maybePop(context),
+                        child: Icon(
+                          Icons.arrow_back_ios_new_rounded,
+                          size: 17,
+                          color: tokens.textPrimary,
+                        ),
+                      ),
+                    ),
+                  Text(
+                    'Profile',
+                    style: TextStyle(
+                      color: tokens.textPrimary,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                    ),
                   ),
-                ),
+                ],
               ),
-              _ActionDivider(isDark: isDark),
-              _ActionRow(
-                icon: Icons.verified_outlined,
-                iconColor: kBlue,
-                label: 'Verification',
-                badge: _kBadgeLabels[_isVerified],
-                badgeColor: _kBadgeColors[_isVerified],
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const VerificationScreen(),
-                  ),
-                ),
-              ),
-              _ActionDivider(isDark: isDark),
-              _ActionRow(
-                icon: Icons.card_giftcard,
-                iconColor: const Color(0xFF8B5CF6),
-                label: 'My Referrals',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => MyReferralScreen(),
-                  ),
-                ),
-              ),
-              _ActionDivider(isDark: isDark),
-              _ActionRow(
-                icon: Icons.settings_outlined,
-                iconColor: kSub,
-                label: 'Settings',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const WorkerSettingsScreen(),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
-          // ── Switch Role ──────────────────────────────────────────────
-          if (widget.onSwitchRole != null) ...[
-            _SectionHeader(label: 'Switch Mode', onSurface: onSurface),
-            const SizedBox(height: 10),
-            GestureDetector(
-              onTap: widget.onSwitchRole,
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  vertical: 16,
-                  horizontal: 18,
+              // ── Profile Header Card ──────────────────────────────────────
+              _ProfileCard(
+                name: _name,
+                email: _email,
+                phone: _phone,
+                bio: _bio,
+                photoUrl: _photoUrl,
+                createdAt: _createdAt,
+                isVerified: _isVerified,
+                tokens: tokens,
+                onEdit: _showEditProfile,
+              ),
+              const SizedBox(height: 16),
+
+              // ── Role Stats Toggle ─────────────────────────────────────────
+              _RoleToggle(
+                selected: _viewRole,
+                onChanged: _setViewRole,
+                tokens: tokens,
+              ),
+              const SizedBox(height: 16),
+
+              // ── Role-specific Stats ──────────────────────────────────────
+              if (_viewRole == 'worker')
+                _StatsCard(
+                  columns: workerColumns,
+                  footnote: '$weeklyStr earned this week',
+                  tokens: tokens,
+                )
+              else
+                _StatsCard(
+                  columns: hostColumns,
+                  footnote:
+                      '$_activeGigs active · ${_completionRate.toStringAsFixed(0)}% completion · $spentStr spent',
+                  tokens: tokens,
                 ),
-                decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: isDark
-                        ? kBorder
-                        : Colors.grey.withValues(alpha: 0.2),
+              const SizedBox(height: 20),
+
+              // ── Account actions ──────────────────────────────────────────
+              _SectionHeader(label: 'Account', tokens: tokens),
+              const SizedBox(height: 10),
+              _ActionCard(
+                tokens: tokens,
+                children: _viewRole == 'worker'
+                    ? [
+                        _ActionRow(
+                          icon: Icons.construction_rounded,
+                          iconColor: kGold,
+                          label: 'My Toolchest',
+                          badge:
+                              _skills.isNotEmpty ? '${_skills.length}' : null,
+                          badgeColor: kGold,
+                          tokens: tokens,
+                          onTap: () => ToolchestSheet.show(context, _uid),
+                        ),
+                        _ActionDivider(tokens: tokens),
+                        _ActionRow(
+                          icon: Icons.history_rounded,
+                          iconColor: kBlue,
+                          label: 'Gig History',
+                          tokens: tokens,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const GigHistoryScreen(),
+                            ),
+                          ),
+                        ),
+                        _ActionDivider(tokens: tokens),
+                        _ActionRow(
+                          icon: Icons.star_outline_rounded,
+                          iconColor: kGold,
+                          label: 'Ratings & Reviews',
+                          tokens: tokens,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const WorkerRatingsScreen(),
+                            ),
+                          ),
+                        ),
+                      ]
+                    : [
+                        _ActionRow(
+                          icon: Icons.history_rounded,
+                          iconColor: kBlue,
+                          label: 'Gig History',
+                          tokens: tokens,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => HostGigsScreen(uid: _uid),
+                            ),
+                          ),
+                        ),
+                        _ActionDivider(tokens: tokens),
+                        _ActionRow(
+                          icon: Icons.favorite_outline_rounded,
+                          iconColor: const Color(0xFFEC4899),
+                          label: 'Favorite Workers',
+                          tokens: tokens,
+                          onTap: () => showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (_) =>
+                                FavoriteWorkersSheet(hostId: _uid),
+                          ),
+                        ),
+                        _ActionDivider(tokens: tokens),
+                        _ActionRow(
+                          icon: Icons.star_outline_rounded,
+                          iconColor: kGold,
+                          label: 'Ratings Given',
+                          tokens: tokens,
+                          onTap: () => showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (_) => const RatingsGivenSheet(),
+                          ),
+                        ),
+                        _ActionDivider(tokens: tokens),
+                        _ActionRow(
+                          icon: Icons.receipt_long_outlined,
+                          iconColor: const Color(0xFF10B981),
+                          label: 'Payment History',
+                          tokens: tokens,
+                          onTap: () {
+                            final completed = [
+                              ..._quickGigsDocs,
+                              ..._openGigsDocs,
+                              ..._offeredGigsDocs,
+                            ]
+                                .where(
+                                  (g) =>
+                                      (g['status'] as String?) ==
+                                      'completed',
+                                )
+                                .toList();
+                            PaymentHistorySheet.show(
+                              context: context,
+                              completedGigs: completed,
+                            );
+                          },
+                        ),
+                      ],
+              ),
+              const SizedBox(height: 16),
+
+              // ── Settings ─────────────────────────────────────────────────
+              _SectionHeader(label: 'Settings', tokens: tokens),
+              const SizedBox(height: 10),
+              _ActionCard(
+                tokens: tokens,
+                children: [
+                  _ActionRow(
+                    icon: Icons.notifications_outlined,
+                    iconColor: kBlue,
+                    label: 'Notifications',
+                    tokens: tokens,
+                    onTap: () => _viewRole == 'worker'
+                        ? WorkerNotificationsSheet.show(context)
+                        : host_notif.NotificationsSheet.show(context),
                   ),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: (widget.initialRole == 'worker'
+                  _ActionDivider(tokens: tokens),
+                  _ActionRow(
+                    icon: Icons.description_rounded,
+                    iconColor: _kPurple,
+                    label: 'My Documents',
+                    tokens: tokens,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MyDocumentsScreen(userId: _uid),
+                      ),
+                    ),
+                  ),
+                  _ActionDivider(tokens: tokens),
+                  _ActionRow(
+                    icon: Icons.shield_outlined,
+                    iconColor: _kGreen,
+                    label: 'Verification',
+                    badge: _kBadgeLabels[_isVerified],
+                    badgeColor: _kBadgeColors[_isVerified],
+                    tokens: tokens,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const VerificationScreen(),
+                      ),
+                    ),
+                  ),
+                  _ActionDivider(tokens: tokens),
+                  _ActionRow(
+                    icon: Icons.card_giftcard,
+                    iconColor: _kPurple,
+                    label: 'My Referrals',
+                    tokens: tokens,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MyReferralScreen(),
+                      ),
+                    ),
+                  ),
+                  _ActionDivider(tokens: tokens),
+                  _ActionRow(
+                    icon: Icons.settings_outlined,
+                    iconColor: tokens.textSecondary,
+                    label: 'Settings',
+                    tokens: tokens,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const WorkerSettingsScreen(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // ── Switch Role ──────────────────────────────────────────────
+              if (widget.onSwitchRole != null) ...[
+                _SectionHeader(label: 'Switch Mode', tokens: tokens),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: widget.onSwitchRole,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 16,
+                      horizontal: 18,
+                    ),
+                    decoration: BoxDecoration(
+                      color: tokens.cardSurface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: tokens.cardBorder),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: (widget.initialRole == 'worker'
+                                    ? kGold
+                                    : kBlue)
+                                .withValues(alpha: tokens.iconTintAlpha),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            widget.initialRole == 'worker'
+                                ? Icons.business_center_outlined
+                                : Icons.work_outline_rounded,
+                            color: widget.initialRole == 'worker'
                                 ? kGold
-                                : kBlue)
-                            .withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        widget.initialRole == 'worker'
-                            ? Icons.business_center_outlined
-                            : Icons.work_outline_rounded,
-                        color: widget.initialRole == 'worker'
-                            ? kGold
-                            : kBlue,
-                        size: 18,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.initialRole == 'worker'
-                                ? 'Switch to Host Mode'
-                                : 'Switch to Worker Mode',
-                            style: TextStyle(
-                              color: onSurface,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
+                                : kBlue,
+                            size: 18,
                           ),
-                          Text(
-                            widget.initialRole == 'worker'
-                                ? 'Post gigs and hire workers'
-                                : 'Find gigs and earn money',
-                            style: const TextStyle(
-                              color: kSub,
-                              fontSize: 12,
-                            ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.initialRole == 'worker'
+                                    ? 'Switch to Host Mode'
+                                    : 'Switch to Worker Mode',
+                                style: TextStyle(
+                                  color: tokens.textPrimary,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              Text(
+                                widget.initialRole == 'worker'
+                                    ? 'Post gigs and hire workers'
+                                    : 'Find gigs and earn money',
+                                style: TextStyle(
+                                  color: tokens.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: tokens.textSecondary,
+                          size: 20,
+                        ),
+                      ],
                     ),
-                    const Icon(
-                      Icons.chevron_right_rounded,
-                      color: kSub,
-                      size: 20,
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // ── Logout ───────────────────────────────────────────────────
+              _ActionCard(
+                tokens: tokens,
+                children: [
+                  _ActionRow(
+                    icon: Icons.logout_rounded,
+                    iconColor: _kRed,
+                    label: 'Log out',
+                    labelColor: _kRed,
+                    labelWeight: FontWeight.w600,
+                    tokens: tokens,
+                    onTap: _confirmLogout,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+
+              // ── Delete Account (demoted to a text link) ───────────────────
+              Center(
+                child: GestureDetector(
+                  onTap: () => DeleteAccountService.deleteAccount(context),
+                  child: Text(
+                    'Delete Account',
+                    style: TextStyle(
+                      color: _kRed,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      decoration: TextDecoration.underline,
+                      decorationColor: _kRed,
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // ── Logout ───────────────────────────────────────────────────
-          _ActionCard(
-            isDark: isDark,
-            cardColor: cardColor,
-            children: [
-              _ActionRow(
-                icon: Icons.logout_rounded,
-                iconColor: Colors.redAccent,
-                label: 'Log out',
-                labelColor: Colors.redAccent,
-                onTap: _confirmLogout,
-                showArrow: false,
+              const SizedBox(height: 6),
+              Center(
+                child: FutureBuilder<PackageInfo>(
+                  future: PackageInfo.fromPlatform(),
+                  builder: (context, snap) {
+                    if (!snap.hasData) return const SizedBox.shrink();
+                    final info = snap.data!;
+                    return Text(
+                      'Giggre v${info.version} (${info.buildNumber})',
+                      style: TextStyle(color: tokens.textMuted, fontSize: 10),
+                    );
+                  },
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-
-          // ── Delete Account ───────────────────────────────────────────
-          _ActionCard(
-            isDark: isDark,
-            cardColor: cardColor,
-            children: [
-              _ActionRow(
-                icon: Icons.delete_outline_rounded,
-                iconColor: Colors.redAccent,
-                label: 'Delete Account',
-                labelColor: Colors.redAccent,
-                onTap: () => DeleteAccountService.deleteAccount(context),
-                showArrow: true,
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-        ],
+        ),
       ),
     );
   }
@@ -1099,7 +1204,7 @@ class _ProfileTabState extends State<ProfileTab> {
 // ─────────────────────────────────────────────────────────────────────────────
 class _ProfileCard extends StatelessWidget {
   final String name, email, phone, bio, photoUrl, createdAt, isVerified;
-  final bool isDark;
+  final ProfileTabTokens tokens;
   final VoidCallback onEdit;
   final bool isOwner;
 
@@ -1111,7 +1216,7 @@ class _ProfileCard extends StatelessWidget {
     required this.photoUrl,
     required this.createdAt,
     required this.isVerified,
-    required this.isDark,
+    required this.tokens,
     required this.onEdit,
     this.isOwner = true,
   });
@@ -1130,21 +1235,12 @@ class _ProfileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final showAbout = isOwner || bio.isNotEmpty;
 
-    final cardBg = isDark ? kCard : _kPCardBg;
-    final cardBorder = isDark ? kBorder : _kPCardBorder;
-    final textPrimary = isDark ? _kPTextPrimaryDark : _kPTextPrimary;
-    final textSecondary = isDark ? _kPTextSecondaryDark : _kPTextSecondary;
-    final textMuted = isDark ? _kPTextMutedDark : _kPTextMuted;
-    final divider = isDark ? kBorder : _kPDivider;
-    final iconBg = isDark ? _kPIconBgDark : _kPIconBg;
-    final aboutBg = isDark ? _kPAboutBgDark : _kPAboutBg;
-
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: cardBg,
+        color: tokens.cardSurface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: cardBorder),
+        border: Border.all(color: tokens.cardBorder),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -1159,7 +1255,7 @@ class _ProfileCard extends StatelessWidget {
                 width: double.infinity,
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [_kPCoverStart, _kPCoverEnd],
+                    colors: [_kCoverStart, _kCoverEnd],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
@@ -1182,14 +1278,14 @@ class _ProfileCard extends StatelessWidget {
                       children: [
                         Icon(
                           Icons.edit_outlined,
-                          color: _kPCoverEnd,
+                          color: _kCoverEnd,
                           size: 13,
                         ),
                         SizedBox(width: 5),
                         Text(
                           'Edit',
                           style: TextStyle(
-                            color: _kPCoverEnd,
+                            color: _kCoverEnd,
                             fontSize: 11.5,
                             fontWeight: FontWeight.w700,
                           ),
@@ -1211,7 +1307,8 @@ class _ProfileCard extends StatelessWidget {
                       height: 76,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        border: Border.all(color: cardBg, width: 3.5),
+                        border:
+                            Border.all(color: tokens.cardSurface, width: 3.5),
                       ),
                       child: ClipOval(
                         child: photoUrl.isNotEmpty
@@ -1221,21 +1318,18 @@ class _ProfileCard extends StatelessWidget {
                                 placeholder: (_, _) => _DefaultAvatar(
                                   size: 76,
                                   name: name,
-                                  bgColor: iconBg,
-                                  fgColor: textSecondary,
+                                  tokens: tokens,
                                 ),
                                 errorWidget: (_, _, _) => _DefaultAvatar(
                                   size: 76,
                                   name: name,
-                                  bgColor: iconBg,
-                                  fgColor: textSecondary,
+                                  tokens: tokens,
                                 ),
                               )
                             : _DefaultAvatar(
                                 size: 76,
                                 name: name,
-                                bgColor: iconBg,
-                                fgColor: textSecondary,
+                                tokens: tokens,
                               ),
                       ),
                     ),
@@ -1247,9 +1341,10 @@ class _ProfileCard extends StatelessWidget {
                           width: 22,
                           height: 22,
                           decoration: BoxDecoration(
-                            color: _kPGreen,
+                            color: _kGreen,
                             shape: BoxShape.circle,
-                            border: Border.all(color: cardBg, width: 2.5),
+                            border: Border.all(
+                                color: tokens.cardSurface, width: 2.5),
                           ),
                           child: const Icon(
                             Icons.check,
@@ -1273,7 +1368,7 @@ class _ProfileCard extends StatelessWidget {
                 Text(
                   name.isNotEmpty ? name : 'User',
                   style: TextStyle(
-                    color: textPrimary,
+                    color: tokens.textPrimary,
                     fontSize: 19,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.5,
@@ -1285,23 +1380,20 @@ class _ProfileCard extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(
                     _subtitle,
-                    style: TextStyle(color: textMuted, fontSize: 11),
+                    style: TextStyle(color: tokens.textMuted, fontSize: 11),
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
                   ),
                 ],
                 const SizedBox(height: 14),
-                Container(height: 1, color: divider),
+                Container(height: 1, color: tokens.divider),
                 if (isOwner) ...[
                   const SizedBox(height: 14),
                   _ContactRow(
                     icon: Icons.email_outlined,
                     label: 'EMAIL',
                     value: email,
-                    iconBg: iconBg,
-                    textMuted: textMuted,
-                    textPrimary: textPrimary,
-                    textSecondary: textSecondary,
+                    tokens: tokens,
                   ),
                   if (phone.isNotEmpty) ...[
                     const SizedBox(height: 12),
@@ -1309,10 +1401,7 @@ class _ProfileCard extends StatelessWidget {
                       icon: Icons.phone_outlined,
                       label: 'PHONE',
                       value: _formatPhoneForDisplay(phone),
-                      iconBg: iconBg,
-                      textMuted: textMuted,
-                      textPrimary: textPrimary,
-                      textSecondary: textSecondary,
+                      tokens: tokens,
                     ),
                   ],
                 ],
@@ -1321,7 +1410,7 @@ class _ProfileCard extends StatelessWidget {
                   Text(
                     'ABOUT',
                     style: TextStyle(
-                      color: textMuted,
+                      color: tokens.textMuted,
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.6,
@@ -1334,16 +1423,18 @@ class _ProfileCard extends StatelessWidget {
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: aboutBg,
+                        color: tokens.insetBg,
                         borderRadius: BorderRadius.circular(13),
-                        border: Border.all(color: cardBorder),
+                        border: Border.all(color: tokens.cardBorder),
                       ),
                       child: Text(
                         bio.isNotEmpty
                             ? bio
                             : 'Add a short bio so hosts know you',
                         style: TextStyle(
-                          color: bio.isNotEmpty ? textSecondary : textMuted,
+                          color: bio.isNotEmpty
+                              ? tokens.textSecondary
+                              : tokens.textMuted,
                           fontSize: 12,
                           height: 1.5,
                         ),
@@ -1363,16 +1454,13 @@ class _ProfileCard extends StatelessWidget {
 class _ContactRow extends StatelessWidget {
   final IconData icon;
   final String label, value;
-  final Color iconBg, textMuted, textPrimary, textSecondary;
+  final ProfileTabTokens tokens;
 
   const _ContactRow({
     required this.icon,
     required this.label,
     required this.value,
-    required this.iconBg,
-    required this.textMuted,
-    required this.textPrimary,
-    required this.textSecondary,
+    required this.tokens,
   });
 
   @override
@@ -1384,10 +1472,10 @@ class _ContactRow extends StatelessWidget {
           width: 32,
           height: 32,
           decoration: BoxDecoration(
-            color: iconBg,
+            color: tokens.insetBg,
             borderRadius: BorderRadius.circular(9),
           ),
-          child: Icon(icon, color: textSecondary, size: 16),
+          child: Icon(icon, color: tokens.textSecondary, size: 16),
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -1397,7 +1485,7 @@ class _ContactRow extends StatelessWidget {
               Text(
                 label,
                 style: TextStyle(
-                  color: textMuted,
+                  color: tokens.textMuted,
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 0.4,
@@ -1409,7 +1497,7 @@ class _ContactRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 maxLines: 1,
                 style: TextStyle(
-                  color: textPrimary,
+                  color: tokens.textPrimary,
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1423,51 +1511,50 @@ class _ContactRow extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Role Switcher
+//  Role Stats Toggle — segmented control (local to this screen only; does
+//  NOT change the app's active worker/host mode or nav shell).
 // ─────────────────────────────────────────────────────────────────────────────
-class _RoleSwitcher extends StatelessWidget {
+class _RoleToggle extends StatelessWidget {
   final String selected;
   final ValueChanged<String> onChanged;
-  final bool isDark;
-  final Color cardColor, onSurface;
+  final ProfileTabTokens tokens;
 
-  const _RoleSwitcher({
+  const _RoleToggle({
     required this.selected,
     required this.onChanged,
-    required this.isDark,
-    required this.cardColor,
-    required this.onSurface,
+    required this.tokens,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
+      height: 44,
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.06)
-            : Colors.grey.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
+        color: tokens.segmentTrack,
+        borderRadius: BorderRadius.circular(22),
       ),
-      padding: const EdgeInsets.all(4),
       child: Row(
         children: [
-          _RoleChip(
-            label: 'Gig Worker',
-            icon: Icons.work_outline_rounded,
-            isSelected: selected == 'worker',
-            accentColor: kBlue,
-            onTap: () => onChanged('worker'),
-            isDark: isDark,
-            onSurface: onSurface,
+          Expanded(
+            child: _RoleSegment(
+              label: 'Gig Worker',
+              icon: Icons.work_outline_rounded,
+              isSelected: selected == 'worker',
+              gradient: const [_kCoverStart, _kCoverEnd],
+              onTap: () => onChanged('worker'),
+              tokens: tokens,
+            ),
           ),
-          _RoleChip(
-            label: 'Gig Host',
-            icon: Icons.business_center_outlined,
-            isSelected: selected == 'host',
-            accentColor: kGold,
-            onTap: () => onChanged('host'),
-            isDark: isDark,
-            onSurface: onSurface,
+          Expanded(
+            child: _RoleSegment(
+              label: 'Gig Host',
+              icon: Icons.business_center_outlined,
+              isSelected: selected == 'host',
+              gradient: const [kGold, _kGoldDeep],
+              onTap: () => onChanged('host'),
+              tokens: tokens,
+            ),
           ),
         ],
       ),
@@ -1475,60 +1562,60 @@ class _RoleSwitcher extends StatelessWidget {
   }
 }
 
-class _RoleChip extends StatelessWidget {
+class _RoleSegment extends StatelessWidget {
   final String label;
   final IconData icon;
   final bool isSelected;
-  final Color accentColor;
+  final List<Color> gradient;
   final VoidCallback onTap;
-  final bool isDark;
-  final Color onSurface;
+  final ProfileTabTokens tokens;
 
-  const _RoleChip({
+  const _RoleSegment({
     required this.label,
     required this.icon,
     required this.isSelected,
-    required this.accentColor,
+    required this.gradient,
     required this.onTap,
-    required this.isDark,
-    required this.onSurface,
+    required this.tokens,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? accentColor
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: isSelected ? Colors.white : kSub,
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        height: double.infinity,
+        decoration: BoxDecoration(
+          gradient: isSelected
+              ? LinearGradient(
+                  colors: gradient,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        alignment: Alignment.center,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 15,
+              color: isSelected ? Colors.white : tokens.textSecondary,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? Colors.white : tokens.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
               ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : kSub,
-                  fontSize: 13,
-                  fontWeight: isSelected
-                      ? FontWeight.w600
-                      : FontWeight.normal,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -1536,240 +1623,87 @@ class _RoleChip extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Worker Stats
+//  Stats Card — N columns with vertical dividers + optional footnote.
 // ─────────────────────────────────────────────────────────────────────────────
-class _WorkerStats extends StatelessWidget {
-  final double rating;
-  final int ratingCount;
-  final Map<String, double> earningsByCode;
-  final Map<String, double> weeklyByCode;
-  final int completedGigs;
-  final bool isDark;
-  final Color cardColor, onSurface;
+class _StatColumn {
+  final String value;
+  final String label;
+  final Color? valueColor;
 
-  const _WorkerStats({
-    required this.rating,
-    required this.ratingCount,
-    required this.earningsByCode,
-    required this.weeklyByCode,
-    required this.completedGigs,
-    required this.isDark,
-    required this.cardColor,
-    required this.onSurface,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final totalStr = earningsByCode.isEmpty
-        ? CurrencyFormatter.format(0, 'PHP')
-        : (earningsByCode.entries.toList()
-              ..sort((a, b) => a.key.compareTo(b.key)))
-            .map((e) => CurrencyFormatter.format(e.value, e.key))
-            .join('  ');
-
-    final weeklyStr = weeklyByCode.isEmpty
-        ? CurrencyFormatter.format(0, 'PHP')
-        : (weeklyByCode.entries.toList()
-              ..sort((a, b) => a.key.compareTo(b.key)))
-            .map((e) => CurrencyFormatter.format(e.value, e.key))
-            .join('  ');
-
-    return Column(
-      children: [
-        // Reputation row
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.15),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _ReputationItem(
-                icon: Icons.star_rounded,
-                iconColor: Colors.amber,
-                value: rating.toStringAsFixed(1),
-                label: 'Worker Rating',
-                sub: '($ratingCount)',
-                onSurface: onSurface,
-              ),
-              _VertDivider(),
-              _ReputationItem(
-                icon: Icons.check_circle_outline_rounded,
-                iconColor: const Color(0xFF10B981),
-                value: '$completedGigs',
-                label: 'Gigs Done',
-                onSurface: onSurface,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        // Earnings grid
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 1.5,
-          children: [
-            _StatCard(
-              label: 'Total Earnings',
-              value: totalStr,
-              icon: Icons.payments_outlined,
-              color: const Color(0xFF10B981),
-              isDark: isDark,
-              cardColor: cardColor,
-              onSurface: onSurface,
-              compact: true,
-            ),
-            _StatCard(
-              label: 'This Week',
-              value: weeklyStr,
-              icon: Icons.trending_up_rounded,
-              color: kBlue,
-              isDark: isDark,
-              cardColor: cardColor,
-              onSurface: onSurface,
-              compact: true,
-            ),
-          ],
-        ),
-      ],
-    );
-  }
+  const _StatColumn({required this.value, required this.label, this.valueColor});
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Host Stats
-// ─────────────────────────────────────────────────────────────────────────────
-class _HostStats extends StatelessWidget {
-  final double rating;
-  final int ratingCount;
-  final int gigsPosted, activeGigs, completedGigs;
-  final Map<String, double> spentByCurrency;
-  final double completionRate;
-  final bool isDark;
-  final Color cardColor, onSurface;
+class _StatsCard extends StatelessWidget {
+  final List<_StatColumn> columns;
+  final String? footnote;
+  final ProfileTabTokens tokens;
 
-  const _HostStats({
-    required this.rating,
-    required this.ratingCount,
-    required this.gigsPosted,
-    required this.activeGigs,
-    required this.completedGigs,
-    required this.spentByCurrency,
-    required this.completionRate,
-    required this.isDark,
-    required this.cardColor,
-    required this.onSurface,
+  const _StatsCard({
+    required this.columns,
+    required this.tokens,
+    this.footnote,
   });
 
   @override
   Widget build(BuildContext context) {
-    final spentStr = spentByCurrency.isEmpty
-        ? CurrencyFormatter.format(0, 'PHP')
-        : (spentByCurrency.entries.toList()
-              ..sort((a, b) => a.key.compareTo(b.key)))
-            .map((e) => CurrencyFormatter.format(e.value, e.key))
-            .join('  ');
-
-    return Column(
-      children: [
-        // Reputation row
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.15),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 10),
+      decoration: BoxDecoration(
+        color: tokens.cardSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: tokens.cardBorder),
+      ),
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _ReputationItem(
-                icon: Icons.star_rounded,
-                iconColor: Colors.amber,
-                value: rating.toStringAsFixed(1),
-                label: 'Host Rating',
-                sub: '($ratingCount)',
-                onSurface: onSurface,
-              ),
-              _VertDivider(),
-              _ReputationItem(
-                icon: Icons.percent,
-                iconColor: kGold,
-                value: '${completionRate.toStringAsFixed(0)}%',
-                label: 'Completion',
-                onSurface: onSurface,
-              ),
-              _VertDivider(),
-              _ReputationItem(
-                icon: Icons.check_circle_outline_rounded,
-                iconColor: const Color(0xFF10B981),
-                value: '$completedGigs/$gigsPosted',
-                label: 'Completed',
-                onSurface: onSurface,
-              ),
+              for (var i = 0; i < columns.length; i++) ...[
+                if (i > 0) Container(width: 1, height: 34, color: tokens.divider),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        columns[i].value,
+                        style: TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                          color: columns[i].valueColor ?? tokens.textPrimary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        columns[i].label,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: tokens.textSecondary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
-        ),
-        const SizedBox(height: 12),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 1.5,
-          children: [
-            _StatCard(
-              label: 'Gigs Posted',
-              value: '$gigsPosted',
-              icon: Icons.work_outline_rounded,
-              color: kGold,
-              isDark: isDark,
-              cardColor: cardColor,
-              onSurface: onSurface,
-            ),
-            _StatCard(
-              label: 'Active Gigs',
-              value: '$activeGigs',
-              icon: Icons.bolt_rounded,
-              color: kBlue,
-              isDark: isDark,
-              cardColor: cardColor,
-              onSurface: onSurface,
-            ),
-            _StatCard(
-              label: 'Completed',
-              value: '$completedGigs',
-              icon: Icons.check_circle_outline_rounded,
-              color: const Color(0xFF10B981),
-              isDark: isDark,
-              cardColor: cardColor,
-              onSurface: onSurface,
-            ),
-            _StatCard(
-              label: 'Total Spent',
-              value: spentStr,
-              icon: Icons.payments_outlined,
-              color: const Color(0xFFEC4899),
-              isDark: isDark,
-              cardColor: cardColor,
-              onSurface: onSurface,
-              compact: true,
+          if (footnote != null) ...[
+            const SizedBox(height: 14),
+            Container(height: 1, color: tokens.divider),
+            const SizedBox(height: 10),
+            Text(
+              footnote!,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 10.5, color: tokens.textMuted),
             ),
           ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -1778,218 +1712,41 @@ class _HostStats extends StatelessWidget {
 //  Shared small widgets
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _ReputationItem extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String value;
-  final String label;
-  final String? sub;
-  final Color onSurface;
-
-  const _ReputationItem({
-    required this.icon,
-    required this.iconColor,
-    required this.value,
-    required this.label,
-    required this.onSurface,
-    this.sub,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: iconColor.withValues(alpha: 0.12),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: iconColor, size: 18),
-        ),
-        const SizedBox(height: 6),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              value,
-              style: TextStyle(
-                color: onSurface,
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            if (sub != null) ...[
-              const SizedBox(width: 2),
-              Text(sub!, style: const TextStyle(color: kSub, fontSize: 11)),
-            ],
-          ],
-        ),
-        const SizedBox(height: 1),
-        Text(
-          label,
-          style: const TextStyle(color: kSub, fontSize: 11),
-        ),
-      ],
-    );
-  }
-}
-
-class _VertDivider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Container(
-        width: 1,
-        height: 36,
-        color: kBorder,
-      );
-}
-
-class _StatCard extends StatelessWidget {
-  final String label, value;
-  final IconData icon;
-  final Color color;
-  final bool isDark;
-  final Color cardColor, onSurface;
-  final bool compact;
-
-  const _StatCard({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
-    required this.isDark,
-    required this.cardColor,
-    required this.onSurface,
-    this.compact = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 18, 14, 14),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.15),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: color, size: 19),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      value,
-                      style: TextStyle(
-                        color: onSurface,
-                        fontSize: compact ? 13 : 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                    ),
-                    Text(
-                      label,
-                      style: const TextStyle(color: kSub, fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        // Colored top accent bar
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: Container(
-            height: 3,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(14),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _SectionHeader extends StatelessWidget {
   final String label;
-  final Color onSurface;
+  final ProfileTabTokens tokens;
 
-  const _SectionHeader({required this.label, required this.onSurface});
+  const _SectionHeader({required this.label, required this.tokens});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 3,
-          height: 14,
-          decoration: BoxDecoration(
-            color: kBlue,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            color: onSurface.withValues(alpha: 0.55),
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.1,
-          ),
-        ),
-      ],
+    return Text(
+      label.toUpperCase(),
+      style: TextStyle(
+        color: tokens.textMuted,
+        fontSize: 10.5,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.0,
+      ),
     );
   }
 }
 
 class _ActionCard extends StatelessWidget {
   final List<Widget> children;
-  final bool isDark;
-  final Color cardColor;
+  final ProfileTabTokens tokens;
 
-  const _ActionCard({
-    required this.children,
-    required this.isDark,
-    required this.cardColor,
-  });
+  const _ActionCard({required this.children, required this.tokens});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
       decoration: BoxDecoration(
-        color: cardColor,
+        color: tokens.cardSurface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? kBorder : Colors.grey.withValues(alpha: 0.15),
-        ),
+        border: Border.all(color: tokens.cardBorder),
       ),
       child: Column(children: children),
     );
@@ -2001,37 +1758,38 @@ class _ActionRow extends StatelessWidget {
   final Color iconColor;
   final String label;
   final Color? labelColor;
+  final FontWeight labelWeight;
   final String? badge;
   final Color? badgeColor;
   final VoidCallback onTap;
-  final bool showArrow;
+  final ProfileTabTokens tokens;
 
   const _ActionRow({
     required this.icon,
     required this.iconColor,
     required this.label,
     required this.onTap,
+    required this.tokens,
     this.labelColor,
+    this.labelWeight = FontWeight.w400,
     this.badge,
     this.badgeColor,
-    this.showArrow = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+      child: SizedBox(
+        height: 55,
         child: Row(
           children: [
             Container(
               width: 38,
               height: 38,
               decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.1),
+                color: iconColor.withValues(alpha: tokens.iconTintAlpha),
                 borderRadius: BorderRadius.circular(11),
               ),
               child: Icon(icon, color: iconColor, size: 18),
@@ -2041,8 +1799,9 @@ class _ActionRow extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  color: labelColor ?? onSurface,
+                  color: labelColor ?? tokens.textPrimary,
                   fontSize: 14,
+                  fontWeight: labelWeight,
                 ),
               ),
             ),
@@ -2053,7 +1812,8 @@ class _ActionRow extends StatelessWidget {
                   vertical: 3,
                 ),
                 decoration: BoxDecoration(
-                  color: (badgeColor ?? kBlue).withValues(alpha: 0.15),
+                  color: (badgeColor ?? kBlue)
+                      .withValues(alpha: tokens.iconTintAlpha),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -2067,12 +1827,11 @@ class _ActionRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            if (showArrow)
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: kSub,
-                size: 20,
-              ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: tokens.textSecondary,
+              size: 20,
+            ),
           ],
         ),
       ),
@@ -2081,29 +1840,24 @@ class _ActionRow extends StatelessWidget {
 }
 
 class _ActionDivider extends StatelessWidget {
-  final bool isDark;
-  const _ActionDivider({required this.isDark});
+  final ProfileTabTokens tokens;
+  const _ActionDivider({required this.tokens});
 
   @override
   Widget build(BuildContext context) {
-    return Divider(
-      height: 1,
-      color: isDark
-          ? kBorder.withValues(alpha: 0.5)
-          : Colors.grey.withValues(alpha: 0.12),
-    );
+    return Divider(height: 1, color: tokens.divider);
   }
 }
 
 class _DefaultAvatar extends StatelessWidget {
   final double size;
   final String name;
-  final Color bgColor, fgColor;
+  final ProfileTabTokens tokens;
+
   const _DefaultAvatar({
     required this.size,
+    required this.tokens,
     this.name = '',
-    this.bgColor = _kPIconBg,
-    this.fgColor = _kPTextSecondary,
   });
 
   @override
@@ -2114,12 +1868,12 @@ class _DefaultAvatar extends StatelessWidget {
     return Container(
       width: size,
       height: size,
-      decoration: BoxDecoration(color: bgColor, shape: BoxShape.circle),
+      decoration: BoxDecoration(color: tokens.insetBg, shape: BoxShape.circle),
       alignment: Alignment.center,
       child: Text(
         initial,
         style: TextStyle(
-          color: fgColor,
+          color: tokens.textSecondary,
           fontSize: size * 0.4,
           fontWeight: FontWeight.w700,
         ),

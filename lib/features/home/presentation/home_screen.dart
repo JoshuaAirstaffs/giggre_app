@@ -22,8 +22,9 @@ import 'package:giggre_app/core/widgets/update_card.dart';
 import 'package:giggre_app/screens/app_contents/about_giggre.dart';
 import 'package:giggre_app/screens/giggre-updates.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/profile_tab_theme.dart';
 import '../../../services/delete_acc_service.dart';
-import '../../auth/presentation/login_screen.dart';
+import '../../auth/presentation/welcome_screen.dart';
 import '../../../screens/host/host_shell.dart';
 import '../../../screens/worker/worker_shell.dart';
 import '../../../widgets/active_gig_bar.dart';
@@ -512,7 +513,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           .read<CurrentUserProvider>()
                           .clearUser();
                       Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (_) => const LoginScreen()),
+                        MaterialPageRoute(builder: (_) => const WelcomeScreen()),
                         (route) => false,
                       );
                     }
@@ -554,9 +555,9 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => Scaffold(
-          appBar: AppBar(title: const Text('Profile'), elevation: 0),
           body: ProfileTab(
             initialRole: _selectedRole ?? 'worker',
+            isTabRoot: false,
             onLogout: _logout,
           ),
         ),
@@ -661,7 +662,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         clearing = context.read<CurrentUserProvider>().clearUser();
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          MaterialPageRoute(builder: (_) => const WelcomeScreen()),
           (route) => false,
         );
       }
@@ -683,11 +684,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openGiggreMenu() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (_) => _GiggreMenu(
         hasPendingUpdate: _hasUpdate && _updateDismissed,
         onUpdate: _showUpdateModal,
@@ -1364,188 +1362,250 @@ class _FooterLink extends StatelessWidget {
 // ─────────────────────────────────────────────
 //  Giggre menu (bottom sheet)
 // ─────────────────────────────────────────────
+const _kMenuGreen = Color(0xFF2E9E6B);
+const _kMenuBlue = Color(0xFF2B6FB5);
+const _kMenuPurple = Color(0xFF8B6FD8);
+const _kMenuGoldDeep = Color(0xFFD88810);
+const _kMenuPink = Color(0xFFEC4899);
+const _kMenuSubtleLight = Color(0xFFB7C0CD);
+const _kMenuHandleLight = Color(0xFFD5DCE6);
+
+class _GiggreMenuItem {
+  final String title;
+  final IconData icon;
+  final Widget screen;
+  final Color color;
+  final double tintAlphaLight;
+
+  const _GiggreMenuItem({
+    required this.title,
+    required this.icon,
+    required this.screen,
+    required this.color,
+    required this.tintAlphaLight,
+  });
+}
+
 class _GiggreMenu extends StatelessWidget {
   final bool hasPendingUpdate;
   final VoidCallback onUpdate;
 
   const _GiggreMenu({this.hasPendingUpdate = false, required this.onUpdate});
 
-  static final List<Map<String, dynamic>> gigMenuData = [
-    {'title': 'About Giggre', 'icon': Icons.info, 'screen': AboutGiggre()},
-    {
-      'title': 'Terms & Conditions',
-      'icon': Icons.description,
-      'screen': TermsAndConditions(),
-    },
-    {
-      'title': 'Privacy Policy',
-      'icon': Icons.privacy_tip,
-      'screen': PrivacyPolicy(),
-    },
-    {'title': 'Help/FAQ', 'icon': Icons.help, 'screen': HelpFaq()},
-    {
-      'title': 'Contact Us',
-      'icon': Icons.contact_support,
-      'screen': ContactUs(),
-    },
+  static final List<_GiggreMenuItem> gigMenuData = [
+    _GiggreMenuItem(
+      title: 'About Giggre',
+      icon: Icons.info_outline_rounded,
+      screen: AboutGiggre(),
+      color: _kMenuBlue,
+      tintAlphaLight: 0.12,
+    ),
+    _GiggreMenuItem(
+      title: 'Terms & Conditions',
+      icon: Icons.description_outlined,
+      screen: TermsAndConditions(),
+      color: _kMenuPurple,
+      tintAlphaLight: 0.14,
+    ),
+    _GiggreMenuItem(
+      title: 'Privacy Policy',
+      icon: Icons.shield_outlined,
+      screen: PrivacyPolicy(),
+      color: _kMenuGreen,
+      tintAlphaLight: 0.12,
+    ),
+    _GiggreMenuItem(
+      title: 'Help/FAQ',
+      icon: Icons.help_outline_rounded,
+      screen: HelpFaq(),
+      color: _kMenuGoldDeep,
+      tintAlphaLight: 0.14,
+    ),
+    _GiggreMenuItem(
+      title: 'Contact Us',
+      icon: Icons.mail_outline_rounded,
+      screen: ContactUs(),
+      color: _kMenuPink,
+      tintAlphaLight: 0.14,
+    ),
   ];
 
   @override
   Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.5,
-      minChildSize: 0.3,
-      maxChildSize: 0.9,
-      expand: false,
-      builder: (context, scrollController) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        final iconBg = isDark
-            ? const Color(0xFF001B52)
-            : const Color(0xFFEBF0FB);
-        return Container(
-          color: Theme.of(context).scaffoldBackgroundColor,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
+    final handleColor = isDark ? Colors.white24 : _kMenuHandleLight;
+    final subtleText = isDark ? tokens.textMuted : _kMenuSubtleLight;
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          color: tokens.cardSurface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SingleChildScrollView(
           child: Padding(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(24, 10, 24, 20),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Column(
-                  children: [
-                    Image.asset('assets/images/logo.png', height: 60),
-                    const SizedBox(height: 12),
-                    FutureBuilder<PackageInfo>(
-                      future: PackageInfo.fromPlatform(),
-                      builder: (context, snapshot) {
-                        final version = snapshot.hasData
-                            ? 'Version ${snapshot.data!.version}'
-                            : 'Version ...';
-                        return Column(
-                          children: [
-                            Text(
-                              version,
-                              style: TextStyle(
-                                color: isDark ? Colors.white70 : Colors.black54,
-                                fontSize: 14,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            if (hasPendingUpdate)
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.pop(context);
-                                  onUpdate();
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: kBlue,
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: const Text(
-                                    'Update Available',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              )
-                            else
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: const Text(
-                                  'Latest',
-                                  style: TextStyle(
-                                    color: Colors.green,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'The fastest way to find jobs or hire workers near you',
-                      style: TextStyle(
-                        color: isDark ? Colors.white70 : Colors.black54,
-                        fontSize: 10,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                ),
-                Divider(color: isDark ? Colors.white24 : Colors.black26),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: ListView.separated(
-                    controller: scrollController,
-                    itemCount: gigMenuData.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 16),
-                    itemBuilder: (context, index) {
-                      final item = gigMenuData[index];
-                      return GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => item['screen'] as Widget,
-                            ),
-                          );
-                        },
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    color: iconBg,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Icon(
-                                    item['icon'] as IconData,
-                                    color: kBlue,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  item['title'] as String,
-                                  style: TextStyle(
-                                    color: isDark ? Colors.white : Colors.black,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            Icon(
-                              Icons.chevron_right,
-                              color: isDark ? Colors.white : Colors.black,
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: handleColor,
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
+                const SizedBox(height: 18),
+                Image.asset('assets/images/logo.png', height: 40),
+                const SizedBox(height: 12),
+                FutureBuilder<PackageInfo>(
+                  future: PackageInfo.fromPlatform(),
+                  builder: (context, snapshot) {
+                    final version = snapshot.hasData
+                        ? 'Version ${snapshot.data!.version}'
+                        : 'Version ...';
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          version,
+                          style: TextStyle(
+                            color: tokens.textMuted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (hasPendingUpdate)
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.pop(context);
+                              onUpdate();
+                            },
+                            child: Container(
+                              height: 20,
+                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: kBlue,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Text(
+                                'Update Available',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          Container(
+                            height: 20,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: _kMenuGreen.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Text(
+                              '✓ Latest',
+                              style: TextStyle(
+                                color: _kMenuGreen,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'The fastest way to find jobs or hire workers near you',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: subtleText, fontSize: 10.5),
+                ),
+                const SizedBox(height: 16),
+                Container(height: 1, color: tokens.divider),
+                for (var i = 0; i < gigMenuData.length; i++) ...[
+                  _GiggreMenuRow(
+                    item: gigMenuData[i],
+                    isDark: isDark,
+                    textColor: tokens.textPrimary,
+                    chevronColor: subtleText,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => gigMenuData[i].screen),
+                    ),
+                  ),
+                  if (i < gigMenuData.length - 1)
+                    Divider(height: 1, color: tokens.divider),
+                ],
               ],
             ),
           ),
-        );
-      },
+        ),
+      ),
+    );
+  }
+}
+
+class _GiggreMenuRow extends StatelessWidget {
+  final _GiggreMenuItem item;
+  final bool isDark;
+  final Color textColor;
+  final Color chevronColor;
+  final VoidCallback onTap;
+
+  const _GiggreMenuRow({
+    required this.item,
+    required this.isDark,
+    required this.textColor,
+    required this.chevronColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final alpha =
+        isDark ? (item.tintAlphaLight + 0.08).clamp(0.0, 1.0) : item.tintAlphaLight;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: SizedBox(
+        height: 55,
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: item.color.withValues(alpha: alpha),
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Icon(item.icon, color: item.color, size: 17),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                item.title,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: chevronColor, size: 20),
+          ],
+        ),
+      ),
     );
   }
 }
