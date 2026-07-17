@@ -21,6 +21,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../services/quick_gig_matching_service.dart';
 import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
+import 'quick_gig_search_sheet.dart';
 import '../../../../core/widgets/gig_completion_celebration.dart';
 import '../../../gig_shared/active_gig_theme.dart';
 import '../../../gig_shared/active_gig_step.dart';
@@ -229,6 +230,23 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     final location = data['location'] as GeoPoint?;
     if (location == null) return;
 
+    // Navigate to the search sheet BEFORE touching Firestore. This sheet has
+    // its own live .snapshots() listener on the same doc, so writing the new
+    // status first would let it redraw showing "scanning" while still the
+    // mounted, visible route — a flicker of the old sheet's content, not a
+    // transition-animation issue. Removing this route first (no exit
+    // animation, since the new sheet already covers it) makes the swap
+    // atomic from the user's perspective; the write can safely happen after.
+    final navigator = Navigator.of(context);
+    final myRoute = ModalRoute.of(context);
+    QuickGigSearchSheet.show(
+      context: navigator.context,
+      gigId: widget.gigId,
+      gigLocation: location,
+      onDone: navigator.pop,
+    );
+    if (myRoute != null) navigator.removeRoute(myRoute);
+
     await FirebaseFirestore.instance
         .collection('quick_gigs')
         .doc(widget.gigId)
@@ -237,25 +255,13 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           'assignedWorkerId': null,
           'assignedWorkerName': null,
           'searchStartedAt': FieldValue.serverTimestamp(),
+          'exclusionList': [],
         });
 
     QuickGigMatchingService.startAutoSearch(
       gigId: widget.gigId,
       gigLocation: location,
     );
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Searching for available workers...'),
-          backgroundColor: kAmber,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
-    }
   }
 
   Future<void> _requestCancellation() async {
@@ -1100,11 +1106,8 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ],
               ],
 
-              // ── Dispatch button (quick gigs not yet accepted) ──────
-              if (widget.gigType == 'quick' &&
-                  (status == 'scanning' ||
-                      status == 'no_worker' ||
-                      status == 'in_progress')) ...[
+              // ── Start New Search button (quick gigs with no match found) ──────
+              if (widget.gigType == 'quick' && status == 'no_worker') ...[
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -1113,7 +1116,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     onPressed: _dispatchGig,
                     icon: const Icon(Icons.send_rounded, size: 18),
                     label: const Text(
-                      'Dispatch',
+                      'Start New Search',
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,

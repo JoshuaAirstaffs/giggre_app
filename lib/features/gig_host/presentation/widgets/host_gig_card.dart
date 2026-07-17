@@ -8,6 +8,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../gig_shared/active_gig_step.dart';
 import '../../services/quick_gig_matching_service.dart';
 import 'gig_detail_sheet.dart';
+import 'quick_gig_search_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Host Gig Card — single reusable list-item widget for every place the
@@ -192,6 +193,21 @@ class _HostGigCardState extends State<HostGigCard> {
     final gigType = widget.data['gigType'] as String? ?? 'quick';
     final docId = widget.data['docId'] as String? ?? '';
     if (docId.isEmpty) return;
+
+    final status = widget.data['status'] as String? ?? 'scanning';
+    final location = widget.data['location'] as GeoPoint?;
+    if (gigType == 'quick' &&
+        (status == 'scanning' || status == 'in_progress') &&
+        location != null) {
+      QuickGigSearchSheet.show(
+        context: context,
+        gigId: docId,
+        gigLocation: location,
+        onDone: () => Navigator.pop(context),
+      );
+      return;
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -423,6 +439,7 @@ class _HostGigCardState extends State<HostGigCard> {
           'assignedWorkerId': null,
           'assignedWorkerName': null,
           'searchStartedAt': FieldValue.serverTimestamp(),
+          'exclusionList': [],
         });
 
     QuickGigMatchingService.startAutoSearch(
@@ -431,15 +448,11 @@ class _HostGigCardState extends State<HostGigCard> {
     );
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Searching for available workers...'),
-          backgroundColor: kAmber,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
+      QuickGigSearchSheet.show(
+        context: context,
+        gigId: docId,
+        gigLocation: location,
+        onDone: () => Navigator.pop(context),
       );
     }
   }
@@ -462,9 +475,7 @@ class _HostGigCardState extends State<HostGigCard> {
     };
     final isActiveGig = activeGigStatusesForMenu.contains(status);
     final canDispatch =
-        !isClosed &&
-        gigType == 'quick' &&
-        (status == 'scanning' || status == 'no_worker' || status == 'in_progress');
+        !isClosed && gigType == 'quick' && status == 'no_worker';
 
     showModalBottomSheet(
       context: context,
@@ -478,7 +489,7 @@ class _HostGigCardState extends State<HostGigCard> {
             if (canDispatch)
               ListTile(
                 leading: const Icon(Icons.send_rounded, color: kAmber),
-                title: const Text('Dispatch'),
+                title: const Text('Start New Search'),
                 onTap: () {
                   Navigator.pop(ctx);
                   _dispatchGig();
