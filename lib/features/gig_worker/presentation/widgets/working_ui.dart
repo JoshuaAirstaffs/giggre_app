@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
@@ -159,6 +160,22 @@ class _WorkingUIState extends State<WorkingUI> {
   String? _locationWarning;
   StreamSubscription<ServiceStatus>? _locationServiceSub;
 
+  // On a multi-worker gig, this worker's own `workers/{uid}` subcollection
+  // doc is the write/listen target instead of the gig doc — every other
+  // write in this widget goes through _targetRef so one worker's progress
+  // never touches another worker's slot on the same gig. Null (legacy
+  // single-worker gigs, or quick/offered gigs not yet on this model) falls
+  // back to the gig doc unchanged.
+  String? _slotWorkerId;
+
+  DocumentReference<Map<String, dynamic>> get _targetRef {
+    final gigRef = FirebaseFirestore.instance
+        .collection(widget.gigCollection)
+        .doc(widget.gig.id);
+    final slotId = _slotWorkerId;
+    return slotId == null ? gigRef : gigRef.collection('workers').doc(slotId);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -168,18 +185,34 @@ class _WorkingUIState extends State<WorkingUI> {
         setState(() => _elapsed = _elapsedOffset + _stopwatch.elapsed);
       }
     });
+    _init();
+  }
+
+  Future<void> _init() async {
+    await _resolveSlotRef();
+    if (!mounted) return;
     _listenGig();
     _startLocation();
     _restoreElapsedIfWorking();
   }
 
+  Future<void> _resolveSlotRef() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection(widget.gigCollection)
+          .doc(widget.gig.id)
+          .collection('workers')
+          .doc(uid)
+          .get();
+      if (snap.exists && mounted) setState(() => _slotWorkerId = uid);
+    } catch (_) {}
+  }
+
   // ── Firestore listener ────────────────────────────────────────────────────
   void _listenGig() {
-    _gigSub = FirebaseFirestore.instance
-        .collection(widget.gigCollection)
-        .doc(widget.gig.id)
-        .snapshots()
-        .listen((snap) {
+    _gigSub = _targetRef.snapshots().listen((snap) {
       if (!mounted || !snap.exists) return;
 
       final status = snap.data()?['status'] as String? ?? 'navigating';
@@ -276,9 +309,7 @@ class _WorkingUIState extends State<WorkingUI> {
         // Re-fetch route only when navigating and moved >30 m from last fetch
         if (_step == GigStep.navigating) {
           // Persist location to Firestore so host can track worker in real-time
-          FirebaseFirestore.instance
-              .collection(widget.gigCollection)
-              .doc(widget.gig.id)
+          _targetRef
               .update({'workerLocation': GeoPoint(pos.latitude, pos.longitude)})
               .catchError((_) {});
 
@@ -333,10 +364,7 @@ class _WorkingUIState extends State<WorkingUI> {
 
   Future<void> _confirmArrival() async {
     setState(() => _arrivedPromptVisible = false);
-    await FirebaseFirestore.instance
-        .collection(widget.gigCollection)
-        .doc(widget.gig.id)
-        .update({
+    await _targetRef.update({
       'status': 'arrived',
       'arrivedAt': FieldValue.serverTimestamp(),
     });
@@ -346,10 +374,7 @@ class _WorkingUIState extends State<WorkingUI> {
   /// elapsed time from Firestore so the timer shows the correct running total.
   Future<void> _restoreElapsedIfWorking() async {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection(widget.gigCollection)
-          .doc(widget.gig.id)
-          .get();
+      final snap = await _targetRef.get();
       if (!snap.exists || !mounted) return;
       final data = snap.data()!;
       if ((data['status'] as String?) != 'working') return;
@@ -364,10 +389,7 @@ class _WorkingUIState extends State<WorkingUI> {
 
   /// Save workStartedAt + set status to 'working'.
   Future<void> _startWork() async {
-    await FirebaseFirestore.instance
-        .collection(widget.gigCollection)
-        .doc(widget.gig.id)
-        .update({
+    await _targetRef.update({
       'status': 'working',
       'workStartedAt': FieldValue.serverTimestamp(),
     });
@@ -377,10 +399,7 @@ class _WorkingUIState extends State<WorkingUI> {
   Future<void> _completeWork() async {
     _stopwatch.stop();
     final total = _elapsedOffset + _stopwatch.elapsed;
-    await FirebaseFirestore.instance
-        .collection(widget.gigCollection)
-        .doc(widget.gig.id)
-        .update({
+    await _targetRef.update({
       'status': 'task_complete',
       'durationSeconds': total.inSeconds,
       'workCompletedAt': FieldValue.serverTimestamp(),
@@ -401,10 +420,7 @@ class _WorkingUIState extends State<WorkingUI> {
       if (!submitted || !mounted) return;
       final reason = controller.text.trim();
       if (reason.isEmpty) return;
-      await FirebaseFirestore.instance
-          .collection(widget.gigCollection)
-          .doc(widget.gig.id)
-          .update({
+      await _targetRef.update({
         'cancellation_reason': FieldValue.arrayUnion([
           {
             'reason': reason,
@@ -454,6 +470,7 @@ class _WorkingUIState extends State<WorkingUI> {
       budget: widget.gig.budget,
       currencyCode: widget.gig.currencyCode,
       hostName: widget.gig.hostName,
+      slotWorkerId: _slotWorkerId,
       onConfirmed: _onPaymentConfirmed,
     );
   }
@@ -1150,7 +1167,7 @@ class _GigHostCard extends StatelessWidget {
                       ),
                     ),
                     TextSpan(
-                      text: ' / gig',
+                      text: gig.isMultiWorker ? ' / you' : ' / gig',
                       style: TextStyle(
                         color: activeGigTextMuted(isDark),
                         fontSize: 10,
@@ -1162,6 +1179,19 @@ class _GigHostCard extends StatelessWidget {
               ),
             ],
           ),
+          if (gig.isMultiWorker) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.groups_rounded, color: activeGigTextMuted(isDark), size: 12),
+                const SizedBox(width: 5),
+                Text(
+                  'You\'re one of ${gig.workerSlots} workers on this gig, paid independently',
+                  style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 10.5),
+                ),
+              ],
+            ),
+          ],
           if (gig.address.isNotEmpty) ...[
             const SizedBox(height: 8),
             Row(

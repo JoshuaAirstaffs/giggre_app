@@ -103,28 +103,36 @@ class ActiveGigInfo {
 /// this existed before.
 Stream<ActiveGigInfo?> watchActiveWorkerGig(String uid) {
   late final StreamController<ActiveGigInfo?> controller;
-  StreamSubscription? quickSub, openSub, offeredSub;
+  StreamSubscription? quickSub, openSub, offeredSub, slotSub;
   QueryDocumentSnapshot<Map<String, dynamic>>? quickDoc;
   QueryDocumentSnapshot<Map<String, dynamic>>? openDoc;
   QueryDocumentSnapshot<Map<String, dynamic>>? offeredDoc;
+  // Multi-worker gigs: this worker's own status lives on their
+  // `workers/{uid}` subcollection doc, not the top-level gig doc's
+  // `workerId`/`status` fields — a collection-group query across all three
+  // gig collections' `workers` subcollections finds it regardless of which
+  // gig type it's under.
+  QueryDocumentSnapshot<Map<String, dynamic>>? slotDoc;
 
   void emit() {
     if (controller.isClosed) return;
     final QueryDocumentSnapshot<Map<String, dynamic>>? doc =
-        quickDoc ?? openDoc ?? offeredDoc;
+        quickDoc ?? openDoc ?? offeredDoc ?? slotDoc;
     if (doc == null) {
       controller.add(null);
       return;
     }
-    final collection = quickDoc != null
-        ? 'quick_gigs'
-        : openDoc != null
-            ? 'open_gigs'
-            : 'offered_gigs';
     final data = doc.data();
+    final isSlotDoc = doc == slotDoc;
     controller.add(ActiveGigInfo(
-      id: doc.id,
-      gigCollection: collection,
+      id: isSlotDoc ? (data['gigId'] as String? ?? doc.id) : doc.id,
+      gigCollection: isSlotDoc
+          ? (data['gigCollection'] as String? ?? 'open_gigs')
+          : (quickDoc != null
+              ? 'quick_gigs'
+              : openDoc != null
+                  ? 'open_gigs'
+                  : 'offered_gigs'),
       title: data['title'] as String? ?? 'Gig',
       status: data['status'] as String? ?? 'navigating',
       lastProgressStatus: data['lastProgressStatus'] as String?,
@@ -164,11 +172,22 @@ Stream<ActiveGigInfo?> watchActiveWorkerGig(String uid) {
         offeredDoc = snap.docs.isNotEmpty ? snap.docs.first : null;
         emit();
       }, onError: (_) {});
+      slotSub = FirebaseFirestore.instance
+          .collectionGroup('workers')
+          .where('workerId', isEqualTo: uid)
+          .where('status', whereIn: _activeGigStatuses)
+          .limit(1)
+          .snapshots()
+          .listen((snap) {
+        slotDoc = snap.docs.isNotEmpty ? snap.docs.first : null;
+        emit();
+      }, onError: (_) {});
     },
     onCancel: () {
       quickSub?.cancel();
       openSub?.cancel();
       offeredSub?.cancel();
+      slotSub?.cancel();
     },
   );
   return controller.stream;

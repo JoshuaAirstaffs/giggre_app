@@ -549,9 +549,13 @@ class _HostGigCardState extends State<HostGigCard> {
     final createdAt = data['createdAt'] != null
         ? (data['createdAt'] as Timestamp).toDate()
         : DateTime.now();
+    final workerSlots = (data['workerSlots'] as num?)?.toInt() ?? 1;
+    final filledSlotCount = (data['filledSlotCount'] as num?)?.toInt() ?? 0;
+    final isMultiWorker = workerSlots > 1;
     final line2 = [
       if (category.isNotEmpty) category,
       pay,
+      if (isMultiWorker) '$filledSlotCount/$workerSlots workers',
       _timeLabel(createdAt),
     ].join(' · ');
 

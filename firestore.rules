@@ -59,6 +59,19 @@ service cloud.firestore {
           allow read: if isAdmin();
         }
 
+    // ─── Worker slots — collection-group reads ─────────────────
+    // Nested `match /workers/{workerId}` blocks under quick_gigs/open_gigs/
+    // offered_gigs (below) only govern DIRECT subcollection access via a
+    // known parent doc id. They do NOT extend to collectionGroup('workers')
+    // queries spanning multiple parents (workerHasActiveGig, the worker's
+    // active-gig bar, gig history) — those need this separate recursive
+    // rule, same pattern as referrals_list above. Writes stay governed by
+    // the more specific per-parent rules, since every write goes through a
+    // known parent path.
+    match /{path=**}/workers/{workerId} {
+      allow read: if isAuth();
+    }
+
     // ─── Admins ────────────────────────────────────────────────
     match /admins/{uid} {
       allow read: if isAdmin();
@@ -198,7 +211,42 @@ service cloud.firestore {
     }
 
     // ─── Quick Gigs ────────────────────────────────────────────
-   match /quick_gigs/{gigId} { allow read: if isAuth(); allow create: if isAuth() && request.resource.data.hostId == request.auth.uid; allow update: if isAuth() && ( resource.data.hostId == request.auth.uid || resource.data.workerId == request.auth.uid || (resource.data.assignedWorkerId == request.auth.uid && resource.data.hostId != request.auth.uid) || isAdmin() ); allow delete: if isAuth() && ( resource.data.hostId == request.auth.uid || isAdmin() ); }
+    match /quick_gigs/{gigId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.hostId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.hostId == request.auth.uid ||
+        resource.data.workerId == request.auth.uid ||
+        (resource.data.assignedWorkerId == request.auth.uid && resource.data.hostId != request.auth.uid) ||
+        // Multi-worker gigs: a candidate declining/timing out writes
+        // exclusionList on the parent doc directly (quick_gig_matching_
+        // service.dart / _declineDispatch) — they're not `workerId`/
+        // `assignedWorkerId` (those stay unset for multi-worker gigs), so
+        // identify them by having their own slot doc instead.
+        exists(/databases/$(database)/documents/quick_gigs/$(gigId)/workers/$(request.auth.uid)) ||
+        isAdmin()
+      );
+      allow delete: if isAuth() && ( resource.data.hostId == request.auth.uid || isAdmin() );
+
+      // ─── Worker slots (multi-worker gigs) ────────────────────
+      // Each worker owns only their own slot doc; the gig's host owns all
+      // slots (assign/track/pay); hostId is denormalized onto every slot
+      // doc so this stays get()-free.
+      match /workers/{workerId} {
+        allow read: if isAuth();
+        allow create: if isAuth() && (
+          request.resource.data.hostId == request.auth.uid ||
+          request.auth.uid == workerId ||
+          isAdmin()
+        );
+        allow update: if isAuth() && (
+          request.auth.uid == workerId ||
+          resource.data.hostId == request.auth.uid ||
+          isAdmin()
+        );
+        allow delete: if isAdmin();
+      }
+    }
 
     // ─── Open Gigs ─────────────────────────────────────────────
    match /open_gigs/{gigId} {
@@ -210,12 +258,33 @@ service cloud.firestore {
       resource.data.workerId == request.auth.uid ||
       resource.data.assignedWorkerId == request.auth.uid ||
       resource.data.status == 'open' ||
+      // Multi-worker gigs keep accepting applicants (arrayUnion on
+      // `applicants`) past the first assignment, once status has moved off
+      // 'open' to 'partially_filled' — see acceptingMoreSlots in
+      // gig_detail_sheet.dart / _applyToOpenGig in gig_map_section.dart.
+      resource.data.status == 'partially_filled' ||
       isAdmin()
     );
 
     allow delete: if isAuth() && (
       resource.data.hostId == request.auth.uid || isAdmin()
     );
+
+    // ─── Worker slots (multi-worker gigs) ──────────────────────
+    match /workers/{workerId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && (
+        request.resource.data.hostId == request.auth.uid ||
+        request.auth.uid == workerId ||
+        isAdmin()
+      );
+      allow update: if isAuth() && (
+        request.auth.uid == workerId ||
+        resource.data.hostId == request.auth.uid ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
   }
 
     // ─── Offered Gigs ──────────────────────────────────────────
@@ -227,11 +296,32 @@ service cloud.firestore {
         resource.data.hostId == request.auth.uid ||
         resource.data.workerId == request.auth.uid ||
         resource.data.assignedWorkerId == request.auth.uid ||
+        // Multi-worker gigs: an accepting worker bumps filledSlotCount/
+        // status on the parent doc directly (_acceptOfferedGig's
+        // transaction) — identify them by having their own slot doc,
+        // since workerId/assignedWorkerId stay unset for multi-worker gigs.
+        exists(/databases/$(database)/documents/offered_gigs/$(gigId)/workers/$(request.auth.uid)) ||
         isAdmin()
       );
       allow delete: if isAuth() && (
         resource.data.hostId == request.auth.uid || isAdmin()
       );
+
+      // ─── Worker slots (multi-worker gigs) ────────────────────
+      match /workers/{workerId} {
+        allow read: if isAuth();
+        allow create: if isAuth() && (
+          request.resource.data.hostId == request.auth.uid ||
+          request.auth.uid == workerId ||
+          isAdmin()
+        );
+        allow update: if isAuth() && (
+          request.auth.uid == workerId ||
+          resource.data.hostId == request.auth.uid ||
+          isAdmin()
+        );
+        allow delete: if isAdmin();
+      }
     }
 
     // ─── Quick Gig Config ──────────────────────────────────────

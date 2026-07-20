@@ -51,6 +51,12 @@ class OfferedGigOfferCard extends StatelessWidget {
             ? _formatSchedule(gig.scheduledDate!)
             : 'Flexible',
       ),
+      if (gig.isMultiWorker)
+        _InfoChip(
+          Icons.groups_rounded,
+          'WORKERS',
+          '${gig.openSlots} of ${gig.workerSlots} spots open',
+        ),
       if (skillRequired.isNotEmpty)
         _InfoChip(Icons.build_outlined, 'SKILL', skillRequired),
       if (gig.address.isNotEmpty)

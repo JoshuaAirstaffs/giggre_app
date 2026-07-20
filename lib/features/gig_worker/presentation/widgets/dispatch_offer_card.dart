@@ -188,6 +188,15 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                     fontSize: 13,
                     fontWeight: FontWeight.bold),
               ),
+              if (widget.gig.isMultiWorker) ...[
+                const SizedBox(width: 16),
+                const Icon(Icons.groups_rounded, color: kSub, size: 14),
+                const SizedBox(width: 6),
+                Text(
+                  '${widget.gig.openSlots} of ${widget.gig.workerSlots} spots',
+                  style: const TextStyle(color: kSub, fontSize: 12),
+                ),
+              ],
             ],
           ),
           if (widget.gig.address.isNotEmpty) ...[

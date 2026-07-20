@@ -38,6 +38,10 @@ class GigMarkerData {
   final DateTime? scheduledDate;
   final DateTime? createdAt;
   final int applicantCount;
+  // Multi-worker gigs: how many worker slots this gig needs, and how many
+  // are currently filled. 1/0 == a legacy single-worker gig.
+  final int workerSlots;
+  final int filledSlotCount;
 
   const GigMarkerData({
     required this.id,
@@ -57,7 +61,12 @@ class GigMarkerData {
     this.scheduledDate,
     this.createdAt,
     this.applicantCount = 0,
+    this.workerSlots = 1,
+    this.filledSlotCount = 0,
   });
+
+  bool get isMultiWorker => workerSlots > 1;
+  int get openSlots => (workerSlots - filledSlotCount).clamp(0, workerSlots);
 }
 
 enum _SkillFilter { all, mySkills, specific }
@@ -607,7 +616,17 @@ class _GigMapSectionState extends State<GigMapSection> {
         return;
       }
       final currentStatus = snap.data()?['status'] as String? ?? '';
-      if (currentStatus != 'open') {
+      final workerSlots = (snap.data()?['workerSlots'] as num?)?.toInt() ?? 1;
+      final filledSlotCount = (snap.data()?['filledSlotCount'] as num?)?.toInt() ?? 0;
+      // Multi-slot gigs keep accepting applicants past the initial 'open'
+      // status (it moves to 'partially_filled' once the first worker is
+      // assigned) as long as capacity remains; single-slot gigs are
+      // unchanged — 'open' is the only status that still has room.
+      final stillAcceptingApplicants = workerSlots > 1
+          ? (currentStatus == 'open' || currentStatus == 'partially_filled') &&
+              filledSlotCount < workerSlots
+          : currentStatus == 'open';
+      if (!stillAcceptingApplicants) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -699,6 +718,61 @@ class _GigMapSectionState extends State<GigMapSection> {
     }
   }
 
+  // Withdraws this worker's pending application — only valid while they're
+  // still in the gig's `applicants` array (i.e. not yet selected; once a
+  // host picks them, _selectWorker moves them into the `workers`
+  // subcollection and removes them from `applicants`, so this naturally
+  // stops applying at that point).
+  Future<void> _cancelApplication(GigMarkerData gig) async {
+    try {
+      final gigRef = FirebaseFirestore.instance.collection('open_gigs').doc(gig.id);
+      final snap = await gigRef.get();
+      final applicants = List<dynamic>.from(snap.data()?['applicants'] ?? []);
+      final mine = applicants.firstWhere(
+        (a) => (a as Map<String, dynamic>)['workerId'] == widget.uid,
+        orElse: () => null,
+      );
+      if (mine == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'This application is no longer pending — it may have already been accepted.',
+              ),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+      // Exact-value match required for arrayRemove — using the entry read
+      // straight off the doc guarantees the map matches what's stored.
+      await gigRef.update({
+        'applicants': FieldValue.arrayRemove([mine]),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Application withdrawn.'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[GigMap] cancel application error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to withdraw application: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     _googleMapController?.dispose();
@@ -743,6 +817,8 @@ class _GigMapSectionState extends State<GigMapSection> {
       currencyCode: (data['currencyCode'] as String?) ?? 'PHP',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
       applicantCount: type == 'open' ? applicants.length : 0,
+      workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
+      filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -1328,6 +1404,33 @@ class _GigMapSectionState extends State<GigMapSection> {
                     ),
                   ],
                 ),
+                if (gig.isMultiWorker) ...[
+                  const SizedBox(height: 12),
+                  _InfoGridCell(
+                    icon: Icons.groups_rounded,
+                    label: 'WORKERS NEEDED',
+                    child: RichText(
+                      text: TextSpan(
+                        style: const TextStyle(
+                          color: Color(0xFF2E9E6B),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        children: [
+                          TextSpan(text: '${gig.openSlots} of ${gig.workerSlots} spots open'),
+                          TextSpan(
+                            text: ' · each worker paid independently',
+                            style: TextStyle(
+                              color: kSub.withValues(alpha: 0.9),
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1472,7 +1575,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Apply button
+                // Apply / Withdraw button
                 SizedBox(
                   width: double.infinity,
                   height: 52,
@@ -1483,7 +1586,14 @@ class _GigMapSectionState extends State<GigMapSection> {
                               colors: [Color(0xFF2B6FB5), Color(0xFF1F4D80)],
                             )
                           : null,
-                      color: canTapApply ? null : neutralSurface,
+                      color: canTapApply
+                          ? null
+                          : isAppliedPending
+                              ? Colors.redAccent.withValues(alpha: 0.08)
+                              : neutralSurface,
+                      border: isAppliedPending
+                          ? Border.all(color: Colors.redAccent.withValues(alpha: 0.4))
+                          : null,
                       borderRadius: BorderRadius.circular(15),
                     ),
                     child: Material(
@@ -1503,12 +1613,48 @@ class _GigMapSectionState extends State<GigMapSection> {
                                   _applyToOpenGig(gig);
                                 }
                               }
-                            : null,
+                            : isAppliedPending
+                                ? () async {
+                                    final confirm = await showDialog<bool>(
+                                      context: ctx,
+                                      builder: (dCtx) => AlertDialog(
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(18),
+                                        ),
+                                        title: const Text('Withdraw Application?'),
+                                        content: const Text(
+                                          'You can apply again later if the gig is still accepting applicants.',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(dCtx, false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(dCtx, true),
+                                            child: const Text(
+                                              'Withdraw',
+                                              style: TextStyle(color: Colors.redAccent),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm == true && ctx.mounted) {
+                                      Navigator.pop(ctx);
+                                      _cancelApplication(gig);
+                                    }
+                                  }
+                                : null,
                         child: Center(
                           child: Text(
-                            isAppliedPending ? 'Application sent' : 'Apply now',
+                            isAppliedPending ? 'Withdraw Application' : 'Apply now',
                             style: TextStyle(
-                              color: canTapApply ? Colors.white : kSub,
+                              color: canTapApply
+                                  ? Colors.white
+                                  : isAppliedPending
+                                      ? Colors.redAccent
+                                      : kSub,
                               fontSize: 14.5,
                               fontWeight: FontWeight.w800,
                             ),
@@ -1518,7 +1664,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                     ),
                   ),
                 ),
-                if (gig.gigType == 'open') ...[
+                if (gig.gigType == 'open' && !isAppliedPending) ...[
                   const SizedBox(height: 10),
                   const Text(
                     "You can withdraw your application anytime before it's accepted",
@@ -1716,6 +1862,17 @@ class _GigMapSectionState extends State<GigMapSection> {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
+                            if (g.isMultiWorker) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                '${g.openSlots}/${g.workerSlots} spots',
+                                style: const TextStyle(
+                                  color: Color(0xFF2E9E6B),
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                         if (missing.isNotEmpty) ...[
@@ -3025,6 +3182,24 @@ class _GigListCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
+                if (gig.isMultiWorker) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2E9E6B).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${gig.openSlots} of ${gig.workerSlots} spots',
+                      style: const TextStyle(
+                        color: Color(0xFF2E9E6B),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

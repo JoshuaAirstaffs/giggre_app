@@ -1835,6 +1835,8 @@ class _GigHistoryCard extends StatelessWidget {
         '';
     final completedAt = gig['completedAt'] as Timestamp?;
     final durationSec = (gig['durationSeconds'] as num?)?.toInt();
+    final workerSlots = (gig['workerSlots'] as num?)?.toInt() ?? 1;
+    final isMultiWorker = workerSlots > 1;
 
     final typeColor = gigType == 'quick'
         ? kAmber
@@ -1916,6 +1918,27 @@ class _GigHistoryCard extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (isMultiWorker) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '$workerSlots workers',
+                            style: const TextStyle(
+                              color: Color(0xFF10B981),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -1998,6 +2021,9 @@ class _GigHistoryCard extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                if (isMultiWorker)
+                  const Text('per worker',
+                      style: TextStyle(color: kSub, fontSize: 9.5)),
                 const SizedBox(height: 4),
                 const Icon(Icons.chevron_right_rounded, color: kSub, size: 18),
               ],
@@ -2090,6 +2116,8 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
     final workStartedAt = gig['workStartedAt'] as Timestamp?;
     final workCompletedAt = gig['workCompletedAt'] as Timestamp?;
     final durationSec = (gig['durationSeconds'] as num?)?.toInt();
+    final workerSlots = (gig['workerSlots'] as num?)?.toInt() ?? 1;
+    final isMultiWorker = workerSlots > 1;
 
     final typeColor = gigType == 'quick'
         ? kAmber
@@ -2210,11 +2238,19 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
                   ),
                 _HistoryDetailRow(
                   icon: Icons.attach_money_rounded,
-                  label: 'Budget',
+                  label: isMultiWorker ? 'Rate per worker' : 'Budget',
                   value: CurrencyFormatter.format(budget, currencyCode),
                   valueColor: kAmber,
                   onSurface: onSurface,
                 ),
+                if (isMultiWorker)
+                  _HistoryDetailRow(
+                    icon: Icons.groups_rounded,
+                    label: 'Workers',
+                    value: '$workerSlots workers, paid independently',
+                    valueColor: const Color(0xFF10B981),
+                    onSurface: onSurface,
+                  ),
                 if (address.isNotEmpty)
                   _HistoryDetailRow(
                     icon: Icons.location_on_outlined,

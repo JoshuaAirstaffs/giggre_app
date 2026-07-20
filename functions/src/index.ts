@@ -149,7 +149,7 @@ export const onOpenGigPosted = onDocumentCreated(
       nearbyWorkerIds.map((uid) =>
         sendPushToUser(uid, {
           title: "New Gig Nearby",
-          body: "A new gig matches your skills — check it out!",
+          body: "A new gig matches your skills. Check it out!",
           channelId: "nearby_gigs_v2",
           data: { type: "nearby_gig", gigId: event.params.gigId },
         })
@@ -173,7 +173,7 @@ export const onApplicantNotificationCreated = onDocumentCreated(
 
     await sendPushToUser(hostUid, {
       title: "New Application",
-      body: `A worker applied to your gig — ${workerName} wants "${gigTitle}"`,
+      body: `${workerName} applied to your gig "${gigTitle}"`,
       channelId: "gig_applications_v4",
       data: { type: "new_applicant", gigId },
     });
@@ -194,7 +194,7 @@ export const onGigOfferCreated = onDocumentCreated(
 
     await sendPushToUser(workerId, {
       title: "New Gig Offer",
-      body: `${hostName} offered you a gig — "${gigTitle}"`,
+      body: `${hostName} offered you the gig "${gigTitle}"`,
       channelId: "gig_offers_v3",
       data: { type: "gig_offered", gigId: event.params.gigId },
     });
@@ -301,7 +301,7 @@ export const onSkillRequestStatusChanged = onDocumentUpdated(
 const PROGRESS_MILESTONES: Array<[field: string, title: (n: string) => string, body: (n: string, t: string) => string]> = [
   ["arrivedAt", (n) => `${n} Has Arrived`, (n, t) => `${n} is ready to start "${t}"`],
   ["workStartedAt", (n) => `${n} Started Working`, (n, t) => `${n} is working on "${t}"`],
-  ["workCompletedAt", (n) => `${n} Completed the Task`, (n, t) => `${n} finished "${t}" — awaiting your confirmation`],
+  ["workCompletedAt", (n) => `${n} Completed the Task`, (n, t) => `${n} finished "${t}" and is awaiting your confirmation`],
 ];
 
 function makeWorkerProgressTrigger(collection: string) {
@@ -336,6 +336,57 @@ export const onQuickGigProgress = makeWorkerProgressTrigger("quick_gigs");
 export const onOpenGigProgress = makeWorkerProgressTrigger("open_gigs");
 export const onOfferedGigProgress = makeWorkerProgressTrigger("offered_gigs");
 
+// ── Worker progress milestones — multi-worker gigs ──────────────────────────
+// Multi-worker gigs record each worker's arrivedAt/workStartedAt/
+// workCompletedAt on their own `workers/{workerId}` subcollection doc instead
+// of the parent gig doc, so the trigger above never fires for them. This is
+// the subcollection equivalent — one push per worker's own milestone.
+function makeWorkerProgressSlotTrigger(collection: string) {
+  return onDocumentUpdated(
+    `${collection}/{gigId}/workers/{workerId}`,
+    async (event) => {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const hostId = after.hostId as string | undefined;
+      if (!hostId) return;
+
+      const workerName = (after.workerName as string) ?? "Your worker";
+      let gigTitle = "your gig";
+      try {
+        const gigSnap = await admin
+          .firestore()
+          .collection(collection)
+          .doc(event.params.gigId)
+          .get();
+        gigTitle = (gigSnap.data()?.title as string) ?? gigTitle;
+      } catch {
+        // Best-effort — notification still fires with the generic title.
+      }
+
+      for (const [field, title, body] of PROGRESS_MILESTONES) {
+        if (!before[field] && after[field]) {
+          await sendPushToUser(hostId, {
+            title: title(workerName),
+            body: body(workerName, gigTitle),
+            channelId: "gig_worker_progress_v3",
+            data: {
+              type: "worker_progress",
+              gigId: event.params.gigId,
+              workerId: event.params.workerId,
+            },
+          });
+        }
+      }
+    }
+  );
+}
+
+export const onQuickGigWorkerSlotProgress = makeWorkerProgressSlotTrigger("quick_gigs");
+export const onOpenGigWorkerSlotProgress = makeWorkerProgressSlotTrigger("open_gigs");
+export const onOfferedGigWorkerSlotProgress = makeWorkerProgressSlotTrigger("offered_gigs");
+
 // ── Gig assigned (worker side) ──────────────────────────────────────────────
 // Fires the moment a gig's status enters an "assigned" state (navigating /
 // in_progress) with a worker attached, across all three gig collections.
@@ -356,7 +407,7 @@ function makeGigAssignedTrigger(collection: string, gigTypeLabel: string) {
     const gigTitle = (after.title as string) ?? "a gig";
 
     await sendPushToUser(workerId, {
-      title: `You're Assigned! — ${gigTypeLabel}`,
+      title: `You're Assigned to a ${gigTypeLabel}!`,
       body: `You've been assigned to: ${gigTitle}. Head to the location now.`,
       channelId: "gig_assignments_v2",
       data: { type: "gig_assigned", gigId: event.params.gigId },
@@ -367,6 +418,113 @@ function makeGigAssignedTrigger(collection: string, gigTypeLabel: string) {
 export const onQuickGigAssigned = makeGigAssignedTrigger("quick_gigs", "Quick Gig");
 export const onOpenGigAssigned = makeGigAssignedTrigger("open_gigs", "Open Gig");
 export const onOfferedGigAssigned = makeGigAssignedTrigger("offered_gigs", "Offered Gig");
+
+// ── Gig assigned — multi-worker gigs ────────────────────────────────────────
+// Each worker on a multi-worker gig gets their own `workers/{workerId}` doc
+// created already-assigned (Open Gig: host picks straight from applicants),
+// so this fires on subcollection doc CREATE rather than a gig-doc status
+// transition.
+function makeGigAssignedSlotTrigger(collection: string, gigTypeLabel: string) {
+  return onDocumentCreated(
+    `${collection}/{gigId}/workers/{workerId}`,
+    async (event) => {
+      const after = event.data?.data();
+      if (!after) return;
+      const workerId = event.params.workerId as string;
+      if (!ASSIGNED_STATUSES.has(after.status)) return;
+
+      let gigTitle = "a gig";
+      try {
+        const gigSnap = await admin
+          .firestore()
+          .collection(collection)
+          .doc(event.params.gigId)
+          .get();
+        gigTitle = (gigSnap.data()?.title as string) ?? gigTitle;
+      } catch {
+        // Best-effort — notification still fires with the generic title.
+      }
+
+      await sendPushToUser(workerId, {
+        title: `You're Assigned to a ${gigTypeLabel}!`,
+        body: `You've been assigned to: ${gigTitle}. Head to the location now.`,
+        channelId: "gig_assignments_v2",
+        data: { type: "gig_assigned", gigId: event.params.gigId },
+      });
+    }
+  );
+}
+
+export const onQuickGigSlotAssigned = makeGigAssignedSlotTrigger("quick_gigs", "Quick Gig");
+export const onOpenGigSlotAssigned = makeGigAssignedSlotTrigger("open_gigs", "Open Gig");
+export const onOfferedGigSlotAssigned = makeGigAssignedSlotTrigger("offered_gigs", "Offered Gig");
+
+// ── Offered gig declined (host side) ────────────────────────────────────────
+// A host directly offers a gig to one or more specific named workers, so
+// unlike Quick Gig's automated candidate-by-candidate search (where a decline
+// just quietly moves on to the next candidate), a decline here is meaningful
+// and actionable — the host picked that person and should know right away.
+export const onOfferedGigDeclined = onDocumentUpdated(
+  "offered_gigs/{gigId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (before.status === "declined" || after.status !== "declined") return;
+
+    const hostId = after.hostId as string | undefined;
+    if (!hostId) return;
+    const workerName = (after.workerName as string) ?? "The worker";
+    const gigTitle = (after.title as string) ?? "your gig";
+
+    await sendPushToUser(hostId, {
+      title: "Offer Declined",
+      body: `${workerName} declined your offer for "${gigTitle}".`,
+      channelId: "gig_offer_declined_v1",
+      data: { type: "gig_offer_declined", gigId: event.params.gigId },
+    });
+  }
+);
+
+// Multi-worker equivalent — each named worker's decline lives on their own
+// `workers/{workerId}` doc rather than the gig doc's single `status` field,
+// so one worker declining never touches the others' offers.
+export const onOfferedGigSlotDeclined = onDocumentUpdated(
+  "offered_gigs/{gigId}/workers/{workerId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (before.status === "declined" || after.status !== "declined") return;
+
+    const hostId = after.hostId as string | undefined;
+    if (!hostId) return;
+    const workerName = (after.workerName as string) ?? "A worker";
+
+    let gigTitle = "your gig";
+    try {
+      const gigSnap = await admin
+        .firestore()
+        .collection("offered_gigs")
+        .doc(event.params.gigId)
+        .get();
+      gigTitle = (gigSnap.data()?.title as string) ?? gigTitle;
+    } catch {
+      // Best-effort — notification still fires with the generic title.
+    }
+
+    await sendPushToUser(hostId, {
+      title: "Offer Declined",
+      body: `${workerName} declined your offer for "${gigTitle}".`,
+      channelId: "gig_offer_declined_v1",
+      data: {
+        type: "gig_offer_declined",
+        gigId: event.params.gigId,
+        workerId: event.params.workerId,
+      },
+    });
+  }
+);
 
 // ── Schedule-expiry auto-cancel (host side) ─────────────────────────────────
 // Was previously a client-side Timer in CurrentUserProvider, which only fired
@@ -415,7 +573,7 @@ export const checkExpiredGigSchedules = onSchedule(
         if (gigTitle && hostId) {
           await sendPushToUser(hostId, {
             title: "Gig Cancelled",
-            body: `No worker was selected for "${gigTitle}" before its scheduled time — the gig has been cancelled.`,
+            body: `No worker was selected for "${gigTitle}" before its scheduled time, so the gig has been cancelled.`,
             channelId: "gig_auto_cancelled_v3",
             data: { type: "gig_auto_cancelled", gigId: doc.id },
           });

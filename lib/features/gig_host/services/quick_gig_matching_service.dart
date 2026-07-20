@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import '../models/worker_slot_model.dart';
 
 /// Smart dispatch engine for quick gigs.
 /// Runs entirely client-side (no Cloud Functions).
@@ -121,7 +122,7 @@ class QuickGigMatchingService {
     return best;
   }
 
-  // ── Dispatch gig to a worker ────────────────────────────────────────────────
+  // ── Dispatch gig to a worker (legacy single-worker gig) ─────────────────────
   static Future<void> _dispatchToWorker({
     required String gigId,
     required String workerId,
@@ -139,6 +140,44 @@ class QuickGigMatchingService {
     ]);
   }
 
+  // ── Dispatch gig to a candidate slot (multi-worker gig) ──────────────────────
+  // Creates the candidate's own `workers/{workerId}` doc instead of writing
+  // singular fields on the gig doc, so this candidate's offer/response never
+  // touches any other slot already filled/in-flight on the same gig.
+  static Future<void> _dispatchToWorkerSlot({
+    required String gigId,
+    required String workerId,
+    required String workerName,
+    required String hostId,
+    required String hostName,
+    required double rate,
+    required String currencyCode,
+  }) async {
+    final db = FirebaseFirestore.instance;
+    await Future.wait([
+      db
+          .collection('quick_gigs')
+          .doc(gigId)
+          .collection('workers')
+          .doc(workerId)
+          .set(
+            WorkerSlotModel(
+              workerId: workerId,
+              workerName: workerName,
+              gigId: gigId,
+              gigCollection: 'quick_gigs',
+              hostId: hostId,
+              hostName: hostName,
+              rate: rate,
+              currencyCode: currencyCode,
+              status: 'in_progress',
+            ).toMap()
+              ..['dispatchedAt'] = FieldValue.serverTimestamp(),
+          ),
+      db.collection('users').doc(workerId).update({'slot': 'LOCKED'}),
+    ]);
+  }
+
   // ── Auto-search loop ────────────────────────────────────────────────────────
   /// Posts, dispatches, waits for response, retries with exclusion list.
   /// Marks gig as 'no_worker' after timeout or max attempts with no acceptance.
@@ -152,6 +191,29 @@ class QuickGigMatchingService {
     final db = FirebaseFirestore.instance;
     final gigRef = db.collection('quick_gigs').doc(gigId);
 
+    try {
+      final initSnap = await gigRef.get();
+      if (!initSnap.exists) return;
+      final initData = initSnap.data()!;
+      final workerSlots = (initData['workerSlots'] as num?)?.toInt() ?? 1;
+
+      if (workerSlots <= 1) {
+        await _runSingleSlotSearch(gigId: gigId, gigLocation: gigLocation, gigRef: gigRef);
+      } else {
+        await _runMultiSlotSearch(gigId: gigId, gigLocation: gigLocation, gigRef: gigRef);
+      }
+    } finally {
+      _activeSearches.remove(gigId);
+    }
+  }
+
+  // ── Legacy single-worker search — unchanged behavior ────────────────────────
+  static Future<void> _runSingleSlotSearch({
+    required String gigId,
+    required GeoPoint gigLocation,
+    required DocumentReference<Map<String, dynamic>> gigRef,
+  }) async {
+    final db = FirebaseFirestore.instance;
     final config = await _fetchConfig();
 
     int dispatchAttempts = 0;
@@ -320,8 +382,207 @@ class QuickGigMatchingService {
           'assignedWorkerName': null,
         });
       } catch (_) {}
-    } finally {
-      _activeSearches.remove(gigId);
     }
+  }
+
+  // ── Multi-worker search — fills N slots, one candidate at a time ────────────
+  // Same accept/decline/timeout mechanics as the legacy loop, but each
+  // candidate's offer lives on their own `workers/{workerId}` doc instead of
+  // the gig doc, so slots already filled/in-flight are never touched by a
+  // later candidate's response. Loops until `filledSlotCount == workerSlots`
+  // or the search deadline/max-attempts budget (shared across all slots) runs
+  // out — a partial fill (>0 but <workerSlots) is a valid, non-error outcome.
+  static Future<void> _runMultiSlotSearch({
+    required String gigId,
+    required GeoPoint gigLocation,
+    required DocumentReference<Map<String, dynamic>> gigRef,
+  }) async {
+    final db = FirebaseFirestore.instance;
+    final config = await _fetchConfig();
+
+    int dispatchAttempts = 0;
+
+    try {
+      final initSnap = await gigRef.get();
+      if (!initSnap.exists) return;
+      final initData = initSnap.data()!;
+      final workerSlots = (initData['workerSlots'] as num?)?.toInt() ?? 1;
+      final ratePerSlot = (initData['ratePerSlot'] as num?)?.toDouble() ??
+          (initData['budget'] as num?)?.toDouble() ??
+          0;
+      final currencyCode = (initData['currencyCode'] as String?) ?? 'PHP';
+      final hostId = initData['hostId'] as String? ?? '';
+      final hostName = initData['hostName'] as String? ?? '';
+      final initStatus = initData['status'] as String? ?? '';
+      final existingStartedAt =
+          (initData['searchStartedAt'] as Timestamp?)?.toDate();
+
+      final bool isResuming = existingStartedAt != null &&
+          ['scanning', 'partially_filled'].contains(initStatus);
+
+      DateTime searchStartedAt;
+      if (isResuming) {
+        searchStartedAt = existingStartedAt;
+      } else {
+        await gigRef.update({
+          'searchStartedAt': FieldValue.serverTimestamp(),
+          'exclusionList': [],
+          'status': 'scanning',
+        });
+        final freshSnap = await gigRef.get();
+        searchStartedAt =
+            (freshSnap.data()!['searchStartedAt'] as Timestamp?)?.toDate() ??
+            DateTime.now();
+      }
+
+      final searchDeadline = searchStartedAt.add(config.searchTimeout);
+
+      while (true) {
+        final gigSnap = await gigRef.get();
+        if (!gigSnap.exists) return;
+        final gigData = gigSnap.data()!;
+        final status = gigData['status'] as String? ?? '';
+        final filledSlotCount = (gigData['filledSlotCount'] as num?)?.toInt() ?? 0;
+
+        if (['cancelled', 'no_worker', 'filled', 'completed'].contains(status)) {
+          return;
+        }
+        if (filledSlotCount >= workerSlots) {
+          await gigRef.update({'status': 'filled'});
+          return;
+        }
+
+        // ── Search-wide budget checks ────────────────────────────────────
+        if (!DateTime.now().isBefore(searchDeadline) ||
+            dispatchAttempts >= config.maxAttempts) {
+          await _endMultiSlotSearch(gigRef: gigRef, workerSlots: workerSlots);
+          return;
+        }
+
+        final excluded = [
+          ...List<String>.from(gigData['exclusionList'] ?? []),
+          if (hostId.isNotEmpty) hostId,
+        ];
+
+        final worker = await _findBestWorker(
+          gigLocation: gigLocation,
+          exclude: excluded,
+          maxSearchRadiusKm: config.maxSearchRadiusKm,
+        );
+
+        if (worker == null) {
+          await Future.delayed(_retryInterval);
+          continue;
+        }
+
+        final candidateId = worker['id'] as String;
+        final candidateName = worker['name'] as String;
+
+        // ── Dispatch to this candidate's own slot doc ────────────────────
+        dispatchAttempts++;
+        await _dispatchToWorkerSlot(
+          gigId: gigId,
+          workerId: candidateId,
+          workerName: candidateName,
+          hostId: hostId,
+          hostName: hostName,
+          rate: ratePerSlot,
+          currencyCode: currencyCode,
+        );
+        if (filledSlotCount == 0) {
+          await gigRef.update({'status': 'scanning'});
+        }
+
+        // ── Wait for THIS candidate's response ───────────────────────────
+        final slotRef = gigRef.collection('workers').doc(candidateId);
+        final reviewDeadline = DateTime.now().add(config.reviewWindow);
+        String finalStatus = 'in_progress';
+
+        while (DateTime.now().isBefore(reviewDeadline)) {
+          await Future.delayed(_pollInterval);
+          final check = await slotRef.get();
+          if (!check.exists) {
+            finalStatus = 'declined';
+            break;
+          }
+          final cs = check.data()?['status'] as String? ?? '';
+          if (cs != 'in_progress') {
+            finalStatus = cs;
+            break;
+          }
+        }
+
+        if (finalStatus == 'navigating') {
+          // Accepted — claim the slot transactionally, then keep looping to
+          // fill any remaining capacity.
+          await db.runTransaction((tx) async {
+            final snap = await tx.get(gigRef);
+            final data = snap.data() ?? {};
+            final filled = (data['filledSlotCount'] as num?)?.toInt() ?? 0;
+            final newFilled = filled + 1;
+            tx.update(gigRef, {
+              'filledSlotCount': newFilled,
+              'status': newFilled >= workerSlots ? 'filled' : 'partially_filled',
+            });
+          });
+          continue;
+        }
+
+        // Cancelled mid-offer (host cancelled the whole gig).
+        if (finalStatus == 'cancelled') return;
+
+        // Review window timed out with no response from the candidate — the
+        // loop must do the cleanup itself (exclude, free their slot, apply
+        // the timeout penalty). If the candidate explicitly declined
+        // instead, their own decline handler already did all of this with
+        // its own penalty — mirrors the legacy loop's "exclusionList already
+        // updated by the worker's _declineDispatch call" comment, so no
+        // redundant (double-penalty) write happens here for that case.
+        if (finalStatus == 'in_progress') {
+          await Future.wait([
+            gigRef.update({
+              'exclusionList': FieldValue.arrayUnion([candidateId]),
+            }),
+            db.collection('users').doc(candidateId).update({
+              'slot': 'AVAILABLE',
+              'acceptanceRate': FieldValue.increment(-0.05),
+            }),
+            slotRef.update({'status': 'declined'}).catchError((_) {}),
+          ]);
+        }
+
+        if (!DateTime.now().isBefore(searchDeadline)) {
+          await _endMultiSlotSearch(gigRef: gigRef, workerSlots: workerSlots);
+          return;
+        }
+        // Deadline not yet passed — loop again and try the next candidate.
+      }
+    } catch (e) {
+      debugPrint('[QuickGigMatching] multi-slot auto-search error for $gigId: $e');
+      try {
+        final snap = await gigRef.get();
+        final workerSlots = (snap.data()?['workerSlots'] as num?)?.toInt() ?? 1;
+        await _endMultiSlotSearch(gigRef: gigRef, workerSlots: workerSlots);
+      } catch (_) {}
+    }
+  }
+
+  // Sets the gig's coarse status based on how many slots ended up filled —
+  // 'filled' (all), 'partially_filled' (some — a valid, non-error outcome),
+  // or 'no_worker' (none), mirroring the legacy single-slot loop's terminal
+  // states.
+  static Future<void> _endMultiSlotSearch({
+    required DocumentReference<Map<String, dynamic>> gigRef,
+    required int workerSlots,
+  }) async {
+    final snap = await gigRef.get();
+    final filled = (snap.data()?['filledSlotCount'] as num?)?.toInt() ?? 0;
+    await gigRef.update({
+      'status': filled >= workerSlots
+          ? 'filled'
+          : filled > 0
+              ? 'partially_filled'
+              : 'no_worker',
+    });
   }
 }

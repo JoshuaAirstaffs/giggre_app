@@ -45,6 +45,11 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
     'task_complete',
     'payment',
     'cancellation_requested',
+    // Multi-worker gigs: the parent gig doc only carries this coarse
+    // fill-phase status — per-worker step detail lives in the `workers`
+    // subcollection (see _MultiWorkerSummaryCard below).
+    'partially_filled',
+    'filled',
   ];
 
   List<QueryDocumentSnapshot> _searchingDocs = [];
@@ -534,6 +539,27 @@ class _GigProgressCard extends StatelessWidget {
     final gigId = doc.id;
     final title = data['title'] as String? ?? 'Gig';
     final status = data['status'] as String? ?? 'navigating';
+    final workerSlots = (data['workerSlots'] as num?)?.toInt() ?? 1;
+
+    // Multi-worker gigs don't fit the single-stepper/single-map card below
+    // (per-worker step detail lives in the `workers` subcollection, not on
+    // this gig doc) — show a condensed summary instead. Full per-worker
+    // tracking/payment lives in GigDetailSheet, opened from the main gig list.
+    if (workerSlots > 1) {
+      return _MultiWorkerSummaryCard(
+        gigId: gigId,
+        gigCollection: gigCollection,
+        title: title,
+        workerSlots: workerSlots,
+        filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
+        ratePerSlot: (data['ratePerSlot'] as num?)?.toDouble() ??
+            (data['budget'] as num?)?.toDouble() ??
+            0,
+        currencyCode: (data['currencyCode'] as String?) ?? 'PHP',
+        isOfferedGig: gigCollection == 'offered_gigs',
+        isOpenGig: gigCollection == 'open_gigs',
+      );
+    }
     // offered_gigs use 'workerName'/'workerId'; quick/open use 'assignedWorkerName'/'assignedWorkerId'
     final workerName =
         data['assignedWorkerName'] as String? ??
@@ -910,6 +936,153 @@ class _GigProgressCard extends StatelessWidget {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Multi-worker summary card — dashboard glance for gigs with >1 worker
+//  slot. Full per-worker tracking/payment lives in GigDetailSheet; this is
+//  just "N of M workers, tap into the gig for details."
+// ─────────────────────────────────────────────────────────────────────────────
+class _MultiWorkerSummaryCard extends StatelessWidget {
+  final String gigId;
+  final String gigCollection;
+  final String title;
+  final int workerSlots;
+  final int filledSlotCount;
+  final double ratePerSlot;
+  final String currencyCode;
+  final bool isOfferedGig;
+  final bool isOpenGig;
+
+  const _MultiWorkerSummaryCard({
+    required this.gigId,
+    required this.gigCollection,
+    required this.title,
+    required this.workerSlots,
+    required this.filledSlotCount,
+    required this.ratePerSlot,
+    required this.currencyCode,
+    required this.isOfferedGig,
+    required this.isOpenGig,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    final divider = Theme.of(context).dividerColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent = isOfferedGig
+        ? const Color(0xFF8B5CF6)
+        : isOpenGig
+            ? kBlue
+            : kAmber;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: divider),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.groups_rounded, color: accent, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        const Icon(Icons.groups_rounded, color: kSub, size: 12),
+                        const SizedBox(width: 4),
+                        Text(
+                          '$filledSlotCount of $workerSlots workers',
+                          style: const TextStyle(color: kSub, fontSize: 11),
+                        ),
+                        const SizedBox(width: 10),
+                        const Icon(Icons.attach_money_rounded, color: kAmber, size: 12),
+                        Text(
+                          '${CurrencyFormatter.format(ratePerSlot, currencyCode)}/worker',
+                          style: const TextStyle(
+                            color: kAmber,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collection(gigCollection)
+                .doc(gigId)
+                .collection('workers')
+                .snapshots(),
+            builder: (context, snap) {
+              final docs = snap.data?.docs ?? [];
+              final readyForPayment = docs
+                  .where((d) => (d.data()['status'] as String?) == 'task_complete')
+                  .length;
+              if (readyForPayment == 0) return const SizedBox.shrink();
+              return Container(
+                margin: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF22C55E).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
+                ),
+                child: Text(
+                  '$readyForPayment worker${readyForPayment == 1 ? '' : 's'} ready for payment — open the gig to pay',
+                  style: const TextStyle(
+                    color: Color(0xFF22C55E),
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );

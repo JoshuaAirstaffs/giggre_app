@@ -16,6 +16,10 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
   final double budget;
   final String currencyCode;
   final String hostName;
+  // When set, this gig uses the multi-worker `workers` subcollection and the
+  // code/status live on `{gigCollection}/{gigId}/workers/{slotWorkerId}`
+  // instead of the gig doc directly. Null == legacy single-worker gig.
+  final String? slotWorkerId;
   // Called after Firestore update succeeds — parent owns the pop + rating flow.
   final VoidCallback? onConfirmed;
 
@@ -26,6 +30,7 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
     required this.budget,
     this.currencyCode = 'PHP',
     required this.hostName,
+    this.slotWorkerId,
     this.onConfirmed,
   });
 
@@ -36,6 +41,7 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
     required double budget,
     String currencyCode = 'PHP',
     required String hostName,
+    String? slotWorkerId,
     VoidCallback? onConfirmed,
   }) {
     return showModalBottomSheet(
@@ -50,6 +56,7 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
         budget: budget,
         currencyCode: currencyCode,
         hostName: hostName,
+        slotWorkerId: slotWorkerId,
         onConfirmed: onConfirmed,
       ),
     );
@@ -100,9 +107,12 @@ class _WorkerPaymentConfirmSheetState
     try {
       final db = FirebaseFirestore.instance;
       final gigRef = db.collection(widget.gigCollection).doc(widget.gigId);
+      final slotId = widget.slotWorkerId;
+      final targetRef =
+          slotId == null ? gigRef : gigRef.collection('workers').doc(slotId);
 
       // Validate the payment code before opening a transaction.
-      final snap = await gigRef.get();
+      final snap = await targetRef.get();
       final storedCode = snap.data()?['paymentCode'] as String?;
       if (storedCode == null || storedCode != trimmed) {
         setState(() {
@@ -119,8 +129,8 @@ class _WorkerPaymentConfirmSheetState
 
       await db.runTransaction((tx) async {
         // Re-read inside the transaction for the idempotency guard.
-        final gigSnap = await tx.get(gigRef);
-        if (gigSnap.data()?['status'] == 'completed') return;
+        final targetSnap = await tx.get(targetRef);
+        if (targetSnap.data()?['status'] == 'completed') return;
 
         await EarningsService.incrementInTransaction(
           tx: tx,
@@ -130,12 +140,23 @@ class _WorkerPaymentConfirmSheetState
           currentWeek: currentWeek,
         );
 
-        tx.update(gigRef, {
+        tx.update(targetRef, {
           'status': 'completed',
           'completedAt': FieldValue.serverTimestamp(),
           'paymentConfirmedAt': FieldValue.serverTimestamp(),
           'paymentConfirmedBy': 'worker',
         });
+
+        if (slotId != null) {
+          final gigSnap = await tx.get(gigRef);
+          final gigData = gigSnap.data() ?? {};
+          final slots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
+          final completed = ((gigData['slotsCompleted'] as num?)?.toInt() ?? 0) + 1;
+          tx.update(gigRef, {
+            'slotsCompleted': completed,
+            if (completed >= slots) 'status': 'completed',
+          });
+        }
       });
       // Let the parent (WorkingUI) own the pop + rating dialog flow so there
       // is no race between this Navigator.pop and the Firestore stream firing.

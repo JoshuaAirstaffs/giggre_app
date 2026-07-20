@@ -127,6 +127,15 @@ class CurrentUserProvider extends ChangeNotifier {
     );
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
+        'gig_offer_declined_v1',
+        'Offer Declined',
+        description: 'Notifications when a worker declines a gig you offered them',
+        importance: Importance.max,
+        sound: gigSound,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
         'gig_auto_cancelled_v3',
         'Gig Auto-Cancelled',
         description:

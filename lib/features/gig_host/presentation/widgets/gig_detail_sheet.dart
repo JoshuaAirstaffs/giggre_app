@@ -18,6 +18,7 @@ import 'package:giggre_app/features/chat/gig_chat_action.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/map_style.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../models/worker_slot_model.dart';
 import '../../services/quick_gig_matching_service.dart';
 import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
@@ -377,6 +378,73 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     if (mounted) Navigator.pop(context);
   }
 
+  // Multi-worker equivalent of _confirmCompleted — operates on a single
+  // worker's own subcollection doc so paying/rating one worker never touches
+  // any other worker's slot on the same gig.
+  Future<void> _confirmWorkerSlotCompleted(WorkerSlotModel worker) async {
+    final db = FirebaseFirestore.instance;
+    final slotRef = db
+        .collection(_collection)
+        .doc(widget.gigId)
+        .collection('workers')
+        .doc(worker.workerId);
+
+    String? paymentCode;
+    await PaymentSelectionSheet.show(
+      context: context,
+      gigTitle: _data?['title'] as String? ?? 'Gig',
+      budget: worker.rate,
+      currencyCode: worker.currencyCode,
+      onConfirm: (paymentMethod) async {
+        paymentCode = _generatePaymentCode();
+        await Future.wait([
+          slotRef.update({
+            'status': 'payment',
+            'paymentMethod': paymentMethod,
+            'paymentCode': paymentCode,
+            'paymentInitiatedAt': FieldValue.serverTimestamp(),
+          }),
+          db.collection('users').doc(worker.workerId).update({'slot': 'AVAILABLE'}),
+        ]);
+      },
+    );
+    if (!mounted || paymentCode == null) return;
+
+    final workerConfirmed = await HostPaymentCodeSheet.show(
+      context: context,
+      gigId: widget.gigId,
+      gigCollection: _collection,
+      paymentCode: paymentCode!,
+      budget: worker.rate,
+      currencyCode: worker.currencyCode,
+      workerName: worker.workerName,
+      workerId: worker.workerId,
+      slotWorkerId: worker.workerId,
+    );
+    if (!mounted || !workerConfirmed) return;
+
+    await GigCompletionCelebration.show(
+      context: context,
+      title: 'Worker Paid!',
+      subtitle: '${worker.workerName} has been paid — nice work!',
+      icon: Icons.emoji_events_rounded,
+      accentColor: kAmber,
+    );
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _RatingDialog(
+        workerId: worker.workerId,
+        workerName: worker.workerName,
+        gigId: widget.gigId,
+        gigCollection: _collection,
+        slotWorkerId: worker.workerId,
+      ),
+    );
+  }
+
   Future<void> _selectWorker(Map<String, dynamic> applicant) async {
     final workerName = applicant['workerName'] as String? ?? 'Worker';
     final confirmed = await showDialog<bool>(
@@ -470,16 +538,89 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    await FirebaseFirestore.instance
-        .collection(_collection)
-        .doc(widget.gigId)
-        .update({
-          'workerId': applicant['workerId'],
-          'assignedWorkerId': applicant['workerId'],
-          'assignedWorkerName': workerName,
-          'status': 'navigating',
-          'selectedAt': FieldValue.serverTimestamp(),
+
+    final data = _data;
+    final workerSlots = (data?['workerSlots'] as num?)?.toInt() ?? 1;
+    final workerId = applicant['workerId'] as String;
+
+    // Legacy single-worker path — unchanged behavior, plus removing the
+    // now-assigned worker from `applicants` so they don't linger as if
+    // still pending (they're also no longer eligible to withdraw).
+    if (workerSlots <= 1) {
+      await FirebaseFirestore.instance
+          .collection(_collection)
+          .doc(widget.gigId)
+          .update({
+            'workerId': workerId,
+            'assignedWorkerId': workerId,
+            'assignedWorkerName': workerName,
+            'status': 'navigating',
+            'selectedAt': FieldValue.serverTimestamp(),
+            'applicants': FieldValue.arrayRemove([applicant]),
+          });
+      return;
+    }
+
+    // Multi-worker path — repeatable: creates this worker's own subcollection
+    // doc and transactionally claims one slot, leaving other applicants and
+    // already-assigned workers untouched.
+    final db = FirebaseFirestore.instance;
+    final gigRef = db.collection(_collection).doc(widget.gigId);
+    final hostId = FirebaseAuth.instance.currentUser?.uid ?? '';
+    String? failureMsg;
+    try {
+      await db.runTransaction((tx) async {
+        final gigSnap = await tx.get(gigRef);
+        final gigData = gigSnap.data() ?? {};
+        final slots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
+        final filled = (gigData['filledSlotCount'] as num?)?.toInt() ?? 0;
+        final rate = (gigData['ratePerSlot'] as num?)?.toDouble() ??
+            (gigData['budget'] as num?)?.toDouble() ??
+            0;
+        final currencyCode = (gigData['currencyCode'] as String?) ?? 'PHP';
+        final hostName = (gigData['hostName'] as String?) ?? '';
+
+        if (filled >= slots) {
+          failureMsg = 'All worker slots are already filled.';
+          return;
+        }
+        final slotRef = gigRef.collection('workers').doc(workerId);
+        final slotSnap = await tx.get(slotRef);
+        if (slotSnap.exists) {
+          failureMsg = '$workerName is already assigned to this gig.';
+          return;
+        }
+
+        final newFilled = filled + 1;
+        tx.set(
+          slotRef,
+          WorkerSlotModel(
+            workerId: workerId,
+            workerName: workerName,
+            gigId: widget.gigId,
+            gigCollection: _collection,
+            hostId: hostId,
+            hostName: hostName,
+            rate: rate,
+            currencyCode: currencyCode,
+            status: 'navigating',
+          ).toMap()
+            ..['selectedAt'] = FieldValue.serverTimestamp(),
+        );
+        tx.update(gigRef, {
+          'filledSlotCount': newFilled,
+          'status': newFilled >= slots ? 'filled' : 'partially_filled',
+          'applicants': FieldValue.arrayRemove([applicant]),
         });
+      });
+    } catch (e) {
+      failureMsg = 'Could not assign worker. Please try again.';
+    }
+    if (failureMsg != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(failureMsg!), backgroundColor: Colors.redAccent),
+      );
+    }
   }
 
   Widget _buildApplicantsSection(List<Map<String, dynamic>> applicants) {
@@ -605,10 +746,30 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             data['assignedWorkerId'] as String? ??
             data['workerId'] as String? ??
             '';
-        final isActive = _activeStatuses.contains(status);
-        final isTaskComplete = status == 'task_complete';
+        final workerSlots = (data['workerSlots'] as num?)?.toInt() ?? 1;
+        final filledSlotCount = (data['filledSlotCount'] as num?)?.toInt() ?? 0;
+        final isMultiWorker = workerSlots > 1;
         // scanning = no worker dispatched yet; in_progress = dispatched, awaiting response
         final isSearching = status == 'scanning' || status == 'in_progress';
+        // A multi-worker Offered Gig starts with every named worker already
+        // sitting at status:'offered' and filledSlotCount still 0 — awaiting
+        // their individual accept/decline, not "unfilled" the way an Open
+        // Gig with no applicants yet would be.
+        final isAwaitingOfferResponses =
+            widget.gigType == 'offered' && status == 'offered';
+        final isActive = isMultiWorker
+            // A multi-worker Quick Gig actively searching for its first
+            // slot (filledSlotCount still 0) is still "active" — otherwise
+            // it'd fall through to the static non-active layout instead of
+            // showing the searching state.
+            ? (filledSlotCount > 0 || isSearching || isAwaitingOfferResponses)
+            : _activeStatuses.contains(status);
+        final acceptingMoreSlots =
+            widget.gigType == 'open' &&
+            status != 'cancelled' &&
+            status != 'cancellation_requested' &&
+            (isMultiWorker ? filledSlotCount < workerSlots : status == 'open');
+        final isTaskComplete = status == 'task_complete';
         final progressStatus = status == 'cancellation_requested'
             ? (data['lastProgressStatus'] as String? ?? 'working')
             : status;
@@ -671,7 +832,45 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ),
               ),
 
-              if (isActive) ...[
+              if (isActive && isMultiWorker) ...[
+                // ── Multi-worker gig: N independent worker cards instead of
+                // the single-worker map/stepper/payment block below ──────
+                ActiveGigHeader(
+                  title: isSearching
+                      ? 'Finding Workers'
+                      : isAwaitingOfferResponses
+                          ? 'Awaiting Responses'
+                          : 'Gig in Progress',
+                  statusLabel: isSearching
+                      ? 'Searching for workers… ($filledSlotCount of $workerSlots filled)'
+                      : isAwaitingOfferResponses
+                          ? 'Waiting for workers to respond… ($filledSlotCount of $workerSlots accepted)'
+                          : '$filledSlotCount of $workerSlots workers assigned',
+                  onBack: () => Navigator.pop(context),
+                  accent: kHostAccent,
+                ),
+                const SizedBox(height: 16),
+                if (acceptingMoreSlots) ...[
+                  _buildApplicantsSection(applicantsList),
+                  const SizedBox(height: 16),
+                ],
+                _MultiWorkerSection(
+                  gigId: widget.gigId,
+                  gigCollection: _collection,
+                  gigLocation: gigLocation,
+                  workerSlots: workerSlots,
+                  filledSlotCount: filledSlotCount,
+                  onMarkPaid: _confirmWorkerSlotCompleted,
+                ),
+                if (showCancelGig) ...[
+                  const SizedBox(height: 20),
+                  CancelGigSection(
+                    onPressed: _requestCancellation,
+                    caption:
+                        'Cancelling now notifies assigned workers · frequent cancellations affect your host rating',
+                  ),
+                ],
+              ] else if (isActive) ...[
                 // ── Gold "Gig in Progress" header (mirrors worker's Figure 9) ──
                 ActiveGigHeader(
                   title: isSearching ? 'Finding a Worker' : 'Gig in Progress',
@@ -942,7 +1141,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ],
 
                 // ── Applicants (open gig waiting for host to pick a worker) ──────
-                if (widget.gigType == 'open' && status == 'open') ...[
+                if (acceptingMoreSlots) ...[
                   _buildApplicantsSection(applicantsList),
                   const SizedBox(height: 16),
                 ],
@@ -968,7 +1167,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                                 ),
                               ),
                               TextSpan(
-                                text: ' / gig',
+                                text: isMultiWorker ? ' / worker' : ' / gig',
                                 style: TextStyle(
                                   color: activeGigTextMuted(isDark),
                                   fontSize: 10,
@@ -993,6 +1192,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     ),
                   ],
                 ),
+                if (isMultiWorker) ...[
+                  const SizedBox(height: 14),
+                  _InfoGridCell(
+                    icon: Icons.groups_rounded,
+                    label: 'WORKERS NEEDED',
+                    isDark: isDark,
+                    value: '$filledSlotCount of $workerSlots filled',
+                  ),
+                ],
                 if (address.isNotEmpty) ...[
                   const SizedBox(height: 14),
                   _InfoGridCell(
@@ -1106,8 +1314,13 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ],
               ],
 
-              // ── Start New Search button (quick gigs with no match found) ──────
-              if (widget.gigType == 'quick' && status == 'no_worker') ...[
+              // ── Start New Search button (quick gigs with no match found,
+              // or a multi-worker quick gig that still has open slots) ─────
+              if (widget.gigType == 'quick' &&
+                  (status == 'no_worker' ||
+                      (isMultiWorker &&
+                          status == 'partially_filled' &&
+                          filledSlotCount < workerSlots))) ...[
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -2205,6 +2418,271 @@ class _ApplicantTileState extends State<_ApplicantTile> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Multi-worker section — one independent card per worker slot, each with
+//  its own live tracking map and its own "Mark Complete & Pay" action.
+// ─────────────────────────────────────────────────────────────────────────────
+class _MultiWorkerSection extends StatelessWidget {
+  final String gigId;
+  final String gigCollection;
+  final LatLng? gigLocation;
+  final int workerSlots;
+  final int filledSlotCount;
+  final void Function(WorkerSlotModel) onMarkPaid;
+
+  const _MultiWorkerSection({
+    required this.gigId,
+    required this.gigCollection,
+    required this.gigLocation,
+    required this.workerSlots,
+    required this.filledSlotCount,
+    required this.onMarkPaid,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'Workers',
+              style: TextStyle(
+                color: activeGigTextPrimary(isDark),
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: kHostAccent.solid.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$filledSlotCount / $workerSlots',
+                style: TextStyle(
+                  color: kHostAccent.onWhiteText,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: workersRef(gigCollection, gigId).snapshots(),
+          builder: (context, snap) {
+            if (!snap.hasData) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                  child: CircularProgressIndicator(color: kAmber, strokeWidth: 2),
+                ),
+              );
+            }
+            final workers = snap.data!.docs
+                .map((d) => WorkerSlotModel.fromDoc(d))
+                .toList()
+              ..sort((a, b) => a.workerName.compareTo(b.workerName));
+            if (workers.isEmpty) {
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _hostSheetRowSurface(isDark),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: activeGigCardBorder(isDark)),
+                ),
+                child: Text(
+                  'No workers assigned yet',
+                  style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 13),
+                ),
+              );
+            }
+            return Column(
+              children: workers
+                  .map((w) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _WorkerSlotCard(
+                          key: ValueKey('slot_${w.workerId}'),
+                          worker: w,
+                          gigLocation: gigLocation,
+                          onMarkPaid: () => onMarkPaid(w),
+                        ),
+                      ))
+                  .toList(),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _WorkerSlotCard extends StatelessWidget {
+  final WorkerSlotModel worker;
+  final LatLng? gigLocation;
+  final VoidCallback onMarkPaid;
+
+  const _WorkerSlotCard({
+    super.key,
+    required this.worker,
+    required this.gigLocation,
+    required this.onMarkPaid,
+  });
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'completed':
+        return kActiveGigSuccessGreen;
+      case 'declined':
+      case 'cancelled':
+      case 'no_worker':
+        return kActiveGigDestructiveRed;
+      case 'task_complete':
+      case 'payment':
+      case 'in_progress':
+      case 'offered':
+        return kAmber;
+      default:
+        return kHostAccent.solid;
+    }
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'in_progress':
+        return 'Awaiting response';
+      case 'offered':
+        return 'Offer sent';
+      case 'navigating':
+        return 'On the way';
+      case 'arrived':
+        return 'Arrived';
+      case 'working':
+        return 'Working';
+      case 'task_complete':
+        return 'Ready for payment';
+      case 'payment':
+        return 'Payment in progress';
+      case 'completed':
+        return 'Paid';
+      case 'declined':
+        return 'Declined';
+      case 'cancelled':
+        return 'Cancelled';
+      default:
+        return status;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final geo = worker.workerLocation;
+    final workerLoc = geo != null ? LatLng(geo.latitude, geo.longitude) : null;
+    final showMap = gigLocation != null &&
+        !['completed', 'declined', 'cancelled', 'in_progress', 'offered']
+            .contains(worker.status);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: activeGigCardBg(isDark),
+        borderRadius: BorderRadius.circular(kActiveGigCardRadius),
+        border: Border.all(color: activeGigCardBorder(isDark)),
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  worker.workerName,
+                  style: TextStyle(
+                    color: activeGigTextPrimary(isDark),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                CurrencyFormatter.format(worker.rate, worker.currencyCode),
+                style: TextStyle(
+                  color: kHostAccent.onWhiteText,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _statusColor(worker.status).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  _statusLabel(worker.status),
+                  style: TextStyle(
+                    color: _statusColor(worker.status),
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (showMap) ...[
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                height: 130,
+                child: _GigTrackingMap(
+                  gigLocation: gigLocation!,
+                  workerLocation: workerLoc,
+                  workerId: worker.workerId,
+                  workerName: worker.workerName,
+                ),
+              ),
+            ),
+          ],
+          if (worker.status == 'task_complete') ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: ElevatedButton(
+                onPressed: onMarkPaid,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kHostAccent.solid,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text(
+                  'Mark Complete & Pay',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Cancel Reason Dialog — host states reason; admin decides approval
 // ─────────────────────────────────────────────────────────────────────────────
 class _CancelReasonDialog extends StatefulWidget {
@@ -2367,12 +2845,16 @@ class _RatingDialog extends StatefulWidget {
   final String workerName;
   final String gigId;
   final String gigCollection;
+  // When set, this gig uses the multi-worker `workers` subcollection — the
+  // rating is written to that worker's own slot doc instead of the gig doc.
+  final String? slotWorkerId;
 
   const _RatingDialog({
     required this.workerId,
     required this.workerName,
     required this.gigId,
     required this.gigCollection,
+    this.slotWorkerId,
   });
 
   @override
@@ -2398,12 +2880,16 @@ class _RatingDialogState extends State<_RatingDialog> {
       final currentCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
       final newCount = currentCount + 1;
       final newRating = ((currentRating * currentCount) + _selected) / newCount;
+      final gigRef = db.collection(widget.gigCollection).doc(widget.gigId);
+      final ratingTargetRef = widget.slotWorkerId == null
+          ? gigRef
+          : gigRef.collection('workers').doc(widget.slotWorkerId);
       await Future.wait([
         db.collection('users').doc(widget.workerId).update({
           'ratingAsWorker': double.parse(newRating.toStringAsFixed(2)),
           'ratingCount': newCount,
         }),
-        db.collection(widget.gigCollection).doc(widget.gigId).update({
+        ratingTargetRef.update({
           'hostRating': _selected,
           'hostRatedAt': FieldValue.serverTimestamp(),
         }),
