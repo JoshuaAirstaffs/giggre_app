@@ -40,7 +40,7 @@ class OfferedGigOfferCard extends StatelessWidget {
 
     final chips = <_InfoChip>[
       _InfoChip(
-        Icons.attach_money_rounded,
+        null, // Icons.attach_money_rounded
         'PAY',
         CurrencyFormatter.format(gig.budget, gig.currencyCode),
       ),
@@ -265,7 +265,7 @@ class OfferedGigOfferCard extends StatelessWidget {
 }
 
 class _InfoChip {
-  final IconData icon;
+  final IconData? icon;
   final String label;
   final String value;
   // Address is the one value long/variable enough that truncating it would
@@ -310,8 +310,10 @@ class _ChipGrid extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(chip.icon, size: 14, color: purple),
-          const SizedBox(width: 6),
+          if (chip.icon != null) ...[
+            Icon(chip.icon, size: 14, color: purple),
+            const SizedBox(width: 6),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

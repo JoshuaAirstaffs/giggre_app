@@ -116,7 +116,7 @@ class GigAssignedDialog extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             _DetailRow(
-              icon: Icons.attach_money_rounded,
+              // icon: Icons.attach_money_rounded,
               value: CurrencyFormatter.format(gig.budget, gig.currencyCode),
               valueColor: green,
             ),
@@ -199,12 +199,12 @@ class GigAssignedDialog extends StatelessWidget {
 }
 
 class _DetailRow extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
   final String value;
   final Color? valueColor;
 
   const _DetailRow({
-    required this.icon,
+    this.icon,
     required this.value,
     this.valueColor,
   });
@@ -214,8 +214,10 @@ class _DetailRow extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(icon, color: kSub, size: 14),
-        const SizedBox(width: 6),
+        if (icon != null) ...[
+          Icon(icon, color: kSub, size: 14),
+          const SizedBox(width: 6),
+        ],
         Flexible(
           child: Text(
             value,

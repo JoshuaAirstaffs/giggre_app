@@ -2209,7 +2209,7 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
                     onSurface: onSurface,
                   ),
                 _HistoryDetailRow(
-                  icon: Icons.attach_money_rounded,
+                  // icon: Icons.attach_money_rounded,
                   label: 'Budget',
                   value: CurrencyFormatter.format(budget, currencyCode),
                   valueColor: kAmber,
@@ -2408,14 +2408,14 @@ class _HistoryDetailCard extends StatelessWidget {
 }
 
 class _HistoryDetailRow extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
   final String label;
   final String value;
   final Color? valueColor;
   final Color onSurface;
 
   const _HistoryDetailRow({
-    required this.icon,
+    this.icon,
     required this.label,
     required this.value,
     required this.onSurface,
@@ -2427,8 +2427,10 @@ class _HistoryDetailRow extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 16, color: kSub),
-        const SizedBox(width: 10),
+        if (icon != null) ...[
+          Icon(icon, size: 16, color: kSub),
+          const SizedBox(width: 10),
+        ],
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

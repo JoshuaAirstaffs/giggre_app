@@ -350,7 +350,7 @@ class _SearchingCardState extends State<_SearchingCard>
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        const Icon(Icons.attach_money_rounded, color: kAmber, size: 12),
+                        // const Icon(Icons.attach_money_rounded, color: kAmber, size: 12),
                         Text(
                           CurrencyFormatter.format(budget, currencyCode),
                           style: const TextStyle(
@@ -642,11 +642,11 @@ class _GigProgressCard extends StatelessWidget {
                           style: const TextStyle(color: kSub, fontSize: 11),
                         ),
                         const SizedBox(width: 10),
-                        const Icon(
-                          Icons.attach_money_rounded,
-                          color: kAmber,
-                          size: 12,
-                        ),
+                        // const Icon(
+                        //   Icons.attach_money_rounded,
+                        //   color: kAmber,
+                        //   size: 12,
+                        // ),
                         Text(
                           CurrencyFormatter.format(budget, currencyCode),
                           style: const TextStyle(

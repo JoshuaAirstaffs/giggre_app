@@ -1289,7 +1289,6 @@ class _GigMapSectionState extends State<GigMapSection> {
                   children: [
                     Expanded(
                       child: _InfoGridCell(
-                        icon: Icons.attach_money_rounded,
                         label: 'PAY',
                         child: RichText(
                           text: TextSpan(
@@ -3143,12 +3142,12 @@ class _LegendDot extends StatelessWidget {
 //  Gig detail sheet — 2x2 info grid cell (icon + micro-label + value)
 // ─────────────────────────────────────────────────────────────────────────────
 class _InfoGridCell extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
   final String label;
   final String? value;
   final Widget? child;
   const _InfoGridCell({
-    required this.icon,
+    this.icon,
     required this.label,
     this.value,
     this.child,
@@ -3160,17 +3159,19 @@ class _InfoGridCell extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: _neutralSurface(isDark),
-            borderRadius: BorderRadius.circular(9),
+        if (icon != null) ...[
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: _neutralSurface(isDark),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 15, color: kSub),
           ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 15, color: kSub),
-        ),
-        const SizedBox(width: 8),
+          const SizedBox(width: 8),
+        ],
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

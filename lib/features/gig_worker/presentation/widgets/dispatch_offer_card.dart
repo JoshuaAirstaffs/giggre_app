@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
@@ -34,11 +36,56 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
   Timer? _timer;
   int _seconds = _defaultSeconds;
   int _total = _defaultSeconds;
+  double? _distanceMeters;
 
   @override
   void initState() {
     super.initState();
     _loadConfigAndStart();
+    _loadDistance();
+  }
+
+  Future<void> _loadDistance() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return;
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+      );
+      if (!mounted) return;
+      setState(() {
+        _distanceMeters = Geolocator.distanceBetween(
+          pos.latitude,
+          pos.longitude,
+          widget.gig.position.latitude,
+          widget.gig.position.longitude,
+        );
+      });
+    } catch (_) {
+      // distance stays hidden
+    }
+  }
+
+  String _fmtDistance(double meters) {
+    if (meters < 1000) return '${meters.round()} m away';
+    return '${(meters / 1000).toStringAsFixed(1)} km away';
+  }
+
+  Future<void> _openInGoogleMaps() async {
+    final dest = widget.gig.position;
+    final uri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1'
+      '&query=${dest.latitude},${dest.longitude}',
+    );
+    await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
   }
 
   Future<void> _loadConfigAndStart() async {
@@ -180,7 +227,7 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                 style: const TextStyle(color: kSub, fontSize: 12),
               ),
               const SizedBox(width: 16),
-              const Icon(Icons.attach_money_rounded, color: kAmber, size: 14),
+              // const Icon(Icons.attach_money_rounded, color: kAmber, size: 14),
               Text(
                 CurrencyFormatter.format(widget.gig.budget, widget.gig.currencyCode),
                 style: const TextStyle(
@@ -200,14 +247,43 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                   child: Text(
                     widget.gig.address,
                     style: const TextStyle(color: kSub, fontSize: 12),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1
                   ),
                 ),
               ],
             ),
           ],
-          const SizedBox(height: 14),
+          if (_distanceMeters != null) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.social_distance_outlined, color: kSub, size: 14),
+                const SizedBox(width: 6),
+                Text(
+                  _fmtDistance(_distanceMeters!),
+                  style: const TextStyle(color: kSub, fontSize: 12),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: _openInGoogleMaps,
+              style: TextButton.styleFrom(
+                foregroundColor: kAmber,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                alignment: Alignment.centerLeft,
+              ),
+              icon: const Icon(Icons.map_outlined, size: 16),
+              label: const Text(
+                'View in Google Maps',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
           Row(
             children: [
               Expanded(
