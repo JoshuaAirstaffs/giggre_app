@@ -585,4 +585,155 @@ class QuickGigMatchingService {
               : 'no_worker',
     });
   }
+
+  // ── Backfill search — fills one slot freed up by a worker cancellation ────
+  // Time-boxed to the same admin-configured `search_timeout_minutes`
+  // (quick_gig_config/matching_engine) as the initial search — it either
+  // finds a replacement within that window or the search closes and the gig
+  // just carries on with whoever's left.
+
+  /// Looks for one replacement worker for a slot a worker just cancelled out
+  /// of on an already-dispatched multi-worker quick gig. Closes itself once
+  /// `search_timeout_minutes` elapses (or on max dispatch attempts) if nobody
+  /// accepts — the gig simply continues with fewer workers, same as a
+  /// partial initial fill.
+  static Future<void> startBackfillSearch({
+    required String gigId,
+    required GeoPoint gigLocation,
+    required String cancelledWorkerId,
+  }) async {
+    if (_activeSearches.contains(gigId)) return;
+    _activeSearches.add(gigId);
+    try {
+      final gigRef = FirebaseFirestore.instance.collection('quick_gigs').doc(gigId);
+      await _runBackfillSlotSearch(
+        gigId: gigId,
+        gigLocation: gigLocation,
+        gigRef: gigRef,
+        cancelledWorkerId: cancelledWorkerId,
+      );
+    } finally {
+      _activeSearches.remove(gigId);
+    }
+  }
+
+  static Future<void> _runBackfillSlotSearch({
+    required String gigId,
+    required GeoPoint gigLocation,
+    required DocumentReference<Map<String, dynamic>> gigRef,
+    required String cancelledWorkerId,
+  }) async {
+    final db = FirebaseFirestore.instance;
+    final config = await _fetchConfig();
+    final searchDeadline = DateTime.now().add(config.searchTimeout);
+    int dispatchAttempts = 0;
+
+    try {
+      await gigRef.update({
+        'exclusionList': FieldValue.arrayUnion([cancelledWorkerId]),
+      });
+
+      while (DateTime.now().isBefore(searchDeadline)) {
+        final gigSnap = await gigRef.get();
+        if (!gigSnap.exists) return;
+        final gigData = gigSnap.data()!;
+        final status = gigData['status'] as String? ?? '';
+        final workerSlots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
+        final filledSlotCount = (gigData['filledSlotCount'] as num?)?.toInt() ?? 0;
+
+        // Gig closed out from under us (cancelled/completed) or the freed
+        // slot is no longer there to fill (another dispatch beat us to it).
+        if (['cancelled', 'completed'].contains(status)) return;
+        if (filledSlotCount >= workerSlots) return;
+        if (dispatchAttempts >= config.maxAttempts) return;
+
+        final excluded = [
+          ...List<String>.from(gigData['exclusionList'] ?? []),
+          if ((gigData['hostId'] as String?)?.isNotEmpty ?? false) gigData['hostId'] as String,
+        ];
+
+        final worker = await _findBestWorker(
+          gigLocation: gigLocation,
+          exclude: excluded,
+          maxSearchRadiusKm: config.maxSearchRadiusKm,
+        );
+
+        if (worker == null) {
+          await Future.delayed(_retryInterval);
+          continue;
+        }
+
+        final candidateId = worker['id'] as String;
+        final candidateName = worker['name'] as String;
+
+        dispatchAttempts++;
+        await _dispatchToWorkerSlot(
+          gigId: gigId,
+          workerId: candidateId,
+          workerName: candidateName,
+          hostId: gigData['hostId'] as String? ?? '',
+          hostName: gigData['hostName'] as String? ?? '',
+          rate: (gigData['ratePerSlot'] as num?)?.toDouble() ??
+              (gigData['budget'] as num?)?.toDouble() ??
+              0,
+          currencyCode: gigData['currencyCode'] as String? ?? 'PHP',
+        );
+
+        final slotRef = gigRef.collection('workers').doc(candidateId);
+        final reviewDeadline = DateTime.now().add(config.reviewWindow);
+        String finalStatus = 'in_progress';
+
+        while (DateTime.now().isBefore(reviewDeadline) &&
+            DateTime.now().isBefore(searchDeadline)) {
+          await Future.delayed(_pollInterval);
+          final check = await slotRef.get();
+          if (!check.exists) {
+            finalStatus = 'declined';
+            break;
+          }
+          final cs = check.data()?['status'] as String? ?? '';
+          if (cs != 'in_progress') {
+            finalStatus = cs;
+            break;
+          }
+        }
+
+        if (finalStatus == 'navigating') {
+          // Accepted — claim the slot and stop; the backfill only needed to
+          // fill the one freed slot.
+          await db.runTransaction((tx) async {
+            final snap = await tx.get(gigRef);
+            final data = snap.data() ?? {};
+            final filled = (data['filledSlotCount'] as num?)?.toInt() ?? 0;
+            final newFilled = filled + 1;
+            tx.update(gigRef, {
+              'filledSlotCount': newFilled,
+              'status': newFilled >= workerSlots ? 'filled' : 'partially_filled',
+            });
+          });
+          return;
+        }
+
+        if (finalStatus == 'cancelled') return;
+
+        if (finalStatus == 'in_progress') {
+          // Review window (or the whole backfill window) timed out with no
+          // response — exclude and penalize same as the initial search loop.
+          await Future.wait([
+            gigRef.update({
+              'exclusionList': FieldValue.arrayUnion([candidateId]),
+            }),
+            db.collection('users').doc(candidateId).update({
+              'slot': 'AVAILABLE',
+              'acceptanceRate': FieldValue.increment(-0.05),
+            }),
+            slotRef.update({'status': 'declined'}).catchError((_) {}),
+          ]);
+        }
+        // Otherwise (declined) — loop again if time remains.
+      }
+    } catch (e) {
+      debugPrint('[QuickGigMatching] backfill search error for $gigId: $e');
+    }
+  }
 }

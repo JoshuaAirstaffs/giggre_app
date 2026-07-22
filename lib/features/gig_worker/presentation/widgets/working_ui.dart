@@ -102,6 +102,13 @@ class WorkingUI extends StatefulWidget {
   final GigMarkerData gig;
   final VoidCallback onComplete;
   final VoidCallback onCancel;
+  // Fired right after the cancellation *request* is submitted (before admin
+  // approval) — lets the caller take the worker back to the dashboard
+  // immediately. Distinct from onCancel, which only fires once an admin
+  // actually approves the request (see _onAdminCancelled) and runs the
+  // real cleanup (freeing the slot, backfill search, etc.) — firing that
+  // early would wrongly tear down a gig that's still awaiting review.
+  final VoidCallback? onCancellationRequested;
   final String gigCollection;
 
 
@@ -111,6 +118,7 @@ class WorkingUI extends StatefulWidget {
     required this.gig,
     required this.onComplete,
     required this.onCancel,
+    this.onCancellationRequested,
     this.gigCollection = 'quick_gigs',
   });
 
@@ -440,7 +448,7 @@ class _WorkingUIState extends State<WorkingUI> {
             backgroundColor: Colors.orange,
           ),
         );
-        // widget.onCancel();
+        widget.onCancellationRequested?.call();
       }
     } finally {
       controller.dispose();
@@ -683,6 +691,7 @@ class _WorkingUIState extends State<WorkingUI> {
                             _step == GigStep.working))
                       CancelGigSection(
                         onPressed: _showCancelReasonDialog,
+                        label: 'Cancel Application',
                         caption:
                             'Cancelling after being selected may affect your worker rating',
                       ),

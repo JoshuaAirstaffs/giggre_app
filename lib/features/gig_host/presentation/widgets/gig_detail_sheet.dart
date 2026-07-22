@@ -105,8 +105,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             final lastReason = reasons != null && reasons.isNotEmpty
                 ? reasons.last as Map<String, dynamic>?
                 : null;
-            final isSystemAutoCancel =
-                lastReason?['requestedBy'] == 'system';
+            final isSystemAutoCancel = lastReason?['requestedBy'] == 'system';
+            final isAutoApprovedTimeout =
+                !isSystemAutoCancel && lastReason?['approvedBy'] == 'system';
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
@@ -114,6 +115,8 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   content: Text(
                     isSystemAutoCancel
                         ? 'This gig was auto-cancelled — no worker was selected before the scheduled time.'
+                        : isAutoApprovedTimeout
+                        ? "The worker's cancellation request was auto-approved after 10 minutes without admin review."
                         : 'Gig cancellation has been approved by admin.',
                   ),
                   backgroundColor: Colors.redAccent,
@@ -137,10 +140,13 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
   Future<void> _loadFavoriteWorkerIds() async {
     final hostId = FirebaseAuth.instance.currentUser?.uid;
     if (hostId == null) return;
-    final doc =
-        await FirebaseFirestore.instance.collection('users').doc(hostId).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(hostId)
+        .get();
     if (!mounted) return;
-    final list = (doc.data()?['favoriteWorkerIds'] as List?)
+    final list =
+        (doc.data()?['favoriteWorkerIds'] as List?)
             ?.map((e) => e.toString())
             .toList() ??
         [];
@@ -268,17 +274,60 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
   Future<void> _requestCancellation() async {
     final controller = TextEditingController();
     bool submitted = false;
+
+    // An Open Gig with no worker assigned yet has nothing for admin to
+    // adjudicate between host and worker — cancel it immediately instead
+    // of routing through the cancellation_requested/admin-review flow.
+    final data = _data;
+    final workerId =
+        data?['assignedWorkerId'] as String? ?? data?['workerId'] as String?;
+    final filledSlotCount = (data?['filledSlotCount'] as num?)?.toInt() ?? 0;
+    final noWorkerYet =
+        widget.gigType == 'open' &&
+        (workerId == null || workerId.isEmpty) &&
+        filledSlotCount == 0;
+
     try {
       submitted =
           await showDialog<bool>(
             context: context,
             barrierDismissible: false,
-            builder: (_) => _CancelReasonDialog(controller: controller),
+            builder: (_) => _CancelReasonDialog(
+              controller: controller,
+              immediate: noWorkerYet,
+            ),
           ) ??
           false;
       if (!submitted || !mounted) return;
       final reason = controller.text.trim();
       if (reason.isEmpty) return;
+
+      if (noWorkerYet) {
+        // Set before the write — the doc's own snapshot listener (above)
+        // would otherwise race this and show its "approved by admin" copy.
+        _cancelledHandled = true;
+        await FirebaseFirestore.instance
+            .collection(_collection)
+            .doc(widget.gigId)
+            .update({
+              'cancellation_reason': FieldValue.arrayUnion([
+                {'reason': reason, 'approved': true, 'requestedBy': 'host'},
+              ]),
+              'cancelledAt': FieldValue.serverTimestamp(),
+              'status': 'cancelled',
+            });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Gig cancelled.'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+          Navigator.pop(context);
+        }
+        return;
+      }
+
       await FirebaseFirestore.instance
           .collection(_collection)
           .doc(widget.gigId)
@@ -404,7 +453,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             'paymentCode': paymentCode,
             'paymentInitiatedAt': FieldValue.serverTimestamp(),
           }),
-          db.collection('users').doc(worker.workerId).update({'slot': 'AVAILABLE'}),
+          db.collection('users').doc(worker.workerId).update({
+            'slot': 'AVAILABLE',
+          }),
         ]);
       },
     );
@@ -574,7 +625,8 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         final gigData = gigSnap.data() ?? {};
         final slots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
         final filled = (gigData['filledSlotCount'] as num?)?.toInt() ?? 0;
-        final rate = (gigData['ratePerSlot'] as num?)?.toDouble() ??
+        final rate =
+            (gigData['ratePerSlot'] as num?)?.toDouble() ??
             (gigData['budget'] as num?)?.toDouble() ??
             0;
         final currencyCode = (gigData['currencyCode'] as String?) ?? 'PHP';
@@ -604,8 +656,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             rate: rate,
             currencyCode: currencyCode,
             status: 'navigating',
-          ).toMap()
-            ..['selectedAt'] = FieldValue.serverTimestamp(),
+          ).toMap()..['selectedAt'] = FieldValue.serverTimestamp(),
         );
         tx.update(gigRef, {
           'filledSlotCount': newFilled,
@@ -802,12 +853,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           (data['applicants'] as List<dynamic>? ?? [])
               .cast<Map<String, dynamic>>(),
         );
-        final hostMapDistanceText = (gigLocation != null && workerLocation != null)
-            ? ' · ${fmtDist(const ll.Distance().as(
-                  ll.LengthUnit.Meter,
-                  ll.LatLng(gigLocation.latitude, gigLocation.longitude),
-                  ll.LatLng(workerLocation.latitude, workerLocation.longitude),
-                ))} away'
+        final hostMapDistanceText =
+            (gigLocation != null && workerLocation != null)
+            ? ' · ${fmtDist(const ll.Distance().as(ll.LengthUnit.Meter, ll.LatLng(gigLocation.latitude, gigLocation.longitude), ll.LatLng(workerLocation.latitude, workerLocation.longitude)))} away'
             : '';
 
         return Container(
@@ -839,17 +887,141 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   title: isSearching
                       ? 'Finding Workers'
                       : isAwaitingOfferResponses
-                          ? 'Awaiting Responses'
-                          : 'Gig in Progress',
+                      ? 'Awaiting Responses'
+                      : 'Gig in Progress',
                   statusLabel: isSearching
                       ? 'Searching for workers… ($filledSlotCount of $workerSlots filled)'
                       : isAwaitingOfferResponses
-                          ? 'Waiting for workers to respond… ($filledSlotCount of $workerSlots accepted)'
-                          : '$filledSlotCount of $workerSlots workers assigned',
+                      ? 'Waiting for workers to respond… ($filledSlotCount of $workerSlots accepted)'
+                      : '$filledSlotCount of $workerSlots workers assigned',
                   onBack: () => Navigator.pop(context),
                   accent: kHostAccent,
                 ),
                 const SizedBox(height: 16),
+
+                // ── Gig info — same "title + status dot" / info-grid layout
+                // as the static (else) branch below, so multi-worker gigs
+                // read the same as Open/Offered while active. _MultiWorkerSection
+                // only covers each worker's own slot, not these shared gig
+                // details, so this would otherwise never be shown.
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          color: activeGigTextPrimary(isDark),
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            color: _gigTypeAccent(widget.gigType),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _hostSheetStatusLabel(status),
+                          style: TextStyle(
+                            color: _gigTypeAccent(widget.gigType),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  [
+                    _gigTypeLabel(widget.gigType),
+                    if (createdAt != null)
+                      'posted ${_timeAgo(createdAt.toDate())}',
+                  ].join(' · '),
+                  style: TextStyle(
+                    color: activeGigTextMuted(isDark),
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _InfoGridCell(
+                        icon: Icons.payments_rounded,
+                        label: 'PAY',
+                        isDark: isDark,
+                        child: RichText(
+                          text: TextSpan(
+                            children: [
+                              TextSpan(
+                                text: CurrencyFormatter.format(
+                                  budget,
+                                  currencyCode,
+                                ),
+                                style: TextStyle(
+                                  color: kHostAccent.onWhiteText,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              TextSpan(
+                                text: ' / worker',
+                                style: TextStyle(
+                                  color: activeGigTextMuted(isDark),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _InfoGridCell(
+                        icon: Icons.event_rounded,
+                        label: 'SCHEDULE',
+                        isDark: isDark,
+                        value: scheduledDate != null
+                            ? _fmtScheduleGrid(scheduledDate)
+                            : '—',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                _InfoGridCell(
+                  icon: Icons.groups_rounded,
+                  label: 'WORKERS NEEDED',
+                  isDark: isDark,
+                  value: '$filledSlotCount of $workerSlots filled',
+                ),
+                if (address.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  _InfoGridCell(
+                    icon: Icons.location_on_outlined,
+                    label: 'LOCATION',
+                    isDark: isDark,
+                    value: dedupedAddress(address),
+                  ),
+                ],
+                const SizedBox(height: 16),
+
                 if (acceptingMoreSlots) ...[
                   _buildApplicantsSection(applicantsList),
                   const SizedBox(height: 16),
@@ -889,7 +1061,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     child: Container(
                       height: 176,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(kActiveGigCardRadius),
+                        borderRadius: BorderRadius.circular(
+                          kActiveGigCardRadius,
+                        ),
                         border: Border.all(color: activeGigCardBorder(isDark)),
                       ),
                       child: Stack(
@@ -913,7 +1087,11 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                             ),
                           ),
                           if (workerLocation != null)
-                            const Positioned(right: 8, top: 8, child: LiveBadge()),
+                            const Positioned(
+                              right: 8,
+                              top: 8,
+                              child: LiveBadge(),
+                            ),
                           Positioned(
                             left: 10,
                             bottom: 10,
@@ -981,7 +1159,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                             text: TextSpan(
                               children: [
                                 TextSpan(
-                                  text: CurrencyFormatter.format(budget, currencyCode),
+                                  text: CurrencyFormatter.format(
+                                    budget,
+                                    currencyCode,
+                                  ),
                                   style: TextStyle(
                                     color: kHostAccent.onWhiteText,
                                     fontSize: 16,
@@ -1006,18 +1187,24 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(Icons.location_on_outlined,
-                                color: activeGigTextMuted(isDark), size: 14),
+                            Icon(
+                              Icons.location_on_outlined,
+                              color: activeGigTextMuted(isDark),
+                              size: 14,
+                            ),
                             const SizedBox(width: 5),
                             Expanded(
                               child: Text(
                                 [
-                                  if (address.isNotEmpty) dedupedAddress(address),
+                                  if (address.isNotEmpty)
+                                    dedupedAddress(address),
                                   if (scheduledDate != null)
                                     _fmtScheduledShort(scheduledDate),
                                 ].join(' · '),
                                 style: TextStyle(
-                                    color: activeGigTextMuted(isDark), fontSize: 11),
+                                  color: activeGigTextMuted(isDark),
+                                  fontSize: 11,
+                                ),
                               ),
                             ),
                           ],
@@ -1026,7 +1213,11 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       // Worker profile only shown after acceptance — not during dispatch.
                       if (workerId.isNotEmpty && !isSearching) ...[
                         const SizedBox(height: 14),
-                        Divider(height: 0, thickness: 1, color: activeGigDividerColor(isDark)),
+                        Divider(
+                          height: 0,
+                          thickness: 1,
+                          color: activeGigDividerColor(isDark),
+                        ),
                         const SizedBox(height: 14),
                         _WorkerProfileCard(
                           key: ValueKey('worker_$workerId'),
@@ -1093,11 +1284,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 Text(
                   [
                     _gigTypeLabel(widget.gigType),
-                    if (createdAt != null) 'posted ${_timeAgo(createdAt.toDate())}',
+                    if (createdAt != null)
+                      'posted ${_timeAgo(createdAt.toDate())}',
                     if (widget.gigType == 'open')
                       '${applicantsList.length} applicant${applicantsList.length == 1 ? '' : 's'}',
                   ].join(' · '),
-                  style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 11),
+                  style: TextStyle(
+                    color: activeGigTextMuted(isDark),
+                    fontSize: 11,
+                  ),
                 ),
                 const SizedBox(height: 16),
 
@@ -1159,7 +1354,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                           text: TextSpan(
                             children: [
                               TextSpan(
-                                text: CurrencyFormatter.format(budget, currencyCode),
+                                text: CurrencyFormatter.format(
+                                  budget,
+                                  currencyCode,
+                                ),
                                 style: TextStyle(
                                   color: kHostAccent.onWhiteText,
                                   fontSize: 15,
@@ -1228,57 +1426,59 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
 
                 // ── Favorite worker (completed gigs) ────────────────────
                 if (status == 'completed' && workerId.isNotEmpty) ...[
-                  Builder(builder: (_) {
-                    final isFavorite = _favoriteWorkerIds.contains(workerId);
-                    return GestureDetector(
-                      onTap: () => _toggleFavoriteWorker(workerId),
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 14,
-                          horizontal: 16,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isFavorite
-                              ? Colors.redAccent.withValues(alpha: 0.08)
-                              : isDark
-                                  ? Colors.white.withValues(alpha: 0.04)
-                                  : Colors.grey.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
+                  Builder(
+                    builder: (_) {
+                      final isFavorite = _favoriteWorkerIds.contains(workerId);
+                      return GestureDetector(
+                        onTap: () => _toggleFavoriteWorker(workerId),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                            horizontal: 16,
+                          ),
+                          decoration: BoxDecoration(
                             color: isFavorite
-                                ? Colors.redAccent.withValues(alpha: 0.4)
-                                : activeGigCardBorder(isDark),
+                                ? Colors.redAccent.withValues(alpha: 0.08)
+                                : isDark
+                                ? Colors.white.withValues(alpha: 0.04)
+                                : Colors.grey.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: isFavorite
+                                  ? Colors.redAccent.withValues(alpha: 0.4)
+                                  : activeGigCardBorder(isDark),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                isFavorite
+                                    ? Icons.favorite_rounded
+                                    : Icons.favorite_border_rounded,
+                                color: isFavorite ? Colors.redAccent : kSub,
+                                size: 22,
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                isFavorite
+                                    ? 'In Favorites'
+                                    : 'Add $resolvedWorkerName to Favorites',
+                                style: TextStyle(
+                                  color: isFavorite
+                                      ? Colors.redAccent
+                                      : activeGigTextPrimary(isDark),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              isFavorite
-                                  ? Icons.favorite_rounded
-                                  : Icons.favorite_border_rounded,
-                              color: isFavorite ? Colors.redAccent : kSub,
-                              size: 22,
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              isFavorite
-                                  ? 'In Favorites'
-                                  : 'Add $resolvedWorkerName to Favorites',
-                              style: TextStyle(
-                                color: isFavorite
-                                    ? Colors.redAccent
-                                    : activeGigTextPrimary(isDark),
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
+                      );
+                    },
+                  ),
                   const SizedBox(height: 16),
                 ],
 
@@ -1304,7 +1504,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       ),
                       style: OutlinedButton.styleFrom(
                         backgroundColor: activeGigCardBg(isDark),
-                        side: BorderSide(color: activeGigDestructiveBorder(isDark)),
+                        side: BorderSide(
+                          color: activeGigDestructiveBorder(isDark),
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
@@ -1352,6 +1554,95 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       },
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Worker avatar marker — shared by the single-worker and multi-worker
+//  tracking maps below. Split into a fetch step (network, cached per worker)
+//  and a draw step (pure canvas work) so re-drawing a marker with a
+//  different ring color — e.g. a multi-worker map highlighting whichever
+//  worker is selected — never needs a second network round-trip.
+// ─────────────────────────────────────────────────────────────────────────────
+Future<ui.Image?> _fetchWorkerPhotoImage(
+  String? photoUrl, {
+  double targetSize = 40,
+}) async {
+  if (photoUrl == null || photoUrl.isEmpty) return null;
+  try {
+    final res = await http.get(Uri.parse(photoUrl));
+    if (res.statusCode != 200) return null;
+    final codec = await ui.instantiateImageCodec(
+      res.bodyBytes,
+      targetWidth: targetSize.toInt(),
+    );
+    final frame = await codec.getNextFrame();
+    return frame.image;
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<BitmapDescriptor> _drawWorkerAvatarMarker({
+  required ui.Image? photo,
+  required String name,
+  Color ringColor = Colors.white,
+  double size = 40,
+  double border = 5,
+}) async {
+  final radius = size / 2 - border;
+  final center = Offset(size / 2, size / 2);
+
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+
+  // Ring backdrop — white by default, or a status/selection color.
+  canvas.drawCircle(center, size / 2, Paint()..color = ringColor);
+
+  if (photo != null) {
+    canvas.save();
+    canvas.clipPath(
+      Path()..addOval(Rect.fromCircle(center: center, radius: radius)),
+    );
+    paintImage(
+      canvas: canvas,
+      rect: Rect.fromCircle(center: center, radius: radius),
+      image: photo,
+      fit: BoxFit.cover,
+    );
+    canvas.restore();
+  } else {
+    canvas.drawCircle(center, radius, Paint()..color = kBlue);
+    final initial = name.trim().isNotEmpty
+        ? name.trim()[0].toUpperCase()
+        : '?';
+    final pb =
+        ui.ParagraphBuilder(
+            ui.ParagraphStyle(
+              textAlign: TextAlign.center,
+              fontWeight: FontWeight.bold,
+              fontSize: radius,
+            ),
+          )
+          ..pushStyle(
+            ui.TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: radius,
+            ),
+          )
+          ..addText(initial);
+    final paragraph = pb.build()
+      ..layout(ui.ParagraphConstraints(width: size));
+    canvas.drawParagraph(
+      paragraph,
+      Offset(0, center.dy - paragraph.height / 2),
+    );
+  }
+
+  final picture = recorder.endRecording();
+  final img = await picture.toImage(size.toInt(), size.toInt());
+  final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+  return BitmapDescriptor.bytes(byteData!.buffer.asUint8List());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1427,90 +1718,17 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
           .get();
       photoUrl = snap.data()?['photoUrl'] as String?;
     } catch (_) {}
-    final icon = await _buildAvatarMarker(photoUrl, widget.workerName);
+    final photo = await _fetchWorkerPhotoImage(photoUrl);
+    final icon = await _drawWorkerAvatarMarker(
+      photo: photo,
+      name: widget.workerName,
+    );
     if (mounted && widget.workerId == wid) {
       setState(() {
         _workerPhotoUrl = photoUrl;
         _workerIcon = icon;
       });
     }
-  }
-
-  Future<BitmapDescriptor> _buildAvatarMarker(
-    String? photoUrl,
-    String name,
-  ) async {
-    const size = 40.0;
-    const border = 5.0;
-    const radius = size / 2 - border;
-    const center = Offset(size / 2, size / 2);
-
-    ui.Image? photo;
-    if (photoUrl != null && photoUrl.isNotEmpty) {
-      try {
-        final res = await http.get(Uri.parse(photoUrl));
-        if (res.statusCode == 200) {
-          final codec = await ui.instantiateImageCodec(
-            res.bodyBytes,
-            targetWidth: size.toInt(),
-          );
-          final frame = await codec.getNextFrame();
-          photo = frame.image;
-        }
-      } catch (_) {}
-    }
-
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-
-    // White ring backdrop
-    canvas.drawCircle(center, size / 2, Paint()..color = Colors.white);
-
-    if (photo != null) {
-      canvas.save();
-      canvas.clipPath(
-        Path()..addOval(Rect.fromCircle(center: center, radius: radius)),
-      );
-      paintImage(
-        canvas: canvas,
-        rect: Rect.fromCircle(center: center, radius: radius),
-        image: photo,
-        fit: BoxFit.cover,
-      );
-      canvas.restore();
-    } else {
-      canvas.drawCircle(center, radius, Paint()..color = kBlue);
-      final initial = name.trim().isNotEmpty
-          ? name.trim()[0].toUpperCase()
-          : '?';
-      final pb =
-          ui.ParagraphBuilder(
-              ui.ParagraphStyle(
-                textAlign: TextAlign.center,
-                fontWeight: FontWeight.bold,
-                fontSize: radius,
-              ),
-            )
-            ..pushStyle(
-              ui.TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: radius,
-              ),
-            )
-            ..addText(initial);
-      final paragraph = pb.build()
-        ..layout(const ui.ParagraphConstraints(width: size));
-      canvas.drawParagraph(
-        paragraph,
-        Offset(0, center.dy - paragraph.height / 2),
-      );
-    }
-
-    final picture = recorder.endRecording();
-    final img = await picture.toImage(size.toInt(), size.toInt());
-    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.bytes(byteData!.buffer.asUint8List());
   }
 
   Future<void> _fetchRoute({int attempt = 0}) async {
@@ -1833,8 +2051,13 @@ class _MapRoundButton extends StatelessWidget {
 class _WorkerPinAvatar extends StatelessWidget {
   final String? photoUrl;
   final String name;
+  final Color ringColor;
 
-  const _WorkerPinAvatar({this.photoUrl, required this.name});
+  const _WorkerPinAvatar({
+    this.photoUrl,
+    required this.name,
+    this.ringColor = Colors.white,
+  });
 
   Widget _initialsFallback() {
     final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
@@ -1857,7 +2080,7 @@ class _WorkerPinAvatar extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2.5),
+        border: Border.all(color: ringColor, width: 2.5),
         boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
       ),
       child: ClipOval(
@@ -2010,8 +2233,6 @@ class _InfoGridCell extends StatelessWidget {
               child ??
                   Text(
                     value ?? '—',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: activeGigTextPrimary(isDark),
                       fontSize: 13,
@@ -2125,7 +2346,10 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
     setState(() => _loading = true);
     try {
       final results = await Future.wait([
-        FirebaseFirestore.instance.collection('users').doc(widget.workerId).get(),
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(widget.workerId)
+            .get(),
         _fetchWorkerCompletedCount(widget.workerId),
       ]);
       if (!mounted) return;
@@ -2181,7 +2405,9 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
                 Text(
                   '★ ${_rating.toStringAsFixed(1)} ($_ratingCount) · $_completedGigs gigs done',
                   style: TextStyle(
-                      color: activeGigTextMuted(isDark), fontSize: 10.5),
+                    color: activeGigTextMuted(isDark),
+                    fontSize: 10.5,
+                  ),
                 ),
             ],
           ),
@@ -2311,7 +2537,10 @@ class _ApplicantTileState extends State<_ApplicantTile> {
     }
     try {
       final results = await Future.wait([
-        FirebaseFirestore.instance.collection('users').doc(widget.workerId).get(),
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(widget.workerId)
+            .get(),
         _fetchWorkerCompletedCount(widget.workerId),
       ]);
       if (!mounted) return;
@@ -2344,7 +2573,11 @@ class _ApplicantTileState extends State<_ApplicantTile> {
       ),
       child: Row(
         children: [
-          _ProfileAvatar(photoUrl: _photoUrl, name: widget.workerName, size: 38),
+          _ProfileAvatar(
+            photoUrl: _photoUrl,
+            name: widget.workerName,
+            size: 38,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -2380,7 +2613,10 @@ class _ApplicantTileState extends State<_ApplicantTile> {
                         fontSize: 10.5,
                       ),
                       children: [
-                        const TextSpan(text: '★ ', style: TextStyle(color: kGold)),
+                        const TextSpan(
+                          text: '★ ',
+                          style: TextStyle(color: kGold),
+                        ),
                         TextSpan(
                           text:
                               '${_rating.toStringAsFixed(1)} ($_ratingCount) · $_completedGigs gigs done',
@@ -2421,7 +2657,70 @@ class _ApplicantTileState extends State<_ApplicantTile> {
 //  Multi-worker section — one independent card per worker slot, each with
 //  its own live tracking map and its own "Mark Complete & Pay" action.
 // ─────────────────────────────────────────────────────────────────────────────
-class _MultiWorkerSection extends StatelessWidget {
+// A worker is only worth putting on the shared map / offering a route to
+// while they're actually en route or on-site — mirrors the old per-card
+// `showMap` gate this replaces.
+bool _workerIsTrackable(String status) => !const [
+  'completed',
+  'declined',
+  'cancelled',
+  'in_progress',
+  'offered',
+  // A worker with a pending cancellation request is coming off the gig one
+  // way or another — pull them off the shared map immediately instead of
+  // waiting for admin to actually approve it.
+  'cancellation_requested',
+].contains(status);
+
+Color _workerStatusColor(String status) {
+  switch (status) {
+    case 'completed':
+      return kActiveGigSuccessGreen;
+    case 'declined':
+    case 'cancelled':
+    case 'no_worker':
+      return kActiveGigDestructiveRed;
+    case 'task_complete':
+    case 'payment':
+    case 'in_progress':
+    case 'offered':
+    case 'cancellation_requested':
+      return kAmber;
+    default:
+      return kHostAccent.solid;
+  }
+}
+
+String _workerStatusLabel(String status) {
+  switch (status) {
+    case 'in_progress':
+      return 'Awaiting response';
+    case 'offered':
+      return 'Offer sent';
+    case 'navigating':
+      return 'On the way';
+    case 'arrived':
+      return 'Arrived';
+    case 'working':
+      return 'Working';
+    case 'task_complete':
+      return 'Ready for payment';
+    case 'payment':
+      return 'Payment in progress';
+    case 'completed':
+      return 'Paid';
+    case 'declined':
+      return 'Declined';
+    case 'cancelled':
+      return 'Cancelled';
+    case 'cancellation_requested':
+      return 'Cancellation pending';
+    default:
+      return status;
+  }
+}
+
+class _MultiWorkerSection extends StatefulWidget {
   final String gigId;
   final String gigCollection;
   final LatLng? gigLocation;
@@ -2437,6 +2736,76 @@ class _MultiWorkerSection extends StatelessWidget {
     required this.filledSlotCount,
     required this.onMarkPaid,
   });
+
+  @override
+  State<_MultiWorkerSection> createState() => _MultiWorkerSectionState();
+}
+
+class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
+  // Which worker's route is drawn on the shared map — at most one at a time
+  // so N workers never turns into N crisscrossing polylines. Tapping a
+  // worker's card again clears it.
+  String? _selectedWorkerId;
+
+  void _openFullScreenTrackingMap(BuildContext context) {
+    final gigLocation = widget.gigLocation;
+    if (gigLocation == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              // Own live stream so the full-screen map keeps tracking every
+              // worker while open, instead of a one-time snapshot from the
+              // embedded card.
+              stream: workersRef(widget.gigCollection, widget.gigId)
+                  .snapshots(),
+              builder: (context, snap) {
+                final liveWorkers = (snap.data?.docs ?? const [])
+                    .map((d) => WorkerSlotModel.fromDoc(d))
+                    .where(
+                      (w) =>
+                          w.workerLocation != null &&
+                          _workerIsTrackable(w.status),
+                    )
+                    .toList();
+                final effectiveSelectedId =
+                    liveWorkers.any((w) => w.workerId == _selectedWorkerId)
+                    ? _selectedWorkerId
+                    : null;
+                return Stack(
+                  children: [
+                    Positioned.fill(
+                      child: _MultiWorkerTrackingMap(
+                        gigLocation: gigLocation,
+                        workers: liveWorkers,
+                        selectedWorkerId: effectiveSelectedId,
+                        onWorkerTap: (id) => setState(
+                          () => _selectedWorkerId = _selectedWorkerId == id
+                              ? null
+                              : id,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 12,
+                      left: 12,
+                      child: _MapRoundButton(
+                        icon: Icons.close_rounded,
+                        onTap: () => Navigator.of(ctx).pop(),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2462,7 +2831,7 @@ class _MultiWorkerSection extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                '$filledSlotCount / $workerSlots',
+                '${widget.filledSlotCount} / ${widget.workerSlots}',
                 style: TextStyle(
                   color: kHostAccent.onWhiteText,
                   fontSize: 11,
@@ -2474,20 +2843,30 @@ class _MultiWorkerSection extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: workersRef(gigCollection, gigId).snapshots(),
+          stream: workersRef(widget.gigCollection, widget.gigId).snapshots(),
           builder: (context, snap) {
             if (!snap.hasData) {
               return const Padding(
                 padding: EdgeInsets.symmetric(vertical: 20),
                 child: Center(
-                  child: CircularProgressIndicator(color: kAmber, strokeWidth: 2),
+                  child: CircularProgressIndicator(
+                    color: kAmber,
+                    strokeWidth: 2,
+                  ),
                 ),
               );
             }
-            final workers = snap.data!.docs
-                .map((d) => WorkerSlotModel.fromDoc(d))
-                .toList()
-              ..sort((a, b) => a.workerName.compareTo(b.workerName));
+            // Cancelled slots are done — the cancelled worker's own device
+            // normally deletes its doc once it processes the cancellation,
+            // but that depends on their app being open. Filter cancelled
+            // slots out of this render too, so the host's list doesn't wait
+            // on that to happen.
+            final workers =
+                snap.data!.docs
+                    .map((d) => WorkerSlotModel.fromDoc(d))
+                    .where((w) => w.status != 'cancelled')
+                    .toList()
+                  ..sort((a, b) => a.workerName.compareTo(b.workerName));
             if (workers.isEmpty) {
               return Container(
                 width: double.infinity,
@@ -2500,22 +2879,86 @@ class _MultiWorkerSection extends StatelessWidget {
                 ),
                 child: Text(
                   'No workers assigned yet',
-                  style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 13),
+                  style: TextStyle(
+                    color: activeGigTextMuted(isDark),
+                    fontSize: 13,
+                  ),
                 ),
               );
             }
+            final trackableWorkers = workers
+                .where(
+                  (w) =>
+                      w.workerLocation != null && _workerIsTrackable(w.status),
+                )
+                .toList();
+            // Selection may point at a worker who's since gone terminal
+            // (paid/declined/cancelled) — treat it as cleared for this
+            // render rather than pointing the map at a stale route; the
+            // field itself is only ever written via setState in onTap.
+            final effectiveSelectedId =
+                trackableWorkers.any((w) => w.workerId == _selectedWorkerId)
+                ? _selectedWorkerId
+                : null;
             return Column(
-              children: workers
-                  .map((w) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _WorkerSlotCard(
-                          key: ValueKey('slot_${w.workerId}'),
-                          worker: w,
-                          gigLocation: gigLocation,
-                          onMarkPaid: () => onMarkPaid(w),
-                        ),
-                      ))
-                  .toList(),
+              children: [
+                if (widget.gigLocation != null &&
+                    trackableWorkers.isNotEmpty) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      height: 180,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: _MultiWorkerTrackingMap(
+                              gigLocation: widget.gigLocation!,
+                              workers: trackableWorkers,
+                              selectedWorkerId: effectiveSelectedId,
+                              onWorkerTap: (id) => setState(
+                                () => _selectedWorkerId =
+                                    _selectedWorkerId == id ? null : id,
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 10,
+                            bottom: 10,
+                            child: _MapRoundButton(
+                              icon: Icons.fullscreen_rounded,
+                              onTap: () =>
+                                  _openFullScreenTrackingMap(context),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                ...workers.map((w) {
+                  final isTrackable =
+                      w.workerLocation != null && _workerIsTrackable(w.status);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _WorkerSlotCard(
+                      key: ValueKey('slot_${w.workerId}'),
+                      worker: w,
+                      isSelected: w.workerId == effectiveSelectedId,
+                      isTrackable: isTrackable,
+                      onTap: isTrackable
+                          ? () => setState(
+                              () => _selectedWorkerId =
+                                  effectiveSelectedId == w.workerId
+                                  ? null
+                                  : w.workerId,
+                            )
+                          : null,
+                      onMarkPaid: () => widget.onMarkPaid(w),
+                    ),
+                  );
+                }),
+              ],
             );
           },
         ),
@@ -2526,159 +2969,516 @@ class _MultiWorkerSection extends StatelessWidget {
 
 class _WorkerSlotCard extends StatelessWidget {
   final WorkerSlotModel worker;
-  final LatLng? gigLocation;
+  final bool isSelected;
+  final bool isTrackable;
+  final VoidCallback? onTap;
   final VoidCallback onMarkPaid;
 
   const _WorkerSlotCard({
     super.key,
     required this.worker,
-    required this.gigLocation,
+    required this.isSelected,
+    required this.isTrackable,
+    required this.onTap,
     required this.onMarkPaid,
   });
-
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'completed':
-        return kActiveGigSuccessGreen;
-      case 'declined':
-      case 'cancelled':
-      case 'no_worker':
-        return kActiveGigDestructiveRed;
-      case 'task_complete':
-      case 'payment':
-      case 'in_progress':
-      case 'offered':
-        return kAmber;
-      default:
-        return kHostAccent.solid;
-    }
-  }
-
-  String _statusLabel(String status) {
-    switch (status) {
-      case 'in_progress':
-        return 'Awaiting response';
-      case 'offered':
-        return 'Offer sent';
-      case 'navigating':
-        return 'On the way';
-      case 'arrived':
-        return 'Arrived';
-      case 'working':
-        return 'Working';
-      case 'task_complete':
-        return 'Ready for payment';
-      case 'payment':
-        return 'Payment in progress';
-      case 'completed':
-        return 'Paid';
-      case 'declined':
-        return 'Declined';
-      case 'cancelled':
-        return 'Cancelled';
-      default:
-        return status;
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final geo = worker.workerLocation;
-    final workerLoc = geo != null ? LatLng(geo.latitude, geo.longitude) : null;
-    final showMap = gigLocation != null &&
-        !['completed', 'declined', 'cancelled', 'in_progress', 'offered']
-            .contains(worker.status);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: activeGigCardBg(isDark),
-        borderRadius: BorderRadius.circular(kActiveGigCardRadius),
-        border: Border.all(color: activeGigCardBorder(isDark)),
-      ),
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  worker.workerName,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(kActiveGigCardRadius),
+      child: Container(
+        decoration: BoxDecoration(
+          color: activeGigCardBg(isDark),
+          borderRadius: BorderRadius.circular(kActiveGigCardRadius),
+          border: Border.all(
+            color: isSelected ? kHostAccent.solid : activeGigCardBorder(isDark),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (isTrackable) ...[
+                  Icon(
+                    Icons.location_on_rounded,
+                    size: 15,
+                    color: isSelected
+                        ? kHostAccent.solid
+                        : activeGigTextMuted(isDark),
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                Expanded(
+                  child: Text(
+                    worker.workerName,
+                    style: TextStyle(
+                      color: activeGigTextPrimary(isDark),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  CurrencyFormatter.format(worker.rate, worker.currencyCode),
                   style: TextStyle(
-                    color: activeGigTextPrimary(isDark),
-                    fontSize: 13,
+                    color: kHostAccent.onWhiteText,
+                    fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                CurrencyFormatter.format(worker.rate, worker.currencyCode),
-                style: TextStyle(
-                  color: kHostAccent.onWhiteText,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _workerStatusColor(
+                      worker.status,
+                    ).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    _workerStatusLabel(worker.status),
+                    style: TextStyle(
+                      color: _workerStatusColor(worker.status),
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _statusColor(worker.status).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  _statusLabel(worker.status),
-                  style: TextStyle(
-                    color: _statusColor(worker.status),
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
+              ],
+            ),
+            if (worker.status == 'task_complete') ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 40,
+                child: ElevatedButton(
+                  onPressed: onMarkPaid,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kHostAccent.solid,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Mark Complete & Pay',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
             ],
-          ),
-          if (showMap) ...[
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(
-                height: 130,
-                child: _GigTrackingMap(
-                  gigLocation: gigLocation!,
-                  workerLocation: workerLoc,
-                  workerId: worker.workerId,
-                  workerName: worker.workerName,
-                ),
-              ),
-            ),
           ],
-          if (worker.status == 'task_complete') ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              height: 40,
-              child: ElevatedButton(
-                onPressed: onMarkPaid,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: kHostAccent.solid,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: const Text(
-                  'Mark Complete & Pay',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
     );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Multi-worker tracking map — one shared map for the whole gig instead of
+//  a live GoogleMap per worker card (N workers previously meant N native map
+//  instances all showing roughly the same area). Every trackable worker gets
+//  a status-colored pin; only the tapped/selected worker gets a route drawn,
+//  so many workers never turns into a tangle of crisscrossing polylines.
+// ─────────────────────────────────────────────────────────────────────────────
+class _MultiWorkerTrackingMap extends StatefulWidget {
+  final LatLng gigLocation;
+  final List<WorkerSlotModel> workers; // pre-filtered to trackable + located
+  final String? selectedWorkerId;
+  final ValueChanged<String> onWorkerTap;
+
+  const _MultiWorkerTrackingMap({
+    required this.gigLocation,
+    required this.workers,
+    required this.selectedWorkerId,
+    required this.onWorkerTap,
+  });
+
+  @override
+  State<_MultiWorkerTrackingMap> createState() =>
+      _MultiWorkerTrackingMapState();
+}
+
+class _MultiWorkerTrackingMapState extends State<_MultiWorkerTrackingMap> {
+  GoogleMapController? _googleMapController;
+  bool _useGoogleMaps = true;
+  final _osmController = fm.MapController();
+  bool _osmMapReady = false;
+  List<LatLng> _routePoints = [];
+  List<ll.LatLng> _routePointsOsm = [];
+  String? _routeForWorkerId;
+  bool _didInitialFit = false;
+
+  // Per-worker avatar marker state. The decoded photo is cached separately
+  // from the rendered bitmap so re-drawing a marker with a different ring
+  // color (e.g. when the selected worker changes) never re-fetches the
+  // photo over the network — only the cheap canvas redraw reruns.
+  final Map<String, String?> _photoUrls = {};
+  final Map<String, ui.Image?> _photoImages = {};
+  final Map<String, BitmapDescriptor> _icons = {};
+  final Set<String> _loadingWorkerIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    GmsAvailability.isAvailable.then((v) {
+      if (mounted) setState(() => _useGoogleMaps = v);
+    });
+    _maybeFetchRoute();
+    _ensureWorkerIcons();
+  }
+
+  @override
+  void didUpdateWidget(_MultiWorkerTrackingMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedWorkerId != widget.selectedWorkerId) {
+      _maybeFetchRoute();
+      _animateToSelection();
+      _redrawIconRing(oldWidget.selectedWorkerId);
+      _redrawIconRing(widget.selectedWorkerId);
+    }
+    _ensureWorkerIcons();
+  }
+
+  void _ensureWorkerIcons() {
+    for (final w in widget.workers) {
+      if (_icons.containsKey(w.workerId) ||
+          _loadingWorkerIds.contains(w.workerId)) {
+        continue;
+      }
+      _loadWorkerIcon(w);
+    }
+  }
+
+  Future<void> _loadWorkerIcon(WorkerSlotModel w) async {
+    _loadingWorkerIds.add(w.workerId);
+    String? photoUrl;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(w.workerId)
+          .get();
+      photoUrl = snap.data()?['photoUrl'] as String?;
+    } catch (_) {}
+    final photo = await _fetchWorkerPhotoImage(photoUrl);
+    _loadingWorkerIds.remove(w.workerId);
+    if (!mounted) return;
+    _photoUrls[w.workerId] = photoUrl;
+    _photoImages[w.workerId] = photo;
+    final icon = await _drawWorkerAvatarMarker(
+      photo: photo,
+      name: w.workerName,
+      ringColor: w.workerId == widget.selectedWorkerId ? kBlue : Colors.white,
+    );
+    if (mounted) setState(() => _icons[w.workerId] = icon);
+  }
+
+  Future<void> _redrawIconRing(String? workerId) async {
+    if (workerId == null || !_photoImages.containsKey(workerId)) return;
+    final match = widget.workers.where((w) => w.workerId == workerId);
+    final name = match.isNotEmpty ? match.first.workerName : '';
+    final icon = await _drawWorkerAvatarMarker(
+      photo: _photoImages[workerId],
+      name: name,
+      ringColor: workerId == widget.selectedWorkerId ? kBlue : Colors.white,
+    );
+    if (mounted) setState(() => _icons[workerId] = icon);
+  }
+
+  WorkerSlotModel? get _selectedWorker {
+    final id = widget.selectedWorkerId;
+    if (id == null) return null;
+    for (final w in widget.workers) {
+      if (w.workerId == id) return w;
+    }
+    return null;
+  }
+
+  Future<void> _maybeFetchRoute({int attempt = 0}) async {
+    final worker = _selectedWorker;
+    final geo = worker?.workerLocation;
+    if (worker == null || geo == null) {
+      if (mounted) {
+        setState(() {
+          _routePoints = [];
+          _routePointsOsm = [];
+          _routeForWorkerId = null;
+        });
+      }
+      return;
+    }
+    _routeForWorkerId = worker.workerId;
+    final workerLatLng = LatLng(geo.latitude, geo.longitude);
+    try {
+      final url = Uri.parse(
+        'http://router.project-osrm.org/route/v1/driving/'
+        '${workerLatLng.longitude},${workerLatLng.latitude};'
+        '${widget.gigLocation.longitude},${widget.gigLocation.latitude}'
+        '?overview=full&geometries=polyline',
+      );
+      final res = await http.get(url);
+      if (!mounted || _routeForWorkerId != worker.workerId) return;
+      if (res.statusCode != 200) {
+        if (attempt < 3) {
+          await Future.delayed(const Duration(seconds: 5));
+          if (mounted) _maybeFetchRoute(attempt: attempt + 1);
+        }
+        return;
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final routes = body['routes'] as List<dynamic>?;
+      if (routes == null || routes.isEmpty) return;
+      final geometry =
+          (routes[0] as Map<String, dynamic>)['geometry'] as String;
+      final decoded = PolylinePoints()
+          .decodePolyline(geometry)
+          .map((p) => LatLng(p.latitude, p.longitude))
+          .toList();
+      if (!mounted || _routeForWorkerId != worker.workerId) return;
+      setState(() {
+        _routePoints = decoded;
+        _routePointsOsm = decoded
+            .map((p) => ll.LatLng(p.latitude, p.longitude))
+            .toList();
+      });
+    } catch (_) {
+      if (attempt < 3) {
+        await Future.delayed(const Duration(seconds: 5));
+        if (mounted) _maybeFetchRoute(attempt: attempt + 1);
+      }
+    }
+  }
+
+  List<LatLng> get _allPoints => [
+    widget.gigLocation,
+    for (final w in widget.workers)
+      if (w.workerLocation != null)
+        LatLng(w.workerLocation!.latitude, w.workerLocation!.longitude),
+  ];
+
+  void _fitBounds(List<LatLng> points) {
+    if (points.isEmpty) return;
+    if (points.length == 1) {
+      if (_useGoogleMaps) {
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(points.first, 15.0),
+        );
+      } else if (_osmMapReady) {
+        _osmController.move(
+          ll.LatLng(points.first.latitude, points.first.longitude),
+          15.0,
+        );
+      }
+      return;
+    }
+    final swLat = points.map((p) => p.latitude).reduce(min);
+    final swLng = points.map((p) => p.longitude).reduce(min);
+    final neLat = points.map((p) => p.latitude).reduce(max);
+    final neLng = points.map((p) => p.longitude).reduce(max);
+    if (_useGoogleMaps) {
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngBounds(
+          LatLngBounds(
+            southwest: LatLng(swLat, swLng),
+            northeast: LatLng(neLat, neLng),
+          ),
+          60,
+        ),
+      );
+    } else if (_osmMapReady) {
+      _osmController.fitCamera(
+        fm.CameraFit.bounds(
+          bounds: fm.LatLngBounds(
+            ll.LatLng(swLat, swLng),
+            ll.LatLng(neLat, neLng),
+          ),
+          padding: const EdgeInsets.all(60),
+        ),
+      );
+    }
+  }
+
+  void _animateToAll() => _fitBounds(_allPoints);
+
+  void _animateToSelection() {
+    final worker = _selectedWorker;
+    final geo = worker?.workerLocation;
+    if (worker == null || geo == null) {
+      _animateToAll();
+      return;
+    }
+    _fitBounds([widget.gigLocation, LatLng(geo.latitude, geo.longitude)]);
+  }
+
+  Set<Marker> _buildGoogleMarkers() {
+    return {
+      Marker(
+        markerId: const MarkerId('gig_location'),
+        position: widget.gigLocation,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+      ),
+      for (final w in widget.workers)
+        if (w.workerLocation != null)
+          Marker(
+            markerId: MarkerId('worker_${w.workerId}'),
+            position: LatLng(
+              w.workerLocation!.latitude,
+              w.workerLocation!.longitude,
+            ),
+            icon:
+                _icons[w.workerId] ??
+                BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueAzure,
+                ),
+            anchor: const Offset(0.5, 0.5),
+            infoWindow: InfoWindow(title: w.workerName),
+            onTap: () => widget.onWorkerTap(w.workerId),
+          ),
+    };
+  }
+
+  Widget _buildOsmMap() {
+    final osmMarkers = <fm.Marker>[
+      fm.Marker(
+        point: ll.LatLng(
+          widget.gigLocation.latitude,
+          widget.gigLocation.longitude,
+        ),
+        width: 32,
+        height: 32,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.orange,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+          ),
+          child: const Icon(Icons.work_rounded, color: Colors.white, size: 16),
+        ),
+      ),
+      for (final w in widget.workers)
+        if (w.workerLocation != null)
+          fm.Marker(
+            point: ll.LatLng(
+              w.workerLocation!.latitude,
+              w.workerLocation!.longitude,
+            ),
+            width: 34,
+            height: 34,
+            child: GestureDetector(
+              onTap: () => widget.onWorkerTap(w.workerId),
+              child: _WorkerPinAvatar(
+                photoUrl: _photoUrls[w.workerId],
+                name: w.workerName,
+                ringColor: w.workerId == widget.selectedWorkerId
+                    ? kBlue
+                    : Colors.white,
+              ),
+            ),
+          ),
+    ];
+    return fm.FlutterMap(
+      mapController: _osmController,
+      options: fm.MapOptions(
+        initialCenter: ll.LatLng(
+          widget.gigLocation.latitude,
+          widget.gigLocation.longitude,
+        ),
+        initialZoom: 14.0,
+        interactionOptions: const fm.InteractionOptions(
+          flags:
+              fm.InteractiveFlag.pinchZoom |
+              fm.InteractiveFlag.doubleTapZoom |
+              fm.InteractiveFlag.drag |
+              fm.InteractiveFlag.flingAnimation,
+        ),
+        onMapReady: () {
+          if (mounted) setState(() => _osmMapReady = true);
+          _animateToAll();
+        },
+      ),
+      children: [
+        fm.TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.giggre.mobile',
+        ),
+        if (_routePointsOsm.isNotEmpty)
+          fm.PolylineLayer(
+            polylines: [
+              fm.Polyline(
+                points: _routePointsOsm,
+                color: kBlue,
+                strokeWidth: 4,
+              ),
+            ],
+          ),
+        fm.MarkerLayer(markers: osmMarkers),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _googleMapController?.dispose();
+    _osmController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _useGoogleMaps
+        ? GoogleMap(
+            style: Theme.of(context).brightness == Brightness.dark
+                ? kDarkMapStyle
+                : null,
+            onMapCreated: (controller) {
+              _googleMapController = controller;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted && !_didInitialFit) {
+                  _didInitialFit = true;
+                  _animateToAll();
+                }
+              });
+            },
+            initialCameraPosition: CameraPosition(
+              target: widget.gigLocation,
+              zoom: 14.0,
+            ),
+            myLocationEnabled: false,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            markers: _buildGoogleMarkers(),
+            polylines: _routePoints.isNotEmpty
+                ? {
+                    Polyline(
+                      polylineId: const PolylineId('route'),
+                      points: _routePoints,
+                      color: kBlue,
+                      width: 4,
+                    ),
+                  }
+                : {},
+            gestureRecognizers: {
+              Factory<OneSequenceGestureRecognizer>(
+                () => EagerGestureRecognizer(),
+              ),
+            },
+          )
+        : _buildOsmMap();
   }
 }
 
@@ -2687,7 +3487,8 @@ class _WorkerSlotCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _CancelReasonDialog extends StatefulWidget {
   final TextEditingController controller;
-  const _CancelReasonDialog({required this.controller});
+  final bool immediate;
+  const _CancelReasonDialog({required this.controller, this.immediate = false});
 
   @override
   State<_CancelReasonDialog> createState() => _CancelReasonDialogState();
@@ -2741,7 +3542,7 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
           ),
           const SizedBox(height: 14),
           Text(
-            'Request Cancellation',
+            widget.immediate ? 'Cancel Gig' : 'Request Cancellation',
             style: TextStyle(
               color: onSurface,
               fontSize: 17,
@@ -2749,9 +3550,11 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Your request will be reviewed by an admin before the gig is cancelled.',
-            style: TextStyle(color: kSub, fontSize: 12),
+          Text(
+            widget.immediate
+                ? 'No worker has been assigned yet, so this gig will be cancelled right away. Please tell us why.'
+                : 'Your request will be reviewed by an admin before the gig is cancelled.',
+            style: const TextStyle(color: kSub, fontSize: 12),
           ),
           const SizedBox(height: 16),
           TextField(

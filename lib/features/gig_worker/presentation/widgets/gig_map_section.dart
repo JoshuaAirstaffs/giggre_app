@@ -658,6 +658,21 @@ class _GigMapSectionState extends State<GigMapSection> {
         return;
       }
 
+      if (await workerHasPendingCancellation(widget.uid)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Your cancellation request hasn't been approved by the admin yet.",
+              ),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+
       if (await workerHasActiveGig(widget.uid)) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

@@ -181,6 +181,25 @@ class CurrentUserProvider extends ChangeNotifier {
         sound: gigSound,
       ),
     );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_cancellation_approved_v1',
+        'Cancellation Approved',
+        description:
+            'Notifications when your own cancellation request for a gig has been approved',
+        importance: Importance.max,
+        sound: gigSound,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_cancelled_by_host_v1',
+        'Gig Cancelled',
+        description: 'Notifications when a host cancels a gig you were working on',
+        importance: Importance.max,
+        sound: gigSound,
+      ),
+    );
     // Distinct from gigSound — used only for the two tester-facing
     // broadcasts (daily 7am reminder + new-build announcement), not any
     // real gig event. Requires android/app/src/main/res/raw/test_sound.mp3.

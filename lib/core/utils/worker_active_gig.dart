@@ -47,3 +47,30 @@ Future<bool> workerHasActiveGig(String uid) async {
   ]);
   return legacyResults.any((snap) => snap.docs.isNotEmpty);
 }
+
+/// Same collection-group + legacy dual-read as workerHasActiveGig, narrowed
+/// to just 'cancellation_requested' — lets callers that block an apply/accept
+/// action tell this specific case apart from a plain in-progress gig and
+/// show a more specific message.
+Future<bool> workerHasPendingCancellation(String uid) async {
+  final db = FirebaseFirestore.instance;
+
+  final subcollectionSnap = await db
+      .collectionGroup('workers')
+      .where('workerId', isEqualTo: uid)
+      .where('status', isEqualTo: 'cancellation_requested')
+      .limit(1)
+      .get();
+  if (subcollectionSnap.docs.isNotEmpty) return true;
+
+  final legacyResults = await Future.wait([
+    for (final collection in _gigCollections)
+      db
+          .collection(collection)
+          .where('workerId', isEqualTo: uid)
+          .where('status', isEqualTo: 'cancellation_requested')
+          .limit(1)
+          .get(),
+  ]);
+  return legacyResults.any((snap) => snap.docs.isNotEmpty);
+}

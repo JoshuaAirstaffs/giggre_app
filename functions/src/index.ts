@@ -392,6 +392,24 @@ export const onOfferedGigWorkerSlotProgress = makeWorkerProgressSlotTrigger("off
 // in_progress) with a worker attached, across all three gig collections.
 const ASSIGNED_STATUSES = new Set(["navigating", "in_progress"]);
 
+// Quick Gig's `in_progress` is a pending offer still awaiting the worker's
+// accept/decline within the review window (see quick_gig_matching_service.dart's
+// _dispatchToWorker/_dispatchToWorkerSlot) — nothing is final yet, so it gets
+// its own "offer" wording instead of the "assigned" wording that fits Open/
+// Offered Gigs, where the host's selection already is the final assignment.
+function gigAssignedMessage(gigTypeLabel: string, gigTitle: string) {
+  if (gigTypeLabel === "Quick Gig") {
+    return {
+      title: "New Quick Gig Offer!",
+      body: `You've got a quick gig offer: ${gigTitle}. Respond before it expires.`,
+    };
+  }
+  return {
+    title: `You're Assigned to a ${gigTypeLabel}!`,
+    body: `You've been assigned to: ${gigTitle}. Head to the location now.`,
+  };
+}
+
 function makeGigAssignedTrigger(collection: string, gigTypeLabel: string) {
   return onDocumentUpdated(`${collection}/{gigId}`, async (event) => {
     const before = event.data?.before.data();
@@ -407,8 +425,7 @@ function makeGigAssignedTrigger(collection: string, gigTypeLabel: string) {
     const gigTitle = (after.title as string) ?? "a gig";
 
     await sendPushToUser(workerId, {
-      title: `You're Assigned to a ${gigTypeLabel}!`,
-      body: `You've been assigned to: ${gigTitle}. Head to the location now.`,
+      ...gigAssignedMessage(gigTypeLabel, gigTitle),
       channelId: "gig_assignments_v2",
       data: { type: "gig_assigned", gigId: event.params.gigId },
     });
@@ -446,8 +463,7 @@ function makeGigAssignedSlotTrigger(collection: string, gigTypeLabel: string) {
       }
 
       await sendPushToUser(workerId, {
-        title: `You're Assigned to a ${gigTypeLabel}!`,
-        body: `You've been assigned to: ${gigTitle}. Head to the location now.`,
+        ...gigAssignedMessage(gigTypeLabel, gigTitle),
         channelId: "gig_assignments_v2",
         data: { type: "gig_assigned", gigId: event.params.gigId },
       });
@@ -582,6 +598,224 @@ export const checkExpiredGigSchedules = onSchedule(
     }
   }
 );
+
+// ── Auto-approve stale worker cancellation requests ─────────────────────────
+// A worker's cancellation request (WorkingUI._showCancelReasonDialog) sits at
+// status:'cancellation_requested' awaiting admin review. Leaving the worker
+// stuck mid-gig indefinitely if no admin ever acts isn't acceptable, so
+// auto-approve it once it's been sitting for 10 minutes untouched. Host-
+// initiated requests are left alone — only the worker side gets this timeout.
+const CANCELLATION_AUTO_APPROVE_MS = 10 * 60 * 1000;
+
+// Re-reads the doc inside a transaction (rather than trusting the query
+// snapshot) so a human admin approving/rejecting in the same moment always
+// wins over the timeout — returns whether this call actually cancelled it.
+async function autoApproveIfStaleWorkerCancellation(
+  ref: admin.firestore.DocumentReference
+): Promise<boolean> {
+  return admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.data();
+    if (!data || data.status !== "cancellation_requested") return false;
+
+    const reasons = data.cancellation_reason as
+      | Array<Record<string, unknown>>
+      | undefined;
+    if (!reasons || reasons.length === 0) return false;
+    const lastIndex = reasons.length - 1;
+    const lastReason = reasons[lastIndex];
+    if (lastReason.requestedBy !== "worker" || lastReason.approved != null) {
+      return false;
+    }
+
+    const requestedAt = data.cancellationRequestedAt as
+      | admin.firestore.Timestamp
+      | undefined;
+    if (!requestedAt) return false;
+    if (Date.now() - requestedAt.toMillis() < CANCELLATION_AUTO_APPROVE_MS) {
+      return false;
+    }
+
+    const updatedReasons = [...reasons];
+    updatedReasons[lastIndex] = {
+      ...lastReason,
+      approved: true,
+      approvedBy: "system",
+    };
+    tx.update(ref, {
+      status: "cancelled",
+      cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+      cancellation_reason: updatedReasons,
+    });
+    return true;
+  });
+}
+
+export const autoApproveStaleWorkerCancellations = onSchedule(
+  "every 2 minutes",
+  async () => {
+    const db = admin.firestore();
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() - CANCELLATION_AUTO_APPROVE_MS
+    );
+
+    // Single-worker gigs — status lives on the gig doc itself.
+    for (const collection of ["quick_gigs", "open_gigs", "offered_gigs"]) {
+      const stale = await db
+        .collection(collection)
+        .where("status", "==", "cancellation_requested")
+        .where("cancellationRequestedAt", "<=", cutoff)
+        .get();
+
+      for (const doc of stale.docs) {
+        const data = doc.data();
+        if (!(await autoApproveIfStaleWorkerCancellation(doc.ref))) continue;
+
+        // Tell the worker who asked to cancel — not the host, who has no
+        // action left to take once this auto-approves.
+        const workerId =
+          (data.assignedWorkerId as string | undefined) ??
+          (data.workerId as string | undefined);
+        if (!workerId) continue;
+        const gigTitle = (data.title as string) ?? "your gig";
+        await sendPushToUser(workerId, {
+          title: "Cancellation Approved",
+          body: `Your cancellation request for "${gigTitle}" has been approved.`,
+          channelId: "gig_cancellation_approved_v1",
+          data: { type: "gig_cancellation_approved", gigId: doc.id },
+        });
+      }
+    }
+
+    // Multi-worker gigs — status lives on each worker's own subcollection
+    // doc (see WorkerSlotModel), so a collection-group query is needed to
+    // catch these across all three parent collections in one pass.
+    const staleSlots = await db
+      .collectionGroup("workers")
+      .where("status", "==", "cancellation_requested")
+      .where("cancellationRequestedAt", "<=", cutoff)
+      .get();
+
+    for (const doc of staleSlots.docs) {
+      const data = doc.data();
+      if (!(await autoApproveIfStaleWorkerCancellation(doc.ref))) continue;
+
+      // Tell the worker who asked to cancel — not the host, who has no
+      // action left to take once this auto-approves.
+      const workerId = (data.workerId as string | undefined) ?? doc.id;
+      if (!workerId) continue;
+      const gigCollection = (data.gigCollection as string) ?? "";
+      const gigId = (data.gigId as string) ?? doc.ref.parent.parent?.id ?? "";
+      let gigTitle = "your gig";
+      if (gigCollection && gigId) {
+        try {
+          const gigSnap = await db.collection(gigCollection).doc(gigId).get();
+          gigTitle = (gigSnap.data()?.title as string) ?? gigTitle;
+        } catch {
+          // Best-effort — notification still fires with the generic title.
+        }
+      }
+
+      await sendPushToUser(workerId, {
+        title: "Cancellation Approved",
+        body: `Your cancellation request for "${gigTitle}" has been approved.`,
+        channelId: "gig_cancellation_approved_v1",
+        data: {
+          type: "gig_cancellation_approved",
+          gigId,
+          workerId: doc.id,
+        },
+      });
+    }
+  }
+);
+
+// ── Cancelling a multi-worker gig cascades to every filled slot ─────────────
+// A multi-worker gig's own workers each track their own progress on
+// {collection}/{gigId}/workers/{workerId} (see WorkerSlotModel) — WorkingUI
+// listens to that doc, not the parent gig doc. So when the host cancels the
+// gig (approved either immediately — no worker yet — or by an admin/the
+// 10-minute worker-timeout above) and the parent doc's status lands on
+// 'cancelled', already-assigned workers would otherwise never find out and
+// keep working a dead gig. Mirror the same status/reason onto every slot
+// that's still active so each worker's own listener picks it up. This must
+// NOT run the other way — a single worker cancelling their own slot only
+// ever touches that one slot doc, never the parent, so it can't accidentally
+// cascade back up and cancel the whole gig or its other workers.
+const WORKER_ACTIVE_SLOT_STATUSES = [
+  "navigating",
+  "arrived",
+  "working",
+  "task_complete",
+  "payment",
+  "cancellation_requested",
+];
+
+function makeGigCancellationCascadeTrigger(collection: string) {
+  return onDocumentUpdated(`${collection}/{gigId}`, async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (before.status === "cancelled" || after.status !== "cancelled") return;
+    if (((after.workerSlots as number) ?? 1) <= 1) return;
+
+    const db = admin.firestore();
+    const workersRef = db
+      .collection(collection)
+      .doc(event.params.gigId)
+      .collection("workers");
+    const activeSlots = await workersRef
+      .where("status", "in", WORKER_ACTIVE_SLOT_STATUSES)
+      .get();
+    if (activeSlots.empty) return;
+
+    const reasons = after.cancellation_reason as
+      | Array<Record<string, unknown>>
+      | undefined;
+    const lastReason =
+      reasons && reasons.length ? reasons[reasons.length - 1] : undefined;
+    const gigTitle = (after.title as string) ?? "your gig";
+
+    const batch = db.batch();
+    for (const doc of activeSlots.docs) {
+      batch.update(doc.ref, {
+        status: "cancelled",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        cancellation_reason: admin.firestore.FieldValue.arrayUnion({
+          reason: (lastReason?.reason as string) ?? "Gig cancelled by host",
+          approved: true,
+          requestedBy: (lastReason?.requestedBy as string) ?? "host",
+          cascadedFromGig: true,
+        }),
+      });
+      const workerId = (doc.data().workerId as string) ?? doc.id;
+      if (workerId) {
+        batch.update(db.collection("users").doc(workerId), {
+          slot: "AVAILABLE",
+        });
+      }
+    }
+    await batch.commit();
+
+    for (const doc of activeSlots.docs) {
+      const workerId = (doc.data().workerId as string) ?? doc.id;
+      if (!workerId) continue;
+      await sendPushToUser(workerId, {
+        title: "Gig Cancelled",
+        body: `"${gigTitle}" was cancelled — you no longer need to continue.`,
+        channelId: "gig_cancelled_by_host_v1",
+        data: { type: "gig_cancelled_by_host", gigId: event.params.gigId },
+      });
+    }
+  });
+}
+
+export const onQuickGigCancelledCascade =
+  makeGigCancellationCascadeTrigger("quick_gigs");
+export const onOpenGigCancelledCascade =
+  makeGigCancellationCascadeTrigger("open_gigs");
+export const onOfferedGigCancelledCascade =
+  makeGigCancellationCascadeTrigger("offered_gigs");
 
 // ── Tester broadcasts (dev/closed-testing project only) ────────────────────
 // Every user doc in the dev Firebase project (simpleproject-8ff7a) belongs to

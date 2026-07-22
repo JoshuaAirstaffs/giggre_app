@@ -17,6 +17,38 @@
       ]
     },
     {
+      "collectionGroup": "quick_gigs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "cancellationRequestedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "open_gigs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "cancellationRequestedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "offered_gigs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "cancellationRequestedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workers",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "cancellationRequestedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "workers",
       "queryScope": "COLLECTION_GROUP",
       "fields": [

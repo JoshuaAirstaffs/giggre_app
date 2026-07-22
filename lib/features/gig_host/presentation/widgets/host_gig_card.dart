@@ -221,6 +221,19 @@ class _HostGigCardState extends State<HostGigCard> {
     final docId = widget.data['docId'] as String? ?? '';
     if (docId.isEmpty) return;
 
+    // An Open Gig with no worker assigned yet has nothing for admin to
+    // adjudicate between host and worker — cancel it immediately instead
+    // of routing through the cancellation_requested/admin-review flow.
+    final workerId =
+        widget.data['assignedWorkerId'] as String? ??
+        widget.data['workerId'] as String?;
+    final filledSlotCount =
+        (widget.data['filledSlotCount'] as num?)?.toInt() ?? 0;
+    final noWorkerYet =
+        gigType == 'open' &&
+        (workerId == null || workerId.isEmpty) &&
+        filledSlotCount == 0;
+
     final controller = TextEditingController();
     bool submitted = false;
     try {
@@ -228,7 +241,10 @@ class _HostGigCardState extends State<HostGigCard> {
           await showDialog<bool>(
             context: context,
             barrierDismissible: false,
-            builder: (_) => _CancelReasonDialog(controller: controller),
+            builder: (_) => _CancelReasonDialog(
+              controller: controller,
+              immediate: noWorkerYet,
+            ),
           ) ??
           false;
       if (!submitted || !mounted) return;
@@ -236,6 +252,28 @@ class _HostGigCardState extends State<HostGigCard> {
       if (reason.isEmpty) return;
 
       final messenger = ScaffoldMessenger.of(context);
+
+      if (noWorkerYet) {
+        await FirebaseFirestore.instance
+            .collection(_collectionFor(gigType))
+            .doc(docId)
+            .update({
+              'cancellation_reason': FieldValue.arrayUnion([
+                {'reason': reason, 'approved': true, 'requestedBy': 'host'},
+              ]),
+              'cancelledAt': FieldValue.serverTimestamp(),
+              'status': 'cancelled',
+            });
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Gig cancelled.'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
       await FirebaseFirestore.instance
           .collection(_collectionFor(gigType))
           .doc(docId)
@@ -464,6 +502,7 @@ class _HostGigCardState extends State<HostGigCard> {
     final gigType = widget.data['gigType'] as String? ?? 'quick';
     final status = widget.data['status'] as String? ?? 'scanning';
     final isClosed = status == 'cancelled' || status == 'completed';
+    final canCancel = !isClosed && status != 'cancellation_requested';
     const activeGigStatusesForMenu = {
       'in_progress',
       'navigating',
@@ -495,7 +534,7 @@ class _HostGigCardState extends State<HostGigCard> {
                   _dispatchGig();
                 },
               ),
-            if (!isClosed)
+            if (canCancel)
               ListTile(
                 leading: const Icon(
                   Icons.cancel_outlined,
@@ -680,7 +719,8 @@ class _HostGigCardState extends State<HostGigCard> {
 // ─────────────────────────────────────────────────────────────────────────────
 class _CancelReasonDialog extends StatefulWidget {
   final TextEditingController controller;
-  const _CancelReasonDialog({required this.controller});
+  final bool immediate;
+  const _CancelReasonDialog({required this.controller, this.immediate = false});
 
   @override
   State<_CancelReasonDialog> createState() => _CancelReasonDialogState();
@@ -734,7 +774,7 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
           ),
           const SizedBox(height: 14),
           Text(
-            'Request Cancellation',
+            widget.immediate ? 'Cancel Gig' : 'Request Cancellation',
             style: TextStyle(
               color: onSurface,
               fontSize: 17,
@@ -742,9 +782,11 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Your request will be reviewed by an admin before the gig is cancelled.',
-            style: TextStyle(color: kSub, fontSize: 12),
+          Text(
+            widget.immediate
+                ? 'No worker has been assigned yet, so this gig will be cancelled right away. Please tell us why.'
+                : 'Your request will be reviewed by an admin before the gig is cancelled.',
+            style: const TextStyle(color: kSub, fontSize: 12),
           ),
           const SizedBox(height: 16),
           TextField(

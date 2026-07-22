@@ -230,18 +230,23 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
             ? reasons.last as Map<String, dynamic>?
             : null;
         final requestedBy = lastReason?['requestedBy'] as String? ?? 'host';
+        final approvedBy = lastReason?['approvedBy'] as String?;
         final cancelledTs = gig['cancelledAt'] as Timestamp? ??
             gig['cancellationRequestedAt'] as Timestamp?;
         if (cancelledTs != null) {
           final dt = cancelledTs.toDate().toLocal();
           if (now.difference(dt) <= _kWindow) {
             final isSystemAutoCancel = requestedBy == 'system';
+            final isAutoApprovedTimeout =
+                !isSystemAutoCancel && approvedBy == 'system';
             items.add(_ActivityItem(
               type: _ActivityType.cancelled,
               title: isSystemAutoCancel ? 'Gig Auto-Cancelled' : 'Gig Cancelled',
               body: isSystemAutoCancel
                   ? 'No worker was selected for "$gigTitle" before the scheduled time'
-                  : 'Admin approved · Requested by ${requestedBy == 'worker' ? workerName : 'you'}',
+                  : isAutoApprovedTimeout
+                      ? '$workerName\'s request auto-approved after 10 min · no admin response'
+                      : 'Admin approved · Requested by ${requestedBy == 'worker' ? workerName : 'you'}',
               timestamp: dt,
               gigType: gigType,
             ));

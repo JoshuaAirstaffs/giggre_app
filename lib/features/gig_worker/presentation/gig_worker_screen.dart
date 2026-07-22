@@ -10,6 +10,7 @@ import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/worker_active_gig.dart';
+import '../../gig_host/services/quick_gig_matching_service.dart';
 import '../../auth/presentation/welcome_screen.dart';
 import '../../../screens/host/host_shell.dart';
 import '../../home/presentation/profile_tab.dart';
@@ -21,6 +22,7 @@ import 'widgets/worker_notifications_sheet.dart';
 import 'widgets/working_ui.dart';
 import 'widgets/offered_gig_offer_card.dart';
 import 'widgets/gig_assigned_popup.dart'; // exports GigAssignedDialog
+import 'widgets/pending_cancellation_card.dart';
 import '../../../widgets/active_gig_bar.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,6 +88,11 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   // not yet restored into WorkingUI (see GigWorkerScreen.restoreActiveGigOnEntry).
   Stream<ActiveGigInfo?>? _activeGigBarStream;
 
+  // ActiveGigBar hides as soon as a cancellation is requested (it no longer
+  // treats 'cancellation_requested' as active), so this drives the small
+  // PendingCancellationCard that's the worker's only feedback for that state.
+  Stream<bool>? _pendingCancellationStream;
+
   // Incoming dispatch offer (quick gig)
   GigMarkerData? _dispatchedGig;
 
@@ -128,7 +135,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _listenToProfile();
     _setOnlineStatus(true);
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) _activeGigBarStream = watchActiveWorkerGig(uid);
+    if (uid != null) {
+      _activeGigBarStream = watchActiveWorkerGig(uid);
+      _pendingCancellationStream = watchPendingCancellation(uid);
+    }
   }
 
   @override
@@ -721,6 +731,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   Navigator.of(context).maybePop();
                 }
               },
+              onCancellationRequested: () {
+                if (mounted) {
+                  setState(() => _workingUIRouteActive = false);
+                  Navigator.of(context).maybePop();
+                }
+              },
             ),
           ),
         )
@@ -737,6 +753,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     }
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
     if (currentUid == null) return;
+    if (await workerHasPendingCancellation(currentUid)) {
+      if (mounted) _showAlreadyActiveGigDialog(pendingCancellation: true);
+      return;
+    }
     if (await workerHasActiveGig(currentUid)) {
       if (mounted) _showAlreadyActiveGigDialog();
       return;
@@ -808,6 +828,18 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _cancelOfferedGig() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final gig = _activeOfferedGig;
+    if (uid != null && gig != null && gig.isMultiWorker) {
+      // Same cleanup as _cancelQuickGig/_cancelOpenGig — drop this worker's
+      // already-cancelled slot doc so it disappears from the host's list.
+      await FirebaseFirestore.instance
+          .collection('offered_gigs')
+          .doc(gig.id)
+          .collection('workers')
+          .doc(uid)
+          .delete();
+    }
     if (mounted) setState(() => _activeOfferedGig = null);
   }
 
@@ -964,6 +996,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
   Future<void> _onQuickGigStarted(GigMarkerData gig) async {
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid != null && await workerHasPendingCancellation(currentUid)) {
+      if (mounted) _showAlreadyActiveGigDialog(pendingCancellation: true);
+      return;
+    }
     if (currentUid != null && await workerHasActiveGig(currentUid)) {
       if (mounted) _showAlreadyActiveGigDialog();
       return;
@@ -984,11 +1020,41 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     // in WorkingUI), so the status is already 'cancelled' in Firestore — do not
     // overwrite it. Just clear the worker assignment and local state.
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null && _activeOpenGig != null) {
-      await FirebaseFirestore.instance
-          .collection('open_gigs')
-          .doc(_activeOpenGig!.id)
-          .update({'workerId': FieldValue.delete()});
+    final gig = _activeOpenGig;
+    if (uid != null && gig != null) {
+      if (gig.isMultiWorker) {
+        // This worker's own `workers/{uid}` slot doc already carries the
+        // admin-approved 'cancelled' status — remove it so it drops off the
+        // host's live worker list instead of lingering there forever.
+        final gigRef =
+            FirebaseFirestore.instance.collection('open_gigs').doc(gig.id);
+        await gigRef.collection('workers').doc(uid).delete();
+
+        // Free up the slot this worker vacated so the host can assign a new
+        // applicant into it — mirrors _cancelQuickGig's same guard, just
+        // without the auto backfill search (Open Gigs fill from applicants,
+        // not auto-matching). Only if the gig isn't already closed out for
+        // some other reason (host cancelled it, etc.) in the meantime.
+        await FirebaseFirestore.instance.runTransaction((tx) async {
+          final snap = await tx.get(gigRef);
+          if (!snap.exists) return;
+          final data = snap.data()!;
+          final status = data['status'] as String? ?? '';
+          if (['cancelled', 'completed', 'no_worker'].contains(status)) return;
+          final filled =
+              ((data['filledSlotCount'] as num?)?.toInt() ?? 1) - 1;
+          final newFilled = filled < 0 ? 0 : filled;
+          tx.update(gigRef, {
+            'filledSlotCount': newFilled,
+            'status': newFilled > 0 ? 'partially_filled' : 'open',
+          });
+        });
+      } else {
+        await FirebaseFirestore.instance
+            .collection('open_gigs')
+            .doc(gig.id)
+            .update({'workerId': FieldValue.delete()});
+      }
     }
     if (mounted) setState(() => _activeOpenGig = null);
   }
@@ -1000,6 +1066,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     }
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
+    if (await workerHasPendingCancellation(uid)) {
+      if (mounted) _showAlreadyActiveGigDialog(pendingCancellation: true);
+      return;
+    }
     if (await workerHasActiveGig(uid)) {
       if (mounted) _showAlreadyActiveGigDialog();
       return;
@@ -1118,12 +1188,50 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _cancelQuickGig() async {
+    // onCancel is only reached via admin-approved cancellation
+    // (_onAdminCancelled in WorkingUI).
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null && _activeQuickGig != null) {
-      await FirebaseFirestore.instance
-          .collection('quick_gigs')
-          .doc(_activeQuickGig!.id)
-          .update({'status': 'cancelled'});
+    final gig = _activeQuickGig;
+    if (uid != null && gig != null) {
+      if (gig.isMultiWorker) {
+        // This worker's own `workers/{uid}` slot doc already carries the
+        // admin-approved 'cancelled' status — remove it so it drops off the
+        // host's live worker list instead of lingering there forever. Never
+        // overwrite the shared gig doc's status here — doing so would wrongly
+        // cancel the whole gig out from under every other worker's slot.
+        final gigRef =
+            FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id);
+        await gigRef.collection('workers').doc(uid).delete();
+
+        // Free up the slot this worker vacated so the gig's fill count
+        // reflects reality, then look for a replacement — but only if the
+        // gig isn't already closed out for some other reason in the meantime.
+        await FirebaseFirestore.instance.runTransaction((tx) async {
+          final snap = await tx.get(gigRef);
+          if (!snap.exists) return;
+          final data = snap.data()!;
+          final status = data['status'] as String? ?? '';
+          if (['cancelled', 'completed', 'no_worker'].contains(status)) return;
+          final filled =
+              ((data['filledSlotCount'] as num?)?.toInt() ?? 1) - 1;
+          final newFilled = filled < 0 ? 0 : filled;
+          tx.update(gigRef, {
+            'filledSlotCount': newFilled,
+            'status': newFilled > 0 ? 'partially_filled' : 'scanning',
+          });
+        });
+
+        QuickGigMatchingService.startBackfillSearch(
+          gigId: gig.id,
+          gigLocation: GeoPoint(gig.position.latitude, gig.position.longitude),
+          cancelledWorkerId: uid,
+        );
+      } else {
+        await FirebaseFirestore.instance
+            .collection('quick_gigs')
+            .doc(gig.id)
+            .update({'status': 'cancelled'});
+      }
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'slot': 'AVAILABLE',
       });
@@ -1193,7 +1301,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     });
   }
 
-  void _showAlreadyActiveGigDialog() {
+  void _showAlreadyActiveGigDialog({bool pendingCancellation = false}) {
     if (!mounted) return;
     showDialog(
       context: context,
@@ -1215,17 +1323,21 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           ),
         ),
         title: Text(
-          'Finish Your Current Gig First',
+          pendingCancellation
+              ? 'Cancellation Still Pending'
+              : 'Finish Your Current Gig First',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: Theme.of(ctx).colorScheme.onSurface,
             fontWeight: FontWeight.bold,
           ),
         ),
-        content: const Text(
-          "You need to finish your current gig before applying to or accepting another one.",
+        content: Text(
+          pendingCancellation
+              ? "Your cancellation request hasn't been approved by the admin yet."
+              : "You need to finish your current gig before applying to or accepting another one.",
           textAlign: TextAlign.center,
-          style: TextStyle(color: kSub, fontSize: 14, height: 1.5),
+          style: const TextStyle(color: kSub, fontSize: 14, height: 1.5),
         ),
         actionsAlignment: MainAxisAlignment.center,
         actions: [
@@ -1389,6 +1501,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               gigCollection: 'quick_gigs',
               onComplete: _finishQuickGig,
               onCancel: _cancelQuickGig,
+              onCancellationRequested: () =>
+                  setState(() => _activeQuickGig = null),
             )
           : !_workingUIRouteActive && _activeOpenGig != null
           ? WorkingUI(
@@ -1396,6 +1510,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               gigCollection: 'open_gigs',
               onComplete: _finishOpenGig,
               onCancel: _cancelOpenGig,
+              onCancellationRequested: () =>
+                  setState(() => _activeOpenGig = null),
             )
           : !_workingUIRouteActive && _activeOfferedGig != null
           ? WorkingUI(
@@ -1403,6 +1519,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               gigCollection: 'offered_gigs',
               onComplete: _finishOfferedGig,
               onCancel: _cancelOfferedGig,
+              onCancellationRequested: () =>
+                  setState(() => _activeOfferedGig = null),
             )
           : StreamBuilder<ActiveGigInfo?>(
               stream: _activeGigBarStream,
@@ -1472,6 +1590,20 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                               // No leading spacer — the availability card's
                               // Transform.translate above already leaves its
                               // own ~24px reserved (unpainted) gap before this.
+
+                              // ── Cancellation pending ───────────────────────
+                              StreamBuilder<bool>(
+                                stream: _pendingCancellationStream,
+                                builder: (context, pendingSnap) {
+                                  if (pendingSnap.data != true) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  return const Padding(
+                                    padding: EdgeInsets.only(bottom: 16),
+                                    child: PendingCancellationCard(),
+                                  );
+                                },
+                              ),
 
                               // ── Earnings ───────────────────────────────────
                               EarningsSummaryCard(

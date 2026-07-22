@@ -33,7 +33,10 @@ const Duration _kWaveDuration = Duration(milliseconds: 1600);
 // ─────────────────────────────────────────────────────────────────────────────
 //  Status source of truth — same collection/field names and same status
 //  string values already used by _checkForActiveGig (gig_worker_screen.dart)
-//  and by _stepFromStatus (working_ui.dart). Do not invent new values here.
+//  and by _stepFromStatus (working_ui.dart), minus 'cancellation_requested':
+//  once the worker requests cancellation this bar should hide right away
+//  rather than wait for host/admin approval, unlike WorkingUI's own frozen
+//  step display. Do not invent new values here.
 // ─────────────────────────────────────────────────────────────────────────────
 const List<String> _activeGigStatuses = [
   'navigating',
@@ -41,7 +44,6 @@ const List<String> _activeGigStatuses = [
   'working',
   'task_complete',
   'payment',
-  'cancellation_requested',
 ];
 
 // Same 6-step sequence as working_ui.dart's _GigStep / _stepLabels.
@@ -69,7 +71,6 @@ class ActiveGigInfo {
   final String gigCollection; // 'quick_gigs' | 'open_gigs' | 'offered_gigs'
   final String title;
   final String status;
-  final String? lastProgressStatus;
   final DateTime? scheduledDate;
 
   const ActiveGigInfo({
@@ -77,19 +78,11 @@ class ActiveGigInfo {
     required this.gigCollection,
     required this.title,
     required this.status,
-    this.lastProgressStatus,
     this.scheduledDate,
   });
 
-  // While a cancellation is pending, WorkingUI freezes the visible step at
-  // whatever it was before the request (see _lastActiveStep in working_ui.dart)
-  // instead of resetting to step 1 — lastProgressStatus is the same field it
-  // persists that prior step into, so mirror that here for consistency.
-  String get _effectiveStatus =>
-      status == 'cancellation_requested' ? (lastProgressStatus ?? 'navigating') : status;
-
   int get stepIndex {
-    final idx = _stepOrder.indexOf(_effectiveStatus);
+    final idx = _stepOrder.indexOf(status);
     return idx == -1 ? 0 : idx;
   }
 
@@ -97,27 +90,30 @@ class ActiveGigInfo {
 }
 
 /// Live stream of the current user's active gig as a worker, across the three
-/// gig collections. Mirrors _checkForActiveGig's query (same where clauses,
-/// same collection priority: quick_gigs > open_gigs > offered_gigs) but as a
-/// live listener instead of a one-shot get(), since no reusable stream for
-/// this existed before.
+/// gig collections. Mirrors _checkForActiveGig's/workerHasActiveGig's query
+/// (same where clauses) but as a live listener instead of a one-shot get(),
+/// since no reusable stream for this existed before.
+///
+/// Multi-worker gigs record this worker's own status on their
+/// `{gigCollection}/{gigId}/workers/{uid}` subcollection doc instead of the
+/// top-level gig doc's `workerId`/`status` fields, so that subcollection doc
+/// (via a collection-group query) is the primary source and takes priority;
+/// the per-collection top-level queries remain as a legacy fallback for
+/// gigs posted before the `workers` subcollection existed. Multi-worker
+/// support here is scoped to quick_gigs/open_gigs only for now — see the
+/// slotSub listener below.
 Stream<ActiveGigInfo?> watchActiveWorkerGig(String uid) {
   late final StreamController<ActiveGigInfo?> controller;
   StreamSubscription? quickSub, openSub, offeredSub, slotSub;
   QueryDocumentSnapshot<Map<String, dynamic>>? quickDoc;
   QueryDocumentSnapshot<Map<String, dynamic>>? openDoc;
   QueryDocumentSnapshot<Map<String, dynamic>>? offeredDoc;
-  // Multi-worker gigs: this worker's own status lives on their
-  // `workers/{uid}` subcollection doc, not the top-level gig doc's
-  // `workerId`/`status` fields — a collection-group query across all three
-  // gig collections' `workers` subcollections finds it regardless of which
-  // gig type it's under.
   QueryDocumentSnapshot<Map<String, dynamic>>? slotDoc;
 
   void emit() {
     if (controller.isClosed) return;
     final QueryDocumentSnapshot<Map<String, dynamic>>? doc =
-        quickDoc ?? openDoc ?? offeredDoc ?? slotDoc;
+        slotDoc ?? quickDoc ?? openDoc ?? offeredDoc;
     if (doc == null) {
       controller.add(null);
       return;
@@ -127,7 +123,7 @@ Stream<ActiveGigInfo?> watchActiveWorkerGig(String uid) {
     controller.add(ActiveGigInfo(
       id: isSlotDoc ? (data['gigId'] as String? ?? doc.id) : doc.id,
       gigCollection: isSlotDoc
-          ? (data['gigCollection'] as String? ?? 'open_gigs')
+          ? (data['gigCollection'] as String? ?? 'quick_gigs')
           : (quickDoc != null
               ? 'quick_gigs'
               : openDoc != null
@@ -135,7 +131,6 @@ Stream<ActiveGigInfo?> watchActiveWorkerGig(String uid) {
                   : 'offered_gigs'),
       title: data['title'] as String? ?? 'Gig',
       status: data['status'] as String? ?? 'navigating',
-      lastProgressStatus: data['lastProgressStatus'] as String?,
       scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
     ));
   }
@@ -176,10 +171,21 @@ Stream<ActiveGigInfo?> watchActiveWorkerGig(String uid) {
           .collectionGroup('workers')
           .where('workerId', isEqualTo: uid)
           .where('status', whereIn: _activeGigStatuses)
-          .limit(1)
           .snapshots()
           .listen((snap) {
-        slotDoc = snap.docs.isNotEmpty ? snap.docs.first : null;
+        // `workers` is a collection-group query, so it spans every gig
+        // type's subcollection (offered_gigs included) — Firestore can't
+        // combine a second whereIn on gigCollection into this query, so
+        // scope it to quick/open gigs client-side instead. Multi-worker
+        // support elsewhere (offered_gigs) isn't surfaced by this bar yet.
+        slotDoc = null;
+        for (final d in snap.docs) {
+          final collection = d.data()['gigCollection'] as String?;
+          if (collection == 'quick_gigs' || collection == 'open_gigs') {
+            slotDoc = d;
+            break;
+          }
+        }
         emit();
       }, onError: (_) {});
     },
