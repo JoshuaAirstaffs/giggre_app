@@ -658,17 +658,28 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (confirm == true) {
-      Future<void>? clearing;
+      if (!mounted) return;
+      // Navigating to WelcomeScreen tears down every route above it
+      // (including AuthGate), so the app looks fully logged out
+      // immediately — if that happened before signOut() actually completed
+      // and the app got killed right then, Firebase's persisted native
+      // session survives untouched and silently restores this same account
+      // on next launch. Await the whole sign-out chain first so nothing
+      // ever looks logged out before it truly is.
+      await context.read<CurrentUserProvider>().clearUser();
+      // Throws when the current session isn't a Google sign-in (e.g. email/
+      // password) — there's nothing to disconnect, so swallow it rather than
+      // letting it abort the sign-out chain below.
+      try {
+        await GoogleSignIn().disconnect();
+      } catch (_) {}
+      await FirebaseAuth.instance.signOut();
       if (mounted) {
-        clearing = context.read<CurrentUserProvider>().clearUser();
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const WelcomeScreen()),
           (route) => false,
         );
       }
-      await clearing;
-      await GoogleSignIn().disconnect();
-      await FirebaseAuth.instance.signOut();
     }
   }
 

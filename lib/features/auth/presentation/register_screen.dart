@@ -635,8 +635,12 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       }
     } catch (e) {
       // Firestore write failed — sign out and send back to login so the user
-      // isn't left authenticated without a profile record.
-      await GoogleSignIn().disconnect();
+      // isn't left authenticated without a profile record. disconnect()
+      // throws when the session isn't a Google sign-in — swallow it so that
+      // doesn't abort the sign-out we actually need here.
+      try {
+        await GoogleSignIn().disconnect();
+      } catch (_) {}
       await FirebaseAuth.instance.signOut();
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(

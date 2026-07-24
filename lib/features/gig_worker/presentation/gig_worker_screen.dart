@@ -733,7 +733,20 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               },
               onCancellationRequested: () {
                 if (mounted) {
-                  setState(() => _workingUIRouteActive = false);
+                  // Clear the active-gig field too, not just the route flag —
+                  // otherwise it's still non-null once the route pops, and
+                  // build() immediately re-shows an inline WorkingUI for the
+                  // same gig instead of landing on the dashboard.
+                  setState(() {
+                    _workingUIRouteActive = false;
+                    if (collection == 'quick_gigs') {
+                      _activeQuickGig = null;
+                    } else if (collection == 'open_gigs') {
+                      _activeOpenGig = null;
+                    } else {
+                      _activeOfferedGig = null;
+                    }
+                  });
                   Navigator.of(context).maybePop();
                 }
               },
@@ -741,8 +754,29 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           ),
         )
         .then((_) {
-          // Reset if the route was dismissed via back gesture / hardware back button.
-          if (mounted) setState(() => _workingUIRouteActive = false);
+          // Reached only when the route was dismissed via back gesture /
+          // hardware back button — onComplete/onCancel above already pop
+          // (and already clear their _activeXGig field) for every other
+          // exit path, so this only ever fires for a bare "back" press.
+          // _activeQuickGig/_activeOpenGig/_activeOfferedGig double as the
+          // "restore this gig's WorkingUI in-place" flag read by build()
+          // below, so leaving it set here would immediately re-show
+          // WorkingUI instead of the dashboard the back press asked for —
+          // clear it so "back" actually lands on the dashboard. The gig
+          // itself isn't touched (no cancel/complete call), so it's still
+          // reachable from the dashboard's ActiveGigBar afterward.
+          if (mounted) {
+            setState(() {
+              _workingUIRouteActive = false;
+              if (collection == 'quick_gigs') {
+                _activeQuickGig = null;
+              } else if (collection == 'open_gigs') {
+                _activeOpenGig = null;
+              } else {
+                _activeOfferedGig = null;
+              }
+            });
+          }
         });
   }
 
@@ -1016,9 +1050,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _cancelOpenGig() async {
-    // onCancel is only reached via admin-approved cancellation (_onAdminCancelled
-    // in WorkingUI), so the status is already 'cancelled' in Firestore — do not
-    // overwrite it. Just clear the worker assignment and local state.
+    // onCancel is only reached via admin-approved cancellation
+    // (_onAdminCancelled in WorkingUI), so the status is already 'cancelled'
+    // in Firestore on entry here.
     final uid = FirebaseAuth.instance.currentUser?.uid;
     final gig = _activeOpenGig;
     if (uid != null && gig != null) {
@@ -1050,10 +1084,25 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           });
         });
       } else {
-        await FirebaseFirestore.instance
-            .collection('open_gigs')
-            .doc(gig.id)
-            .update({'workerId': FieldValue.delete()});
+        // Single-slot gigs have only one status field shared by both
+        // "worker's own cancellation was approved" and "host cancelled the
+        // whole gig outright" — unlike multi-worker gigs, where each has its
+        // own doc. Check who actually requested it before reopening: the
+        // host still wants this gig filled if their worker backed out, but
+        // not if the host cancelled it themselves.
+        final gigRef =
+            FirebaseFirestore.instance.collection('open_gigs').doc(gig.id);
+        final snap = await gigRef.get();
+        final reasons = snap.data()?['cancellation_reason'] as List?;
+        final requestedBy = reasons != null && reasons.isNotEmpty
+            ? ((reasons.last as Map<String, dynamic>?)?['requestedBy'] as String?)
+            : null;
+        await gigRef.update({
+          'workerId': FieldValue.delete(),
+          if (requestedBy == 'worker') 'status': 'open',
+          // else: host cancelled the whole gig — its 'cancelled' status is
+          // already the terminal write the host made; leave it as-is.
+        });
       }
     }
     if (mounted) setState(() => _activeOpenGig = null);
@@ -1227,10 +1276,41 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           cancelledWorkerId: uid,
         );
       } else {
-        await FirebaseFirestore.instance
-            .collection('quick_gigs')
-            .doc(gig.id)
-            .update({'status': 'cancelled'});
+        // Single-slot gigs have only one status field shared by both
+        // "worker's own cancellation was approved" and "host cancelled the
+        // whole gig outright" — unlike multi-worker gigs, where each has its
+        // own doc. Check who actually requested it before deciding whether
+        // to reopen the search: the host still wants this gig done if their
+        // worker backed out, but not if the host cancelled it themselves.
+        final gigRef =
+            FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id);
+        final snap = await gigRef.get();
+        final reasons = snap.data()?['cancellation_reason'] as List?;
+        final requestedBy = reasons != null && reasons.isNotEmpty
+            ? ((reasons.last as Map<String, dynamic>?)?['requestedBy'] as String?)
+            : null;
+        if (requestedBy == 'worker') {
+          // Reopen the search instead of leaving the gig permanently
+          // 'cancelled' — mirrors the multi-worker backfill above, just via
+          // the regular auto-search loop since there's only one slot.
+          // Excluding this worker (on top of whatever exclusionList already
+          // had) keeps them from being immediately re-matched to the gig
+          // they just cancelled out of.
+          await gigRef.update({
+            'status': 'scanning',
+            'assignedWorkerId': FieldValue.delete(),
+            'assignedWorkerName': FieldValue.delete(),
+            'workerId': FieldValue.delete(),
+            'searchStartedAt': FieldValue.serverTimestamp(),
+            'exclusionList': FieldValue.arrayUnion([uid]),
+          });
+          QuickGigMatchingService.startAutoSearch(
+            gigId: gig.id,
+            gigLocation: GeoPoint(gig.position.latitude, gig.position.longitude),
+          );
+        }
+        // else: host cancelled the whole gig — its 'cancelled' status is
+        // already the terminal write the host made; leave it as-is.
       }
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'slot': 'AVAILABLE',
@@ -1454,15 +1534,27 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _dispatchSub?.cancel();
     _offeredGigSub?.cancel();
     if (!mounted) return;
-    final clearing = context.read<CurrentUserProvider>().clearUser();
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const WelcomeScreen()),
-      (_) => false,
-    );
-    await WidgetsBinding.instance.endOfFrame;
-    await clearing;
-    await GoogleSignIn().disconnect();
+    // Navigating to WelcomeScreen tears down every route above it (including
+    // AuthGate), so the app looks fully logged out immediately — if that
+    // happened before signOut() actually completed and the app got killed
+    // right then, Firebase's persisted native session survives untouched
+    // and silently restores this same account on next launch. Await the
+    // whole sign-out chain first so nothing ever looks logged out before it
+    // truly is.
+    await context.read<CurrentUserProvider>().clearUser();
+    // Throws when the current session isn't a Google sign-in (e.g. email/
+    // password) — there's nothing to disconnect, so swallow it rather than
+    // letting it abort the sign-out chain below.
+    try {
+      await GoogleSignIn().disconnect();
+    } catch (_) {}
     await FirebaseAuth.instance.signOut();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+        (_) => false,
+      );
+    }
   }
 
   String _monthName(int m) {

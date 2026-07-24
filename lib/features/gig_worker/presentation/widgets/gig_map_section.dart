@@ -597,7 +597,109 @@ class _GigMapSectionState extends State<GigMapSection> {
         );
   }
 
+  static const _kFarGigThresholdKm = 50.0;
+
   Future<void> _applyToOpenGig(GigMarkerData gig) async {
+    final myLoc = _myLocation;
+    if (myLoc != null) {
+      final distKm = Geolocator.distanceBetween(
+            myLoc.latitude,
+            myLoc.longitude,
+            gig.position.latitude,
+            gig.position.longitude,
+          ) /
+          1000;
+      if (distKm >= _kFarGigThresholdKm) {
+        if (!mounted) return;
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (dCtx) {
+            final isDark = Theme.of(dCtx).brightness == Brightness.dark;
+            return AlertDialog(
+              backgroundColor: Theme.of(dCtx).cardColor,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: kAmber.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.social_distance_rounded,
+                      color: kAmber,
+                      size: 34,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'This gig is quite far from you.',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(dCtx).colorScheme.onSurface,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'It\'s about ${distKm.round()} km from your current location. Make sure you\'re able to travel there before applying.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                      height: 1.4,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(dCtx, false),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: kSub,
+                            side: BorderSide(color: Theme.of(dCtx).dividerColor),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                          ),
+                          child: const Text('Go back',
+                              style: TextStyle(fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(dCtx, true),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: kAmber,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                          ),
+                          child: const Text('Apply Anyway',
+                              style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+        if (proceed != true || !mounted) return;
+      }
+    }
     try {
       final snap = await FirebaseFirestore.instance
           .collection('open_gigs')
@@ -1380,7 +1482,6 @@ class _GigMapSectionState extends State<GigMapSection> {
                   children: [
                     Expanded(
                       child: _InfoGridCell(
-                        icon: Icons.attach_money_rounded,
                         label: 'PAY',
                         child: RichText(
                           text: TextSpan(
@@ -1410,11 +1511,18 @@ class _GigMapSectionState extends State<GigMapSection> {
                       child: _InfoGridCell(
                         icon: Icons.calendar_today_rounded,
                         label: 'SCHEDULE',
-                        value: gig.scheduledDate != null
-                            ? DateFormat(
-                                'EEE, MMM d · h:mm a',
-                              ).format(gig.scheduledDate!)
-                            : '—',
+                        child: Text(
+                          gig.scheduledDate != null
+                              ? DateFormat(
+                                  'EEE, MMM d · h:mm a',
+                                ).format(gig.scheduledDate!)
+                              : '—',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -1454,9 +1562,16 @@ class _GigMapSectionState extends State<GigMapSection> {
                       child: _InfoGridCell(
                         icon: Icons.location_on_outlined,
                         label: locationLabel,
-                        value: gig.address.isNotEmpty
-                            ? dedupAddress(gig.address)
-                            : '—',
+                        child: Text(
+                          gig.address.isNotEmpty
+                              ? dedupAddress(gig.address)
+                              : '—',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -3290,8 +3405,6 @@ class _GigListCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     metaParts.isNotEmpty ? metaParts.join(' · ') : '—',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: kSub, fontSize: 10.5),
                   ),
                 ),
@@ -3333,12 +3446,12 @@ class _LegendDot extends StatelessWidget {
 //  Gig detail sheet — 2x2 info grid cell (icon + micro-label + value)
 // ─────────────────────────────────────────────────────────────────────────────
 class _InfoGridCell extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
   final String label;
   final String? value;
   final Widget? child;
   const _InfoGridCell({
-    required this.icon,
+    this.icon,
     required this.label,
     this.value,
     this.child,
@@ -3350,17 +3463,19 @@ class _InfoGridCell extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: _neutralSurface(isDark),
-            borderRadius: BorderRadius.circular(9),
+        if (icon != null) ...[
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: _neutralSurface(isDark),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 15, color: kSub),
           ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 15, color: kSub),
-        ),
-        const SizedBox(width: 8),
+          const SizedBox(width: 8),
+        ],
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

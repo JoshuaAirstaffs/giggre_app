@@ -603,9 +603,9 @@ export const checkExpiredGigSchedules = onSchedule(
 // A worker's cancellation request (WorkingUI._showCancelReasonDialog) sits at
 // status:'cancellation_requested' awaiting admin review. Leaving the worker
 // stuck mid-gig indefinitely if no admin ever acts isn't acceptable, so
-// auto-approve it once it's been sitting for 10 minutes untouched. Host-
+// auto-approve it once it's been sitting for 5 minutes untouched. Host-
 // initiated requests are left alone — only the worker side gets this timeout.
-const CANCELLATION_AUTO_APPROVE_MS = 10 * 60 * 1000;
+const CANCELLATION_AUTO_APPROVE_MS = 5 * 60 * 1000;
 
 // Re-reads the doc inside a transaction (rather than trusting the query
 // snapshot) so a human admin approving/rejecting in the same moment always
@@ -735,7 +735,7 @@ export const autoApproveStaleWorkerCancellations = onSchedule(
 // {collection}/{gigId}/workers/{workerId} (see WorkerSlotModel) — WorkingUI
 // listens to that doc, not the parent gig doc. So when the host cancels the
 // gig (approved either immediately — no worker yet — or by an admin/the
-// 10-minute worker-timeout above) and the parent doc's status lands on
+// 5-minute worker-timeout above) and the parent doc's status lands on
 // 'cancelled', already-assigned workers would otherwise never find out and
 // keep working a dead gig. Mirror the same status/reason onto every slot
 // that's still active so each worker's own listener picks it up. This must

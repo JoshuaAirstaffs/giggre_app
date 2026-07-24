@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
@@ -34,11 +37,58 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
   Timer? _timer;
   int _seconds = _defaultSeconds;
   int _total = _defaultSeconds;
+  double? _distanceMeters;
 
   @override
   void initState() {
     super.initState();
     _loadConfigAndStart();
+    _loadDistance();
+  }
+
+  Future<void> _loadDistance() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return;
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _distanceMeters = Geolocator.distanceBetween(
+          pos.latitude,
+          pos.longitude,
+          widget.gig.position.latitude,
+          widget.gig.position.longitude,
+        );
+      });
+    } catch (_) {
+      // distance stays hidden
+    }
+  }
+
+  String _fmtDistance(double meters) {
+    if (meters < 1000) return '${meters.round()} m away';
+    return '${(meters / 1000).toStringAsFixed(1)} km away';
+  }
+
+  Future<void> _openInGoogleMaps() async {
+    final dest = widget.gig.position;
+    final uri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1'
+      '&query=${dest.latitude},${dest.longitude}',
+    );
+    await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
   }
 
   Future<void> _loadConfigAndStart() async {
@@ -49,7 +99,7 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
           .get();
       final reviewWindow =
           (doc.data()?['review_window_seconds'] as num?)?.toInt() ??
-              _defaultSeconds;
+          _defaultSeconds;
       if (mounted) {
         setState(() {
           _seconds = reviewWindow;
@@ -90,8 +140,8 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
     final timerColor = _seconds > (_total * 0.66).round()
         ? green
         : _seconds > (_total * 0.33).round()
-            ? kAmber
-            : Colors.redAccent;
+        ? kAmber
+        : Colors.redAccent;
 
     return Container(
       margin: const EdgeInsets.all(12),
@@ -120,8 +170,11 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                   color: kAmber.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.flash_on_rounded,
-                    color: kAmber, size: 22),
+                child: const Icon(
+                  Icons.flash_on_rounded,
+                  color: kAmber,
+                  size: 22,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -131,17 +184,19 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                     const Text(
                       'Quick Gig Offer!',
                       style: TextStyle(
-                          color: kAmber,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5),
+                        color: kAmber,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                      ),
                     ),
                     Text(
                       widget.gig.title,
                       style: TextStyle(
-                          color: onSurface,
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold),
+                        color: onSurface,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -160,9 +215,10 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                   child: Text(
                     '$_seconds',
                     style: TextStyle(
-                        color: timerColor,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold),
+                      color: timerColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
@@ -180,13 +236,17 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                 style: const TextStyle(color: kSub, fontSize: 12),
               ),
               const SizedBox(width: 16),
-              const Icon(Icons.attach_money_rounded, color: kAmber, size: 14),
+              // const Icon(Icons.attach_money_rounded, color: kAmber, size: 14),
               Text(
-                CurrencyFormatter.format(widget.gig.budget, widget.gig.currencyCode),
+                CurrencyFormatter.format(
+                  widget.gig.budget,
+                  widget.gig.currencyCode,
+                ),
                 style: const TextStyle(
-                    color: kAmber,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold),
+                  color: kAmber,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               if (widget.gig.isMultiWorker) ...[
                 const SizedBox(width: 16),
@@ -199,9 +259,26 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
               ],
             ],
           ),
+          if (widget.gig.scheduledDate != null) ...[
+            const SizedBox(height: 4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.schedule_rounded, color: kSub, size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    DateFormat('EEE, h:mm a').format(widget.gig.scheduledDate!),
+                    style: const TextStyle(color: kSub, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (widget.gig.address.isNotEmpty) ...[
             const SizedBox(height: 4),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Icon(Icons.location_on_outlined, color: kSub, size: 14),
                 const SizedBox(width: 6),
@@ -209,14 +286,46 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                   child: Text(
                     widget.gig.address,
                     style: const TextStyle(color: kSub, fontSize: 12),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
           ],
-          const SizedBox(height: 14),
+          if (_distanceMeters != null) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(
+                  Icons.social_distance_outlined,
+                  color: kSub,
+                  size: 14,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _fmtDistance(_distanceMeters!),
+                  style: const TextStyle(color: kSub, fontSize: 12),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: _openInGoogleMaps,
+              style: TextButton.styleFrom(
+                foregroundColor: kAmber,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                alignment: Alignment.centerLeft,
+              ),
+              icon: const Icon(Icons.map_outlined, size: 16),
+              label: const Text(
+                'View in Google Maps',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
           Row(
             children: [
               Expanded(
@@ -226,12 +335,14 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                     foregroundColor: kSub,
                     side: BorderSide(color: divider),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Decline',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  child: const Text(
+                    'Decline',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -244,12 +355,14 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Accept Gig',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'Accept Gig',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             ],

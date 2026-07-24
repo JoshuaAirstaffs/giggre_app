@@ -230,23 +230,24 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
             ? reasons.last as Map<String, dynamic>?
             : null;
         final requestedBy = lastReason?['requestedBy'] as String? ?? 'host';
-        final approvedBy = lastReason?['approvedBy'] as String?;
         final cancelledTs = gig['cancelledAt'] as Timestamp? ??
             gig['cancellationRequestedAt'] as Timestamp?;
         if (cancelledTs != null) {
           final dt = cancelledTs.toDate().toLocal();
           if (now.difference(dt) <= _kWindow) {
             final isSystemAutoCancel = requestedBy == 'system';
-            final isAutoApprovedTimeout =
-                !isSystemAutoCancel && approvedBy == 'system';
+            final isWorkerCancelled = requestedBy == 'worker';
             items.add(_ActivityItem(
               type: _ActivityType.cancelled,
               title: isSystemAutoCancel ? 'Gig Auto-Cancelled' : 'Gig Cancelled',
               body: isSystemAutoCancel
                   ? 'No worker was selected for "$gigTitle" before the scheduled time'
-                  : isAutoApprovedTimeout
-                      ? '$workerName\'s request auto-approved after 10 min · no admin response'
-                      : 'Admin approved · Requested by ${requestedBy == 'worker' ? workerName : 'you'}',
+                  // Same message whether admin approved it or it timed out into
+                  // auto-approval — the host only cares that the worker is gone,
+                  // not which path the approval took.
+                  : isWorkerCancelled
+                      ? '$workerName cancelled their application from "$gigTitle"'
+                      : 'Admin approved · Requested by you',
               timestamp: dt,
               gigType: gigType,
             ));

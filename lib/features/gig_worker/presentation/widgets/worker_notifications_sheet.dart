@@ -244,7 +244,7 @@ class _WorkerNotificationsSheetState
               body: isSystemAutoCancel
                   ? 'No one accepted "$gigTitle" before the scheduled time'
                   : isAutoApprovedTimeout
-                      ? 'Your request was auto-approved after 10 min · no admin response'
+                      ? 'Your request was auto-approved after 5 min · no admin response'
                       : 'Admin approved · Requested by ${requestedBy == 'host' ? hostName : 'you'}',
               timestamp: dt,
               gigType: gigType,

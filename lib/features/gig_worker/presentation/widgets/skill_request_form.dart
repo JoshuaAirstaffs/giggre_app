@@ -96,10 +96,12 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
     }
     _skillId = widget.initialSkillId;
     _skillDocId = widget.initialSkillDocId;
+    _yearsCtrl.addListener(_updateLevelFromYears);
   }
 
   @override
   void dispose() {
+    _yearsCtrl.removeListener(_updateLevelFromYears);
     _skillNameCtrl.dispose();
     _reasonCtrl.dispose();
     _yearsCtrl.dispose();
@@ -108,6 +110,23 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
     _suggestedReqCtrl.dispose();
     _contactCtrl.dispose();
     super.dispose();
+  }
+
+  void _updateLevelFromYears() {
+    final years = int.tryParse(_yearsCtrl.text.trim());
+    String? newLevel;
+    if (years != null) {
+      if (years >= 6) {
+        newLevel = 'Expert';
+      } else if (years >= 3) {
+        newLevel = 'Intermediate';
+      } else {
+        newLevel = 'Beginner';
+      }
+    }
+    if (newLevel != _level) {
+      setState(() => _level = newLevel);
+    }
   }
 
   Future<void> _pickFiles() async {
@@ -360,19 +379,9 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
                 const SizedBox(height: 20),
               ],
 
-              // ── 4. Experience Level ───────────────────────────
+              // ── 4. Years/Months of Experience ─────────────────
               _SectionHeader(
-                  number: '4', title: 'Experience Level', required: true),
-              const SizedBox(height: 8),
-              _LevelSelector(
-                selected: _level,
-                onChanged: (v) => setState(() => _level = v),
-              ),
-              const SizedBox(height: 20),
-
-              // ── 5. Years/Months of Experience ─────────────────
-              _SectionHeader(
-                  number: '5',
+                  number: '4',
                                     title: 'Years or Months of Experience',
                   required: true),
               const SizedBox(height: 8),
@@ -403,6 +412,17 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
                   ),
                 ],
               ),
+              const SizedBox(height: 20),
+
+              // ── 5. Experience Level (auto-determined) ─────────
+              _SectionHeader(
+                  number: '5',
+                  title: 'Experience Level',
+                  required: true,
+                  subtitle:
+                      'Automatically determined from your years of experience'),
+              const SizedBox(height: 8),
+              _LevelSelector(selected: _level),
               const SizedBox(height: 20),
 
               // ── 6. Proof Documents ────────────────────────────
@@ -756,9 +776,8 @@ class _DropdownField<T> extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _LevelSelector extends StatelessWidget {
   final String? selected;
-  final ValueChanged<String?> onChanged;
 
-  const _LevelSelector({required this.selected, required this.onChanged});
+  const _LevelSelector({required this.selected});
 
   @override
   Widget build(BuildContext context) {
@@ -766,9 +785,7 @@ class _LevelSelector extends StatelessWidget {
       children: _kLevels.map((level) {
         final isSelected = selected == level;
         return Expanded(
-          child: GestureDetector(
-            onTap: () => onChanged(level),
-            child: AnimatedContainer(
+          child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               margin: EdgeInsets.only(
                   right: level != _kLevels.last ? 8 : 0),
@@ -793,7 +810,6 @@ class _LevelSelector extends StatelessWidget {
                             ? FontWeight.bold
                             : FontWeight.normal)),
               ),
-            ),
           ),
         );
       }).toList(),

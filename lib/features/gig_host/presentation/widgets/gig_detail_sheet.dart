@@ -106,8 +106,12 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ? reasons.last as Map<String, dynamic>?
                 : null;
             final isSystemAutoCancel = lastReason?['requestedBy'] == 'system';
-            final isAutoApprovedTimeout =
-                !isSystemAutoCancel && lastReason?['approvedBy'] == 'system';
+            final isWorkerCancelled = lastReason?['requestedBy'] == 'worker';
+            final workerName =
+                data['assignedWorkerName'] as String? ??
+                data['workerName'] as String? ??
+                'Worker';
+            final title = data['title'] as String? ?? 'Gig';
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
@@ -115,8 +119,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   content: Text(
                     isSystemAutoCancel
                         ? 'This gig was auto-cancelled — no worker was selected before the scheduled time.'
-                        : isAutoApprovedTimeout
-                        ? "The worker's cancellation request was auto-approved after 10 minutes without admin review."
+                        // Same message whether admin approved it or it timed
+                        // out into auto-approval — only who requested it matters.
+                        : isWorkerCancelled
+                        ? '$workerName cancelled their application from "$title"'
                         : 'Gig cancellation has been approved by admin.',
                   ),
                   backgroundColor: Colors.redAccent,
@@ -1119,7 +1125,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     body: hostCopy.body,
                     arrivedPromptVisible: false,
                     onConfirmArrival: () {},
-                    isCancelPending: status == 'cancellation_requested',
+                    isCancelPending: false,
                     showStartGig: false,
                     onStartGig: () {},
                     showGigComplete: isTaskComplete,
@@ -2753,56 +2759,100 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
     Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (ctx) => Scaffold(
-          backgroundColor: Colors.black,
-          body: SafeArea(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              // Own live stream so the full-screen map keeps tracking every
-              // worker while open, instead of a one-time snapshot from the
-              // embedded card.
-              stream: workersRef(widget.gigCollection, widget.gigId)
-                  .snapshots(),
-              builder: (context, snap) {
-                final liveWorkers = (snap.data?.docs ?? const [])
-                    .map((d) => WorkerSlotModel.fromDoc(d))
-                    .where(
-                      (w) =>
-                          w.workerLocation != null &&
-                          _workerIsTrackable(w.status),
-                    )
-                    .toList();
-                final effectiveSelectedId =
-                    liveWorkers.any((w) => w.workerId == _selectedWorkerId)
-                    ? _selectedWorkerId
-                    : null;
-                return Stack(
-                  children: [
-                    Positioned.fill(
-                      child: _MultiWorkerTrackingMap(
-                        gigLocation: gigLocation,
-                        workers: liveWorkers,
-                        selectedWorkerId: effectiveSelectedId,
-                        onWorkerTap: (id) => setState(
-                          () => _selectedWorkerId = _selectedWorkerId == id
-                              ? null
-                              : id,
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      top: 12,
-                      left: 12,
-                      child: _MapRoundButton(
-                        icon: Icons.close_rounded,
-                        onTap: () => Navigator.of(ctx).pop(),
-                      ),
-                    ),
-                  ],
-                );
-              },
+        // Local, ephemeral UI-only state (selected worker + whether the
+        // avatar list is shown) — this closure runs once per route push, so
+        // it behaves like instance state for the lifetime of this
+        // full-screen view without needing a dedicated StatefulWidget.
+        // Selection is deliberately its own local variable rather than
+        // reusing _selectedWorkerId: StatefulBuilder's setState only
+        // rebuilds this pushed route, not the embedded card behind it (a
+        // separate route in the Navigator stack), so writing to the outer
+        // field via the outer setState never repainted anything here —
+        // that was the "tapping does nothing" bug.
+        builder: (ctx) {
+          bool workerListVisible = true;
+          String? selectedWorkerId = _selectedWorkerId;
+          return Scaffold(
+            backgroundColor: Colors.black,
+            body: SafeArea(
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                // Own live stream so the full-screen map keeps tracking every
+                // worker while open, instead of a one-time snapshot from the
+                // embedded card.
+                stream: workersRef(widget.gigCollection, widget.gigId)
+                    .snapshots(),
+                builder: (context, snap) {
+                  final liveWorkers = (snap.data?.docs ?? const [])
+                      .map((d) => WorkerSlotModel.fromDoc(d))
+                      .where(
+                        (w) =>
+                            w.workerLocation != null &&
+                            _workerIsTrackable(w.status),
+                      )
+                      .toList();
+                  return StatefulBuilder(
+                    builder: (context, setLocalState) {
+                      final effectiveSelectedId =
+                          liveWorkers.any(
+                            (w) => w.workerId == selectedWorkerId,
+                          )
+                          ? selectedWorkerId
+                          : null;
+                      void selectWorker(String id) => setLocalState(
+                        () => selectedWorkerId = selectedWorkerId == id
+                            ? null
+                            : id,
+                      );
+                      return Stack(
+                        children: [
+                          Positioned.fill(
+                            child: _MultiWorkerTrackingMap(
+                              gigLocation: gigLocation,
+                              workers: liveWorkers,
+                              selectedWorkerId: effectiveSelectedId,
+                              onWorkerTap: selectWorker,
+                            ),
+                          ),
+                          Positioned(
+                            top: 12,
+                            left: 12,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _MapRoundButton(
+                                  icon: Icons.close_rounded,
+                                  onTap: () => Navigator.of(ctx).pop(),
+                                ),
+                                const SizedBox(height: 10),
+                                _MapRoundButton(
+                                  icon: workerListVisible
+                                      ? Icons.groups_rounded
+                                      : Icons.groups_outlined,
+                                  onTap: () => setLocalState(
+                                    () => workerListVisible =
+                                        !workerListVisible,
+                                  ),
+                                ),
+                                if (workerListVisible) ...[
+                                  const SizedBox(height: 10),
+                                  _WorkerAvatarColumn(
+                                    workers: liveWorkers,
+                                    selectedWorkerId: effectiveSelectedId,
+                                    onTap: selectWorker,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -2963,6 +3013,103 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
           },
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Worker avatar column — the full-screen tracking map's toggleable worker
+//  list, stacked vertically under the toggle button in the top-left corner.
+//  Deliberately just avatars (no name/rate/status), since the full detail
+//  already lives in the card list below the embedded map; tapping an avatar
+//  here selects that worker exactly like tapping their marker or card does,
+//  drawing their route on the map.
+// ─────────────────────────────────────────────────────────────────────────────
+class _WorkerAvatarColumn extends StatefulWidget {
+  final List<WorkerSlotModel> workers;
+  final String? selectedWorkerId;
+  final ValueChanged<String> onTap;
+
+  const _WorkerAvatarColumn({
+    required this.workers,
+    required this.selectedWorkerId,
+    required this.onTap,
+  });
+
+  @override
+  State<_WorkerAvatarColumn> createState() => _WorkerAvatarColumnState();
+}
+
+class _WorkerAvatarColumnState extends State<_WorkerAvatarColumn> {
+  final Map<String, String?> _photoUrls = {};
+  final Set<String> _loading = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _ensurePhotos();
+  }
+
+  @override
+  void didUpdateWidget(_WorkerAvatarColumn oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _ensurePhotos();
+  }
+
+  void _ensurePhotos() {
+    for (final w in widget.workers) {
+      if (_photoUrls.containsKey(w.workerId) ||
+          _loading.contains(w.workerId)) {
+        continue;
+      }
+      _loading.add(w.workerId);
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(w.workerId)
+          .get()
+          .then((snap) {
+            _loading.remove(w.workerId);
+            if (!mounted) return;
+            setState(
+              () => _photoUrls[w.workerId] = snap.data()?['photoUrl'] as String?,
+            );
+          })
+          .catchError((_) {
+            _loading.remove(w.workerId);
+          });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.workers.isEmpty) return const SizedBox.shrink();
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 260),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final w in widget.workers)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: GestureDetector(
+                  onTap: () => widget.onTap(w.workerId),
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: _WorkerPinAvatar(
+                      photoUrl: _photoUrls[w.workerId],
+                      name: w.workerName,
+                      ringColor: w.workerId == widget.selectedWorkerId
+                          ? kBlue
+                          : Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
