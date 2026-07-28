@@ -417,9 +417,8 @@ class _WorkingUIState extends State<WorkingUI> {
   // ── Cancel gig — show reason form, save to Firestore, await admin review ──
   Future<void> _showCancelReasonDialog() async {
     final controller = TextEditingController();
-    bool submitted = false;
     try {
-      submitted = await showDialog<bool>(
+      final submitted = await showDialog<bool>(
             context: context,
             barrierDismissible: false,
             builder: (_) => _CancelReasonDialog(controller: controller),
@@ -440,15 +439,29 @@ class _WorkingUIState extends State<WorkingUI> {
         'cancellationRequestedAt': FieldValue.serverTimestamp(),
         'status': 'cancellation_requested',
       });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Cancellation request submitted. Pending admin review.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      // Redirect to the dashboard and close this screen right away — the
+      // worker doesn't wait around here for admin approval; onCancel (which
+      // tears the gig down for real) only fires once that approval lands.
+      widget.onCancellationRequested?.call();
+    } catch (e) {
+      // Previously had no catch: a failed write (permission, network, a bad
+      // multi-worker slot ref) surfaced nothing to the user — no error, no
+      // redirect — leaving the screen looking silently stuck.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Cancellation request submitted. Pending admin review.'),
-            backgroundColor: Colors.orange,
+          SnackBar(
+            content: Text('Failed to submit cancellation request: $e'),
+            backgroundColor: Colors.redAccent,
           ),
         );
-        widget.onCancellationRequested?.call();
       }
     } finally {
       controller.dispose();

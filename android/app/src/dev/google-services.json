@@ -108,6 +108,58 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:770115931871:android:b96422dff226fbfa1de36a",
+        "android_client_info": {
+          "package_name": "com.giggre.mobile.dev"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "770115931871-46bnll7krv9v0eanooov776g86cio38f.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.giggre.mobile.dev",
+            "certificate_hash": "57d208e3f23faa4414e42018855877e04a2253fa"
+          }
+        },
+        {
+          "client_id": "770115931871-oh7qi3udid1ue8l3dbtcbkmqdtaodp0k.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.giggre.mobile.dev",
+            "certificate_hash": "8ebb35c6c49b28dd4a8d7483673c2d9fc47707ab"
+          }
+        },
+        {
+          "client_id": "770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyACcH5L5HN3OiUX9Klm0VDc3RiOTPWznw0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "770115931871-42as1vtljgj07rurcakgkv9c5i8qgfco.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.flutterapp"
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

@@ -14,6 +14,30 @@
       },
       "oauth_client": [
         {
+          "client_id": "935744152330-6eua0u9uis3ggqrhin88i1a9n7oe5cjs.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.giggre.mobile",
+            "certificate_hash": "57d208e3f23faa4414e42018855877e04a2253fa"
+          }
+        },
+        {
+          "client_id": "935744152330-frdufvo19ps2vocdj2bmk8auhemgb65s.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.giggre.mobile",
+            "certificate_hash": "8ebb35c6c49b28dd4a8d7483673c2d9fc47707ab"
+          }
+        },
+        {
+          "client_id": "935744152330-icj1689evrhare60lhh73d8k4fbk419q.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.giggre.mobile",
+            "certificate_hash": "3852e3732e8192cc316dbce0b587f14f0835e568"
+          }
+        },
+        {
           "client_id": "935744152330-8d6f8pjehgouqmrnrnj0k2vlf0rutclj.apps.googleusercontent.com",
           "client_type": 3
         }

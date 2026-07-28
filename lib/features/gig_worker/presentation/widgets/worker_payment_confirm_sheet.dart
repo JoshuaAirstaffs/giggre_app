@@ -128,9 +128,15 @@ class _WorkerPaymentConfirmSheetState
       final currentWeek = EarningsService.currentWeekLabel();
 
       await db.runTransaction((tx) async {
-        // Re-read inside the transaction for the idempotency guard.
+        // Firestore transactions require every read before any write in the
+        // same transaction — gather all reads first (idempotency guard, and
+        // the gig doc for multi-worker slot bookkeeping) before issuing any
+        // tx.update. incrementInTransaction's own read (workerRef) also
+        // happens here, still ahead of every write below.
         final targetSnap = await tx.get(targetRef);
         if (targetSnap.data()?['status'] == 'completed') return;
+
+        final gigSnap = slotId != null ? await tx.get(gigRef) : null;
 
         await EarningsService.incrementInTransaction(
           tx: tx,
@@ -147,8 +153,7 @@ class _WorkerPaymentConfirmSheetState
           'paymentConfirmedBy': 'worker',
         });
 
-        if (slotId != null) {
-          final gigSnap = await tx.get(gigRef);
+        if (gigSnap != null) {
           final gigData = gigSnap.data() ?? {};
           final slots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
           final completed = ((gigData['slotsCompleted'] as num?)?.toInt() ?? 0) + 1;

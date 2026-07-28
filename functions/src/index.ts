@@ -15,11 +15,29 @@ admin.initializeApp();
 // triggers don't take a cross-region network hop to reach it.
 setGlobalOptions({ region: "asia-east2", maxInstances: 10 });
 
+// Every user doc in the dev Firebase project (simpleproject-8ff7a) belongs to
+// a closed-testing tester by definition, so tester-broadcast tooling below
+// needs no per-user filtering — it just no-ops outside that project.
+const DEV_PROJECT_ID = "simpleproject-8ff7a";
+
+function isDevProject(): boolean {
+  const currentProject =
+    process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
+  return currentProject === DEV_PROJECT_ID;
+}
+
 // Shared secret checked against the x-release-secret header on
 // publishVersionAnnouncement, so only trusted deploy tooling can trigger a
 // tester-wide broadcast. Set via:
 //   firebase functions:secrets:set RELEASE_ANNOUNCE_SECRET --project dev
-const releaseAnnounceSecret = defineSecret("RELEASE_ANNOUNCE_SECRET");
+// Only defined for the dev project — defineSecret() registers the param with
+// the deploy-time discovery step regardless of whether any exported function
+// ends up referencing it, so calling it unconditionally would make every
+// prod deploy require RELEASE_ANNOUNCE_SECRET to exist in prod's Secret
+// Manager even though publishVersionAnnouncement itself never deploys there.
+const releaseAnnounceSecret = isDevProject()
+  ? defineSecret("RELEASE_ANNOUNCE_SECRET")
+  : undefined;
 
 // ── Chat messages ───────────────────────────────────────────────────────────
 // Mirrors the participant/support-room resolution the client used to do in
@@ -607,9 +625,31 @@ export const checkExpiredGigSchedules = onSchedule(
 // initiated requests are left alone — only the worker side gets this timeout.
 const CANCELLATION_AUTO_APPROVE_MS = 5 * 60 * 1000;
 
+// The gig status a multi-worker gig should fall back to once a slot empties
+// out and isn't replaced — mirrors the client's _cancelQuickGig/_cancelOpenGig
+// (gig_worker_screen.dart) "still open for business" status per collection.
+function emptyStatusForCollection(collection: string): string {
+  switch (collection) {
+    case "open_gigs":
+      return "open";
+    case "offered_gigs":
+      return "offered";
+    default:
+      return "scanning"; // quick_gigs
+  }
+}
+
 // Re-reads the doc inside a transaction (rather than trusting the query
 // snapshot) so a human admin approving/rejecting in the same moment always
 // wins over the timeout — returns whether this call actually cancelled it.
+//
+// Cancelling a slot must also free it up (decrement filledSlotCount / reopen
+// the single-slot gig for search) the same way the client's
+// _cancelQuickGig/_cancelOpenGig/_cancelOfferedGig (gig_worker_screen.dart)
+// do — those only run if the cancelling worker's own device is around to
+// react to the 'cancelled' write, so this auto-approve path (which fires
+// from a Cloud Scheduler job, with nobody's device guaranteed to be open)
+// has to do that bookkeeping itself instead of just flipping the status.
 async function autoApproveIfStaleWorkerCancellation(
   ref: admin.firestore.DocumentReference
 ): Promise<boolean> {
@@ -636,12 +676,82 @@ async function autoApproveIfStaleWorkerCancellation(
       return false;
     }
 
+    // Multi-worker gigs track each worker's progress on its own
+    // {collection}/{gigId}/workers/{workerId} doc (see WorkerSlotModel) — the
+    // parent gig doc only holds the coarse filledSlotCount aggregate. All
+    // transaction reads must precede writes, so grab the parent up front.
+    const isSlotDoc = ref.parent.id === "workers";
+    const gigRef = isSlotDoc ? ref.parent.parent : null;
+    const gigSnap = gigRef ? await tx.get(gigRef) : null;
+
     const updatedReasons = [...reasons];
     updatedReasons[lastIndex] = {
       ...lastReason,
       approved: true,
       approvedBy: "system",
     };
+
+    if (isSlotDoc && gigRef) {
+      const gigData = gigSnap?.data();
+      if (gigData) {
+        const gigStatus = (gigData.status as string) ?? "";
+        if (!["cancelled", "completed", "no_worker"].includes(gigStatus)) {
+          const filled =
+            ((gigData.filledSlotCount as number | undefined) ?? 1) - 1;
+          const newFilled = filled < 0 ? 0 : filled;
+          const gigCollection =
+            (data.gigCollection as string) || gigRef.parent.id;
+          tx.update(gigRef, {
+            filledSlotCount: newFilled,
+            status:
+              newFilled > 0
+                ? "partially_filled"
+                : emptyStatusForCollection(gigCollection),
+            exclusionList: admin.firestore.FieldValue.arrayUnion(ref.id),
+          });
+        }
+      }
+      // This worker's own slot doc has served its purpose — delete it so it
+      // drops off the host's live worker list, same cleanup the client does
+      // in _cancelQuickGig/_cancelOpenGig/_cancelOfferedGig.
+      tx.delete(ref);
+      return true;
+    }
+
+    // Single-worker gig doc. requestedBy === "worker" is already guaranteed
+    // above, so (mirroring the client's _cancelQuickGig/_cancelOpenGig)
+    // reopen the gig for search instead of leaving it permanently cancelled.
+    const collection = ref.parent.id;
+    if (collection === "quick_gigs") {
+      const workerId =
+        (data.assignedWorkerId as string | undefined) ??
+        (data.workerId as string | undefined);
+      tx.update(ref, {
+        status: "scanning",
+        assignedWorkerId: admin.firestore.FieldValue.delete(),
+        assignedWorkerName: admin.firestore.FieldValue.delete(),
+        workerId: admin.firestore.FieldValue.delete(),
+        searchStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...(workerId
+          ? { exclusionList: admin.firestore.FieldValue.arrayUnion(workerId) }
+          : {}),
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        cancellation_reason: updatedReasons,
+      });
+      return true;
+    }
+    if (collection === "open_gigs") {
+      tx.update(ref, {
+        workerId: admin.firestore.FieldValue.delete(),
+        status: "open",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        cancellation_reason: updatedReasons,
+      });
+      return true;
+    }
+
+    // offered_gigs (single-worker) — the client has no equivalent reopen
+    // logic for this case either, so just mark it cancelled as before.
     tx.update(ref, {
       status: "cancelled",
       cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -818,68 +928,153 @@ export const onOfferedGigCancelledCascade =
   makeGigCancellationCascadeTrigger("offered_gigs");
 
 // ── Tester broadcasts (dev/closed-testing project only) ────────────────────
-// Every user doc in the dev Firebase project (simpleproject-8ff7a) belongs to
-// a closed-testing tester by definition, so broadcasts need no per-user
-// filtering. Both functions below no-op if this codebase is ever deployed to
-// the prod project instead.
-const DEV_PROJECT_ID = "simpleproject-8ff7a";
-
-function isDevProject(): boolean {
-  const currentProject =
-    process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
-  return currentProject === DEV_PROJECT_ID;
-}
-
-// Fires at 7am, 11am, and 6pm Asia/Manila daily.
-export const sendDailyTestReminder = onSchedule(
-  { schedule: "0 7,11,18 * * *", timeZone: "Asia/Manila" },
-  async () => {
-    if (!isDevProject()) return;
-    await broadcastToAllUsers({
-      title: "Time to Test!",
-      body: "Time to test, testers!!! Open Giggre and check out the latest build.",
-      channelId: "tester_reminder_v3",
-      data: { type: "tester_reminder" },
-    });
-  }
-);
+// Fires at 7am, 11am, and 6pm Asia/Manila daily. Gated at export time (not
+// just inside the handler) so this scheduled function never gets created as
+// a resource outside the dev/closed-testing project in the first place.
+export const sendDailyTestReminder = isDevProject()
+  ? onSchedule(
+      { schedule: "0 7,11,18 * * *", timeZone: "Asia/Manila" },
+      async () => {
+        await broadcastToAllUsers({
+          title: "Time to Test!",
+          body: "Time to test, testers!!! Open Giggre and check out the latest build.",
+          channelId: "tester_reminder_v3",
+          data: { type: "tester_reminder" },
+        });
+      }
+    )
+  : undefined;
 
 // Called manually (via curl) right after a new dev build is published —
 // see functions/README.md for the exact command. Not automatic: it doesn't
 // poll the Play Developer API, it just needs a nudge once you've uploaded
-// the new AAB/APK to the closed-testing track.
-export const publishVersionAnnouncement = onRequest(
-  { secrets: [releaseAnnounceSecret] },
-  async (req, res) => {
-    if (!isDevProject()) {
-      res.status(404).send("Not found");
-      return;
-    }
-    if (req.method !== "POST") {
-      res.status(405).send("Method not allowed");
-      return;
-    }
-    if (req.get("x-release-secret") !== releaseAnnounceSecret.value()) {
-      res.status(401).send("Unauthorized");
-      return;
+// the new AAB/APK to the closed-testing track. Gated at export time (like
+// sendDailyTestReminder above) so it never gets created outside dev — it
+// also skips needing RELEASE_ANNOUNCE_SECRET provisioned in prod's Secret
+// Manager, which it would otherwise require just to deploy.
+export const publishVersionAnnouncement = releaseAnnounceSecret
+  ? onRequest({ secrets: [releaseAnnounceSecret] }, async (req, res) => {
+      if (!isDevProject()) {
+        res.status(404).send("Not found");
+        return;
+      }
+      if (req.method !== "POST") {
+        res.status(405).send("Method not allowed");
+        return;
+      }
+      if (req.get("x-release-secret") !== releaseAnnounceSecret.value()) {
+        res.status(401).send("Unauthorized");
+        return;
+      }
+
+      const version = req.body?.version as string | undefined;
+      if (!version) {
+        res.status(400).send("Missing 'version' in request body");
+        return;
+      }
+      const notes = req.body?.notes as string | undefined;
+
+      await broadcastToAllUsers({
+        title: "New Test Build Available",
+        body: notes
+          ? `Version ${version} is now available: ${notes}`
+          : `Version ${version} is now available. Update the app to get it.`,
+        channelId: "tester_reminder_v3",
+        data: { type: "new_version", version },
+      });
+
+      res.status(200).json({ ok: true });
+    })
+  : undefined;
+
+// ── Referral counters (verification status change) ─────────────────────────
+// Keeps a referrer's referrals_list mirror + aggregate counters in sync with
+// the referred user's isVerified status (set on register — see
+// register_screen.dart/welcome_screen.dart's referredBy/referrals_list write).
+function referralCounterKey(status: string | undefined): string | null {
+  switch (status) {
+    case "unverified":
+      return "referrals.not_verified_referrals";
+    case "pending":
+      return "referrals.pending_referrals";
+    case "verified":
+      return "referrals.verified_referrals";
+    case "cancelled":
+      return "referrals.cancelled_referrals";
+    case "rejected":
+      return "referrals.rejected_referrals";
+    default:
+      return null;
+  }
+}
+
+// Pinned to us-central1 (rather than this codebase's default asia-east2) to
+// match a pre-existing deploy of this same function already running there in
+// prod — updates it in place instead of requiring a delete+recreate. Means
+// this one trigger takes a cross-region hop from the asia-east2 Firestore
+// database, unlike every other function here.
+export const onVerificationChange = onDocumentUpdated(
+  { document: "users/{userId}", region: "us-central1" },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (before.isVerified === after.isVerified) return;
+
+    const referrerId = after.referredBy as string | undefined;
+    if (!referrerId) return;
+
+    const userId = event.params.userId;
+    const referrerRef = admin.firestore().collection("users").doc(referrerId);
+    const referralDoc = referrerRef.collection("referrals_list").doc(userId);
+
+    const decrementKey = referralCounterKey(before.isVerified);
+    const incrementKey = referralCounterKey(after.isVerified);
+
+    const batch = admin.firestore().batch();
+    batch.update(referralDoc, { isVerified: after.isVerified });
+
+    const updates: Record<string, FirebaseFirestore.FieldValue> = {};
+    if (decrementKey) updates[decrementKey] = admin.firestore.FieldValue.increment(-1);
+    if (incrementKey) updates[incrementKey] = admin.firestore.FieldValue.increment(1);
+    if (Object.keys(updates).length > 0) {
+      batch.update(referrerRef, updates);
     }
 
-    const version = req.body?.version as string | undefined;
-    if (!version) {
-      res.status(400).send("Missing 'version' in request body");
-      return;
-    }
-    const notes = req.body?.notes as string | undefined;
+    await batch.commit();
+  }
+);
 
-    await broadcastToAllUsers({
-      title: "New Test Build Available",
-      body: notes
-        ? `Version ${version} is now available: ${notes}`
-        : `Version ${version} is now available. Update the app to get it.`,
-      channelId: "tester_reminder_v3",
-      data: { type: "new_version", version },
+// ── Incoming call (voice/video) ─────────────────────────────────────────────
+// Fires when call_service.dart writes users/{uid}.incomingCall.status =
+// 'ringing' (see initiateCall), so the callee gets woken up even if the app
+// is backgrounded/terminated and its Firestore incomingCall listener
+// (current_user_provider.dart._listenToIncomingCall) isn't running.
+export const onIncomingCall = onDocumentUpdated(
+  "users/{userId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!after) return;
+
+    const statusAfter = after.incomingCall?.status;
+    const statusBefore = before?.incomingCall?.status;
+    if (statusAfter !== "ringing" || statusBefore === "ringing") return;
+
+    const call = after.incomingCall;
+
+    await sendPushToUser(event.params.userId, {
+      title: call.callerName ?? "Incoming Call",
+      body: call.isVideo === true ? "Incoming video call" : "Incoming voice call",
+      channelId: "incoming_call_v1",
+      data: {
+        type: "incoming_call",
+        callerName: call.callerName ?? "",
+        callerId: call.callerId ?? "",
+        channelName: call.channelName ?? "",
+        token: call.token ?? "",
+        isVideo: call.isVideo === true ? "true" : "false",
+      },
     });
-
-    res.status(200).json({ ok: true });
   }
 );

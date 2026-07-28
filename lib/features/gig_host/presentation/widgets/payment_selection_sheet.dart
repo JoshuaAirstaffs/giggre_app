@@ -271,27 +271,27 @@ class _PaymentSelectionSheetState extends State<PaymentSelectionSheet> {
                         letterSpacing: 0.8)),
                 const SizedBox(height: 12),
 
-                // ── Stripe — coming soon ─────────────────────────────────
-                _PaymentTile(
-                  icon: Icons.credit_card_rounded,
-                  iconColor: const Color(0xFF6366F1),
-                  title: 'Stripe',
-                  subtitle: 'Credit / Debit Card',
-                  comingSoon: true,
-                  isDark: isDark,
-                ),
-                const SizedBox(height: 10),
+                // ── Stripe — commented out for now, not ready for testers ──
+                // _PaymentTile(
+                //   icon: Icons.credit_card_rounded,
+                //   iconColor: const Color(0xFF6366F1),
+                //   title: 'Stripe',
+                //   subtitle: 'Credit / Debit Card',
+                //   comingSoon: true,
+                //   isDark: isDark,
+                // ),
+                // const SizedBox(height: 10),
 
-                // ── Maya / GCash — coming soon ───────────────────────────
-                _PaymentTile(
-                  icon: Icons.account_balance_wallet_rounded,
-                  iconColor: const Color(0xFF0EA5E9),
-                  title: 'Maya / GCash',
-                  subtitle: 'Mobile Wallet',
-                  comingSoon: true,
-                  isDark: isDark,
-                ),
-                const SizedBox(height: 10),
+                // ── Maya / GCash — commented out for now, not ready for testers ──
+                // _PaymentTile(
+                //   icon: Icons.account_balance_wallet_rounded,
+                //   iconColor: const Color(0xFF0EA5E9),
+                //   title: 'Maya / GCash',
+                //   subtitle: 'Mobile Wallet',
+                //   comingSoon: true,
+                //   isDark: isDark,
+                // ),
+                // const SizedBox(height: 10),
 
                 // ── Cash — active ────────────────────────────────────────
                 _PaymentTile(

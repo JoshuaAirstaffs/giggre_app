@@ -496,8 +496,7 @@ class DeleteAccountService {
   static Future<bool> _reAuthWithGoogle(
       BuildContext context, User user) async {
     try {
-      const clientId =
-          '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com';
+      final clientId = googleServerClientId;
       final googleSignIn = GoogleSignIn(
         // clientId required by google_sign_in_web to init the OAuth flow.
         // serverClientId required on Android/iOS to get an idToken in the response.

@@ -19,6 +19,31 @@ import 'firebase_options_dev.dart' as dev;
 import 'firebase_options_prod.dart' as prod;
 
 const String flavor = String.fromEnvironment('FLAVOR', defaultValue: 'dev');
+
+// Web OAuth client used as GoogleSignIn's serverClientId — must match the
+// Firebase project this flavor actually talks to (google-services.json's
+// client_type 3 entry), or Google Sign-In requests a token for the wrong
+// project and Firebase Auth rejects new-account creation against it.
+final String googleServerClientId = flavor == 'prod'
+    ? '935744152330-8d6f8pjehgouqmrnrnj0k2vlf0rutclj.apps.googleusercontent.com'
+    : '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com';
+
+// Set by a signup flow between creating the Firebase Auth account and
+// finishing the Firestore profile write. _MaintenanceGate's auth-state
+// listener reacts to the *auth* account existing, which fires before that
+// Firestore write lands — without this guard it reads the profile mid-write,
+// sees no phone/doc yet, and bounces the new user to CompleteProfileScreen
+// instead of the Dashboard the signup flow is about to show.
+//
+// A ValueNotifier, not a plain bool: AuthGate's build() swaps in a bare
+// loading Scaffold in place of whatever screen is running the signup (e.g.
+// WelcomeScreen's inline form), which un-mounts it. That screen's own
+// `if (mounted) Navigator...` on completion then never fires, so once the
+// flag flips back to false something has to actively tell AuthGate to
+// re-render — a raw bool assignment is invisible to Flutter and leaves the
+// spinner stuck forever. AuthGate listens to this and rebuilds on change.
+final ValueNotifier<bool> isCompletingRegistration = ValueNotifier<bool>(false);
+
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<NavigatorState> callNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -80,20 +105,91 @@ class _AuthGateState extends State<AuthGate> {
   void initState() {
     super.initState();
     _authStream = FirebaseAuth.instance.authStateChanges();
+    isCompletingRegistration.addListener(_onCompletingRegistrationChanged);
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null) {
       _doRestore(currentUser);
     }
   }
 
+  @override
+  void dispose() {
+    isCompletingRegistration.removeListener(_onCompletingRegistrationChanged);
+    super.dispose();
+  }
+
+  void _onCompletingRegistrationChanged() {
+    if (mounted) setState(() {});
+  }
+
+  bool _looksIncomplete(DocumentSnapshot<Map<String, dynamic>> doc) {
+    if (!doc.exists) return true;
+    final phone = doc.data()?['phone'] as String?;
+    return phone == null || phone.isEmpty;
+  }
+
+  // Returns true (and has already updated state) if this account's profile
+  // is incomplete and needs handling — false if phone is present and normal
+  // restore should continue.
+  //
+  // Google's deferred-credential signup can legitimately leave an Auth
+  // account with no Firestore profile yet if the app is killed between
+  // sign-in and the profile write landing — CompleteProfileScreen exists to
+  // resume exactly that. Any other sign-in method (email/password) collects
+  // name/phone on the same form as account creation, so ending up here means
+  // that write genuinely failed — there's no in-progress signup to resume,
+  // so sign out and send them back to Welcome instead of re-prompting for
+  // data they already entered once.
+  Future<bool> _handleIncompleteProfile(User user, String? phone) async {
+    if (phone != null && phone.isNotEmpty) return false;
+
+    final isGoogleUser = user.providerData.any(
+      (p) => p.providerId == 'google.com',
+    );
+    if (isGoogleUser) {
+      if (mounted) {
+        setState(() {
+          _needsProfile = true;
+          _restoredForUid = user.uid;
+        });
+      }
+      return true;
+    }
+
+    await FirebaseAuth.instance.signOut();
+    if (mounted) {
+      setState(() {
+        _accountError = 'Registration did not finish. Please sign up again.';
+      });
+    }
+    return true;
+  }
+
   // Core restore logic — called both from initState and from the stream path.
   Future<void> _doRestore(User user) async {
     if (mounted) setState(() => _restoreError = false);
     try {
-      final doc = await FirebaseFirestore.instance
+      var doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
+
+      // A signup flow for this exact user may be mid-flight: it creates the
+      // Auth account (firing this restore via authStateChanges()) before its
+      // own Firestore profile write lands. Wait that out and re-read once,
+      // rather than bouncing a brand new, about-to-be-complete account to
+      // CompleteProfileScreen.
+      if (isCompletingRegistration.value && _looksIncomplete(doc)) {
+        while (isCompletingRegistration.value) {
+          await Future.delayed(const Duration(milliseconds: 150));
+        }
+        if (!mounted) return;
+        doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+      }
+
       if (!mounted) return;
       if (doc.exists) {
         final data = doc.data()!;
@@ -122,19 +218,10 @@ class _AuthGateState extends State<AuthGate> {
           return;
         }
 
-        final phone = data['phone'] as String?;
-        if (phone == null || phone.isEmpty) {
-          // Account exists in Firebase Auth but registration was never
-          // finished — send them to finish their profile instead of
-          // dropping them into the app with no name/phone on file.
-          if (mounted) {
-            setState(() {
-              _needsProfile = true;
-              _restoredForUid = user.uid;
-            });
-          }
+        if (await _handleIncompleteProfile(user, data['phone'] as String?)) {
           return;
         }
+        if (!mounted) return;
 
         final provider = context.read<CurrentUserProvider>();
         provider.setCurrentUserInfo(
@@ -153,12 +240,7 @@ class _AuthGateState extends State<AuthGate> {
         }
       } else {
         // No profile at all yet — same "finish registration" case as above.
-        if (mounted) {
-          setState(() {
-            _needsProfile = true;
-            _restoredForUid = user.uid;
-          });
-        }
+        await _handleIncompleteProfile(user, null);
         return;
       }
     } catch (_) {
@@ -187,7 +269,8 @@ class _AuthGateState extends State<AuthGate> {
       stream: _authStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting ||
-            _restoringSession) {
+            _restoringSession ||
+            isCompletingRegistration.value) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
