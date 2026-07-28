@@ -927,24 +927,6 @@ export const onOpenGigCancelledCascade =
 export const onOfferedGigCancelledCascade =
   makeGigCancellationCascadeTrigger("offered_gigs");
 
-// ── Tester broadcasts (dev/closed-testing project only) ────────────────────
-// Fires at 7am, 11am, and 6pm Asia/Manila daily. Gated at export time (not
-// just inside the handler) so this scheduled function never gets created as
-// a resource outside the dev/closed-testing project in the first place.
-export const sendDailyTestReminder = isDevProject()
-  ? onSchedule(
-      { schedule: "0 7,11,18 * * *", timeZone: "Asia/Manila" },
-      async () => {
-        await broadcastToAllUsers({
-          title: "Time to Test!",
-          body: "Time to test, testers!!! Open Giggre and check out the latest build.",
-          channelId: "tester_reminder_v3",
-          data: { type: "tester_reminder" },
-        });
-      }
-    )
-  : undefined;
-
 // Called manually (via curl) right after a new dev build is published —
 // see functions/README.md for the exact command. Not automatic: it doesn't
 // poll the Play Developer API, it just needs a nudge once you've uploaded
