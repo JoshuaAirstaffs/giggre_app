@@ -30,7 +30,7 @@
         tools:node="remove"/>
 
     <application
-        android:label="giggre_app"
+        android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
