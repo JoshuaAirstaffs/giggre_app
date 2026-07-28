@@ -201,7 +201,7 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
       tryAdd(
         'assignedAt',
         _ActivityType.assigned,
-        'Worker Assigned',
+        'Worker Hired',
         '$workerName accepted "$gigTitle"',
       );
       // Cancellation requested — show who initiated it

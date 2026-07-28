@@ -69,7 +69,7 @@ class GigAssignedDialog extends StatelessWidget {
 
             // ── Heading ──────────────────────────────────────────────────────
             const Text(
-              'You\'re Assigned!',
+              'You Got the Gig!',
               style: TextStyle(
                 color: Color(0xFF22C55E),
                 fontSize: 20,

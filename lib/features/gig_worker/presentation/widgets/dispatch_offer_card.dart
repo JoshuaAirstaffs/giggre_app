@@ -296,7 +296,7 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                         borderRadius: BorderRadius.circular(12)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Decline',
+                  child: const Text('Pass',
                       style: TextStyle(
                           fontSize: 14, fontWeight: FontWeight.w600)),
                 ),
@@ -314,7 +314,7 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                         borderRadius: BorderRadius.circular(12)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Accept Gig',
+                  child: const Text('Take It',
                       style: TextStyle(
                           fontSize: 14, fontWeight: FontWeight.bold)),
                 ),

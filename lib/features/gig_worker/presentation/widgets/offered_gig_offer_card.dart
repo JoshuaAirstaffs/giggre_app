@@ -233,7 +233,7 @@ class OfferedGigOfferCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Decline',
+                  child: const Text('No Thanks',
                       style: TextStyle(
                           fontSize: 14, fontWeight: FontWeight.w600)),
                 ),
@@ -251,7 +251,7 @@ class OfferedGigOfferCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Accept Offer',
+                  child: const Text("I'm In",
                       style:
                           TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                 ),

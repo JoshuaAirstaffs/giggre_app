@@ -404,7 +404,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               ),
               const SizedBox(height: 14),
               Text(
-                'Assign $workerName?',
+                'Hire $workerName?',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w600,
@@ -413,7 +413,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'This worker will be assigned to the gig and notified to proceed.',
+                'This worker will be hired for the gig and notified to get started.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
               ),
@@ -452,7 +452,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                         ),
                         onPressed: () => Navigator.pop(ctx, true),
                         child: const Text(
-                          'Assign',
+                          'Hire',
                           style: TextStyle(
                             color: Color(0xFF22C55E),
                             fontSize: 15,
@@ -2193,7 +2193,7 @@ class _ApplicantTileState extends State<_ApplicantTile> {
                 ),
               ),
               child: const Text(
-                'Select',
+                'Hire',
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
               ),
             ),

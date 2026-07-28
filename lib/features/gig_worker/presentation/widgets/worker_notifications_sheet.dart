@@ -198,8 +198,8 @@ class _WorkerNotificationsSheetState
         tryAdd(
           'assignedAt',
           _ActivityType.assigned,
-          'Assigned to a Gig',
-          '$hostName assigned you to "$gigTitle"',
+          'Hired for a Gig',
+          '$hostName hired you for "$gigTitle"',
         );
       }
 

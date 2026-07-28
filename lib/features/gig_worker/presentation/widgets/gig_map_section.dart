@@ -1505,7 +1505,11 @@ class _GigMapSectionState extends State<GigMapSection> {
                             : null,
                         child: Center(
                           child: Text(
-                            isAppliedPending ? 'Application sent' : 'Apply now',
+                            isAppliedPending
+                                ? 'Application sent'
+                                : gig.gigType == 'quick'
+                                ? 'Take It'
+                                : 'Put In',
                             style: TextStyle(
                               color: canTapApply ? Colors.white : kSub,
                               fontSize: 14.5,
@@ -1520,7 +1524,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                 if (gig.gigType == 'open') ...[
                   const SizedBox(height: 10),
                   const Text(
-                    "You can withdraw your application anytime before it's accepted",
+                    "You can back out anytime before it's accepted",
                     textAlign: TextAlign.center,
                     style: TextStyle(color: kSub, fontSize: 10.5),
                   ),
@@ -1639,10 +1643,10 @@ class _GigMapSectionState extends State<GigMapSection> {
                       ? 'Offered'
                       : 'Quick';
                   final btnLabel = g.gigType == 'open'
-                      ? 'Apply'
+                      ? 'Put In'
                       : g.gigType == 'offered'
-                      ? 'Accept'
-                      : 'Start';
+                      ? "I'm In"
+                      : 'Take It';
                   final missing =
                       g.gigType == 'open' && g.requiredSkills.isNotEmpty
                       ? g.requiredSkills
