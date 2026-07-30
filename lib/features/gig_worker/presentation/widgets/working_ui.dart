@@ -549,7 +549,7 @@ class _WorkingUIState extends State<WorkingUI> {
   Future<void> _fetchRoute(LatLng from, LatLng to) async {
     try {
       final uri = Uri.parse(
-        'http://router.project-osrm.org/route/v1/driving/'
+        'https://router.project-osrm.org/route/v1/driving/'
         '${from.longitude},${from.latitude};'
         '${to.longitude},${to.latitude}'
         '?overview=full&geometries=polyline&steps=true',

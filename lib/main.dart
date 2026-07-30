@@ -50,11 +50,20 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   String? firebaseError;
   try {
-    await Firebase.initializeApp(
-      options: flavor == 'prod'
-          ? prod.DefaultFirebaseOptions.currentPlatform
-          : dev.DefaultFirebaseOptions.currentPlatform,
-    );
+    try {
+      await Firebase.initializeApp(
+        options: flavor == 'prod'
+            ? prod.DefaultFirebaseOptions.currentPlatform
+            : dev.DefaultFirebaseOptions.currentPlatform,
+      );
+    } catch (e) {
+      // Android can auto-initialize the default app from google-services.json
+      // before this call runs — that app is already the one we want, so a
+      // duplicate-app conflict here just means Firebase is ready to use.
+      // Caught broadly (not `on FirebaseException`) since it's not confirmed
+      // which exception type this surfaces as natively.
+      if (!e.toString().contains('duplicate-app')) rethrow;
+    }
     await CurrentUserProvider.initNotifications();
     FilePicker.platform;
     CurrentUserProvider.navigatorKey = navigatorKey;

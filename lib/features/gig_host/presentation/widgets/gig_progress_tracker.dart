@@ -1198,7 +1198,7 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
     final gLng = widget.gigLocation.longitude;
     try {
       final url = Uri.parse(
-        'http://router.project-osrm.org/route/v1/driving/$wLng,$wLat;$gLng,$gLat?overview=full&geometries=polyline',
+        'https://router.project-osrm.org/route/v1/driving/$wLng,$wLat;$gLng,$gLat?overview=full&geometries=polyline',
       );
       final res = await http.get(url);
       if (!mounted || res.statusCode != 200) {
@@ -1574,7 +1574,7 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
     final gLng = widget.gigLocation.longitude;
     try {
       final url = Uri.parse(
-        'http://router.project-osrm.org/route/v1/driving/$wLng,$wLat;$gLng,$gLat?overview=full&geometries=polyline',
+        'https://router.project-osrm.org/route/v1/driving/$wLng,$wLat;$gLng,$gLat?overview=full&geometries=polyline',
       );
       final res = await http.get(url);
       if (!mounted || res.statusCode != 200) {

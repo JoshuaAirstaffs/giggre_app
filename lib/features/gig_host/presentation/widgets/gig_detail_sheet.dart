@@ -1743,7 +1743,7 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
     final gig = widget.gigLocation;
     try {
       final url = Uri.parse(
-        'http://router.project-osrm.org/route/v1/driving/'
+        'https://router.project-osrm.org/route/v1/driving/'
         '${worker.longitude},${worker.latitude};${gig.longitude},${gig.latitude}'
         '?overview=full&geometries=polyline',
       );
@@ -3372,7 +3372,7 @@ class _MultiWorkerTrackingMapState extends State<_MultiWorkerTrackingMap> {
     final workerLatLng = LatLng(geo.latitude, geo.longitude);
     try {
       final url = Uri.parse(
-        'http://router.project-osrm.org/route/v1/driving/'
+        'https://router.project-osrm.org/route/v1/driving/'
         '${workerLatLng.longitude},${workerLatLng.latitude};'
         '${widget.gigLocation.longitude},${widget.gigLocation.latitude}'
         '?overview=full&geometries=polyline',
