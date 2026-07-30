@@ -327,6 +327,15 @@ class CurrentUserProvider extends ChangeNotifier {
     );
   }
 
+  // Pushes a freshly-fetched (non-cached) status into the provider so gates
+  // reading `isVerified` (e.g. HostShell's speed dial) reflect it immediately
+  // after the user returns from VerificationScreen, instead of only updating
+  // on the next login or manual pull-to-refresh.
+  void updateVerificationStatus(String isVerified) {
+    _isVerified = isVerified;
+    notifyListeners();
+  }
+
   void setCurrentUserInfo(
     String? email,
     String? name,

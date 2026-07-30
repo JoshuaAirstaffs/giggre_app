@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
+import '../../../core/widgets/account_not_verified_modal.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/worker_active_gig.dart';
@@ -1663,7 +1664,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                     },
                                     isVerified: _isVerified,
                                     onVerificationRequired: () =>
-                                        _showWorkerVerificationModal(context),
+                                        _showVerificationModal(context),
                                   ),
                                 ),
                               ),
@@ -1716,7 +1717,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 },
                                 isVerified: _isVerified,
                                 onVerificationRequired: () =>
-                                    _showWorkerVerificationModal(context),
+                                    _showVerificationModal(context),
                               ),
                               const SizedBox(height: 20),
 
@@ -1775,55 +1776,17 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             ),
     );
   }
-}
 
-void _showWorkerVerificationModal(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      contentPadding: const EdgeInsets.all(24),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.error_outline, color: Colors.red, size: 40),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Account not Verified',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your account needs to be verified before you can continue. '
-            'Please request verification from the admin.',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK', style: TextStyle(color: Colors.white)),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
+  // The profile snapshot listener (_listenToProfile) already reacts to a
+  // status change in real time, but that update can lag slightly behind the
+  // user's own navigation — so also recheck explicitly the moment they leave
+  // VerificationScreen, and reflect it in local state immediately.
+  void _showVerificationModal(BuildContext context) {
+    showAccountNotVerifiedModal(
+      context,
+      onStatusRechecked: (status) {
+        if (mounted) setState(() => _isVerified = status);
+      },
+    );
+  }
 }

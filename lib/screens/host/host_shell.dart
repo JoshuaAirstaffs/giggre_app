@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/providers/current_user_provider.dart';
+import '../../core/widgets/account_not_verified_modal.dart';
 import '../../features/auth/presentation/welcome_screen.dart';
 import '../../features/gig_host/presentation/gig_host_screen.dart';
 import '../../features/gig_host/presentation/host_gigs_screen.dart';
@@ -185,49 +186,65 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
     setState(() => _tabIndex = i);
   }
 
-  void _openQuickGig() {
-    _closeDial();
+  // CurrentUserProvider.isVerified is only populated at login/restore (or a
+  // manual pull-to-refresh on the home tab) — it has no live listener of its
+  // own, so a status change made while VerificationScreen was open would
+  // otherwise sit stale until one of those happens. showAccountNotVerifiedModal
+  // rechecks with the backend the moment the user leaves that screen and
+  // reports the fresh value here so the gate — and the originally-requested
+  // action — can proceed without waiting for either.
+  void _requireVerified(VoidCallback onVerified) {
     final provider = context.read<CurrentUserProvider>();
     if (provider.isVerified == 'verified') {
+      onVerified();
+      return;
+    }
+    showAccountNotVerifiedModal(
+      context,
+      onStatusRechecked: (status) {
+        provider.updateVerificationStatus(status);
+        if (status == 'verified') onVerified();
+      },
+    );
+  }
+
+  void _openQuickGig() {
+    _closeDial();
+    _requireVerified(() {
+      final provider = context.read<CurrentUserProvider>();
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => PostQuickGigScreen(hostName: provider.currentName ?? ''),
         ),
       );
-    } else {
-      showUnverifiedHostModal(context);
-    }
+    });
   }
 
   void _openOpenGig() {
     _closeDial();
-    final provider = context.read<CurrentUserProvider>();
-    if (provider.isVerified == 'verified') {
+    _requireVerified(() {
+      final provider = context.read<CurrentUserProvider>();
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => PostOpenGigScreen(hostName: provider.currentName ?? ''),
         ),
       );
-    } else {
-      showUnverifiedHostModal(context);
-    }
+    });
   }
 
   void _openOfferedGig() {
     _closeDial();
-    final provider = context.read<CurrentUserProvider>();
-    if (provider.isVerified == 'verified') {
+    _requireVerified(() {
+      final provider = context.read<CurrentUserProvider>();
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => PostOfferedGigScreen(hostName: provider.currentName ?? ''),
         ),
       );
-    } else {
-      showUnverifiedHostModal(context);
-    }
+    });
   }
 
   Future<void> _performLogout() async {

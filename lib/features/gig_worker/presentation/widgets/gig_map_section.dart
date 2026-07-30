@@ -16,6 +16,7 @@ import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/worker_active_gig.dart';
+import '../../../../core/widgets/account_not_verified_modal.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data models
@@ -1733,7 +1734,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                         onTap: canTapApply
                             ? () {
                                 if (widget.isVerified != 'verified') {
-                                  _showModal(context);
+                                  showAccountNotVerifiedModal(context);
                                   return;
                                 }
                                 Navigator.pop(ctx);
@@ -2024,7 +2025,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                           ? () {
                               if (widget.isVerified != 'verified') {
                                 Navigator.pop(ctx);
-                                _showModal(context);
+                                showAccountNotVerifiedModal(context);
                                 return;
                               }
                               Navigator.pop(ctx);
@@ -3511,55 +3512,3 @@ class _InfoGridCell extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Verification modal
-// ─────────────────────────────────────────────────────────────────────────────
-void _showModal(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      contentPadding: const EdgeInsets.all(24),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: (Colors.red).withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.error_outline, color: Colors.red, size: 40),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Account not Verified',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your account needs to be verified before you can continue. Please request verification from the admin.',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK', style: TextStyle(color: Colors.white)),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
