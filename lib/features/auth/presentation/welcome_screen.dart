@@ -111,12 +111,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   final _signupPhoneController = TextEditingController();
   final _signupEmailController = TextEditingController();
   final _signupPasswordController = TextEditingController();
+  final _signupConfirmPasswordController = TextEditingController();
   final _signupReferralController = TextEditingController();
   _Country _selectedCountry = _kDefaultCountry;
 
   bool _signupIsLoading = false;
   bool _signupIsGoogleLoading = false;
   bool _signupObscurePassword = true;
+  bool _signupObscureConfirmPassword = true;
   String _signupError = '';
 
   void _navigateByRole(String? role) {
@@ -251,8 +253,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         userCred = await FirebaseAuth.instance.signInWithPopup(provider);
       } else {
         final googleUser = await GoogleSignIn(
-          serverClientId:
-              '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com',
+          serverClientId: googleServerClientId,
         ).signIn();
         if (googleUser == null) {
           setState(() => isGoogleLoading = false);
@@ -354,8 +355,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     });
     try {
       final googleUser = await GoogleSignIn(
-        serverClientId:
-            '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com',
+        serverClientId: googleServerClientId,
       ).signIn();
       if (googleUser == null) {
         setState(() => _signupIsGoogleLoading = false);
@@ -495,16 +495,29 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   Future<void> _register() async {
     final email = _signupEmailController.text.trim();
     final password = _signupPasswordController.text.trim();
+    final confirmPassword = _signupConfirmPasswordController.text.trim();
     final name = _signupNameController.text.trim();
     final phone = _signupPhoneController.text.trim();
     final referralCode = _signupReferralController.text.trim().toUpperCase();
 
-    if (email.isEmpty || password.isEmpty || name.isEmpty || phone.isEmpty) {
+    if (email.isEmpty ||
+        password.isEmpty ||
+        confirmPassword.isEmpty ||
+        name.isEmpty ||
+        phone.isEmpty) {
       setState(() => _signupError = 'All fields are required');
       return;
     }
-    if (password.length < 6) {
-      setState(() => _signupError = 'Password must be at least 6 characters');
+    if (!isPasswordStrong(password)) {
+      setState(
+        () => _signupError =
+            'Password must be at least 8 characters and include an uppercase '
+            'letter, a lowercase letter, a number, and a special character.',
+      );
+      return;
+    }
+    if (password != confirmPassword) {
+      setState(() => _signupError = 'Passwords do not match');
       return;
     }
 
@@ -541,6 +554,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         _signupError = '';
       });
 
+      isCompletingRegistration.value = true;
       cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: password,
@@ -661,7 +675,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           message = 'Please enter a valid email address.';
           break;
         case 'weak-password':
-          message = 'Password must be at least 6 characters.';
+          message = 'Password is too weak. Please choose a stronger one.';
           break;
         case 'network-request-failed':
           message = 'No internet connection.';
@@ -689,6 +703,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         );
       }
     } finally {
+      isCompletingRegistration.value = false;
       if (mounted) setState(() => _signupIsLoading = false);
     }
   }
@@ -726,6 +741,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     _signupPhoneController.dispose();
     _signupEmailController.dispose();
     _signupPasswordController.dispose();
+    _signupConfirmPasswordController.dispose();
     _signupReferralController.dispose();
     super.dispose();
   }
@@ -829,6 +845,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                                   phoneController: _signupPhoneController,
                                   emailController: _signupEmailController,
                                   passwordController: _signupPasswordController,
+                                  confirmPasswordController:
+                                      _signupConfirmPasswordController,
                                   referralController: _signupReferralController,
                                   selectedCountry: _selectedCountry,
                                   onCountryChanged: (c) =>
@@ -837,6 +855,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                                   onToggleObscure: () => setState(
                                     () => _signupObscurePassword =
                                         !_signupObscurePassword,
+                                  ),
+                                  obscureConfirmPassword:
+                                      _signupObscureConfirmPassword,
+                                  onToggleObscureConfirm: () => setState(
+                                    () => _signupObscureConfirmPassword =
+                                        !_signupObscureConfirmPassword,
                                   ),
                                   error: _signupError,
                                   isLoading: _signupIsLoading,
@@ -1475,11 +1499,14 @@ class _SignupPanel extends StatelessWidget {
   final TextEditingController phoneController;
   final TextEditingController emailController;
   final TextEditingController passwordController;
+  final TextEditingController confirmPasswordController;
   final TextEditingController referralController;
   final _Country selectedCountry;
   final ValueChanged<_Country> onCountryChanged;
   final bool obscurePassword;
   final VoidCallback onToggleObscure;
+  final bool obscureConfirmPassword;
+  final VoidCallback onToggleObscureConfirm;
   final String error;
   final bool isLoading;
   final bool isGoogleLoading;
@@ -1494,11 +1521,14 @@ class _SignupPanel extends StatelessWidget {
     required this.phoneController,
     required this.emailController,
     required this.passwordController,
+    required this.confirmPasswordController,
     required this.referralController,
     required this.selectedCountry,
     required this.onCountryChanged,
     required this.obscurePassword,
     required this.onToggleObscure,
+    required this.obscureConfirmPassword,
+    required this.onToggleObscureConfirm,
     required this.error,
     required this.isLoading,
     required this.isGoogleLoading,
@@ -1574,6 +1604,28 @@ class _SignupPanel extends StatelessWidget {
                 size: 20,
               ),
               onPressed: onToggleObscure,
+            ),
+          ),
+          _PasswordRequirementsChecklist(
+            tokens: tokens,
+            passwordController: passwordController,
+          ),
+          const SizedBox(height: 12),
+          _AuthField(
+            tokens: tokens,
+            controller: confirmPasswordController,
+            hintText: 'Confirm Password',
+            icon: Icons.lock_outline,
+            obscureText: obscureConfirmPassword,
+            suffixIcon: IconButton(
+              icon: Icon(
+                obscureConfirmPassword
+                    ? Icons.visibility_off
+                    : Icons.visibility,
+                color: tokens.textMuted,
+                size: 20,
+              ),
+              onPressed: onToggleObscureConfirm,
             ),
           ),
           const SizedBox(height: 20),
@@ -1721,6 +1773,58 @@ class _SignupPanel extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// Live password-strength feedback, shown only under the Password field —
+// rebuilds off the controller directly so it updates per keystroke without
+// needing a parent setState.
+class _PasswordRequirementsChecklist extends StatelessWidget {
+  final ProfileTabTokens tokens;
+  final TextEditingController passwordController;
+
+  const _PasswordRequirementsChecklist({
+    required this.tokens,
+    required this.passwordController,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: passwordController,
+      builder: (context, value, _) {
+        if (value.text.isEmpty) return const SizedBox(height: 8);
+        return Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 4,
+            children: passwordRequirements.map((req) {
+              final met = req.isMet(value.text);
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    met ? Icons.check_circle : Icons.circle_outlined,
+                    size: 13,
+                    color: met ? Colors.green : tokens.textMuted,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    req.label,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: met ? Colors.green : tokens.textMuted,
+                      fontWeight: met ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        );
+      },
     );
   }
 }
@@ -2340,10 +2444,13 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _circle('google'),
-            const SizedBox(width: 22),
-            _circle('apple'),
-            const SizedBox(width: 22),
-            _circle('facebook'),
+            // Apple/Facebook sign-in commented out for now — not ready for
+            // testers. mainAxisAlignment.center keeps Google centered with
+            // these removed.
+            // const SizedBox(width: 22),
+            // _circle('apple'),
+            // const SizedBox(width: 22),
+            // _circle('facebook'),
           ],
         ),
         _expandedButton(),

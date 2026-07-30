@@ -10,6 +10,7 @@ import '../../../core/theme/profile_tab_theme.dart';
 import '../../../utils/user_utils.dart';
 import 'register_screen.dart';
 import '../../../services/sound_service.dart';
+import '../../../main.dart';
 
 // ── Design tokens (shared accents — identical across light/dark) ───────────
 const _kGold = Color(0xFFF0A830);
@@ -149,7 +150,7 @@ class _LoginScreenState extends State<LoginScreen> {
         userCred = await FirebaseAuth.instance.signInWithPopup(provider);
       } else {
         final googleUser = await GoogleSignIn(
-          serverClientId: '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com',
+          serverClientId: googleServerClientId,
         ).signIn();
         if (googleUser == null) { setState(() => isGoogleLoading = false); return; }
         final googleAuth = await googleUser.authentication;

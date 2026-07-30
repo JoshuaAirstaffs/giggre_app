@@ -19,6 +19,20 @@ class QuickGigModel {
   final String? assignedWorkerName;
   final List<String> exclusionList;
 
+  // ── Multi-worker slots ────────────────────────────────────────────────────
+  /// Number of worker slots requested. 1 == legacy single-worker gig.
+  final int workerSlots;
+
+  /// Pay per worker slot. `budget` is kept in sync (== ratePerSlot) so
+  /// existing single-worker readers keep working unmodified.
+  final double ratePerSlot;
+
+  /// Count of slots currently occupied by a non-terminal worker doc.
+  final int filledSlotCount;
+
+  /// Count of worker docs that have reached `completed`.
+  final int slotsCompleted;
+
   QuickGigModel({
     this.id,
     required this.hostId,
@@ -37,7 +51,13 @@ class QuickGigModel {
     this.assignedWorkerId,
     this.assignedWorkerName,
     this.exclusionList = const [],
-  }) : createdAt = createdAt ?? DateTime.now();
+    int? workerSlots,
+    double? ratePerSlot,
+    this.filledSlotCount = 0,
+    this.slotsCompleted = 0,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        workerSlots = workerSlots ?? 1,
+        ratePerSlot = ratePerSlot ?? budget;
 
   Map<String, dynamic> toMap() => {
         'hostId': hostId,
@@ -55,10 +75,15 @@ class QuickGigModel {
         'createdAt': Timestamp.fromDate(createdAt),
         if (scheduledDate != null)
           'scheduledDate': Timestamp.fromDate(scheduledDate!),
+        'workerSlots': workerSlots,
+        'ratePerSlot': ratePerSlot,
+        'filledSlotCount': filledSlotCount,
+        'slotsCompleted': slotsCompleted,
       };
 
   factory QuickGigModel.fromDoc(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
+    final budget = (d['budget'] ?? 0).toDouble();
     return QuickGigModel(
       id: doc.id,
       hostId: d['hostId'] ?? '',
@@ -66,7 +91,7 @@ class QuickGigModel {
       title: d['title'] ?? '',
       description: d['description'] ?? '',
       category: d['category'] ?? '',
-      budget: (d['budget'] ?? 0).toDouble(),
+      budget: budget,
       currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
       duration: d['duration'] ?? '',
       location: d['location'] as GeoPoint,
@@ -79,6 +104,10 @@ class QuickGigModel {
       assignedWorkerId: d['assignedWorkerId'] as String?,
       assignedWorkerName: d['assignedWorkerName'] as String?,
       exclusionList: List<String>.from(d['exclusionList'] ?? []),
+      workerSlots: (d['workerSlots'] as num?)?.toInt() ?? 1,
+      ratePerSlot: (d['ratePerSlot'] as num?)?.toDouble() ?? budget,
+      filledSlotCount: (d['filledSlotCount'] as num?)?.toInt() ?? 0,
+      slotsCompleted: (d['slotsCompleted'] as num?)?.toInt() ?? 0,
     );
   }
 }

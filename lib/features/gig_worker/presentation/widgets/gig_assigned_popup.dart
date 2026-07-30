@@ -120,6 +120,13 @@ class GigAssignedDialog extends StatelessWidget {
               value: CurrencyFormatter.format(gig.budget, gig.currencyCode),
               valueColor: green,
             ),
+            if (gig.isMultiWorker) ...[
+              const SizedBox(height: 6),
+              _DetailRow(
+                icon: Icons.groups_rounded,
+                value: '${gig.openSlots} of ${gig.workerSlots} spots open',
+              ),
+            ],
             if (gig.address.isNotEmpty) ...[
               const SizedBox(height: 6),
               _DetailRow(

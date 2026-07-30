@@ -99,6 +99,12 @@ class _QuickGigSearchSheetState extends State<QuickGigSearchSheet>
   String? _workerName;
   String? _assignedWorkerId;
   DateTime? _searchStartedAt;
+  // Multi-worker gigs: real slot progress, shown alongside the decorative
+  // 3-avatar radar animation (which is purely cosmetic and unrelated to the
+  // actual workerSlots count).
+  int _workerSlots = 1;
+  int _filledSlotCount = 0;
+  bool get _isMultiWorker => _workerSlots > 1;
   bool _dispatching = false;
   bool _cancelling = false;
   bool _actioned = false;
@@ -144,6 +150,8 @@ class _QuickGigSearchSheetState extends State<QuickGigSearchSheet>
     final status = data['status'] as String? ?? 'scanning';
     _workerName = data['assignedWorkerName'] as String?;
     _assignedWorkerId = data['assignedWorkerId'] as String?;
+    _workerSlots = (data['workerSlots'] as num?)?.toInt() ?? 1;
+    _filledSlotCount = (data['filledSlotCount'] as num?)?.toInt() ?? 0;
 
     final startedAt = (data['searchStartedAt'] as Timestamp?)?.toDate();
     if (startedAt != null && startedAt != _searchStartedAt) {
@@ -155,6 +163,12 @@ class _QuickGigSearchSheetState extends State<QuickGigSearchSheet>
     final newPhase = switch (status) {
       'scanning' => _SearchPhase.searching,
       'in_progress' => _SearchPhase.found,
+      // Multi-worker: some slots filled but still searching for more is the
+      // same "found" visual as a single candidate being reviewed; fully
+      // filled is a genuine terminal "accepted" state, same as a legacy
+      // single-worker gig's acceptance.
+      'partially_filled' => _SearchPhase.found,
+      'filled' => _SearchPhase.accepted,
       'navigating' ||
       'arrived' ||
       'working' ||
@@ -252,6 +266,18 @@ class _QuickGigSearchSheetState extends State<QuickGigSearchSheet>
   }
 
   Future<void> _onCancelPressed() async {
+    // Multi-worker gigs: once ANY slot has been accepted, that worker has
+    // already committed and is (or will be) en route — an immediate,
+    // no-review cancel here would abandon them silently. This sheet's
+    // "cancel while searching" shortcut is only safe when nobody has
+    // accepted anything yet; once a slot is filled, send the host to the
+    // gig detail screen's reviewed cancellation flow instead.
+    if (_isMultiWorker && _filledSlotCount > 0) {
+      _actioned = true;
+      widget.onDone();
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -324,9 +350,12 @@ class _QuickGigSearchSheetState extends State<QuickGigSearchSheet>
   }
 
   String get _statusText => switch (_phase) {
-        _SearchPhase.searching || _SearchPhase.found =>
-          _kMessages[_messageIndex],
-        _SearchPhase.accepted => '${_workerName ?? 'Worker'} confirmed',
+        _SearchPhase.searching || _SearchPhase.found => _isMultiWorker
+            ? '${_kMessages[_messageIndex]}${_filledSlotCount > 0 ? ' ($_filledSlotCount of $_workerSlots filled)' : ''}'
+            : _kMessages[_messageIndex],
+        _SearchPhase.accepted => _isMultiWorker
+            ? '$_filledSlotCount of $_workerSlots workers confirmed'
+            : '${_workerName ?? 'Worker'} confirmed',
         _SearchPhase.empty => 'No workers found nearby',
         _SearchPhase.cancelled => 'Search cancelled',
       };

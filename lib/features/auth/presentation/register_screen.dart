@@ -488,6 +488,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       // wrong (lost connection, app closed, email already registered,
       // etc.) before this point.
       try {
+        isCompletingRegistration.value = true;
         final userCred = await FirebaseAuth.instance
             .signInWithCredential(widget.pendingCredential!);
         authUser = userCred.user!;
@@ -510,9 +511,11 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
           default:
             message = e.message ?? 'Google Sign-In failed. Please try again.';
         }
+        isCompletingRegistration.value = false;
         if (mounted) setState(() { _error = message; _isLoading = false; });
         return;
       } catch (e) {
+        isCompletingRegistration.value = false;
         if (mounted) {
           setState(() {
             _error = 'Google Sign-In failed. Please try again.';
@@ -533,6 +536,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       if (existingDoc.exists &&
           existingData?['phone'] != null &&
           (existingData!['phone'] as String).isNotEmpty) {
+        isCompletingRegistration.value = false;
         if (mounted) {
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => const DashboardScreen()),
@@ -635,8 +639,12 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       }
     } catch (e) {
       // Firestore write failed — sign out and send back to login so the user
-      // isn't left authenticated without a profile record.
-      await GoogleSignIn().disconnect();
+      // isn't left authenticated without a profile record. disconnect()
+      // throws when the session isn't a Google sign-in — swallow it so that
+      // doesn't abort the sign-out we actually need here.
+      try {
+        await GoogleSignIn().disconnect();
+      } catch (_) {}
       await FirebaseAuth.instance.signOut();
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
@@ -649,6 +657,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         );
       }
     } finally {
+      isCompletingRegistration.value = false;
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -879,6 +888,7 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _referralCode = TextEditingController();
@@ -887,6 +897,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool isLoading = false;
   bool isGoogleLoading = false;
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
   String error = '';
 
   static const _blue = Color(0xFF1B6CA8);
@@ -899,7 +910,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
     try {
       final googleUser = await GoogleSignIn(
-        serverClientId: '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com',
+        serverClientId: googleServerClientId,
       ).signIn();
       if (googleUser == null) {
         setState(() => isGoogleLoading = false);
@@ -1016,16 +1027,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> register() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
+    final confirmPassword = _confirmPasswordController.text.trim();
     final name = _nameController.text.trim();
     final phone = _phoneController.text.trim();
     final referralCode = _referralCode.text.trim().toUpperCase();
 
-    if (email.isEmpty || password.isEmpty || name.isEmpty || phone.isEmpty) {
+    if (email.isEmpty ||
+        password.isEmpty ||
+        confirmPassword.isEmpty ||
+        name.isEmpty ||
+        phone.isEmpty) {
       setState(() => error = 'All fields are required');
       return;
     }
-    if (password.length < 6) {
-      setState(() => error = 'Password must be at least 6 characters');
+    if (!isPasswordStrong(password)) {
+      setState(
+        () => error =
+            'Password must be at least 8 characters and include an uppercase '
+            'letter, a lowercase letter, a number, and a special character.',
+      );
+      return;
+    }
+    if (password != confirmPassword) {
+      setState(() => error = 'Passwords do not match');
       return;
     }
 
@@ -1058,6 +1082,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         error = '';
       });
 
+      isCompletingRegistration.value = true;
       cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: password,
@@ -1170,7 +1195,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           message = 'Please enter a valid email address.';
           break;
         case 'weak-password':
-          message = 'Password must be at least 6 characters.';
+          message = 'Password is too weak. Please choose a stronger one.';
           break;
         case 'network-request-failed':
           message = 'No internet connection.';
@@ -1195,6 +1220,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (mounted)
         setState(() => error = 'Something went wrong. Please try again.');
     } finally {
+      isCompletingRegistration.value = false;
       if (mounted) setState(() => isLoading = false);
     }
   }
@@ -1203,6 +1229,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     _nameController.dispose();
     _phoneController.dispose();
     _referralCode.dispose();
@@ -1369,6 +1396,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                         ),
                       ),
+                      _PasswordRequirementsChecklist(
+                        passwordController: _passwordController,
+                        isDark: isDark,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _confirmPasswordController,
+                        obscureText: _obscureConfirmPassword,
+                        decoration: _inputDecoration(
+                          hint: 'Confirm Password',
+                          icon: Icons.lock_outline,
+                          isDark: isDark,
+                        ).copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscureConfirmPassword
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                              color: Colors.grey[400],
+                              size: 20,
+                            ),
+                            onPressed: () => setState(() =>
+                                _obscureConfirmPassword =
+                                    !_obscureConfirmPassword),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 20),
                       _sectionLabel('Referral Code'),
                       const SizedBox(height: 10),
@@ -1514,6 +1568,59 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 } // ← end _RegisterScreenState
+
+// Live password-strength feedback, shown only under the Password field —
+// rebuilds off the controller directly so it updates per keystroke without
+// needing a parent setState.
+class _PasswordRequirementsChecklist extends StatelessWidget {
+  final TextEditingController passwordController;
+  final bool isDark;
+
+  const _PasswordRequirementsChecklist({
+    required this.passwordController,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final mutedColor = isDark ? Colors.grey[500] : Colors.grey[400];
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: passwordController,
+      builder: (context, value, _) {
+        if (value.text.isEmpty) return const SizedBox(height: 8);
+        return Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 4,
+            children: passwordRequirements.map((req) {
+              final met = req.isMet(value.text);
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    met ? Icons.check_circle : Icons.circle_outlined,
+                    size: 13,
+                    color: met ? Colors.green : mutedColor,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    req.label,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: met ? Colors.green : mutedColor,
+                      fontWeight: met ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        );
+      },
+    );
+  }
+}
 
 // ─────────────────────────────────────────────────────
 // Social Logo Row
@@ -1715,10 +1822,13 @@ class _SocialLogoRowState extends State<_SocialLogoRow>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _logo('google'),
-            const SizedBox(width: 20),
-            _logo('apple'),
-            const SizedBox(width: 20),
-            _logo('facebook'),
+            // Apple/Facebook sign-in commented out for now — not ready for
+            // testers. mainAxisAlignment.center keeps Google centered with
+            // these removed.
+            // const SizedBox(width: 20),
+            // _logo('apple'),
+            // const SizedBox(width: 20),
+            // _logo('facebook'),
           ],
         ),
         _expandedButton(),

@@ -16,6 +16,21 @@ class OpenGigModel {
   final DateTime createdAt;
   final DateTime? scheduledDate;
 
+  // ── Multi-worker slots ────────────────────────────────────────────────────
+  /// Number of worker slots requested. 1 == legacy single-worker gig.
+  final int workerSlots;
+
+  /// Pay per worker slot. `budget` is kept in sync (== ratePerSlot) so
+  /// existing single-worker readers (EarningsService callers, etc.) keep
+  /// working unmodified.
+  final double ratePerSlot;
+
+  /// Count of slots currently occupied by a non-terminal worker doc.
+  final int filledSlotCount;
+
+  /// Count of worker docs that have reached `completed`.
+  final int slotsCompleted;
+
   OpenGigModel({
     this.id,
     required this.hostId,
@@ -31,7 +46,13 @@ class OpenGigModel {
     this.status = 'open',
     DateTime? createdAt,
     this.scheduledDate,
-  }) : createdAt = createdAt ?? DateTime.now();
+    int? workerSlots,
+    double? ratePerSlot,
+    this.filledSlotCount = 0,
+    this.slotsCompleted = 0,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        workerSlots = workerSlots ?? 1,
+        ratePerSlot = ratePerSlot ?? budget;
 
   Map<String, dynamic> toMap() => {
         'hostId': hostId,
@@ -49,10 +70,15 @@ class OpenGigModel {
         'createdAt': Timestamp.fromDate(createdAt),
         if (scheduledDate != null)
           'scheduledDate': Timestamp.fromDate(scheduledDate!),
+        'workerSlots': workerSlots,
+        'ratePerSlot': ratePerSlot,
+        'filledSlotCount': filledSlotCount,
+        'slotsCompleted': slotsCompleted,
       };
 
   factory OpenGigModel.fromDoc(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
+    final budget = (d['budget'] ?? 0).toDouble();
     return OpenGigModel(
       id: doc.id,
       hostId: d['hostId'] ?? '',
@@ -61,7 +87,7 @@ class OpenGigModel {
       description: d['description'] ?? '',
       requiredSkills: List<String>.from(d['requiredSkills'] ?? []),
       experienceLevel: d['experienceLevel'] ?? 'entry',
-      budget: (d['budget'] ?? 0).toDouble(),
+      budget: budget,
       currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
       location: d['location'] as GeoPoint,
       address: d['address'] ?? '',
@@ -70,6 +96,10 @@ class OpenGigModel {
       scheduledDate: d['scheduledDate'] != null
           ? (d['scheduledDate'] as Timestamp).toDate()
           : null,
+      workerSlots: (d['workerSlots'] as num?)?.toInt() ?? 1,
+      ratePerSlot: (d['ratePerSlot'] as num?)?.toDouble() ?? budget,
+      filledSlotCount: (d['filledSlotCount'] as num?)?.toInt() ?? 0,
+      slotsCompleted: (d['slotsCompleted'] as num?)?.toInt() ?? 0,
     );
   }
 }

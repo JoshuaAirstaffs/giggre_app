@@ -24,6 +24,7 @@ import '../../../core/providers/current_user_provider.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../models/gig_template_model.dart';
 import '../models/offered_gig_model.dart';
+import '../models/worker_slot_model.dart';
 import 'widgets/template_name_dialog.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,8 +101,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   final _descCtrl = TextEditingController();
   final _budgetCtrl = TextEditingController();
 
-  // Worker selection
-  _WorkerEntry? _selectedWorker;
+  // Worker selection — multiple workers can be offered the same gig, each
+  // independently accepting/declining and settling on their own timeline.
+  List<_WorkerEntry> _selectedWorkers = [];
   Map<String, int> _workerSkillsXP = {};
   bool _loadingWorkerSkills = false;
 
@@ -154,25 +156,24 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       if (!mounted) return;
       final data = doc.data();
       setState(() {
-        _selectedWorker = _WorkerEntry(
-          uid: uid,
-          userId: data?['userId'] as String? ?? '',
-          name: data?['name'] as String? ?? fallbackName,
-          email: data?['email'] as String? ?? '',
-        );
+        _selectedWorkers = [
+          _WorkerEntry(
+            uid: uid,
+            userId: data?['userId'] as String? ?? '',
+            name: data?['name'] as String? ?? fallbackName,
+            email: data?['email'] as String? ?? '',
+          ),
+        ];
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _selectedWorker = _WorkerEntry(
-          uid: uid,
-          userId: '',
-          name: fallbackName,
-          email: '',
-        );
+        _selectedWorkers = [
+          _WorkerEntry(uid: uid, userId: '', name: fallbackName, email: ''),
+        ];
       });
     }
-    _fetchWorkerSkills(uid);
+    _fetchWorkerSkills();
   }
 
   @override
@@ -331,15 +332,18 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   Future<void> _openWorkerPicker() async {
     final hostId = FirebaseAuth.instance.currentUser?.uid;
     if (hostId == null) return;
-    final result = await showModalBottomSheet<_WorkerEntry>(
+    final result = await showModalBottomSheet<List<_WorkerEntry>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _WorkerPickerSheet(hostId: hostId),
+      builder: (_) => _WorkerPickerSheet(
+        hostId: hostId,
+        initiallySelected: _selectedWorkers,
+      ),
     );
     if (result != null) {
-      setState(() => _selectedWorker = result);
-      _fetchWorkerSkills(result.uid);
+      setState(() => _selectedWorkers = result);
+      _fetchWorkerSkills();
     }
   }
 
@@ -347,8 +351,15 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_selectedWorker == null) {
-      _showSnack('Please select a gig worker.');
+    if (_selectedWorkers.isEmpty) {
+      _showSnack('Please select at least one gig worker.');
+      return;
+    }
+    if (_workerSkillsXP.isEmpty && _selectedWorkers.length > 1) {
+      _showSnack(
+        'The selected workers have no skill in common. Pick workers who share at least one skill, or offer them separately.',
+        isError: true,
+      );
       return;
     }
     if (_selectedSkill == null || _selectedSkill!.isEmpty) {
@@ -430,25 +441,54 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         );
       }
 
+      final rate = double.parse(_budgetCtrl.text.trim());
+      final isSingle = _selectedWorkers.length == 1;
       final gig = OfferedGigModel(
         hostId: uid,
         hostName: widget.hostName,
-        workerId: _selectedWorker!.uid,
-        workerName: _selectedWorker!.name,
+        // Legacy single-recipient shape stays exactly as before — the
+        // subcollection is only used once there's genuinely more than one
+        // recipient to track independently.
+        workerId: isSingle ? _selectedWorkers.single.uid : null,
+        workerName: isSingle ? _selectedWorkers.single.name : null,
         title: _titleCtrl.text.trim(),
         description: _descCtrl.text.trim(),
         skillRequired: _selectedSkill!,
         experienceLevel: _experienceLevel,
-        budget: double.parse(_budgetCtrl.text.trim()),
+        budget: rate,
         currencyCode: currency,
         location: geoPoint,
         address: _address,
         scheduledDate: scheduledAt,
+        workerSlots: _selectedWorkers.length,
+        ratePerSlot: rate,
       );
 
-      await FirebaseFirestore.instance
+      final gigRef = await FirebaseFirestore.instance
           .collection('offered_gigs')
           .add(gig.toMap());
+
+      if (!isSingle) {
+        final batch = FirebaseFirestore.instance.batch();
+        for (final worker in _selectedWorkers) {
+          batch.set(
+            gigRef.collection('workers').doc(worker.uid),
+            WorkerSlotModel(
+              workerId: worker.uid,
+              workerName: worker.name,
+              gigId: gigRef.id,
+              gigCollection: 'offered_gigs',
+              hostId: uid,
+              hostName: widget.hostName,
+              rate: rate,
+              currencyCode: currency,
+              status: 'offered',
+            ).toMap()
+              ..['offeredAt'] = FieldValue.serverTimestamp(),
+          );
+        }
+        await batch.commit();
+      }
 
       if (!mounted) return;
       setState(() => _posting = false);
@@ -809,7 +849,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     final cardColor = Theme.of(context).cardColor;
     final borderColor = Theme.of(context).dividerColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final hasWorker = _selectedWorker != null;
+    final hasWorker = _selectedWorkers.isNotEmpty;
+    final isSingle = _selectedWorkers.length == 1;
 
     return GestureDetector(
       onTap: _openWorkerPicker,
@@ -825,6 +866,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
           ),
         ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
               width: 36,
@@ -836,59 +878,97 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                Icons.person_search_rounded,
+                hasWorker ? Icons.groups_rounded : Icons.person_search_rounded,
                 color: hasWorker ? _kPurple : kSub,
                 size: 18,
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: hasWorker
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _selectedWorker!.name,
-                          style: TextStyle(
-                            color: onSurface,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Row(
+              child: !hasWorker
+                  ? const Text(
+                      'Search by name or ID...',
+                      style: TextStyle(color: kSub, fontSize: 14),
+                    )
+                  : isSingle
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // if (_selectedWorker!.userId.isNotEmpty) ...[
-                            //   Text(
-                            //     _selectedWorker!.userId,
-                            //     style: const TextStyle(
-                            //         color: _kPurple,
-                            //         fontSize: 11,
-                            //         fontWeight: FontWeight.w600,
-                            //         letterSpacing: 0.5),
-                            //   ),
-                            //   const SizedBox(width: 6),
-                            //   const Text('·', style: TextStyle(color: kSub, fontSize: 11)),
-                            //   const SizedBox(width: 6),
-                            // ],
-                            Flexible(
-                              child: Text(
-                                _selectedWorker!.email,
-                                style: const TextStyle(
-                                  color: kSub,
-                                  fontSize: 11,
-                                ),
-                                overflow: TextOverflow.ellipsis,
+                            Text(
+                              _selectedWorkers.single.name,
+                              style: TextStyle(
+                                color: onSurface,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
                               ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _selectedWorkers.single.email,
+                              style: const TextStyle(color: kSub, fontSize: 11),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${_selectedWorkers.length} workers selected',
+                              style: TextStyle(
+                                color: onSurface,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: _selectedWorkers
+                                  .map(
+                                    (w) => Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _kPurple.withValues(alpha: 0.1),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            w.name,
+                                            style: const TextStyle(
+                                              color: _kPurple,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          GestureDetector(
+                                            onTap: () => setState(() {
+                                              _selectedWorkers = _selectedWorkers
+                                                  .where((e) => e.uid != w.uid)
+                                                  .toList();
+                                              _fetchWorkerSkills();
+                                            }),
+                                            child: const Icon(
+                                              Icons.close_rounded,
+                                              size: 12,
+                                              color: _kPurple,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
                             ),
                           ],
                         ),
-                      ],
-                    )
-                  : const Text(
-                      'Search by name or ID...',
-                      style: TextStyle(color: kSub, fontSize: 14),
-                    ),
             ),
             Icon(
               hasWorker
@@ -903,24 +983,44 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     );
   }
 
-  // ── Fetch skills from selected worker's skillsXP ─────────────────────────
-  Future<void> _fetchWorkerSkills(String uid) async {
+  // ── Fetch skills common to ALL selected workers ──────────────────────────
+  // The required skill has to be one every offered worker actually has, so
+  // with multiple workers selected this is the intersection of their
+  // skillsXP keys rather than one worker's full skill set.
+  Future<void> _fetchWorkerSkills() async {
+    if (_selectedWorkers.isEmpty) {
+      setState(() {
+        _selectedSkill = null;
+        _workerSkillsXP = {};
+      });
+      return;
+    }
     setState(() {
       _loadingWorkerSkills = true;
       _selectedSkill = null;
       _workerSkillsXP = {};
     });
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get();
+      final docs = await Future.wait(
+        _selectedWorkers.map(
+          (w) => FirebaseFirestore.instance.collection('users').doc(w.uid).get(),
+        ),
+      );
       if (!mounted) return;
-      final raw = doc.data()?['skillsXP'] as Map<String, dynamic>? ?? {};
+      final perWorkerSkills = docs.map((doc) {
+        final raw = doc.data()?['skillsXP'] as Map<String, dynamic>? ?? {};
+        return raw.map((k, v) => MapEntry(k, (v as num?)?.toInt() ?? 0));
+      }).toList();
+
+      Map<String, int> common = perWorkerSkills.isNotEmpty
+          ? Map<String, int>.from(perWorkerSkills.first)
+          : {};
+      for (final skills in perWorkerSkills.skip(1)) {
+        common.removeWhere((key, _) => !skills.containsKey(key));
+      }
+
       setState(() {
-        _workerSkillsXP = raw.map(
-          (k, v) => MapEntry(k, (v as num?)?.toInt() ?? 0),
-        );
+        _workerSkillsXP = common;
         _loadingWorkerSkills = false;
       });
     } catch (_) {
@@ -936,7 +1036,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
     final workerSkills = _workerSkillsXP.keys.toList()..sort();
-    final noWorker = _selectedWorker == null;
+    final noWorker = _selectedWorkers.isEmpty;
     final enabled =
         !noWorker && !_loadingWorkerSkills && workerSkills.isNotEmpty;
 
@@ -946,7 +1046,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     } else if (_loadingWorkerSkills) {
       hintText = 'Loading worker skills...';
     } else if (workerSkills.isEmpty) {
-      hintText = 'Worker has no skills yet';
+      hintText = _selectedWorkers.length > 1
+          ? 'Workers have no skill in common'
+          : 'Worker has no skills yet';
     } else {
       hintText = 'Select a skill...';
     }
@@ -1371,7 +1473,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 class _WorkerPickerSheet extends StatefulWidget {
   final String hostId;
-  const _WorkerPickerSheet({required this.hostId});
+  final List<_WorkerEntry> initiallySelected;
+  const _WorkerPickerSheet({required this.hostId, this.initiallySelected = const []});
 
   @override
   State<_WorkerPickerSheet> createState() => _WorkerPickerSheetState();
@@ -1385,6 +1488,19 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
   bool _loading = true;
   bool _uidSearching = false;
   Timer? _debounce;
+  late final Map<String, _WorkerEntry> _selected = {
+    for (final w in widget.initiallySelected) w.uid: w,
+  };
+
+  void _toggle(_WorkerEntry w) {
+    setState(() {
+      if (_selected.containsKey(w.uid)) {
+        _selected.remove(w.uid);
+      } else {
+        _selected[w.uid] = w;
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -1732,9 +1848,10 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
                         ..._filtered.map(
                           (w) => _WorkerTile(
                             worker: w,
-                            onTap: () => Navigator.pop(context, w),
+                            onTap: () => _toggle(w),
                             borderColor: borderColor,
                             isFavorite: true,
+                            selected: _selected.containsKey(w.uid),
                           ),
                         ),
                       ],
@@ -1786,13 +1903,37 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
                         ),
                         _WorkerTile(
                           worker: _uidResult!,
-                          onTap: () => Navigator.pop(context, _uidResult),
+                          onTap: () => _toggle(_uidResult!),
                           borderColor: borderColor,
                           isFavorite: false,
+                          selected: _selected.containsKey(_uidResult!.uid),
                         ),
                       ],
                     ],
                   ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              onPressed: _selected.isEmpty
+                  ? null
+                  : () => Navigator.pop(context, _selected.values.toList()),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: purple,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: purple.withValues(alpha: 0.35),
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: Text(
+                _selected.isEmpty
+                    ? 'Select workers'
+                    : 'Use ${_selected.length} selected worker${_selected.length == 1 ? '' : 's'}',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+            ),
           ),
         ],
       ),
@@ -1808,12 +1949,14 @@ class _WorkerTile extends StatelessWidget {
   final VoidCallback onTap;
   final Color borderColor;
   final bool isFavorite;
+  final bool selected;
 
   const _WorkerTile({
     required this.worker,
     required this.onTap,
     required this.borderColor,
     required this.isFavorite,
+    this.selected = false,
   });
 
   @override
@@ -1893,7 +2036,13 @@ class _WorkerTile extends StatelessWidget {
                   size: 14,
                 ),
               const SizedBox(width: 4),
-              const Icon(Icons.chevron_right_rounded, color: kSub, size: 18),
+              Icon(
+                selected
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                color: selected ? _kPurple : kSub,
+                size: 20,
+              ),
             ],
           ),
         ),

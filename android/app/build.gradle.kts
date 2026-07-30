@@ -53,9 +53,12 @@ android {
     productFlavors {
         create("dev") {
             dimension = "env"
+            applicationIdSuffix = ".dev"
+            resValue("string", "app_name", "giggre_app")
         }
         create("prod") {
             dimension = "env"
+            resValue("string", "app_name", "Giggre")
         }
     }
 

@@ -29,12 +29,21 @@ class PaymentHistorySheet extends StatelessWidget {
     );
   }
 
+  // A multi-worker gig's `budget` is the per-slot rate, not the total paid
+  // out for that posting — scale by workerSlots so aggregate spend isn't
+  // undercounted. (1 for legacy single-worker gigs, so this is a no-op there.)
+  double _totalPaidFor(Map<String, dynamic> g) {
+    final rate = (g['budget'] as num?)?.toDouble() ?? 0;
+    final slots = (g['workerSlots'] as num?)?.toInt() ?? 1;
+    return rate * slots;
+  }
+
   // Total spent grouped by currency code.
   Map<String, double> get _totalByCurrency {
     final map = <String, double>{};
     for (final g in gigs) {
       final code = (g['currencyCode'] as String?) ?? 'PHP';
-      map[code] = (map[code] ?? 0) + ((g['budget'] as num?)?.toDouble() ?? 0);
+      map[code] = (map[code] ?? 0) + _totalPaidFor(g);
     }
     return map;
   }
@@ -44,7 +53,7 @@ class PaymentHistorySheet extends StatelessWidget {
     final map = <String, ({double amount, String currencyCode})>{};
     for (final g in gigs) {
       final method = (g['paymentMethod'] as String? ?? 'cash');
-      final amount = (g['budget'] as num?)?.toDouble() ?? 0;
+      final amount = _totalPaidFor(g);
       final code = (g['currencyCode'] as String?) ?? 'PHP';
       final existing = map[method];
       map[method] = (
@@ -285,6 +294,8 @@ class _PaymentCard extends StatelessWidget {
         gig['workerName'] as String? ?? '';
     final completedAt = gig['completedAt'] as Timestamp?;
     final gigType = gig['gigType'] as String? ?? 'quick';
+    final workerSlots = (gig['workerSlots'] as num?)?.toInt() ?? 1;
+    final isMultiWorker = workerSlots > 1;
 
     final cfg = PaymentHistorySheet._methodConfig(paymentMethod);
 
@@ -373,6 +384,13 @@ class _PaymentCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis),
                       ),
                     ],
+                    if (isMultiWorker) ...[
+                      const SizedBox(width: 6),
+                      const Icon(Icons.groups_rounded, size: 11, color: kSub),
+                      const SizedBox(width: 2),
+                      Text('× $workerSlots workers',
+                          style: const TextStyle(color: kSub, fontSize: 11)),
+                    ],
                   ],
                 ),
                 if (completedAt != null) ...[
@@ -394,12 +412,20 @@ class _PaymentCard extends StatelessWidget {
 
           // ── Amount ────────────────────────────────────────────────
           const SizedBox(width: 12),
-          Text(
-            CurrencyFormatter.format(budget, currencyCode),
-            style: TextStyle(
-                color: onSurface,
-                fontSize: 15,
-                fontWeight: FontWeight.bold),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                CurrencyFormatter.format(budget, currencyCode),
+                style: TextStyle(
+                    color: onSurface,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold),
+              ),
+              if (isMultiWorker)
+                const Text('per worker',
+                    style: TextStyle(color: kSub, fontSize: 9.5)),
+            ],
           ),
         ],
       ),

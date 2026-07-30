@@ -461,25 +461,77 @@ class _WorkersOnlineCard extends StatefulWidget {
 }
 
 class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
+  // Matches the "near you" copy to an actual distance now — same radius
+  // constant shape as _WorkerMapSection's _kMaxWorkerDistanceMeters.
+  static const double _kMaxDistanceMeters = 10000;
+
   StreamSubscription? _onlineSub;
+  LatLng? _myLocation;
+  // Locations of all online + seeking-quick-gigs workers, unfiltered by
+  // distance — recomputed into _onlineWorkers whenever either this or
+  // _myLocation changes (see _recomputeOnlineCount).
+  List<GeoPoint> _seekingLocations = [];
   int _onlineWorkers = 0;
 
   @override
   void initState() {
     super.initState();
     if (widget.uid.isEmpty) return;
+    _fetchMyLocation();
     _onlineSub = FirebaseFirestore.instance
         .collection('users')
         .where('isOnline', isEqualTo: true)
         .snapshots()
         .listen((snap) {
-      final count =
-          snap.docs.where((d) => d.data()['seekingQuickGigs'] == true).length;
-      if (mounted) setState(() => _onlineWorkers = count);
+      _seekingLocations = snap.docs
+          .where((d) => d.data()['seekingQuickGigs'] == true)
+          .map((d) => d.data()['location'] as GeoPoint?)
+          .whereType<GeoPoint>()
+          .toList();
+      if (mounted) setState(_recomputeOnlineCount);
     }, onError: (e) {
       if (FirebaseAuth.instance.currentUser == null) return;
       debugPrint('[_WorkersOnlineCard] stream error: $e');
     });
+  }
+
+  // Falls back to counting everyone if the host's own location hasn't
+  // resolved yet, same as _WorkerMapSection's _recomputeVisibleWorkers.
+  void _recomputeOnlineCount() {
+    final loc = _myLocation;
+    _onlineWorkers = loc == null
+        ? _seekingLocations.length
+        : _seekingLocations.where((geo) {
+            final distance = Geolocator.distanceBetween(
+              loc.latitude,
+              loc.longitude,
+              geo.latitude,
+              geo.longitude,
+            );
+            return distance <= _kMaxDistanceMeters;
+          }).length;
+  }
+
+  Future<void> _fetchMyLocation() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return;
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) return;
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      if (!mounted) return;
+      setState(() {
+        _myLocation = LatLng(pos.latitude, pos.longitude);
+        _recomputeOnlineCount();
+      });
+    } catch (_) {}
   }
 
   @override
@@ -1356,13 +1408,19 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   }
 
   void _startWorkersSub() {
-    if (FirebaseAuth.instance.currentUser == null) return;
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    if (myUid == null) return;
     _workerSub = FirebaseFirestore.instance
         .collection('users')
         .where('isOnline', isEqualTo: true)
         .snapshots()
         .listen((snap) {
-      final workers = snap.docs.where((d) => d.data()['availableForGigs'] == true).map((d) {
+      // Exclude the host's own doc — a host account that's also gone online
+      // as a worker before (common on a shared test account) would otherwise
+      // show up as a worker pin right on top of the host's own location dot.
+      final workers = snap.docs
+          .where((d) => d.id != myUid && d.data()['availableForGigs'] == true)
+          .map((d) {
         final data = d.data();
         final geo = data['location'] as GeoPoint?;
         if (geo == null) return null;

@@ -10,6 +10,7 @@ import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/worker_active_gig.dart';
+import '../../gig_host/services/quick_gig_matching_service.dart';
 import '../../auth/presentation/welcome_screen.dart';
 import '../../../screens/host/host_shell.dart';
 import '../../home/presentation/profile_tab.dart';
@@ -21,6 +22,7 @@ import 'widgets/worker_notifications_sheet.dart';
 import 'widgets/working_ui.dart';
 import 'widgets/offered_gig_offer_card.dart';
 import 'widgets/gig_assigned_popup.dart'; // exports GigAssignedDialog
+import 'widgets/pending_cancellation_card.dart';
 import '../../../widgets/active_gig_bar.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,6 +88,11 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   // not yet restored into WorkingUI (see GigWorkerScreen.restoreActiveGigOnEntry).
   Stream<ActiveGigInfo?>? _activeGigBarStream;
 
+  // ActiveGigBar hides as soon as a cancellation is requested (it no longer
+  // treats 'cancellation_requested' as active), so this drives the small
+  // PendingCancellationCard that's the worker's only feedback for that state.
+  Stream<bool>? _pendingCancellationStream;
+
   // Incoming dispatch offer (quick gig)
   GigMarkerData? _dispatchedGig;
 
@@ -97,6 +104,20 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   StreamSubscription? _dispatchSub;
   StreamSubscription? _offeredGigSub;
   StreamSubscription? _openGigAssignSub;
+  // Multi-worker gigs: this worker's own assignment lives on a
+  // `workers/{uid}` subcollection doc (not the gig doc's `workerId`/`status`
+  // fields), so _openGigAssignSub's query never fires for them — this is the
+  // subcollection equivalent, across all three gig collections at once via a
+  // collection-group query.
+  StreamSubscription? _multiWorkerAssignSub;
+  // Multi-worker Quick Gig equivalent of _startDispatchSub — a candidate
+  // being reviewed for a slot has their own `workers/{uid}` doc at
+  // status:'in_progress' rather than the gig doc's `assignedWorkerId`/status.
+  StreamSubscription? _multiWorkerDispatchSub;
+  // Multi-worker Offered Gig equivalent of _startOfferedGigSub — each named
+  // worker's pending offer lives on their own `workers/{uid}` doc at
+  // status:'offered' rather than the gig doc's `workerId`/status.
+  StreamSubscription? _multiWorkerOfferedGigSub;
   StreamSubscription? _profileSub;
 
   // Decline suspension
@@ -114,7 +135,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _listenToProfile();
     _setOnlineStatus(true);
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) _activeGigBarStream = watchActiveWorkerGig(uid);
+    if (uid != null) {
+      _activeGigBarStream = watchActiveWorkerGig(uid);
+      _pendingCancellationStream = watchPendingCancellation(uid);
+    }
   }
 
   @override
@@ -123,6 +147,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _dispatchSub?.cancel();
     _offeredGigSub?.cancel();
     _openGigAssignSub?.cancel();
+    _multiWorkerAssignSub?.cancel();
+    _multiWorkerDispatchSub?.cancel();
+    _multiWorkerOfferedGigSub?.cancel();
     _suspensionTimer?.cancel();
     _setOnlineStatus(false);
     WidgetsBinding.instance.removeObserver(this);
@@ -228,6 +255,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             _startDispatchSub(uid);
             _startOfferedGigSub(uid);
             _startOpenGigAssignSub(uid);
+            _startMultiWorkerAssignSub(uid);
+            _startMultiWorkerDispatchSub(uid);
+            _startMultiWorkerOfferedGigSub(uid);
             if (widget.restoreActiveGigOnEntry) _checkForActiveGig(uid);
           }
 
@@ -281,6 +311,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               position: LatLng(geo.latitude, geo.longitude),
               assignedWorkerId: uid,
               hostId: data['hostId'] as String? ?? '',
+              workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
+              filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
             ),
           );
         }
@@ -311,6 +343,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               position: LatLng(geo.latitude, geo.longitude),
               assignedWorkerId: uid,
               hostId: data['hostId'] as String? ?? '',
+              workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
+              filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
             ),
           );
         }
@@ -344,8 +378,65 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   ? [data['skillRequired'] as String]
                   : [],
               hostId: data['hostId'] as String? ?? '',
+              workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
+              filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
             ),
           );
+        }
+        return;
+      }
+      // None of the legacy single-worker collections had an active gig —
+      // fall back to this worker's own multi-worker `workers/{uid}` slot
+      // doc (collection-group query across all three gig collections).
+      final slotSnap = await FirebaseFirestore.instance
+          .collectionGroup('workers')
+          .where('workerId', isEqualTo: uid)
+          .where('status', whereIn: activeStatuses)
+          .limit(1)
+          .get();
+      if (slotSnap.docs.isNotEmpty) {
+        final slot = slotSnap.docs.first.data();
+        final gigId = slot['gigId'] as String?;
+        final gigCollection = slot['gigCollection'] as String?;
+        if (gigId != null && gigCollection != null) {
+          final gigSnap = await FirebaseFirestore.instance
+              .collection(gigCollection)
+              .doc(gigId)
+              .get();
+          final gigData = gigSnap.data();
+          final geo = gigData?['location'] as GeoPoint?;
+          if (gigData != null && geo != null && mounted) {
+            final gig = GigMarkerData(
+              id: gigId,
+              title: gigData['title'] as String? ?? 'Gig',
+              gigType: gigCollection == 'quick_gigs'
+                  ? 'quick'
+                  : gigCollection == 'offered_gigs'
+                      ? 'offered'
+                      : 'open',
+              budget: (slot['rate'] as num?)?.toDouble() ?? 0,
+              currencyCode: slot['currencyCode'] as String? ?? 'PHP',
+              status: slot['status'] as String? ?? 'navigating',
+              hostName:
+                  slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
+              address: gigData['address'] as String? ?? '',
+              position: LatLng(geo.latitude, geo.longitude),
+              assignedWorkerId: uid,
+              hostId: slot['hostId'] as String? ?? gigData['hostId'] as String? ?? '',
+              scheduledDate: (gigData['scheduledDate'] as Timestamp?)?.toDate(),
+              workerSlots: (gigData['workerSlots'] as num?)?.toInt() ?? 1,
+              filledSlotCount: (gigData['filledSlotCount'] as num?)?.toInt() ?? 0,
+            );
+            setState(() {
+              if (gigCollection == 'quick_gigs') {
+                _activeQuickGig = gig;
+              } else if (gigCollection == 'offered_gigs') {
+                _activeOfferedGig = gig;
+              } else {
+                _activeOpenGig = gig;
+              }
+            });
+          }
         }
       }
     } catch (_) {
@@ -392,6 +483,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                     : [],
                 hostId: data['hostId'] as String? ?? '',
                 scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
+                workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
+                filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
               );
               _pendingOfferedGigDesc = data['description'] as String? ?? '';
               _pendingOfferedGigSkill = data['skillRequired'] as String? ?? '';
@@ -400,6 +493,65 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           onError: (e) =>
               debugPrint('[GigWorker] offered gig stream error: $e'),
         );
+  }
+
+  // Multi-worker Offered Gig equivalent of _startOfferedGigSub.
+  void _startMultiWorkerOfferedGigSub(String uid) {
+    _multiWorkerOfferedGigSub?.cancel();
+    _multiWorkerOfferedGigSub = FirebaseFirestore.instance
+        .collectionGroup('workers')
+        .where('workerId', isEqualTo: uid)
+        .where('gigCollection', isEqualTo: 'offered_gigs')
+        .where('status', isEqualTo: 'offered')
+        .snapshots()
+        .listen((snap) async {
+          if (!mounted) return;
+          if (snap.docs.isEmpty) {
+            if (_pendingOfferedGig != null && _pendingOfferedGig!.isMultiWorker) {
+              setState(() => _pendingOfferedGig = null);
+            }
+            return;
+          }
+          final slot = snap.docs.first.data();
+          final gigId = slot['gigId'] as String?;
+          if (gigId == null) return;
+          try {
+            final gigSnap = await FirebaseFirestore.instance
+                .collection('offered_gigs')
+                .doc(gigId)
+                .get();
+            final gigData = gigSnap.data();
+            final geo = gigData?['location'] as GeoPoint?;
+            if (gigData == null || geo == null || !mounted) return;
+            setState(() {
+              _pendingOfferedGig = GigMarkerData(
+                id: gigId,
+                title: gigData['title'] as String? ?? 'Offered Gig',
+                gigType: 'offered',
+                budget: (slot['rate'] as num?)?.toDouble() ?? 0,
+                currencyCode: slot['currencyCode'] as String? ?? 'PHP',
+                status: 'offered',
+                hostName: slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
+                address: gigData['address'] as String? ?? '',
+                position: LatLng(geo.latitude, geo.longitude),
+                assignedWorkerId: uid,
+                experienceLevel: gigData['experienceLevel'] as String? ?? '',
+                requiredSkills: gigData['skillRequired'] != null
+                    ? [gigData['skillRequired'] as String]
+                    : [],
+                hostId: slot['hostId'] as String? ?? gigData['hostId'] as String? ?? '',
+                scheduledDate: (gigData['scheduledDate'] as Timestamp?)?.toDate(),
+                workerSlots: (gigData['workerSlots'] as num?)?.toInt() ?? 1,
+                filledSlotCount: (gigData['filledSlotCount'] as num?)?.toInt() ?? 0,
+              );
+              _pendingOfferedGigDesc = gigData['description'] as String? ?? '';
+              _pendingOfferedGigSkill = gigData['skillRequired'] as String? ?? '';
+            });
+          } catch (e) {
+            debugPrint('[GigWorker] multi-worker offered gig lookup error: $e');
+          }
+        }, onError: (e) =>
+            debugPrint('[GigWorker] multi-worker offered gig stream error: $e'));
   }
 
   // Watches for open gig assignments initiated by the host (worker doesn't tap accept).
@@ -436,6 +588,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   hostId: data['hostId'] as String? ?? '',
                   scheduledDate: (data['scheduledDate'] as Timestamp?)
                       ?.toDate(),
+                  workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
+                  filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
                 );
                 _showAssignedPopup(gig);
                 break;
@@ -445,6 +599,75 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           onError: (e) =>
               debugPrint('[GigWorker] open gig assign stream error: $e'),
         );
+  }
+
+  // Multi-worker gigs: fires the same "You're assigned!" flow as
+  // _startOpenGigAssignSub, but sourced from a `workers/{uid}` subcollection
+  // doc becoming 'navigating' (Open Gig: host picks straight from
+  // applicants, no separate accept step) rather than the gig doc itself.
+  void _startMultiWorkerAssignSub(String uid) {
+    _multiWorkerAssignSub?.cancel();
+    bool firstLoad = true;
+    _multiWorkerAssignSub = FirebaseFirestore.instance
+        .collectionGroup('workers')
+        .where('workerId', isEqualTo: uid)
+        .where('status', isEqualTo: 'navigating')
+        .snapshots()
+        .listen(
+          (snap) {
+            if (firstLoad) {
+              firstLoad = false;
+              return;
+            }
+            if (!mounted) return;
+            for (final change in snap.docChanges) {
+              if (change.type != DocumentChangeType.added) continue;
+              _handleMultiWorkerAssignment(change.doc.data()!);
+              break;
+            }
+          },
+          onError: (e) =>
+              debugPrint('[GigWorker] multi-worker assign stream error: $e'),
+        );
+  }
+
+  Future<void> _handleMultiWorkerAssignment(Map<String, dynamic> slot) async {
+    final gigId = slot['gigId'] as String?;
+    final gigCollection = slot['gigCollection'] as String?;
+    if (gigId == null || gigCollection == null) return;
+    try {
+      final gigSnap = await FirebaseFirestore.instance
+          .collection(gigCollection)
+          .doc(gigId)
+          .get();
+      final gigData = gigSnap.data();
+      final geo = gigData?['location'] as GeoPoint?;
+      if (gigData == null || geo == null || !mounted) return;
+      final gigType = gigCollection == 'quick_gigs'
+          ? 'quick'
+          : gigCollection == 'offered_gigs'
+              ? 'offered'
+              : 'open';
+      final gig = GigMarkerData(
+        id: gigId,
+        title: gigData['title'] as String? ?? 'Gig',
+        gigType: gigType,
+        budget: (slot['rate'] as num?)?.toDouble() ?? 0,
+        currencyCode: slot['currencyCode'] as String? ?? 'PHP',
+        status: 'navigating',
+        hostName: slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
+        address: gigData['address'] as String? ?? '',
+        position: LatLng(geo.latitude, geo.longitude),
+        assignedWorkerId: FirebaseAuth.instance.currentUser?.uid,
+        hostId: slot['hostId'] as String? ?? gigData['hostId'] as String? ?? '',
+        scheduledDate: (gigData['scheduledDate'] as Timestamp?)?.toDate(),
+        workerSlots: (gigData['workerSlots'] as num?)?.toInt() ?? 1,
+        filledSlotCount: (gigData['filledSlotCount'] as num?)?.toInt() ?? 0,
+      );
+      _showAssignedPopup(gig);
+    } catch (e) {
+      debugPrint('[GigWorker] multi-worker assignment lookup error: $e');
+    }
   }
 
   void _showAssignedPopup(GigMarkerData gig) {
@@ -508,12 +731,52 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   Navigator.of(context).maybePop();
                 }
               },
+              onCancellationRequested: () {
+                if (mounted) {
+                  // Clear the active-gig field too, not just the route flag —
+                  // otherwise it's still non-null once the route pops, and
+                  // build() immediately re-shows an inline WorkingUI for the
+                  // same gig instead of landing on the dashboard.
+                  setState(() {
+                    _workingUIRouteActive = false;
+                    if (collection == 'quick_gigs') {
+                      _activeQuickGig = null;
+                    } else if (collection == 'open_gigs') {
+                      _activeOpenGig = null;
+                    } else {
+                      _activeOfferedGig = null;
+                    }
+                  });
+                  Navigator.of(context).maybePop();
+                }
+              },
             ),
           ),
         )
         .then((_) {
-          // Reset if the route was dismissed via back gesture / hardware back button.
-          if (mounted) setState(() => _workingUIRouteActive = false);
+          // Reached only when the route was dismissed via back gesture /
+          // hardware back button — onComplete/onCancel above already pop
+          // (and already clear their _activeXGig field) for every other
+          // exit path, so this only ever fires for a bare "back" press.
+          // _activeQuickGig/_activeOpenGig/_activeOfferedGig double as the
+          // "restore this gig's WorkingUI in-place" flag read by build()
+          // below, so leaving it set here would immediately re-show
+          // WorkingUI instead of the dashboard the back press asked for —
+          // clear it so "back" actually lands on the dashboard. The gig
+          // itself isn't touched (no cancel/complete call), so it's still
+          // reachable from the dashboard's ActiveGigBar afterward.
+          if (mounted) {
+            setState(() {
+              _workingUIRouteActive = false;
+              if (collection == 'quick_gigs') {
+                _activeQuickGig = null;
+              } else if (collection == 'open_gigs') {
+                _activeOpenGig = null;
+              } else {
+                _activeOfferedGig = null;
+              }
+            });
+          }
         });
   }
 
@@ -523,17 +786,47 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       return;
     }
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUid != null && await workerHasActiveGig(currentUid)) {
+    if (currentUid == null) return;
+    if (await workerHasPendingCancellation(currentUid)) {
+      if (mounted) _showAlreadyActiveGigDialog(pendingCancellation: true);
+      return;
+    }
+    if (await workerHasActiveGig(currentUid)) {
       if (mounted) _showAlreadyActiveGigDialog();
       return;
     }
-    await FirebaseFirestore.instance
-        .collection('offered_gigs')
-        .doc(gig.id)
-        .update({
+    if (gig.isMultiWorker) {
+      // Multi-worker offer: claim this worker's own slot doc and bump the
+      // gig's filledSlotCount transactionally — unlike Quick Gig there's no
+      // background matching service to do this, so the accepting worker's
+      // own action is what advances the aggregate.
+      final db = FirebaseFirestore.instance;
+      final gigRef = db.collection('offered_gigs').doc(gig.id);
+      final slotRef = gigRef.collection('workers').doc(currentUid);
+      await db.runTransaction((tx) async {
+        final gigSnap = await tx.get(gigRef);
+        final gigData = gigSnap.data() ?? {};
+        final slots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
+        final filled = (gigData['filledSlotCount'] as num?)?.toInt() ?? 0;
+        final newFilled = filled + 1;
+        tx.update(slotRef, {
           'status': 'navigating',
           'acceptedAt': FieldValue.serverTimestamp(),
         });
+        tx.update(gigRef, {
+          'filledSlotCount': newFilled,
+          'status': newFilled >= slots ? 'filled' : 'partially_filled',
+        });
+      });
+    } else {
+      await FirebaseFirestore.instance
+          .collection('offered_gigs')
+          .doc(gig.id)
+          .update({
+            'status': 'navigating',
+            'acceptedAt': FieldValue.serverTimestamp(),
+          });
+    }
     if (mounted) {
       setState(() {
         _pendingOfferedGig = null;
@@ -544,10 +837,23 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _declineOfferedGig(GigMarkerData gig) async {
-    await FirebaseFirestore.instance
-        .collection('offered_gigs')
-        .doc(gig.id)
-        .update({'status': 'declined'});
+    if (gig.isMultiWorker) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+      // Only this worker's own slot is declined — the other named workers
+      // on the same offer are completely unaffected.
+      await FirebaseFirestore.instance
+          .collection('offered_gigs')
+          .doc(gig.id)
+          .collection('workers')
+          .doc(uid)
+          .update({'status': 'declined'});
+    } else {
+      await FirebaseFirestore.instance
+          .collection('offered_gigs')
+          .doc(gig.id)
+          .update({'status': 'declined'});
+    }
     if (mounted) setState(() => _pendingOfferedGig = null);
   }
 
@@ -556,6 +862,18 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _cancelOfferedGig() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final gig = _activeOfferedGig;
+    if (uid != null && gig != null && gig.isMultiWorker) {
+      // Same cleanup as _cancelQuickGig/_cancelOpenGig — drop this worker's
+      // already-cancelled slot doc so it disappears from the host's list.
+      await FirebaseFirestore.instance
+          .collection('offered_gigs')
+          .doc(gig.id)
+          .collection('workers')
+          .doc(uid)
+          .delete();
+    }
     if (mounted) setState(() => _activeOfferedGig = null);
   }
 
@@ -588,6 +906,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             assignedWorkerId: uid,
             hostId: data['hostId'] as String? ?? '',
             scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
+            workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
+            filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
           );
           // Auto-accept: skip review window and accept immediately
           if (_autoAccept) {
@@ -596,6 +916,62 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           }
           setState(() => _dispatchedGig = gig);
         }, onError: (e) => debugPrint('[GigWorker] dispatch stream error: $e'));
+  }
+
+  // Multi-worker Quick Gig equivalent of _startDispatchSub.
+  void _startMultiWorkerDispatchSub(String uid) {
+    _multiWorkerDispatchSub?.cancel();
+    _multiWorkerDispatchSub = FirebaseFirestore.instance
+        .collectionGroup('workers')
+        .where('workerId', isEqualTo: uid)
+        .where('gigCollection', isEqualTo: 'quick_gigs')
+        .where('status', isEqualTo: 'in_progress')
+        .snapshots()
+        .listen((snap) async {
+          if (!mounted) return;
+          if (snap.docs.isEmpty) {
+            if (_dispatchedGig != null && _dispatchedGig!.isMultiWorker) {
+              setState(() => _dispatchedGig = null);
+            }
+            return;
+          }
+          final slot = snap.docs.first.data();
+          final gigId = slot['gigId'] as String?;
+          if (gigId == null) return;
+          try {
+            final gigSnap = await FirebaseFirestore.instance
+                .collection('quick_gigs')
+                .doc(gigId)
+                .get();
+            final gigData = gigSnap.data();
+            final geo = gigData?['location'] as GeoPoint?;
+            if (gigData == null || geo == null || !mounted) return;
+            final gig = GigMarkerData(
+              id: gigId,
+              title: gigData['title'] as String? ?? 'Quick Gig',
+              gigType: 'quick',
+              budget: (slot['rate'] as num?)?.toDouble() ?? 0,
+              currencyCode: slot['currencyCode'] as String? ?? 'PHP',
+              status: 'in_progress',
+              hostName: slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
+              address: gigData['address'] as String? ?? '',
+              position: LatLng(geo.latitude, geo.longitude),
+              assignedWorkerId: uid,
+              hostId: slot['hostId'] as String? ?? gigData['hostId'] as String? ?? '',
+              scheduledDate: (gigData['scheduledDate'] as Timestamp?)?.toDate(),
+              workerSlots: (gigData['workerSlots'] as num?)?.toInt() ?? 1,
+              filledSlotCount: (gigData['filledSlotCount'] as num?)?.toInt() ?? 0,
+            );
+            if (_autoAccept) {
+              _acceptDispatch(gig);
+              return;
+            }
+            setState(() => _dispatchedGig = gig);
+          } catch (e) {
+            debugPrint('[GigWorker] multi-worker dispatch lookup error: $e');
+          }
+        }, onError: (e) =>
+            debugPrint('[GigWorker] multi-worker dispatch stream error: $e'));
   }
 
   Future<void> _saveLocationToFirestore() async {
@@ -654,6 +1030,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
   Future<void> _onQuickGigStarted(GigMarkerData gig) async {
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid != null && await workerHasPendingCancellation(currentUid)) {
+      if (mounted) _showAlreadyActiveGigDialog(pendingCancellation: true);
+      return;
+    }
     if (currentUid != null && await workerHasActiveGig(currentUid)) {
       if (mounted) _showAlreadyActiveGigDialog();
       return;
@@ -670,15 +1050,60 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _cancelOpenGig() async {
-    // onCancel is only reached via admin-approved cancellation (_onAdminCancelled
-    // in WorkingUI), so the status is already 'cancelled' in Firestore — do not
-    // overwrite it. Just clear the worker assignment and local state.
+    // onCancel is only reached via admin-approved cancellation
+    // (_onAdminCancelled in WorkingUI), so the status is already 'cancelled'
+    // in Firestore on entry here.
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null && _activeOpenGig != null) {
-      await FirebaseFirestore.instance
-          .collection('open_gigs')
-          .doc(_activeOpenGig!.id)
-          .update({'workerId': FieldValue.delete()});
+    final gig = _activeOpenGig;
+    if (uid != null && gig != null) {
+      if (gig.isMultiWorker) {
+        // This worker's own `workers/{uid}` slot doc already carries the
+        // admin-approved 'cancelled' status — remove it so it drops off the
+        // host's live worker list instead of lingering there forever.
+        final gigRef =
+            FirebaseFirestore.instance.collection('open_gigs').doc(gig.id);
+        await gigRef.collection('workers').doc(uid).delete();
+
+        // Free up the slot this worker vacated so the host can assign a new
+        // applicant into it — mirrors _cancelQuickGig's same guard, just
+        // without the auto backfill search (Open Gigs fill from applicants,
+        // not auto-matching). Only if the gig isn't already closed out for
+        // some other reason (host cancelled it, etc.) in the meantime.
+        await FirebaseFirestore.instance.runTransaction((tx) async {
+          final snap = await tx.get(gigRef);
+          if (!snap.exists) return;
+          final data = snap.data()!;
+          final status = data['status'] as String? ?? '';
+          if (['cancelled', 'completed', 'no_worker'].contains(status)) return;
+          final filled =
+              ((data['filledSlotCount'] as num?)?.toInt() ?? 1) - 1;
+          final newFilled = filled < 0 ? 0 : filled;
+          tx.update(gigRef, {
+            'filledSlotCount': newFilled,
+            'status': newFilled > 0 ? 'partially_filled' : 'open',
+          });
+        });
+      } else {
+        // Single-slot gigs have only one status field shared by both
+        // "worker's own cancellation was approved" and "host cancelled the
+        // whole gig outright" — unlike multi-worker gigs, where each has its
+        // own doc. Check who actually requested it before reopening: the
+        // host still wants this gig filled if their worker backed out, but
+        // not if the host cancelled it themselves.
+        final gigRef =
+            FirebaseFirestore.instance.collection('open_gigs').doc(gig.id);
+        final snap = await gigRef.get();
+        final reasons = snap.data()?['cancellation_reason'] as List?;
+        final requestedBy = reasons != null && reasons.isNotEmpty
+            ? ((reasons.last as Map<String, dynamic>?)?['requestedBy'] as String?)
+            : null;
+        await gigRef.update({
+          'workerId': FieldValue.delete(),
+          if (requestedBy == 'worker') 'status': 'open',
+          // else: host cancelled the whole gig — its 'cancelled' status is
+          // already the terminal write the host made; leave it as-is.
+        });
+      }
     }
     if (mounted) setState(() => _activeOpenGig = null);
   }
@@ -690,21 +1115,46 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     }
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
+    if (await workerHasPendingCancellation(uid)) {
+      if (mounted) _showAlreadyActiveGigDialog(pendingCancellation: true);
+      return;
+    }
     if (await workerHasActiveGig(uid)) {
       if (mounted) _showAlreadyActiveGigDialog();
       return;
     }
-    await Future.wait([
-      FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id).update({
-        'status': 'navigating',
-        'acceptedAt': FieldValue.serverTimestamp(),
-        'workerId': uid,
-      }),
-      FirebaseFirestore.instance.collection('users').doc(uid).update({
-        'slot': 'LOCKED',
-        'acceptanceRate': FieldValue.increment(0.02),
-      }),
-    ]);
+    if (gig.isMultiWorker) {
+      // Multi-worker gig: this candidate's own slot doc is the source of
+      // truth — the matching service's search loop is the one that bumps
+      // the gig's filledSlotCount once it sees this doc turn 'navigating'.
+      await Future.wait([
+        FirebaseFirestore.instance
+            .collection('quick_gigs')
+            .doc(gig.id)
+            .collection('workers')
+            .doc(uid)
+            .update({
+          'status': 'navigating',
+          'acceptedAt': FieldValue.serverTimestamp(),
+        }),
+        FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'slot': 'LOCKED',
+          'acceptanceRate': FieldValue.increment(0.02),
+        }),
+      ]);
+    } else {
+      await Future.wait([
+        FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id).update({
+          'status': 'navigating',
+          'acceptedAt': FieldValue.serverTimestamp(),
+          'workerId': uid,
+        }),
+        FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'slot': 'LOCKED',
+          'acceptanceRate': FieldValue.increment(0.02),
+        }),
+      ]);
+    }
     if (mounted) {
       setState(() {
         _dispatchedGig = null;
@@ -735,20 +1185,40 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         : (data['decline_count'] as num?)?.toInt() ?? 0;
     final newDeclineCount = currentDeclineCount + 1;
 
-    await Future.wait([
-      FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id).update({
-        'status': 'scanning',
-        'assignedWorkerId': FieldValue.delete(),
-        'assignedWorkerName': FieldValue.delete(),
-        'exclusionList': FieldValue.arrayUnion([uid]),
-      }),
-      FirebaseFirestore.instance.collection('users').doc(uid).update({
-        'slot': 'AVAILABLE',
-        'acceptanceRate': FieldValue.increment(-0.10),
-        'decline_count': newDeclineCount,
-        'decline_count_date': todayStr,
-      }),
-    ]);
+    if (gig.isMultiWorker) {
+      await Future.wait([
+        FirebaseFirestore.instance
+            .collection('quick_gigs')
+            .doc(gig.id)
+            .collection('workers')
+            .doc(uid)
+            .update({'status': 'declined'}),
+        FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id).update({
+          'exclusionList': FieldValue.arrayUnion([uid]),
+        }),
+        FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'slot': 'AVAILABLE',
+          'acceptanceRate': FieldValue.increment(-0.10),
+          'decline_count': newDeclineCount,
+          'decline_count_date': todayStr,
+        }),
+      ]);
+    } else {
+      await Future.wait([
+        FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id).update({
+          'status': 'scanning',
+          'assignedWorkerId': FieldValue.delete(),
+          'assignedWorkerName': FieldValue.delete(),
+          'exclusionList': FieldValue.arrayUnion([uid]),
+        }),
+        FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'slot': 'AVAILABLE',
+          'acceptanceRate': FieldValue.increment(-0.10),
+          'decline_count': newDeclineCount,
+          'decline_count_date': todayStr,
+        }),
+      ]);
+    }
     if (mounted) setState(() => _dispatchedGig = null);
     await _checkAndApplySuspension(uid, newDeclineCount);
   }
@@ -767,12 +1237,81 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _cancelQuickGig() async {
+    // onCancel is only reached via admin-approved cancellation
+    // (_onAdminCancelled in WorkingUI).
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null && _activeQuickGig != null) {
-      await FirebaseFirestore.instance
-          .collection('quick_gigs')
-          .doc(_activeQuickGig!.id)
-          .update({'status': 'cancelled'});
+    final gig = _activeQuickGig;
+    if (uid != null && gig != null) {
+      if (gig.isMultiWorker) {
+        // This worker's own `workers/{uid}` slot doc already carries the
+        // admin-approved 'cancelled' status — remove it so it drops off the
+        // host's live worker list instead of lingering there forever. Never
+        // overwrite the shared gig doc's status here — doing so would wrongly
+        // cancel the whole gig out from under every other worker's slot.
+        final gigRef =
+            FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id);
+        await gigRef.collection('workers').doc(uid).delete();
+
+        // Free up the slot this worker vacated so the gig's fill count
+        // reflects reality, then look for a replacement — but only if the
+        // gig isn't already closed out for some other reason in the meantime.
+        await FirebaseFirestore.instance.runTransaction((tx) async {
+          final snap = await tx.get(gigRef);
+          if (!snap.exists) return;
+          final data = snap.data()!;
+          final status = data['status'] as String? ?? '';
+          if (['cancelled', 'completed', 'no_worker'].contains(status)) return;
+          final filled =
+              ((data['filledSlotCount'] as num?)?.toInt() ?? 1) - 1;
+          final newFilled = filled < 0 ? 0 : filled;
+          tx.update(gigRef, {
+            'filledSlotCount': newFilled,
+            'status': newFilled > 0 ? 'partially_filled' : 'scanning',
+          });
+        });
+
+        QuickGigMatchingService.startBackfillSearch(
+          gigId: gig.id,
+          gigLocation: GeoPoint(gig.position.latitude, gig.position.longitude),
+          cancelledWorkerId: uid,
+        );
+      } else {
+        // Single-slot gigs have only one status field shared by both
+        // "worker's own cancellation was approved" and "host cancelled the
+        // whole gig outright" — unlike multi-worker gigs, where each has its
+        // own doc. Check who actually requested it before deciding whether
+        // to reopen the search: the host still wants this gig done if their
+        // worker backed out, but not if the host cancelled it themselves.
+        final gigRef =
+            FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id);
+        final snap = await gigRef.get();
+        final reasons = snap.data()?['cancellation_reason'] as List?;
+        final requestedBy = reasons != null && reasons.isNotEmpty
+            ? ((reasons.last as Map<String, dynamic>?)?['requestedBy'] as String?)
+            : null;
+        if (requestedBy == 'worker') {
+          // Reopen the search instead of leaving the gig permanently
+          // 'cancelled' — mirrors the multi-worker backfill above, just via
+          // the regular auto-search loop since there's only one slot.
+          // Excluding this worker (on top of whatever exclusionList already
+          // had) keeps them from being immediately re-matched to the gig
+          // they just cancelled out of.
+          await gigRef.update({
+            'status': 'scanning',
+            'assignedWorkerId': FieldValue.delete(),
+            'assignedWorkerName': FieldValue.delete(),
+            'workerId': FieldValue.delete(),
+            'searchStartedAt': FieldValue.serverTimestamp(),
+            'exclusionList': FieldValue.arrayUnion([uid]),
+          });
+          QuickGigMatchingService.startAutoSearch(
+            gigId: gig.id,
+            gigLocation: GeoPoint(gig.position.latitude, gig.position.longitude),
+          );
+        }
+        // else: host cancelled the whole gig — its 'cancelled' status is
+        // already the terminal write the host made; leave it as-is.
+      }
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'slot': 'AVAILABLE',
       });
@@ -842,7 +1381,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     });
   }
 
-  void _showAlreadyActiveGigDialog() {
+  void _showAlreadyActiveGigDialog({bool pendingCancellation = false}) {
     if (!mounted) return;
     showDialog(
       context: context,
@@ -864,17 +1403,21 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           ),
         ),
         title: Text(
-          'Finish Your Current Gig First',
+          pendingCancellation
+              ? 'Cancellation Still Pending'
+              : 'Finish Your Current Gig First',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: Theme.of(ctx).colorScheme.onSurface,
             fontWeight: FontWeight.bold,
           ),
         ),
-        content: const Text(
-          "You need to finish your current gig before applying to or accepting another one.",
+        content: Text(
+          pendingCancellation
+              ? "Your cancellation request hasn't been approved by the admin yet."
+              : "You need to finish your current gig before applying to or accepting another one.",
           textAlign: TextAlign.center,
-          style: TextStyle(color: kSub, fontSize: 14, height: 1.5),
+          style: const TextStyle(color: kSub, fontSize: 14, height: 1.5),
         ),
         actionsAlignment: MainAxisAlignment.center,
         actions: [
@@ -991,15 +1534,27 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _dispatchSub?.cancel();
     _offeredGigSub?.cancel();
     if (!mounted) return;
-    final clearing = context.read<CurrentUserProvider>().clearUser();
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const WelcomeScreen()),
-      (_) => false,
-    );
-    await WidgetsBinding.instance.endOfFrame;
-    await clearing;
-    await GoogleSignIn().disconnect();
+    // Navigating to WelcomeScreen tears down every route above it (including
+    // AuthGate), so the app looks fully logged out immediately — if that
+    // happened before signOut() actually completed and the app got killed
+    // right then, Firebase's persisted native session survives untouched
+    // and silently restores this same account on next launch. Await the
+    // whole sign-out chain first so nothing ever looks logged out before it
+    // truly is.
+    await context.read<CurrentUserProvider>().clearUser();
+    // Throws when the current session isn't a Google sign-in (e.g. email/
+    // password) — there's nothing to disconnect, so swallow it rather than
+    // letting it abort the sign-out chain below.
+    try {
+      await GoogleSignIn().disconnect();
+    } catch (_) {}
     await FirebaseAuth.instance.signOut();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+        (_) => false,
+      );
+    }
   }
 
   String _monthName(int m) {
@@ -1038,6 +1593,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               gigCollection: 'quick_gigs',
               onComplete: _finishQuickGig,
               onCancel: _cancelQuickGig,
+              onCancellationRequested: () =>
+                  setState(() => _activeQuickGig = null),
             )
           : !_workingUIRouteActive && _activeOpenGig != null
           ? WorkingUI(
@@ -1045,6 +1602,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               gigCollection: 'open_gigs',
               onComplete: _finishOpenGig,
               onCancel: _cancelOpenGig,
+              onCancellationRequested: () =>
+                  setState(() => _activeOpenGig = null),
             )
           : !_workingUIRouteActive && _activeOfferedGig != null
           ? WorkingUI(
@@ -1052,6 +1611,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               gigCollection: 'offered_gigs',
               onComplete: _finishOfferedGig,
               onCancel: _cancelOfferedGig,
+              onCancellationRequested: () =>
+                  setState(() => _activeOfferedGig = null),
             )
           : StreamBuilder<ActiveGigInfo?>(
               stream: _activeGigBarStream,
@@ -1121,6 +1682,20 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                               // No leading spacer — the availability card's
                               // Transform.translate above already leaves its
                               // own ~24px reserved (unpainted) gap before this.
+
+                              // ── Cancellation pending ───────────────────────
+                              StreamBuilder<bool>(
+                                stream: _pendingCancellationStream,
+                                builder: (context, pendingSnap) {
+                                  if (pendingSnap.data != true) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  return const Padding(
+                                    padding: EdgeInsets.only(bottom: 16),
+                                    child: PendingCancellationCard(),
+                                  );
+                                },
+                              ),
 
                               // ── Earnings ───────────────────────────────────
                               EarningsSummaryCard(

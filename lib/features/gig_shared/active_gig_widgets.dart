@@ -575,10 +575,12 @@ class PartyActionCircle extends StatelessWidget {
 class CancelGigSection extends StatelessWidget {
   final VoidCallback onPressed;
   final String caption;
+  final String label;
   const CancelGigSection({
     super.key,
     required this.onPressed,
     required this.caption,
+    this.label = 'Cancel gig',
   });
 
   @override
@@ -593,9 +595,9 @@ class CancelGigSection extends StatelessWidget {
             onPressed: onPressed,
             icon: const Icon(Icons.close_rounded,
                 size: 18, color: kActiveGigDestructiveRed),
-            label: const Text(
-              'Cancel gig',
-              style: TextStyle(
+            label: Text(
+              label,
+              style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
                   color: kActiveGigDestructiveRed),

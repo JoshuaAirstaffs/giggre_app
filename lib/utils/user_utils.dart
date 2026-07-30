@@ -2,9 +2,7 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Matches Philippine (+63 / 09xx) and U.S. (+1 / 10-digit) numbers.
-final phoneRegex = RegExp(
-  r'^(\+?63|0)9\d{9}$|^(\+?1)?[2-9]\d{2}[2-9]\d{6}$',
-);
+final phoneRegex = RegExp(r'^(\+?63|0)9\d{9}$|^(\+?1)?[2-9]\d{2}[2-9]\d{6}$');
 
 /// Normalises a raw phone input to a standard format.
 String formatPhone(String raw) {
@@ -35,13 +33,42 @@ bool needsNewUserId(String? userId) {
   return RegExp(r'^GIG\d{6}$').hasMatch(userId);
 }
 
+/// One signup password rule (e.g. "at least 8 characters") plus the check
+/// for whether a given password satisfies it. Shared by every signup form
+/// so the rules and their wording can't drift between screens.
+class PasswordRequirement {
+  final String label;
+  final bool Function(String) isMet;
+  const PasswordRequirement(this.label, this.isMet);
+}
+
+final List<PasswordRequirement> passwordRequirements = [
+  PasswordRequirement('At least 8 characters', (p) => p.length >= 8),
+  PasswordRequirement(
+    '1 uppercase letter',
+    (p) => RegExp(r'[A-Z]').hasMatch(p),
+  ),
+  PasswordRequirement(
+    '1 lowercase letter',
+    (p) => RegExp(r'[a-z]').hasMatch(p),
+  ),
+  PasswordRequirement('1 number', (p) => RegExp(r'[0-9]').hasMatch(p)),
+  PasswordRequirement(
+    '1 special character',
+    (p) => RegExp(r'''[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\/~`]''').hasMatch(p),
+  ),
+];
+
+bool isPasswordStrong(String password) =>
+    passwordRequirements.every((r) => r.isMet(password));
+
 /// Generates a unique user ID: 3 random uppercase letters + 6 random digits
 /// (e.g. "XKP482931"). Retries automatically on the rare collision.
 Future<String> generateUserId() async {
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const digits  = '0123456789';
+  const digits = '0123456789';
   final rng = Random.secure();
-  final db  = FirebaseFirestore.instance;
+  final db = FirebaseFirestore.instance;
 
   while (true) {
     final part1 = List.generate(3, (_) => letters[rng.nextInt(26)]).join();

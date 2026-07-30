@@ -5,7 +5,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 
 class MyDocumentsScreen extends StatefulWidget {
   final String userId;
@@ -147,20 +146,6 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
     });
   }
 
-  Future<bool> _requestPermission() async {
-    if (!Platform.isAndroid) return true;
-
-    final androidInfo = await DeviceInfoPlugin().androidInfo;
-    if (androidInfo.version.sdkInt >= 33) {
-      final photos = await Permission.photos.request();
-      final videos = await Permission.videos.request();
-      return photos.isGranted || videos.isGranted;
-    } else {
-      final storage = await Permission.storage.request();
-      return storage.isGranted;
-    }
-  }
-
   Future<bool> _requestCameraPermission() async {
     if (!Platform.isAndroid && !Platform.isIOS) return true;
     final status = await Permission.camera.request();
@@ -293,18 +278,6 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
     }
 
     if (choice == _UploadSource.gallery) {
-      final granted = await _requestPermission();
-      if (!granted) {
-        if (mounted) {
-          _showResultModal(
-            success: false,
-            title: 'Permission Denied',
-            message: 'Storage permission is required to upload files. Please enable it in settings.',
-          );
-        }
-        return;
-      }
-
       final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery,
         imageQuality: 85,
@@ -313,18 +286,6 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
 
       final file = File(picked.path);
       await _uploadFile(category, file, picked.name, await file.length());
-      return;
-    }
-
-    final granted = await _requestPermission();
-    if (!granted) {
-      if (mounted) {
-        _showResultModal(
-          success: false,
-          title: 'Permission Denied',
-          message: 'Storage permission is required to upload files. Please enable it in settings.',
-        );
-      }
       return;
     }
 

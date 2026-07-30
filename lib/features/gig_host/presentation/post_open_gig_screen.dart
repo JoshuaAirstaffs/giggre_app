@@ -61,6 +61,9 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   // Experience level
   String _experienceLevel = 'entry';
 
+  // Multi-worker slots
+  int _workerSlots = 1;
+
   // Schedule
   DateTime? _scheduledDate;
   TimeOfDay? _scheduledTime;
@@ -82,6 +85,10 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     super.initState();
     _fetchGpsLocation();
     _fetchSkills();
+    // Recompute the "Total: ..." hint under the worker-slots stepper live.
+    _budgetCtrl.addListener(() {
+      if (mounted && _workerSlots > 1) setState(() {});
+    });
     final t = widget.template;
     if (t != null) {
       _titleCtrl.text = t.title;
@@ -342,6 +349,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         );
       }
 
+      final rate = double.parse(_budgetCtrl.text.trim());
       final gig = OpenGigModel(
         hostId: uid,
         hostName: widget.hostName,
@@ -349,11 +357,13 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         description: _descCtrl.text.trim(),
         requiredSkills: [_selectedSkill!],
         experienceLevel: _experienceLevel,
-        budget: double.parse(_budgetCtrl.text.trim()),
+        budget: rate,
         currencyCode: currency,
         location: geoPoint,
         address: _address,
         scheduledDate: scheduledAt,
+        workerSlots: _workerSlots,
+        ratePerSlot: rate,
       );
 
       await FirebaseFirestore.instance.collection('open_gigs').add(gig.toMap());
@@ -598,6 +608,18 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                 ),
                 const SizedBox(height: 20),
 
+                // ── Workers needed ─────────────────────────────────
+                _SectionLabel('Workers Needed'),
+                const SizedBox(height: 6),
+                Text(
+                  'Each worker is paid the amount above independently',
+                  style: TextStyle(
+                      color: kSub.withValues(alpha: 0.8), fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                _buildWorkerSlotsStepper(),
+                const SizedBox(height: 20),
+
                 // ── Schedule ──────────────────────────────────────
                 Row(
                   children: [
@@ -790,6 +812,59 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
           }).toList(),
           onChanged: (v) => setState(() => _experienceLevel = v!),
         ),
+      ),
+    );
+  }
+
+  // ── Worker Slots Stepper ──────────────────────────────────────────────────────
+  Widget _buildWorkerSlotsStepper() {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final currencyCode = context.read<CurrentUserProvider>().currencyCode;
+    final rate = double.tryParse(_budgetCtrl.text.trim()) ?? 0;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        children: [
+          _StepperButton(
+            icon: Icons.remove_rounded,
+            onTap: _workerSlots > 1
+                ? () => setState(() => _workerSlots--)
+                : null,
+          ),
+          Expanded(
+            child: Column(
+              children: [
+                Text(
+                  '$_workerSlots ${_workerSlots == 1 ? 'worker' : 'workers'}',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (rate > 0 && _workerSlots > 1)
+                  Text(
+                    'Total: ${CurrencyFormatter.format(rate * _workerSlots, currencyCode)}',
+                    style: TextStyle(color: kSub.withValues(alpha: 0.8), fontSize: 11),
+                  ),
+              ],
+            ),
+          ),
+          _StepperButton(
+            icon: Icons.add_rounded,
+            onTap: _workerSlots < 50
+                ? () => setState(() => _workerSlots++)
+                : null,
+          ),
+        ],
       ),
     );
   }
@@ -1104,6 +1179,33 @@ class _SectionLabel extends StatelessWidget {
             color: Theme.of(context).colorScheme.onSurface,
             fontSize: 15,
             fontWeight: FontWeight.bold));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Stepper Button (worker slots +/-)
+// ─────────────────────────────────────────────────────────────────────────────
+class _StepperButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  const _StepperButton({required this.icon, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: kBlue.withValues(alpha: enabled ? 0.12 : 0.05),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: enabled ? kBlue : kSub.withValues(alpha: 0.4), size: 18),
+      ),
+    );
   }
 }
 

@@ -37,6 +37,7 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
       _fetchCollection('quick_gigs', uid, 'Quick'),
       _fetchCollection('open_gigs', uid, 'Open'),
       _fetchCollection('offered_gigs', uid, 'Offered'),
+      _fetchMultiWorkerCompletions(uid),
     ]);
     final userDoc = await FirebaseFirestore.instance
         .collection('users')
@@ -82,8 +83,55 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
         currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
         completedAt: completedAt,
         hostName: d['hostName'] as String? ?? '',
+        workerSlots: (d['workerSlots'] as num?)?.toInt() ?? 1,
       );
     }).toList();
+  }
+
+  // Multi-worker gigs: this worker's own completion lives on their
+  // `workers/{uid}` subcollection doc (rate/completedAt/etc.), not on the
+  // top-level gig doc's `workerId`/`status` fields — those top-level fields
+  // are never set for a multi-worker gig, so _fetchCollection's per-collection
+  // queries above would silently miss these entirely without this fallback.
+  Future<List<_HistoryItem>> _fetchMultiWorkerCompletions(String uid) async {
+    final slotSnap = await FirebaseFirestore.instance
+        .collectionGroup('workers')
+        .where('workerId', isEqualTo: uid)
+        .where('status', isEqualTo: 'completed')
+        .get();
+    if (slotSnap.docs.isEmpty) return [];
+
+    final items = await Future.wait(slotSnap.docs.map((doc) async {
+      final d = doc.data();
+      final gigId = d['gigId'] as String?;
+      final gigCollection = d['gigCollection'] as String?;
+      if (gigId == null || gigCollection == null) return null;
+      final typeLabel = gigCollection == 'quick_gigs'
+          ? 'Quick'
+          : gigCollection == 'offered_gigs'
+              ? 'Offered'
+              : 'Open';
+      final gigSnap = await FirebaseFirestore.instance
+          .collection(gigCollection)
+          .doc(gigId)
+          .get();
+      final gigData = gigSnap.data();
+      final completedAt = (d['completedAt'] as Timestamp?)?.toDate() ??
+          (d['acceptedAt'] as Timestamp?)?.toDate() ??
+          DateTime.now();
+      return _HistoryItem(
+        id: '${gigId}_${doc.id}',
+        type: typeLabel,
+        title: gigData?['title'] as String? ?? typeLabel,
+        address: gigData?['address'] as String? ?? '',
+        budget: (d['rate'] as num?)?.toDouble() ?? 0,
+        currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
+        completedAt: completedAt,
+        hostName: d['hostName'] as String? ?? gigData?['hostName'] as String? ?? '',
+        workerSlots: (gigData?['workerSlots'] as num?)?.toInt() ?? 1,
+      );
+    }));
+    return items.whereType<_HistoryItem>().toList();
   }
 
   @override
@@ -150,6 +198,7 @@ class _HistoryItem {
   final String currencyCode;
   final DateTime completedAt;
   final String hostName;
+  final int workerSlots;
 
   const _HistoryItem({
     required this.id,
@@ -160,7 +209,10 @@ class _HistoryItem {
     required this.currencyCode,
     required this.completedAt,
     required this.hostName,
+    this.workerSlots = 1,
   });
+
+  bool get isMultiWorker => workerSlots > 1;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -407,6 +459,13 @@ class _GigHistoryCard extends StatelessWidget {
                 Row(
                   children: [
                     _TypeBadge(label: item.type, color: _typeColor),
+                    if (item.isMultiWorker) ...[
+                      const SizedBox(width: 6),
+                      _TypeBadge(
+                        label: '1 of ${item.workerSlots} workers',
+                        color: const Color(0xFF10B981),
+                      ),
+                    ],
                     if (item.hostName.isNotEmpty) ...[
                       const SizedBox(width: 6),
                       Expanded(

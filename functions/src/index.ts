@@ -15,11 +15,29 @@ admin.initializeApp();
 // triggers don't take a cross-region network hop to reach it.
 setGlobalOptions({ region: "asia-east2", maxInstances: 10 });
 
+// Every user doc in the dev Firebase project (simpleproject-8ff7a) belongs to
+// a closed-testing tester by definition, so tester-broadcast tooling below
+// needs no per-user filtering — it just no-ops outside that project.
+const DEV_PROJECT_ID = "simpleproject-8ff7a";
+
+function isDevProject(): boolean {
+  const currentProject =
+    process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
+  return currentProject === DEV_PROJECT_ID;
+}
+
 // Shared secret checked against the x-release-secret header on
 // publishVersionAnnouncement, so only trusted deploy tooling can trigger a
 // tester-wide broadcast. Set via:
 //   firebase functions:secrets:set RELEASE_ANNOUNCE_SECRET --project dev
-const releaseAnnounceSecret = defineSecret("RELEASE_ANNOUNCE_SECRET");
+// Only defined for the dev project — defineSecret() registers the param with
+// the deploy-time discovery step regardless of whether any exported function
+// ends up referencing it, so calling it unconditionally would make every
+// prod deploy require RELEASE_ANNOUNCE_SECRET to exist in prod's Secret
+// Manager even though publishVersionAnnouncement itself never deploys there.
+const releaseAnnounceSecret = isDevProject()
+  ? defineSecret("RELEASE_ANNOUNCE_SECRET")
+  : undefined;
 
 // ── Chat messages ───────────────────────────────────────────────────────────
 // Mirrors the participant/support-room resolution the client used to do in
@@ -149,7 +167,7 @@ export const onOpenGigPosted = onDocumentCreated(
       nearbyWorkerIds.map((uid) =>
         sendPushToUser(uid, {
           title: "New Gig Nearby",
-          body: "A new gig matches your skills — check it out!",
+          body: "A new gig matches your skills. Check it out!",
           channelId: "nearby_gigs_v2",
           data: { type: "nearby_gig", gigId: event.params.gigId },
         })
@@ -173,7 +191,7 @@ export const onApplicantNotificationCreated = onDocumentCreated(
 
     await sendPushToUser(hostUid, {
       title: "New Application",
-      body: `A worker applied to your gig — ${workerName} wants "${gigTitle}"`,
+      body: `${workerName} applied to your gig "${gigTitle}"`,
       channelId: "gig_applications_v4",
       data: { type: "new_applicant", gigId },
     });
@@ -194,7 +212,7 @@ export const onGigOfferCreated = onDocumentCreated(
 
     await sendPushToUser(workerId, {
       title: "New Gig Offer",
-      body: `${hostName} offered you a gig — "${gigTitle}"`,
+      body: `${hostName} offered you the gig "${gigTitle}"`,
       channelId: "gig_offers_v3",
       data: { type: "gig_offered", gigId: event.params.gigId },
     });
@@ -301,7 +319,7 @@ export const onSkillRequestStatusChanged = onDocumentUpdated(
 const PROGRESS_MILESTONES: Array<[field: string, title: (n: string) => string, body: (n: string, t: string) => string]> = [
   ["arrivedAt", (n) => `${n} Has Arrived`, (n, t) => `${n} is ready to start "${t}"`],
   ["workStartedAt", (n) => `${n} Started Working`, (n, t) => `${n} is working on "${t}"`],
-  ["workCompletedAt", (n) => `${n} Completed the Task`, (n, t) => `${n} finished "${t}" — awaiting your confirmation`],
+  ["workCompletedAt", (n) => `${n} Completed the Task`, (n, t) => `${n} finished "${t}" and is awaiting your confirmation`],
 ];
 
 function makeWorkerProgressTrigger(collection: string) {
@@ -336,10 +354,79 @@ export const onQuickGigProgress = makeWorkerProgressTrigger("quick_gigs");
 export const onOpenGigProgress = makeWorkerProgressTrigger("open_gigs");
 export const onOfferedGigProgress = makeWorkerProgressTrigger("offered_gigs");
 
+// ── Worker progress milestones — multi-worker gigs ──────────────────────────
+// Multi-worker gigs record each worker's arrivedAt/workStartedAt/
+// workCompletedAt on their own `workers/{workerId}` subcollection doc instead
+// of the parent gig doc, so the trigger above never fires for them. This is
+// the subcollection equivalent — one push per worker's own milestone.
+function makeWorkerProgressSlotTrigger(collection: string) {
+  return onDocumentUpdated(
+    `${collection}/{gigId}/workers/{workerId}`,
+    async (event) => {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const hostId = after.hostId as string | undefined;
+      if (!hostId) return;
+
+      const workerName = (after.workerName as string) ?? "Your worker";
+      let gigTitle = "your gig";
+      try {
+        const gigSnap = await admin
+          .firestore()
+          .collection(collection)
+          .doc(event.params.gigId)
+          .get();
+        gigTitle = (gigSnap.data()?.title as string) ?? gigTitle;
+      } catch {
+        // Best-effort — notification still fires with the generic title.
+      }
+
+      for (const [field, title, body] of PROGRESS_MILESTONES) {
+        if (!before[field] && after[field]) {
+          await sendPushToUser(hostId, {
+            title: title(workerName),
+            body: body(workerName, gigTitle),
+            channelId: "gig_worker_progress_v3",
+            data: {
+              type: "worker_progress",
+              gigId: event.params.gigId,
+              workerId: event.params.workerId,
+            },
+          });
+        }
+      }
+    }
+  );
+}
+
+export const onQuickGigWorkerSlotProgress = makeWorkerProgressSlotTrigger("quick_gigs");
+export const onOpenGigWorkerSlotProgress = makeWorkerProgressSlotTrigger("open_gigs");
+export const onOfferedGigWorkerSlotProgress = makeWorkerProgressSlotTrigger("offered_gigs");
+
 // ── Gig assigned (worker side) ──────────────────────────────────────────────
 // Fires the moment a gig's status enters an "assigned" state (navigating /
 // in_progress) with a worker attached, across all three gig collections.
 const ASSIGNED_STATUSES = new Set(["navigating", "in_progress"]);
+
+// Quick Gig's `in_progress` is a pending offer still awaiting the worker's
+// accept/decline within the review window (see quick_gig_matching_service.dart's
+// _dispatchToWorker/_dispatchToWorkerSlot) — nothing is final yet, so it gets
+// its own "offer" wording instead of the "assigned" wording that fits Open/
+// Offered Gigs, where the host's selection already is the final assignment.
+function gigAssignedMessage(gigTypeLabel: string, gigTitle: string) {
+  if (gigTypeLabel === "Quick Gig") {
+    return {
+      title: "New Quick Gig Offer!",
+      body: `You've got a quick gig offer: ${gigTitle}. Respond before it expires.`,
+    };
+  }
+  return {
+    title: `You're Assigned to a ${gigTypeLabel}!`,
+    body: `You've been assigned to: ${gigTitle}. Head to the location now.`,
+  };
+}
 
 function makeGigAssignedTrigger(collection: string, gigTypeLabel: string) {
   return onDocumentUpdated(`${collection}/{gigId}`, async (event) => {
@@ -356,8 +443,7 @@ function makeGigAssignedTrigger(collection: string, gigTypeLabel: string) {
     const gigTitle = (after.title as string) ?? "a gig";
 
     await sendPushToUser(workerId, {
-      title: `You're Assigned! — ${gigTypeLabel}`,
-      body: `You've been assigned to: ${gigTitle}. Head to the location now.`,
+      ...gigAssignedMessage(gigTypeLabel, gigTitle),
       channelId: "gig_assignments_v2",
       data: { type: "gig_assigned", gigId: event.params.gigId },
     });
@@ -367,6 +453,112 @@ function makeGigAssignedTrigger(collection: string, gigTypeLabel: string) {
 export const onQuickGigAssigned = makeGigAssignedTrigger("quick_gigs", "Quick Gig");
 export const onOpenGigAssigned = makeGigAssignedTrigger("open_gigs", "Open Gig");
 export const onOfferedGigAssigned = makeGigAssignedTrigger("offered_gigs", "Offered Gig");
+
+// ── Gig assigned — multi-worker gigs ────────────────────────────────────────
+// Each worker on a multi-worker gig gets their own `workers/{workerId}` doc
+// created already-assigned (Open Gig: host picks straight from applicants),
+// so this fires on subcollection doc CREATE rather than a gig-doc status
+// transition.
+function makeGigAssignedSlotTrigger(collection: string, gigTypeLabel: string) {
+  return onDocumentCreated(
+    `${collection}/{gigId}/workers/{workerId}`,
+    async (event) => {
+      const after = event.data?.data();
+      if (!after) return;
+      const workerId = event.params.workerId as string;
+      if (!ASSIGNED_STATUSES.has(after.status)) return;
+
+      let gigTitle = "a gig";
+      try {
+        const gigSnap = await admin
+          .firestore()
+          .collection(collection)
+          .doc(event.params.gigId)
+          .get();
+        gigTitle = (gigSnap.data()?.title as string) ?? gigTitle;
+      } catch {
+        // Best-effort — notification still fires with the generic title.
+      }
+
+      await sendPushToUser(workerId, {
+        ...gigAssignedMessage(gigTypeLabel, gigTitle),
+        channelId: "gig_assignments_v2",
+        data: { type: "gig_assigned", gigId: event.params.gigId },
+      });
+    }
+  );
+}
+
+export const onQuickGigSlotAssigned = makeGigAssignedSlotTrigger("quick_gigs", "Quick Gig");
+export const onOpenGigSlotAssigned = makeGigAssignedSlotTrigger("open_gigs", "Open Gig");
+export const onOfferedGigSlotAssigned = makeGigAssignedSlotTrigger("offered_gigs", "Offered Gig");
+
+// ── Offered gig declined (host side) ────────────────────────────────────────
+// A host directly offers a gig to one or more specific named workers, so
+// unlike Quick Gig's automated candidate-by-candidate search (where a decline
+// just quietly moves on to the next candidate), a decline here is meaningful
+// and actionable — the host picked that person and should know right away.
+export const onOfferedGigDeclined = onDocumentUpdated(
+  "offered_gigs/{gigId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (before.status === "declined" || after.status !== "declined") return;
+
+    const hostId = after.hostId as string | undefined;
+    if (!hostId) return;
+    const workerName = (after.workerName as string) ?? "The worker";
+    const gigTitle = (after.title as string) ?? "your gig";
+
+    await sendPushToUser(hostId, {
+      title: "Offer Declined",
+      body: `${workerName} declined your offer for "${gigTitle}".`,
+      channelId: "gig_offer_declined_v1",
+      data: { type: "gig_offer_declined", gigId: event.params.gigId },
+    });
+  }
+);
+
+// Multi-worker equivalent — each named worker's decline lives on their own
+// `workers/{workerId}` doc rather than the gig doc's single `status` field,
+// so one worker declining never touches the others' offers.
+export const onOfferedGigSlotDeclined = onDocumentUpdated(
+  "offered_gigs/{gigId}/workers/{workerId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (before.status === "declined" || after.status !== "declined") return;
+
+    const hostId = after.hostId as string | undefined;
+    if (!hostId) return;
+    const workerName = (after.workerName as string) ?? "A worker";
+
+    let gigTitle = "your gig";
+    try {
+      const gigSnap = await admin
+        .firestore()
+        .collection("offered_gigs")
+        .doc(event.params.gigId)
+        .get();
+      gigTitle = (gigSnap.data()?.title as string) ?? gigTitle;
+    } catch {
+      // Best-effort — notification still fires with the generic title.
+    }
+
+    await sendPushToUser(hostId, {
+      title: "Offer Declined",
+      body: `${workerName} declined your offer for "${gigTitle}".`,
+      channelId: "gig_offer_declined_v1",
+      data: {
+        type: "gig_offer_declined",
+        gigId: event.params.gigId,
+        workerId: event.params.workerId,
+      },
+    });
+  }
+);
 
 // ── Schedule-expiry auto-cancel (host side) ─────────────────────────────────
 // Was previously a client-side Timer in CurrentUserProvider, which only fired
@@ -415,7 +607,7 @@ export const checkExpiredGigSchedules = onSchedule(
         if (gigTitle && hostId) {
           await sendPushToUser(hostId, {
             title: "Gig Cancelled",
-            body: `No worker was selected for "${gigTitle}" before its scheduled time — the gig has been cancelled.`,
+            body: `No worker was selected for "${gigTitle}" before its scheduled time, so the gig has been cancelled.`,
             channelId: "gig_auto_cancelled_v3",
             data: { type: "gig_auto_cancelled", gigId: doc.id },
           });
@@ -425,69 +617,446 @@ export const checkExpiredGigSchedules = onSchedule(
   }
 );
 
-// ── Tester broadcasts (dev/closed-testing project only) ────────────────────
-// Every user doc in the dev Firebase project (simpleproject-8ff7a) belongs to
-// a closed-testing tester by definition, so broadcasts need no per-user
-// filtering. Both functions below no-op if this codebase is ever deployed to
-// the prod project instead.
-const DEV_PROJECT_ID = "simpleproject-8ff7a";
+// ── Auto-approve stale worker cancellation requests ─────────────────────────
+// A worker's cancellation request (WorkingUI._showCancelReasonDialog) sits at
+// status:'cancellation_requested' awaiting admin review. Leaving the worker
+// stuck mid-gig indefinitely if no admin ever acts isn't acceptable, so
+// auto-approve it once it's been sitting for 5 minutes untouched. Host-
+// initiated requests are left alone — only the worker side gets this timeout.
+const CANCELLATION_AUTO_APPROVE_MS = 5 * 60 * 1000;
 
-function isDevProject(): boolean {
-  const currentProject =
-    process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
-  return currentProject === DEV_PROJECT_ID;
+// The gig status a multi-worker gig should fall back to once a slot empties
+// out and isn't replaced — mirrors the client's _cancelQuickGig/_cancelOpenGig
+// (gig_worker_screen.dart) "still open for business" status per collection.
+function emptyStatusForCollection(collection: string): string {
+  switch (collection) {
+    case "open_gigs":
+      return "open";
+    case "offered_gigs":
+      return "offered";
+    default:
+      return "scanning"; // quick_gigs
+  }
 }
 
-// Fires at 7am, 11am, and 6pm Asia/Manila daily.
-export const sendDailyTestReminder = onSchedule(
-  { schedule: "0 7,11,18 * * *", timeZone: "Asia/Manila" },
-  async () => {
-    if (!isDevProject()) return;
-    await broadcastToAllUsers({
-      title: "Time to Test!",
-      body: "Time to test, testers!!! Open Giggre and check out the latest build.",
-      channelId: "tester_reminder_v3",
-      data: { type: "tester_reminder" },
+// Re-reads the doc inside a transaction (rather than trusting the query
+// snapshot) so a human admin approving/rejecting in the same moment always
+// wins over the timeout — returns whether this call actually cancelled it.
+//
+// Cancelling a slot must also free it up (decrement filledSlotCount / reopen
+// the single-slot gig for search) the same way the client's
+// _cancelQuickGig/_cancelOpenGig/_cancelOfferedGig (gig_worker_screen.dart)
+// do — those only run if the cancelling worker's own device is around to
+// react to the 'cancelled' write, so this auto-approve path (which fires
+// from a Cloud Scheduler job, with nobody's device guaranteed to be open)
+// has to do that bookkeeping itself instead of just flipping the status.
+async function autoApproveIfStaleWorkerCancellation(
+  ref: admin.firestore.DocumentReference
+): Promise<boolean> {
+  return admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.data();
+    if (!data || data.status !== "cancellation_requested") return false;
+
+    const reasons = data.cancellation_reason as
+      | Array<Record<string, unknown>>
+      | undefined;
+    if (!reasons || reasons.length === 0) return false;
+    const lastIndex = reasons.length - 1;
+    const lastReason = reasons[lastIndex];
+    if (lastReason.requestedBy !== "worker" || lastReason.approved != null) {
+      return false;
+    }
+
+    const requestedAt = data.cancellationRequestedAt as
+      | admin.firestore.Timestamp
+      | undefined;
+    if (!requestedAt) return false;
+    if (Date.now() - requestedAt.toMillis() < CANCELLATION_AUTO_APPROVE_MS) {
+      return false;
+    }
+
+    // Multi-worker gigs track each worker's progress on its own
+    // {collection}/{gigId}/workers/{workerId} doc (see WorkerSlotModel) — the
+    // parent gig doc only holds the coarse filledSlotCount aggregate. All
+    // transaction reads must precede writes, so grab the parent up front.
+    const isSlotDoc = ref.parent.id === "workers";
+    const gigRef = isSlotDoc ? ref.parent.parent : null;
+    const gigSnap = gigRef ? await tx.get(gigRef) : null;
+
+    const updatedReasons = [...reasons];
+    updatedReasons[lastIndex] = {
+      ...lastReason,
+      approved: true,
+      approvedBy: "system",
+    };
+
+    if (isSlotDoc && gigRef) {
+      const gigData = gigSnap?.data();
+      if (gigData) {
+        const gigStatus = (gigData.status as string) ?? "";
+        if (!["cancelled", "completed", "no_worker"].includes(gigStatus)) {
+          const filled =
+            ((gigData.filledSlotCount as number | undefined) ?? 1) - 1;
+          const newFilled = filled < 0 ? 0 : filled;
+          const gigCollection =
+            (data.gigCollection as string) || gigRef.parent.id;
+          tx.update(gigRef, {
+            filledSlotCount: newFilled,
+            status:
+              newFilled > 0
+                ? "partially_filled"
+                : emptyStatusForCollection(gigCollection),
+            exclusionList: admin.firestore.FieldValue.arrayUnion(ref.id),
+          });
+        }
+      }
+      // This worker's own slot doc has served its purpose — delete it so it
+      // drops off the host's live worker list, same cleanup the client does
+      // in _cancelQuickGig/_cancelOpenGig/_cancelOfferedGig.
+      tx.delete(ref);
+      return true;
+    }
+
+    // Single-worker gig doc. requestedBy === "worker" is already guaranteed
+    // above, so (mirroring the client's _cancelQuickGig/_cancelOpenGig)
+    // reopen the gig for search instead of leaving it permanently cancelled.
+    const collection = ref.parent.id;
+    if (collection === "quick_gigs") {
+      const workerId =
+        (data.assignedWorkerId as string | undefined) ??
+        (data.workerId as string | undefined);
+      tx.update(ref, {
+        status: "scanning",
+        assignedWorkerId: admin.firestore.FieldValue.delete(),
+        assignedWorkerName: admin.firestore.FieldValue.delete(),
+        workerId: admin.firestore.FieldValue.delete(),
+        searchStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...(workerId
+          ? { exclusionList: admin.firestore.FieldValue.arrayUnion(workerId) }
+          : {}),
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        cancellation_reason: updatedReasons,
+      });
+      return true;
+    }
+    if (collection === "open_gigs") {
+      tx.update(ref, {
+        workerId: admin.firestore.FieldValue.delete(),
+        status: "open",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        cancellation_reason: updatedReasons,
+      });
+      return true;
+    }
+
+    // offered_gigs (single-worker) — the client has no equivalent reopen
+    // logic for this case either, so just mark it cancelled as before.
+    tx.update(ref, {
+      status: "cancelled",
+      cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+      cancellation_reason: updatedReasons,
     });
+    return true;
+  });
+}
+
+export const autoApproveStaleWorkerCancellations = onSchedule(
+  "every 2 minutes",
+  async () => {
+    const db = admin.firestore();
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() - CANCELLATION_AUTO_APPROVE_MS
+    );
+
+    // Single-worker gigs — status lives on the gig doc itself.
+    for (const collection of ["quick_gigs", "open_gigs", "offered_gigs"]) {
+      const stale = await db
+        .collection(collection)
+        .where("status", "==", "cancellation_requested")
+        .where("cancellationRequestedAt", "<=", cutoff)
+        .get();
+
+      for (const doc of stale.docs) {
+        const data = doc.data();
+        if (!(await autoApproveIfStaleWorkerCancellation(doc.ref))) continue;
+
+        // Tell the worker who asked to cancel — not the host, who has no
+        // action left to take once this auto-approves.
+        const workerId =
+          (data.assignedWorkerId as string | undefined) ??
+          (data.workerId as string | undefined);
+        if (!workerId) continue;
+        const gigTitle = (data.title as string) ?? "your gig";
+        await sendPushToUser(workerId, {
+          title: "Cancellation Approved",
+          body: `Your cancellation request for "${gigTitle}" has been approved.`,
+          channelId: "gig_cancellation_approved_v1",
+          data: { type: "gig_cancellation_approved", gigId: doc.id },
+        });
+      }
+    }
+
+    // Multi-worker gigs — status lives on each worker's own subcollection
+    // doc (see WorkerSlotModel), so a collection-group query is needed to
+    // catch these across all three parent collections in one pass.
+    const staleSlots = await db
+      .collectionGroup("workers")
+      .where("status", "==", "cancellation_requested")
+      .where("cancellationRequestedAt", "<=", cutoff)
+      .get();
+
+    for (const doc of staleSlots.docs) {
+      const data = doc.data();
+      if (!(await autoApproveIfStaleWorkerCancellation(doc.ref))) continue;
+
+      // Tell the worker who asked to cancel — not the host, who has no
+      // action left to take once this auto-approves.
+      const workerId = (data.workerId as string | undefined) ?? doc.id;
+      if (!workerId) continue;
+      const gigCollection = (data.gigCollection as string) ?? "";
+      const gigId = (data.gigId as string) ?? doc.ref.parent.parent?.id ?? "";
+      let gigTitle = "your gig";
+      if (gigCollection && gigId) {
+        try {
+          const gigSnap = await db.collection(gigCollection).doc(gigId).get();
+          gigTitle = (gigSnap.data()?.title as string) ?? gigTitle;
+        } catch {
+          // Best-effort — notification still fires with the generic title.
+        }
+      }
+
+      await sendPushToUser(workerId, {
+        title: "Cancellation Approved",
+        body: `Your cancellation request for "${gigTitle}" has been approved.`,
+        channelId: "gig_cancellation_approved_v1",
+        data: {
+          type: "gig_cancellation_approved",
+          gigId,
+          workerId: doc.id,
+        },
+      });
+    }
   }
 );
+
+// ── Cancelling a multi-worker gig cascades to every filled slot ─────────────
+// A multi-worker gig's own workers each track their own progress on
+// {collection}/{gigId}/workers/{workerId} (see WorkerSlotModel) — WorkingUI
+// listens to that doc, not the parent gig doc. So when the host cancels the
+// gig (approved either immediately — no worker yet — or by an admin/the
+// 5-minute worker-timeout above) and the parent doc's status lands on
+// 'cancelled', already-assigned workers would otherwise never find out and
+// keep working a dead gig. Mirror the same status/reason onto every slot
+// that's still active so each worker's own listener picks it up. This must
+// NOT run the other way — a single worker cancelling their own slot only
+// ever touches that one slot doc, never the parent, so it can't accidentally
+// cascade back up and cancel the whole gig or its other workers.
+const WORKER_ACTIVE_SLOT_STATUSES = [
+  "navigating",
+  "arrived",
+  "working",
+  "task_complete",
+  "payment",
+  "cancellation_requested",
+];
+
+function makeGigCancellationCascadeTrigger(collection: string) {
+  return onDocumentUpdated(`${collection}/{gigId}`, async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (before.status === "cancelled" || after.status !== "cancelled") return;
+    if (((after.workerSlots as number) ?? 1) <= 1) return;
+
+    const db = admin.firestore();
+    const workersRef = db
+      .collection(collection)
+      .doc(event.params.gigId)
+      .collection("workers");
+    const activeSlots = await workersRef
+      .where("status", "in", WORKER_ACTIVE_SLOT_STATUSES)
+      .get();
+    if (activeSlots.empty) return;
+
+    const reasons = after.cancellation_reason as
+      | Array<Record<string, unknown>>
+      | undefined;
+    const lastReason =
+      reasons && reasons.length ? reasons[reasons.length - 1] : undefined;
+    const gigTitle = (after.title as string) ?? "your gig";
+
+    const batch = db.batch();
+    for (const doc of activeSlots.docs) {
+      batch.update(doc.ref, {
+        status: "cancelled",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        cancellation_reason: admin.firestore.FieldValue.arrayUnion({
+          reason: (lastReason?.reason as string) ?? "Gig cancelled by host",
+          approved: true,
+          requestedBy: (lastReason?.requestedBy as string) ?? "host",
+          cascadedFromGig: true,
+        }),
+      });
+      const workerId = (doc.data().workerId as string) ?? doc.id;
+      if (workerId) {
+        batch.update(db.collection("users").doc(workerId), {
+          slot: "AVAILABLE",
+        });
+      }
+    }
+    await batch.commit();
+
+    for (const doc of activeSlots.docs) {
+      const workerId = (doc.data().workerId as string) ?? doc.id;
+      if (!workerId) continue;
+      await sendPushToUser(workerId, {
+        title: "Gig Cancelled",
+        body: `"${gigTitle}" was cancelled — you no longer need to continue.`,
+        channelId: "gig_cancelled_by_host_v1",
+        data: { type: "gig_cancelled_by_host", gigId: event.params.gigId },
+      });
+    }
+  });
+}
+
+export const onQuickGigCancelledCascade =
+  makeGigCancellationCascadeTrigger("quick_gigs");
+export const onOpenGigCancelledCascade =
+  makeGigCancellationCascadeTrigger("open_gigs");
+export const onOfferedGigCancelledCascade =
+  makeGigCancellationCascadeTrigger("offered_gigs");
 
 // Called manually (via curl) right after a new dev build is published —
 // see functions/README.md for the exact command. Not automatic: it doesn't
 // poll the Play Developer API, it just needs a nudge once you've uploaded
-// the new AAB/APK to the closed-testing track.
-export const publishVersionAnnouncement = onRequest(
-  { secrets: [releaseAnnounceSecret] },
-  async (req, res) => {
-    if (!isDevProject()) {
-      res.status(404).send("Not found");
-      return;
-    }
-    if (req.method !== "POST") {
-      res.status(405).send("Method not allowed");
-      return;
-    }
-    if (req.get("x-release-secret") !== releaseAnnounceSecret.value()) {
-      res.status(401).send("Unauthorized");
-      return;
+// the new AAB/APK to the closed-testing track. Gated at export time (like
+// sendDailyTestReminder above) so it never gets created outside dev — it
+// also skips needing RELEASE_ANNOUNCE_SECRET provisioned in prod's Secret
+// Manager, which it would otherwise require just to deploy.
+export const publishVersionAnnouncement = releaseAnnounceSecret
+  ? onRequest({ secrets: [releaseAnnounceSecret] }, async (req, res) => {
+      if (!isDevProject()) {
+        res.status(404).send("Not found");
+        return;
+      }
+      if (req.method !== "POST") {
+        res.status(405).send("Method not allowed");
+        return;
+      }
+      if (req.get("x-release-secret") !== releaseAnnounceSecret.value()) {
+        res.status(401).send("Unauthorized");
+        return;
+      }
+
+      const version = req.body?.version as string | undefined;
+      if (!version) {
+        res.status(400).send("Missing 'version' in request body");
+        return;
+      }
+      const notes = req.body?.notes as string | undefined;
+
+      await broadcastToAllUsers({
+        title: "New Test Build Available",
+        body: notes
+          ? `Version ${version} is now available: ${notes}`
+          : `Version ${version} is now available. Update the app to get it.`,
+        channelId: "tester_reminder_v3",
+        data: { type: "new_version", version },
+      });
+
+      res.status(200).json({ ok: true });
+    })
+  : undefined;
+
+// ── Referral counters (verification status change) ─────────────────────────
+// Keeps a referrer's referrals_list mirror + aggregate counters in sync with
+// the referred user's isVerified status (set on register — see
+// register_screen.dart/welcome_screen.dart's referredBy/referrals_list write).
+function referralCounterKey(status: string | undefined): string | null {
+  switch (status) {
+    case "unverified":
+      return "referrals.not_verified_referrals";
+    case "pending":
+      return "referrals.pending_referrals";
+    case "verified":
+      return "referrals.verified_referrals";
+    case "cancelled":
+      return "referrals.cancelled_referrals";
+    case "rejected":
+      return "referrals.rejected_referrals";
+    default:
+      return null;
+  }
+}
+
+// Pinned to us-central1 (rather than this codebase's default asia-east2) to
+// match a pre-existing deploy of this same function already running there in
+// prod — updates it in place instead of requiring a delete+recreate. Means
+// this one trigger takes a cross-region hop from the asia-east2 Firestore
+// database, unlike every other function here.
+export const onVerificationChange = onDocumentUpdated(
+  { document: "users/{userId}", region: "us-central1" },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (before.isVerified === after.isVerified) return;
+
+    const referrerId = after.referredBy as string | undefined;
+    if (!referrerId) return;
+
+    const userId = event.params.userId;
+    const referrerRef = admin.firestore().collection("users").doc(referrerId);
+    const referralDoc = referrerRef.collection("referrals_list").doc(userId);
+
+    const decrementKey = referralCounterKey(before.isVerified);
+    const incrementKey = referralCounterKey(after.isVerified);
+
+    const batch = admin.firestore().batch();
+    batch.update(referralDoc, { isVerified: after.isVerified });
+
+    const updates: Record<string, FirebaseFirestore.FieldValue> = {};
+    if (decrementKey) updates[decrementKey] = admin.firestore.FieldValue.increment(-1);
+    if (incrementKey) updates[incrementKey] = admin.firestore.FieldValue.increment(1);
+    if (Object.keys(updates).length > 0) {
+      batch.update(referrerRef, updates);
     }
 
-    const version = req.body?.version as string | undefined;
-    if (!version) {
-      res.status(400).send("Missing 'version' in request body");
-      return;
-    }
-    const notes = req.body?.notes as string | undefined;
+    await batch.commit();
+  }
+);
 
-    await broadcastToAllUsers({
-      title: "New Test Build Available",
-      body: notes
-        ? `Version ${version} is now available: ${notes}`
-        : `Version ${version} is now available. Update the app to get it.`,
-      channelId: "tester_reminder_v3",
-      data: { type: "new_version", version },
+// ── Incoming call (voice/video) ─────────────────────────────────────────────
+// Fires when call_service.dart writes users/{uid}.incomingCall.status =
+// 'ringing' (see initiateCall), so the callee gets woken up even if the app
+// is backgrounded/terminated and its Firestore incomingCall listener
+// (current_user_provider.dart._listenToIncomingCall) isn't running.
+export const onIncomingCall = onDocumentUpdated(
+  "users/{userId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!after) return;
+
+    const statusAfter = after.incomingCall?.status;
+    const statusBefore = before?.incomingCall?.status;
+    if (statusAfter !== "ringing" || statusBefore === "ringing") return;
+
+    const call = after.incomingCall;
+
+    await sendPushToUser(event.params.userId, {
+      title: call.callerName ?? "Incoming Call",
+      body: call.isVideo === true ? "Incoming video call" : "Incoming voice call",
+      channelId: "incoming_call_v1",
+      data: {
+        type: "incoming_call",
+        callerName: call.callerName ?? "",
+        callerId: call.callerId ?? "",
+        channelName: call.channelName ?? "",
+        token: call.token ?? "",
+        isVideo: call.isVideo === true ? "true" : "false",
+      },
     });
-
-    res.status(200).json({ ok: true });
   }
 );

@@ -996,9 +996,14 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                           value: _spentByCurrency.isEmpty
                               ? CurrencyFormatter.format(0, 'PHP')
                               : (_spentByCurrency.entries.toList()
-                                    ..sort((a, b) => a.key.compareTo(b.key)))
-                                  .map((e) => CurrencyFormatter.format(e.value, e.key))
-                                  .join('  '),
+                                      ..sort((a, b) => a.key.compareTo(b.key)))
+                                    .map(
+                                      (e) => CurrencyFormatter.format(
+                                        e.value,
+                                        e.key,
+                                      ),
+                                    )
+                                    .join('  '),
                           icon: Icons.payments_outlined,
                           color: const Color(0xFFEC4899),
                           cardColor: cardColor,
@@ -1229,49 +1234,63 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                       ),
                     ),
                     const SizedBox(height: 32),
-                 Container(
-  padding: const EdgeInsets.all(16),
-  width: double.infinity,
-  decoration: BoxDecoration(
-    color: Colors.red[50],
-    borderRadius: BorderRadius.circular(8),
-    border: Border.all(color: Colors.red),
-  ),
-  child: Row(
-    crossAxisAlignment: CrossAxisAlignment.center,
-    children: [
-      // trash icon
-      Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: Colors.red.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(
-          Icons.delete,
-          color: Colors.red,
-          size: 18,
-        ),
-      ),
-      const SizedBox(width: 12),
-     Expanded(
-  child: GestureDetector(
-    onTap: () => DeleteAccountService.deleteAccount(context),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Delete Account', style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
-        Text('Permanently delete your account and data', style: TextStyle(color: Colors.grey[800], fontSize: 12)),
-      ],
-    ),
-  ),
-),
-      const SizedBox(width: 8),
-      Icon(Icons.chevron_right_rounded, color: Colors.grey),
-    ],
-  ),
-),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.red[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // trash icon
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: Colors.red.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.delete,
+                              color: Colors.red,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () =>
+                                  DeleteAccountService.deleteAccount(context),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Delete Account',
+                                    style: TextStyle(
+                                      color: Colors.red,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Permanently delete your account and data',
+                                    style: TextStyle(
+                                      color: Colors.grey[800],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                        ],
+                      ),
+                    ),
                     const SizedBox(height: 32),
                   ],
                 ),
@@ -1835,6 +1854,8 @@ class _GigHistoryCard extends StatelessWidget {
         '';
     final completedAt = gig['completedAt'] as Timestamp?;
     final durationSec = (gig['durationSeconds'] as num?)?.toInt();
+    final workerSlots = (gig['workerSlots'] as num?)?.toInt() ?? 1;
+    final isMultiWorker = workerSlots > 1;
 
     final typeColor = gigType == 'quick'
         ? kAmber
@@ -1916,6 +1937,29 @@ class _GigHistoryCard extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (isMultiWorker) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(
+                              0xFF10B981,
+                            ).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '$workerSlots workers',
+                            style: const TextStyle(
+                              color: Color(0xFF10B981),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -1998,6 +2042,11 @@ class _GigHistoryCard extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                if (isMultiWorker)
+                  const Text(
+                    'per worker',
+                    style: TextStyle(color: kSub, fontSize: 9.5),
+                  ),
                 const SizedBox(height: 4),
                 const Icon(Icons.chevron_right_rounded, color: kSub, size: 18),
               ],
@@ -2090,6 +2139,8 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
     final workStartedAt = gig['workStartedAt'] as Timestamp?;
     final workCompletedAt = gig['workCompletedAt'] as Timestamp?;
     final durationSec = (gig['durationSeconds'] as num?)?.toInt();
+    final workerSlots = (gig['workerSlots'] as num?)?.toInt() ?? 1;
+    final isMultiWorker = workerSlots > 1;
 
     final typeColor = gigType == 'quick'
         ? kAmber
@@ -2209,12 +2260,20 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
                     onSurface: onSurface,
                   ),
                 _HistoryDetailRow(
-                  // icon: Icons.attach_money_rounded,
-                  label: 'Budget',
+                  icon: Icons.attach_money_rounded,
+                  label: isMultiWorker ? 'Rate per worker' : 'Budget',
                   value: CurrencyFormatter.format(budget, currencyCode),
                   valueColor: kAmber,
                   onSurface: onSurface,
                 ),
+                if (isMultiWorker)
+                  _HistoryDetailRow(
+                    icon: Icons.groups_rounded,
+                    label: 'Workers',
+                    value: '$workerSlots workers, paid independently',
+                    valueColor: const Color(0xFF10B981),
+                    onSurface: onSurface,
+                  ),
                 if (address.isNotEmpty)
                   _HistoryDetailRow(
                     icon: Icons.location_on_outlined,
@@ -2240,20 +2299,23 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
                 onTap: _handleFavoriteToggle,
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 14,
+                    horizontal: 16,
+                  ),
                   decoration: BoxDecoration(
                     color: _isFavorite
                         ? Colors.redAccent.withValues(alpha: 0.08)
                         : isDark
-                            ? Colors.white.withValues(alpha: 0.04)
-                            : Colors.grey.withValues(alpha: 0.06),
+                        ? Colors.white.withValues(alpha: 0.04)
+                        : Colors.grey.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                       color: _isFavorite
                           ? Colors.redAccent.withValues(alpha: 0.4)
                           : isDark
-                              ? kBorder
-                              : Colors.grey.withValues(alpha: 0.2),
+                          ? kBorder
+                          : Colors.grey.withValues(alpha: 0.2),
                     ),
                   ),
                   child: Row(
@@ -2263,9 +2325,7 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
                         _isFavorite
                             ? Icons.favorite_rounded
                             : Icons.favorite_border_rounded,
-                        color: _isFavorite
-                            ? Colors.redAccent
-                            : kSub,
+                        color: _isFavorite ? Colors.redAccent : kSub,
                         size: 22,
                       ),
                       const SizedBox(width: 10),

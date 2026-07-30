@@ -44,6 +44,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   final _descCtrl = TextEditingController();
   final _budgetCtrl = TextEditingController();
 
+  // Multi-worker slots
+  int _workerSlots = 1;
+
   // Schedule
   DateTime? _scheduledDate;
   TimeOfDay? _scheduledTime;
@@ -64,6 +67,10 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   void initState() {
     super.initState();
     _fetchGpsLocation();
+    // Recompute the "Total: ..." hint under the worker-slots stepper live.
+    _budgetCtrl.addListener(() {
+      if (mounted && _workerSlots > 1) setState(() {});
+    });
     final t = widget.template;
     if (t != null) {
       _titleCtrl.text = t.title;
@@ -315,19 +322,22 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         );
       }
 
+      final rate = double.parse(_budgetCtrl.text.trim());
       final gig = QuickGigModel(
         hostId: uid,
         hostName: widget.hostName,
         title: _titleCtrl.text.trim(),
         description: _descCtrl.text.trim(),
         category: 'Quick',
-        budget: double.parse(_budgetCtrl.text.trim()),
+        budget: rate,
         currencyCode: currency,
         duration: 'Flexible',
         location: geoPoint,
         address: _address,
         status: 'scanning',
         scheduledDate: scheduledAt,
+        workerSlots: _workerSlots,
+        ratePerSlot: rate,
       );
 
       final docRef = await FirebaseFirestore.instance.collection('quick_gigs').add(gig.toMap());
@@ -541,6 +551,18 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                           fontSize: 15,
                           fontWeight: FontWeight.bold)),
                 ),
+                const SizedBox(height: 20),
+
+                // ── Workers needed ─────────────────────────────────
+                _SectionLabel('Workers Needed'),
+                const SizedBox(height: 6),
+                Text(
+                  'Each worker is paid the amount above independently',
+                  style: TextStyle(
+                      color: kSub.withValues(alpha: 0.8), fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                _buildWorkerSlotsStepper(),
                 const SizedBox(height: 20),
 
                 // ── Schedule ──────────────────────────────────────
@@ -924,6 +946,59 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       ),
     );
   }
+
+  // ── Worker Slots Stepper ──────────────────────────────────────────────────────
+  Widget _buildWorkerSlotsStepper() {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final currencyCode = context.read<CurrentUserProvider>().currencyCode;
+    final rate = double.tryParse(_budgetCtrl.text.trim()) ?? 0;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        children: [
+          _StepperButton(
+            icon: Icons.remove_rounded,
+            onTap: _workerSlots > 1
+                ? () => setState(() => _workerSlots--)
+                : null,
+          ),
+          Expanded(
+            child: Column(
+              children: [
+                Text(
+                  '$_workerSlots ${_workerSlots == 1 ? 'worker' : 'workers'}',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (rate > 0 && _workerSlots > 1)
+                  Text(
+                    'Total: ${CurrencyFormatter.format(rate * _workerSlots, currencyCode)}',
+                    style: TextStyle(color: kSub.withValues(alpha: 0.8), fontSize: 11),
+                  ),
+              ],
+            ),
+          ),
+          _StepperButton(
+            icon: Icons.add_rounded,
+            onTap: _workerSlots < 50
+                ? () => setState(() => _workerSlots++)
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -940,6 +1015,33 @@ class _SectionLabel extends StatelessWidget {
             color: Theme.of(context).colorScheme.onSurface,
             fontSize: 15,
             fontWeight: FontWeight.bold));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Stepper Button (worker slots +/-)
+// ─────────────────────────────────────────────────────────────────────────────
+class _StepperButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  const _StepperButton({required this.icon, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: kAmber.withValues(alpha: enabled ? 0.12 : 0.05),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: enabled ? kAmber : kSub.withValues(alpha: 0.4), size: 18),
+      ),
+    );
   }
 }
 

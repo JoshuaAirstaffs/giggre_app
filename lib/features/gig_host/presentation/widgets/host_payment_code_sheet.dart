@@ -20,6 +20,11 @@ class HostPaymentCodeSheet extends StatefulWidget {
   final String currencyCode;
   final String workerName;
   final String workerId;
+  // When set, this gig uses the multi-worker `workers` subcollection and all
+  // reads/writes target `{gigCollection}/{gigId}/workers/{slotWorkerId}`
+  // instead of the gig doc directly — each worker settles independently.
+  // Null == legacy single-worker gig, unchanged behavior.
+  final String? slotWorkerId;
 
   const HostPaymentCodeSheet({
     super.key,
@@ -30,6 +35,7 @@ class HostPaymentCodeSheet extends StatefulWidget {
     this.currencyCode = 'PHP',
     required this.workerName,
     required this.workerId,
+    this.slotWorkerId,
   });
 
   static Future<bool> show({
@@ -41,6 +47,7 @@ class HostPaymentCodeSheet extends StatefulWidget {
     String currencyCode = 'PHP',
     required String workerName,
     required String workerId,
+    String? slotWorkerId,
   }) async {
     final result = await showModalBottomSheet<bool>(
       context: context,
@@ -56,6 +63,7 @@ class HostPaymentCodeSheet extends StatefulWidget {
         currencyCode: currencyCode,
         workerName: workerName,
         workerId: workerId,
+        slotWorkerId: slotWorkerId,
       ),
     );
     return result ?? false;
@@ -70,14 +78,18 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
   bool _confirmed = false;
   bool _manualProcessing = false;
 
+  DocumentReference<Map<String, dynamic>> get _targetRef {
+    final gigRef = FirebaseFirestore.instance
+        .collection(widget.gigCollection)
+        .doc(widget.gigId);
+    final slotId = widget.slotWorkerId;
+    return slotId == null ? gigRef : gigRef.collection('workers').doc(slotId);
+  }
+
   @override
   void initState() {
     super.initState();
-    _sub = FirebaseFirestore.instance
-        .collection(widget.gigCollection)
-        .doc(widget.gigId)
-        .snapshots()
-        .listen((snap) {
+    _sub = _targetRef.snapshots().listen((snap) {
       final status = snap.data()?['status'] as String?;
       if (status == 'completed' && !_confirmed && mounted) {
         _confirmed = true;
@@ -176,13 +188,17 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
     setState(() => _manualProcessing = true);
     try {
       final db = FirebaseFirestore.instance;
-      final gigRef = db.collection(widget.gigCollection).doc(widget.gigId);
+      final targetRef = _targetRef;
       final workerRef = db.collection('users').doc(widget.workerId);
       final currentWeek = EarningsService.currentWeekLabel();
+      final slotId = widget.slotWorkerId;
+      final gigRef = slotId == null
+          ? null
+          : db.collection(widget.gigCollection).doc(widget.gigId);
 
       await db.runTransaction((tx) async {
-        final gigSnap = await tx.get(gigRef);
-        if (gigSnap.data()?['status'] == 'completed') return;
+        final targetSnap = await tx.get(targetRef);
+        if (targetSnap.data()?['status'] == 'completed') return;
 
         await EarningsService.incrementInTransaction(
           tx: tx,
@@ -192,11 +208,22 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
           currentWeek: currentWeek,
         );
 
-        tx.update(gigRef, {
+        tx.update(targetRef, {
           'status': 'completed',
           'completedAt': FieldValue.serverTimestamp(),
           'paymentConfirmedManually': true,
         });
+
+        if (gigRef != null) {
+          final gigSnap = await tx.get(gigRef);
+          final gigData = gigSnap.data() ?? {};
+          final slots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
+          final completed = ((gigData['slotsCompleted'] as num?)?.toInt() ?? 0) + 1;
+          tx.update(gigRef, {
+            'slotsCompleted': completed,
+            if (completed >= slots) 'status': 'completed',
+          });
+        }
       });
     } finally {
       if (mounted) setState(() => _manualProcessing = false);

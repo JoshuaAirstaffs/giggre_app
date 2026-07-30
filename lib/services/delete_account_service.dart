@@ -299,8 +299,7 @@ class DeleteAccountService {
         await user.reauthenticateWithProvider(provider);
       } else {
         final googleUser = await GoogleSignIn(
-          serverClientId:
-              '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com',
+          serverClientId: googleServerClientId,
         ).signIn();
         if (googleUser == null) return false;
         final googleAuth = await googleUser.authentication;

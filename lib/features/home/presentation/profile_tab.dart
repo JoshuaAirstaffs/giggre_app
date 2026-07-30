@@ -733,22 +733,48 @@ class _ProfileTabState extends State<ProfileTab> {
   Future<void> _confirmLogout() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+        actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _kRed.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.logout_rounded, color: _kRed, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Log out?',
+              style: TextStyle(
+                color: Theme.of(ctx).colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+                fontSize: 17,
+              ),
+            ),
+          ],
         ),
-        title: const Text('Log out?'),
-        content: const Text('Are you sure you want to log out?'),
+        content: const Text(
+          "You'll need to sign in again to access your account.",
+          style: TextStyle(color: kSub, height: 1.5, fontSize: 14),
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: kSub)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
               'Log out',
-              style: TextStyle(color: Colors.redAccent),
+              style: TextStyle(color: _kRed, fontWeight: FontWeight.w600),
             ),
           ),
         ],

@@ -127,6 +127,15 @@ class CurrentUserProvider extends ChangeNotifier {
     );
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
+        'gig_offer_declined_v1',
+        'Offer Declined',
+        description: 'Notifications when a worker declines a gig you offered them',
+        importance: Importance.max,
+        sound: gigSound,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
         'gig_auto_cancelled_v3',
         'Gig Auto-Cancelled',
         description:
@@ -168,6 +177,25 @@ class CurrentUserProvider extends ChangeNotifier {
         'skill_request_status_v1',
         'Skill Request Status',
         description: 'Notifications when an admin approves or rejects a skill request',
+        importance: Importance.max,
+        sound: gigSound,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_cancellation_approved_v1',
+        'Cancellation Approved',
+        description:
+            'Notifications when your own cancellation request for a gig has been approved',
+        importance: Importance.max,
+        sound: gigSound,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_cancelled_by_host_v1',
+        'Gig Cancelled',
+        description: 'Notifications when a host cancels a gig you were working on',
         importance: Importance.max,
         sound: gigSound,
       ),
