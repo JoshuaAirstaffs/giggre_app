@@ -404,6 +404,12 @@ class CurrentUserProvider extends ChangeNotifier {
           final data = snap.data();
           if (data == null) return;
 
+          final newIsVerified = data['isVerified'] as String?;
+          if (newIsVerified != _isVerified) {
+            _isVerified = newIsVerified;
+            notifyListeners();
+          }
+
           final incomingCall = data['incomingCall'];
           debugPrint('📞 incomingCall: $incomingCall');
 
