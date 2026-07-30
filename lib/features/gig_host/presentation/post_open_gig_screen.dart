@@ -533,6 +533,12 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                     fontSize: 16)),
           ],
         ),
+        actions: [
+          _GigTypeInfoButton(
+            message:
+                "Post it publicly and let workers come to you. You're in control of who gets hired.",
+          ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -1160,6 +1166,52 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
               const BorderSide(color: Colors.redAccent, width: 1.5),
         ),
         errorStyle: const TextStyle(color: Colors.redAccent, fontSize: 11),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Gig Type Info Button — (i) icon in the AppBar explaining what this gig
+//  type does; tap shows an anchored, theme-aware tooltip bubble.
+// ─────────────────────────────────────────────────────────────────────────────
+class _GigTypeInfoButton extends StatelessWidget {
+  final String message;
+  const _GigTypeInfoButton({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final onSurface = theme.colorScheme.onSurface;
+    final isDark = theme.brightness == Brightness.dark;
+    final bubbleColor = isDark ? kCard : Colors.white;
+    final bubbleBorder = isDark ? kBorder : const Color(0xFFE2E8F0);
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Tooltip(
+        message: message,
+        triggerMode: TooltipTriggerMode.tap,
+        showDuration: const Duration(seconds: 5),
+        decoration: BoxDecoration(
+          color: bubbleColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: bubbleBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        textStyle: TextStyle(color: onSurface, fontSize: 13, height: 1.4),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(Icons.info_outline_rounded, size: 20, color: kSub),
+        ),
       ),
     );
   }
