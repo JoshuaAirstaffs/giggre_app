@@ -42,7 +42,7 @@ class PaymentHistorySheet extends StatelessWidget {
   Map<String, double> get _totalByCurrency {
     final map = <String, double>{};
     for (final g in gigs) {
-      final code = (g['currencyCode'] as String?) ?? 'PHP';
+      final code = (g['currencyCode'] as String?) ?? 'USD';
       map[code] = (map[code] ?? 0) + _totalPaidFor(g);
     }
     return map;
@@ -54,7 +54,7 @@ class PaymentHistorySheet extends StatelessWidget {
     for (final g in gigs) {
       final method = (g['paymentMethod'] as String? ?? 'cash');
       final amount = _totalPaidFor(g);
-      final code = (g['currencyCode'] as String?) ?? 'PHP';
+      final code = (g['currencyCode'] as String?) ?? 'USD';
       final existing = map[method];
       map[method] = (
         amount: (existing?.amount ?? 0) + amount,
@@ -67,7 +67,7 @@ class PaymentHistorySheet extends StatelessWidget {
   String _totalSpentLabel() {
     final entries = _totalByCurrency.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
-    if (entries.isEmpty) return CurrencyFormatter.format(0, 'PHP');
+    if (entries.isEmpty) return CurrencyFormatter.format(0, 'USD');
     return entries
         .map((e) => CurrencyFormatter.format(e.value, e.key))
         .join('  ');
@@ -288,7 +288,7 @@ class _PaymentCard extends StatelessWidget {
 
     final title = gig['title'] as String? ?? 'Gig';
     final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
-    final currencyCode = (gig['currencyCode'] as String?) ?? 'PHP';
+    final currencyCode = (gig['currencyCode'] as String?) ?? 'USD';
     final paymentMethod = gig['paymentMethod'] as String? ?? 'cash';
     final workerName = gig['assignedWorkerName'] as String? ??
         gig['workerName'] as String? ?? '';

@@ -91,7 +91,7 @@ String _formatPhoneForDisplay(String raw) {
 // Joins a per-currency-code amount map into a display string using the
 // existing CurrencyFormatter — unchanged calculation, just centralized.
 String _formatByCode(Map<String, double> byCode) {
-  if (byCode.isEmpty) return CurrencyFormatter.format(0, 'PHP');
+  if (byCode.isEmpty) return CurrencyFormatter.format(0, 'USD');
   return (byCode.entries.toList()..sort((a, b) => a.key.compareTo(b.key)))
       .map((e) => CurrencyFormatter.format(e.value, e.key))
       .join('  ');
@@ -343,7 +343,7 @@ class _ProfileTabState extends State<ProfileTab> {
       if (status == 'completed') {
         completedGigs++;
         final amount = (d['budget'] as num? ?? 0).toDouble();
-        final code = (d['currencyCode'] as String?) ?? 'PHP';
+        final code = (d['currencyCode'] as String?) ?? 'USD';
         spentByCode[code] = (spentByCode[code] ?? 0) + amount;
       }
     }

@@ -14,7 +14,11 @@ import 'package:giggre_app/screens/chat/chat.dart';
 import '../services/currency_service.dart';
 import '../services/push_notification_service.dart';
 
-class CurrentUserProvider extends ChangeNotifier {
+class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
+  CurrentUserProvider() {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
   String? _currentEmail;
   String? _currentName;
   String? _uid;
@@ -33,8 +37,9 @@ class CurrentUserProvider extends ChangeNotifier {
 
   static GlobalKey<NavigatorState>? navigatorKey;
 
-  String _currencyCode = 'PHP';
+  String _currencyCode = 'USD';
   bool _currencyInitialized = false;
+  bool _currencyRefreshing = false;
 
   String? get currentEmail => _currentEmail;
   String? get currentName => _currentName;
@@ -44,16 +49,54 @@ class CurrentUserProvider extends ChangeNotifier {
   bool get isLoggedIn => _uid != null;
   String get currencyCode => _currencyCode;
 
-  // Called once per session after setCurrentUserInfo. Reads the stored
-  // currencyCode from the user doc; if absent, detects it via GPS and persists
-  // it to Firestore. No-op on subsequent calls within the same session.
+  // Called once per session after setCurrentUserInfo. Applies the stored
+  // currencyCode from the user doc immediately (GPS/reverse-geocode can take
+  // up to 10s, and screens read currencyCode synchronously as soon as this
+  // returns/before it resolves) then detects via GPS in the background and
+  // persists to Firestore if it disagrees. No-op on subsequent calls within
+  // the same session.
   Future<void> initCurrencyCode(
       String uid, Map<String, dynamic> userDoc) async {
     if (_currencyInitialized) return;
     _currencyInitialized = true;
+    final existing = userDoc['currencyCode'] as String?;
+    if (existing != null) {
+      _currencyCode = existing;
+      notifyListeners();
+    }
     final code = await CurrencyService.initForUser(uid, userDoc);
-    _currencyCode = code;
-    notifyListeners();
+    if (code != _currencyCode) {
+      _currencyCode = code;
+      notifyListeners();
+    }
+  }
+
+  // Re-detects location on every foreground resume so a user who travels
+  // while staying logged in (app backgrounded, not signed out) gets synced
+  // to the new country's currency, instead of being stuck with whatever was
+  // detected at login for the rest of the session.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshCurrencyCode();
+  }
+
+  Future<void> _refreshCurrencyCode() async {
+    if (_uid == null || _currencyRefreshing) return;
+    _currencyRefreshing = true;
+    try {
+      final detected = await CurrencyService.detectCurrency();
+      if (detected == null || detected == _currencyCode || _uid == null) {
+        return;
+      }
+      _currencyCode = detected;
+      notifyListeners();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_uid)
+          .update({'currencyCode': detected});
+    } finally {
+      _currencyRefreshing = false;
+    }
   }
 
   static Future<void> initNotifications() async {
@@ -362,6 +405,12 @@ class CurrentUserProvider extends ChangeNotifier {
   static Future<void> unregisterPushForUid(String uid) =>
       _pushService.unregisterForUser(uid);
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
   // Awaited by every logout call site so the FCM token removal below
   // reaches Firestore (isAuth() rule) before signOut() invalidates the
   // session — otherwise the write silently fails as permission-denied and
@@ -372,7 +421,7 @@ class CurrentUserProvider extends ChangeNotifier {
     _currentEmail = null;
     _currentName = null;
     _uid = null;
-    _currencyCode = 'PHP';
+    _currencyCode = 'USD';
     _currencyInitialized = false;
     _callSubscription?.cancel();
     _callSubscription = null;

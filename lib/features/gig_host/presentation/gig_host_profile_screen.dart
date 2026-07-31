@@ -217,7 +217,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
       if (status == 'completed') {
         completedCount++;
         final amount = (d['budget'] as num? ?? 0).toDouble();
-        final code = (d['currencyCode'] as String?) ?? 'PHP';
+        final code = (d['currencyCode'] as String?) ?? 'USD';
         spentByCode[code] = (spentByCode[code] ?? 0) + amount;
       }
     }
@@ -994,7 +994,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                         _StatCard2(
                           label: 'Total Spent',
                           value: _spentByCurrency.isEmpty
-                              ? CurrencyFormatter.format(0, 'PHP')
+                              ? CurrencyFormatter.format(0, 'USD')
                               : (_spentByCurrency.entries.toList()
                                       ..sort((a, b) => a.key.compareTo(b.key)))
                                     .map(
@@ -1847,7 +1847,7 @@ class _GigHistoryCard extends StatelessWidget {
     final gigType = gig['gigType'] as String? ?? 'quick';
     final title = gig['title'] as String? ?? 'Gig';
     final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
-    final currencyCode = (gig['currencyCode'] as String?) ?? 'PHP';
+    final currencyCode = (gig['currencyCode'] as String?) ?? 'USD';
     final workerName =
         gig['assignedWorkerName'] as String? ??
         gig['workerName'] as String? ??
@@ -2129,7 +2129,7 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
     final title = gig['title'] as String? ?? 'Gig';
     final description = gig['description'] as String? ?? '';
     final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
-    final currencyCode = (gig['currencyCode'] as String?) ?? 'PHP';
+    final currencyCode = (gig['currencyCode'] as String?) ?? 'USD';
     final address = gig['address'] as String? ?? '';
     final workerName =
         gig['assignedWorkerName'] as String? ??

@@ -10,7 +10,16 @@ class CurrencyService {
   // so callers can distinguish "couldn't detect" from a real 'PHP' result.
   static Future<String?> detectCurrency() async {
     try {
-      final permission = await Geolocator.checkPermission();
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return null;
+      LocationPermission permission = await Geolocator.checkPermission();
+      // Unlike other Geolocator call sites, this one can run before the user
+      // has ever been prompted (e.g. right after signup) — checkPermission()
+      // alone returns `denied` for "never asked" and would otherwise make
+      // detection silently no-op forever instead of prompting.
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
         return null;
@@ -31,7 +40,7 @@ class CurrencyService {
 
   // Called once per session on login. Detects the device's current country and
   // updates Firestore if the currency has changed (e.g. user moved countries).
-  // Falls back to the stored value when detection is unavailable, or 'PHP' on
+  // Falls back to the stored value when detection is unavailable, or 'USD' on
   // first use with no stored value.
   static Future<String> initForUser(
       String uid, Map<String, dynamic> userDoc) async {
