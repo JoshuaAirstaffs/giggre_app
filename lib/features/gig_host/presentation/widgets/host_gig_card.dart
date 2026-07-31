@@ -582,7 +582,7 @@ class _HostGigCardState extends State<HostGigCard> {
     final title = data['title'] as String? ?? 'Untitled Gig';
     final pay = CurrencyFormatter.format(
       (data['budget'] as num?)?.toDouble() ?? 0,
-      (data['currencyCode'] as String?) ?? 'PHP',
+      (data['currencyCode'] as String?) ?? 'USD',
     );
     final category = _categoryText(gigType, data);
     final createdAt = data['createdAt'] != null

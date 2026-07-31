@@ -80,7 +80,7 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
         title: d['title'] as String? ?? type,
         address: d['address'] as String? ?? '',
         budget: (d['budget'] as num?)?.toDouble() ?? 0,
-        currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
+        currencyCode: (d['currencyCode'] as String?) ?? 'USD',
         completedAt: completedAt,
         hostName: d['hostName'] as String? ?? '',
         workerSlots: (d['workerSlots'] as num?)?.toInt() ?? 1,
@@ -125,7 +125,7 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
         title: gigData?['title'] as String? ?? typeLabel,
         address: gigData?['address'] as String? ?? '',
         budget: (d['rate'] as num?)?.toDouble() ?? 0,
-        currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
+        currencyCode: (d['currencyCode'] as String?) ?? 'USD',
         completedAt: completedAt,
         hostName: d['hostName'] as String? ?? gigData?['hostName'] as String? ?? '',
         workerSlots: (gigData?['workerSlots'] as num?)?.toInt() ?? 1,
@@ -233,7 +233,7 @@ class _GigHistoryHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sortedEntries = earningsByCode.isEmpty
-        ? [const MapEntry('PHP', 0.0)]
+        ? [const MapEntry('USD', 0.0)]
         : (earningsByCode.entries.toList()..sort((a, b) => a.key.compareTo(b.key)));
 
     final earningsValue = sortedEntries

@@ -373,7 +373,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         'Worker';
     final title = data['title'] as String? ?? 'Gig';
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
-    final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
+    final currencyCode = (data['currencyCode'] as String?) ?? 'USD';
 
     String? paymentCode;
     await PaymentSelectionSheet.show(
@@ -635,7 +635,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             (gigData['ratePerSlot'] as num?)?.toDouble() ??
             (gigData['budget'] as num?)?.toDouble() ??
             0;
-        final currencyCode = (gigData['currencyCode'] as String?) ?? 'PHP';
+        final currencyCode = (gigData['currencyCode'] as String?) ?? 'USD';
         final hostName = (gigData['hostName'] as String?) ?? '';
 
         if (filled >= slots) {
@@ -784,7 +784,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         final status = data['status'] as String? ?? '';
         final title = data['title'] as String? ?? 'Gig';
         final budget = (data['budget'] as num?)?.toDouble() ?? 0;
-        final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
+        final currencyCode = (data['currencyCode'] as String?) ?? 'USD';
         final address = data['address'] as String? ?? '';
         final scheduledDate = data['scheduledDate'] as Timestamp?;
         final geo = data['location'] as GeoPoint?;

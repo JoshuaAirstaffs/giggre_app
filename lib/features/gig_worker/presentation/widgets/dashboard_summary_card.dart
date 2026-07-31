@@ -112,7 +112,7 @@ class EarningsSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final entries = totalByCurrency.isEmpty
-        ? [const MapEntry('PHP', 0.0)]
+        ? [const MapEntry('USD', 0.0)]
         : (totalByCurrency.entries.toList()
             ..sort((a, b) => a.key.compareTo(b.key)));
     final primary = entries.first;

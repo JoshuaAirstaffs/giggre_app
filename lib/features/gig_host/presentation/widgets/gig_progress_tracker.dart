@@ -301,7 +301,7 @@ class _SearchingCardState extends State<_SearchingCard>
     final data = widget.doc.data() as Map<String, dynamic>;
     final title = data['title'] as String? ?? 'Quick Gig';
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
-    final currencyCode = data['currencyCode'] as String? ?? 'PHP';
+    final currencyCode = data['currencyCode'] as String? ?? 'USD';
     final status = data['status'] as String? ?? 'scanning';
 
     final cardColor = Theme.of(context).cardColor;
@@ -555,7 +555,7 @@ class _GigProgressCard extends StatelessWidget {
         ratePerSlot: (data['ratePerSlot'] as num?)?.toDouble() ??
             (data['budget'] as num?)?.toDouble() ??
             0,
-        currencyCode: (data['currencyCode'] as String?) ?? 'PHP',
+        currencyCode: (data['currencyCode'] as String?) ?? 'USD',
         isOfferedGig: gigCollection == 'offered_gigs',
         isOpenGig: gigCollection == 'open_gigs',
       );
@@ -568,7 +568,7 @@ class _GigProgressCard extends StatelessWidget {
     final workerId =
         data['assignedWorkerId'] as String? ?? data['workerId'] as String?;
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
-    final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
+    final currencyCode = (data['currencyCode'] as String?) ?? 'USD';
     final isOfferedGig = gigCollection == 'offered_gigs';
     final isOpenGig = gigCollection == 'open_gigs';
     final isCancelPending = status == 'cancellation_requested';

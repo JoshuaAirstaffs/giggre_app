@@ -21,7 +21,7 @@ class GigTemplateModel {
     required this.title,
     required this.description,
     required this.budget,
-    this.currencyCode = 'PHP',
+    this.currencyCode = 'USD',
     this.skillRequired = '',
     this.experienceLevel = '',
     required this.createdAt,
@@ -50,7 +50,7 @@ class GigTemplateModel {
       title: d['title'] ?? '',
       description: d['description'] ?? '',
       budget: (d['budget'] as num?)?.toDouble() ?? 0,
-      currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
+      currencyCode: (d['currencyCode'] as String?) ?? 'USD',
       skillRequired: d['skillRequired'] ?? '',
       experienceLevel: d['experienceLevel'] ?? '',
       createdAt: d['createdAt'] != null

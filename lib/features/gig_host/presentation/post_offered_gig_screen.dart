@@ -750,7 +750,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                     return null;
                   },
                   prefix: Text(
-                    '${CurrencyFormatter.symbol(context.read<CurrentUserProvider>().currencyCode)} ',
+                    '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
                     style: const TextStyle(
                       color: _kPurple,
                       fontSize: 15,

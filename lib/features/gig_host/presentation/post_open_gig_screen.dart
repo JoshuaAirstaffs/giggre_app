@@ -606,7 +606,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                     return null;
                   },
                   prefix: Text(
-                      '${CurrencyFormatter.symbol(context.read<CurrentUserProvider>().currencyCode)} ',
+                      '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
                       style: const TextStyle(
                           color: kBlue,
                           fontSize: 15,
