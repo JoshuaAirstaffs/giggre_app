@@ -34,62 +34,92 @@ class _RouteStep {
   final String instruction;
   final IconData icon;
   final double distanceM;
-  const _RouteStep({required this.instruction, required this.icon, required this.distanceM});
+  const _RouteStep({
+    required this.instruction,
+    required this.icon,
+    required this.distanceM,
+  });
 }
 
 String _buildStepInstruction(Map<String, dynamic> step) {
   final maneuver = step['maneuver'] as Map<String, dynamic>? ?? {};
-  final type     = maneuver['type'] as String? ?? '';
+  final type = maneuver['type'] as String? ?? '';
   final modifier = maneuver['modifier'] as String? ?? '';
-  final name     = (step['name'] as String? ?? '').trim();
-  final onto     = name.isNotEmpty ? ' onto $name' : '';
+  final name = (step['name'] as String? ?? '').trim();
+  final onto = name.isNotEmpty ? ' onto $name' : '';
   switch (type) {
-    case 'depart':    return 'Head out${onto.isNotEmpty ? onto : ''}';
-    case 'arrive':    return 'Arrive at destination';
-    case 'turn':      return 'Turn ${_stepDir(modifier)}$onto';
+    case 'depart':
+      return 'Head out${onto.isNotEmpty ? onto : ''}';
+    case 'arrive':
+      return 'Arrive at destination';
+    case 'turn':
+      return 'Turn ${_stepDir(modifier)}$onto';
     case 'new name':
-    case 'continue':  return 'Continue${onto.isEmpty ? ' straight' : onto}';
-    case 'merge':     return 'Merge ${_stepDir(modifier)}$onto';
-    case 'on ramp':   return 'Take the ramp ${_stepDir(modifier)}';
-    case 'off ramp':  return 'Take exit${onto.isNotEmpty ? onto : ''}';
-    case 'fork':      return 'Keep ${_stepDir(modifier)} at the fork';
-    case 'end of road': return 'Turn ${_stepDir(modifier)} at end of road';
+    case 'continue':
+      return 'Continue${onto.isEmpty ? ' straight' : onto}';
+    case 'merge':
+      return 'Merge ${_stepDir(modifier)}$onto';
+    case 'on ramp':
+      return 'Take the ramp ${_stepDir(modifier)}';
+    case 'off ramp':
+      return 'Take exit${onto.isNotEmpty ? onto : ''}';
+    case 'fork':
+      return 'Keep ${_stepDir(modifier)} at the fork';
+    case 'end of road':
+      return 'Turn ${_stepDir(modifier)} at end of road';
     case 'roundabout':
-    case 'rotary': {
-      final exit = maneuver['exit'] as int?;
-      return exit != null ? 'Take exit $exit at roundabout' : 'Enter the roundabout';
-    }
-    default: return name.isNotEmpty ? 'Continue on $name' : 'Continue';
+    case 'rotary':
+      {
+        final exit = maneuver['exit'] as int?;
+        return exit != null
+            ? 'Take exit $exit at roundabout'
+            : 'Enter the roundabout';
+      }
+    default:
+      return name.isNotEmpty ? 'Continue on $name' : 'Continue';
   }
 }
 
 String _stepDir(String modifier) {
   switch (modifier) {
-    case 'uturn':       return 'around';
-    case 'sharp right': return 'sharp right';
-    case 'right':       return 'right';
-    case 'slight right':return 'slightly right';
-    case 'slight left': return 'slightly left';
-    case 'left':        return 'left';
-    case 'sharp left':  return 'sharp left';
-    default:            return 'straight';
+    case 'uturn':
+      return 'around';
+    case 'sharp right':
+      return 'sharp right';
+    case 'right':
+      return 'right';
+    case 'slight right':
+      return 'slightly right';
+    case 'slight left':
+      return 'slightly left';
+    case 'left':
+      return 'left';
+    case 'sharp left':
+      return 'sharp left';
+    default:
+      return 'straight';
   }
 }
 
 IconData _iconForStepData(Map<String, dynamic> step) {
   final maneuver = step['maneuver'] as Map<String, dynamic>? ?? {};
-  final type     = maneuver['type'] as String? ?? '';
+  final type = maneuver['type'] as String? ?? '';
   final modifier = maneuver['modifier'] as String? ?? '';
   switch (type) {
-    case 'depart':    return Icons.navigation_rounded;
-    case 'arrive':    return Icons.location_on_rounded;
+    case 'depart':
+      return Icons.navigation_rounded;
+    case 'arrive':
+      return Icons.location_on_rounded;
     case 'roundabout':
-    case 'rotary':    return Icons.roundabout_right_rounded;
-    case 'merge':     return Icons.merge_rounded;
+    case 'rotary':
+      return Icons.roundabout_right_rounded;
+    case 'merge':
+      return Icons.merge_rounded;
     case 'on ramp':
-    case 'off ramp':  return Icons.ramp_right_rounded;
+    case 'off ramp':
+      return Icons.ramp_right_rounded;
     default:
-      if (modifier.contains('left'))  return Icons.turn_left_rounded;
+      if (modifier.contains('left')) return Icons.turn_left_rounded;
       if (modifier.contains('right')) return Icons.turn_right_rounded;
       return Icons.straight_rounded;
   }
@@ -110,8 +140,6 @@ class WorkingUI extends StatefulWidget {
   // early would wrongly tear down a gig that's still awaiting review.
   final VoidCallback? onCancellationRequested;
   final String gigCollection;
-
-
 
   const WorkingUI({
     super.key,
@@ -227,7 +255,9 @@ class _WorkingUIState extends State<WorkingUI> {
 
       if (status == 'cancelled' && !_cancelledHandled) {
         _cancelledHandled = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) => _onAdminCancelled());
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _onAdminCancelled(),
+        );
         return;
       }
 
@@ -256,7 +286,8 @@ class _WorkingUIState extends State<WorkingUI> {
       if (newStep == GigStep.payment && !_paymentConfirmShown) {
         _paymentConfirmShown = true;
         WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _showWorkerPaymentConfirm());
+          (_) => _showWorkerPaymentConfirm(),
+        );
       }
 
       if (newStep == GigStep.completed && !_ratingShown) {
@@ -272,14 +303,21 @@ class _WorkingUIState extends State<WorkingUI> {
       }
     }, onError: (e) => debugPrint('[WorkingUI] gig stream error: $e'));
   }
+
   // ── Location stream + geofence ────────────────────────────────────────────
   Future<void> _startLocation() async {
     try {
       bool enabled = await Geolocator.isLocationServiceEnabled();
       if (!enabled) {
-        if (mounted) setState(() => _locationWarning = 'Location is turned off. Tracking is paused.');
+        if (mounted)
+          setState(
+            () => _locationWarning =
+                'Location is turned off. Tracking is paused.',
+          );
         _locationServiceSub?.cancel();
-        _locationServiceSub = Geolocator.getServiceStatusStream().listen((status) {
+        _locationServiceSub = Geolocator.getServiceStatusStream().listen((
+          status,
+        ) {
           if (!mounted) return;
           if (status == ServiceStatus.enabled) {
             _locationServiceSub?.cancel();
@@ -297,67 +335,91 @@ class _WorkingUIState extends State<WorkingUI> {
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
         if (mounted) {
-          setState(() => _locationWarning = perm == LocationPermission.deniedForever
-              ? 'Location permanently denied. Enable in app settings.'
-              : 'Location permission denied. Tracking is paused.');
+          setState(
+            () => _locationWarning = perm == LocationPermission.deniedForever
+                ? 'Location permanently denied. Enable in app settings.'
+                : 'Location permission denied. Tracking is paused.',
+          );
         }
         return;
       }
       if (mounted) setState(() => _locationWarning = null);
-      _locationSub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 5,
-        ),
-      ).listen((pos) {
-        if (!mounted) return;
-        final loc = LatLng(pos.latitude, pos.longitude);
-        setState(() => _workerLocation = loc);
-        _checkGeofence(pos);
-        // Re-fetch route only when navigating and moved >30 m from last fetch
-        if (_step == GigStep.navigating) {
-          // Persist location to Firestore so host can track worker in real-time
-          _targetRef
-              .update({'workerLocation': GeoPoint(pos.latitude, pos.longitude)})
-              .catchError((_) {});
+      _locationSub =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 5,
+            ),
+          ).listen(
+            (pos) {
+              if (!mounted) return;
+              final loc = LatLng(pos.latitude, pos.longitude);
+              setState(() => _workerLocation = loc);
+              _checkGeofence(pos);
+              // Re-fetch route only when navigating and moved >30 m from last fetch
+              if (_step == GigStep.navigating) {
+                // Persist location to Firestore so host can track worker in real-time
+                _targetRef
+                    .update({
+                      'workerLocation': GeoPoint(pos.latitude, pos.longitude),
+                    })
+                    .catchError((_) {});
 
-          final gigPos = LatLng(
-            widget.gig.position.latitude,
-            widget.gig.position.longitude,
+                final gigPos = LatLng(
+                  widget.gig.position.latitude,
+                  widget.gig.position.longitude,
+                );
+                final shouldFetch =
+                    _lastRouteFetch == null ||
+                    Geolocator.distanceBetween(
+                          _lastRouteFetch!.latitude,
+                          _lastRouteFetch!.longitude,
+                          loc.latitude,
+                          loc.longitude,
+                        ) >
+                        30;
+                if (shouldFetch) {
+                  _lastRouteFetch = loc;
+                  _fetchRoute(loc, gigPos);
+                }
+              }
+            },
+            onError: (e) {
+              debugPrint('[WorkingUI] location stream error: $e');
+              if (!mounted) return;
+              if (e is LocationServiceDisabledException) {
+                setState(
+                  () => _locationWarning =
+                      'Location turned off. Tracking is paused.',
+                );
+                _startLocation();
+              } else if (e is PermissionDefinitionsNotFoundException) {
+                setState(
+                  () => _locationWarning =
+                      'Location permission revoked. Tracking is paused.',
+                );
+              } else {
+                setState(
+                  () => _locationWarning =
+                      'Location error. Tracking may be interrupted.',
+                );
+              }
+            },
           );
-          final shouldFetch = _lastRouteFetch == null ||
-              Geolocator.distanceBetween(
-                _lastRouteFetch!.latitude, _lastRouteFetch!.longitude,
-                loc.latitude, loc.longitude,
-              ) > 30;
-          if (shouldFetch) {
-            _lastRouteFetch = loc;
-            _fetchRoute(loc, gigPos);
-          }
-        }
-      }, onError: (e) {
-        debugPrint('[WorkingUI] location stream error: $e');
-        if (!mounted) return;
-        if (e is LocationServiceDisabledException) {
-          setState(() => _locationWarning = 'Location turned off. Tracking is paused.');
-          _startLocation();
-        } else if (e is PermissionDefinitionsNotFoundException) {
-          setState(() => _locationWarning = 'Location permission revoked. Tracking is paused.');
-        } else {
-          setState(() => _locationWarning = 'Location error. Tracking may be interrupted.');
-        }
-      });
     } catch (e) {
       debugPrint('[WorkingUI] _startLocation error: $e');
-      if (mounted) setState(() => _locationWarning = 'Could not start location tracking.');
+      if (mounted)
+        setState(() => _locationWarning = 'Could not start location tracking.');
     }
   }
 
   void _checkGeofence(Position pos) {
     if (_step != GigStep.navigating) return;
     final dist = Geolocator.distanceBetween(
-      pos.latitude, pos.longitude,
-      widget.gig.position.latitude, widget.gig.position.longitude,
+      pos.latitude,
+      pos.longitude,
+      widget.gig.position.latitude,
+      widget.gig.position.longitude,
     );
     final withinRange = dist <= _arrivedThresholdMeters;
     // Reactive, not a one-shot latch — walking back out of range hides the
@@ -418,7 +480,8 @@ class _WorkingUIState extends State<WorkingUI> {
   Future<void> _showCancelReasonDialog() async {
     final controller = TextEditingController();
     try {
-      final submitted = await showDialog<bool>(
+      final submitted =
+          await showDialog<bool>(
             context: context,
             barrierDismissible: false,
             builder: (_) => _CancelReasonDialog(controller: controller),
@@ -429,11 +492,7 @@ class _WorkingUIState extends State<WorkingUI> {
       if (reason.isEmpty) return;
       await _targetRef.update({
         'cancellation_reason': FieldValue.arrayUnion([
-          {
-            'reason': reason,
-            'approved': null,
-            'requestedBy': 'worker',
-          }
+          {'reason': reason, 'approved': null, 'requestedBy': 'worker'},
         ]),
         'lastProgressStatus': _lastStatusString,
         'cancellationRequestedAt': FieldValue.serverTimestamp(),
@@ -443,7 +502,8 @@ class _WorkingUIState extends State<WorkingUI> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-              'Cancellation request submitted. Pending admin review.'),
+            'Cancellation request submitted. Pending admin review.',
+          ),
           backgroundColor: Colors.orange,
         ),
       );
@@ -559,34 +619,39 @@ class _WorkingUIState extends State<WorkingUI> {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final routes = data['routes'] as List?;
       if (routes == null || routes.isEmpty) return;
-      final route   = routes[0] as Map<String, dynamic>;
+      final route = routes[0] as Map<String, dynamic>;
       final geometry = route['geometry'] as String;
-      final decoded  = PolylinePoints().decodePolyline(geometry);
+      final decoded = PolylinePoints().decodePolyline(geometry);
 
-      final distM   = (route['distance'] as num?)?.toDouble();
-      final durS    = (route['duration'] as num?)?.toInt();
+      final distM = (route['distance'] as num?)?.toDouble();
+      final durS = (route['duration'] as num?)?.toInt();
 
       final steps = <_RouteStep>[];
-      final legs  = route['legs'] as List?;
+      final legs = route['legs'] as List?;
       if (legs != null && legs.isNotEmpty) {
-        final rawSteps = (legs[0] as Map<String, dynamic>)['steps'] as List? ?? [];
+        final rawSteps =
+            (legs[0] as Map<String, dynamic>)['steps'] as List? ?? [];
         for (final s in rawSteps) {
-          final step  = s as Map<String, dynamic>;
-          final dist  = (step['distance'] as num?)?.toDouble() ?? 0;
-          steps.add(_RouteStep(
-            instruction: _buildStepInstruction(step),
-            icon: _iconForStepData(step),
-            distanceM: dist,
-          ));
+          final step = s as Map<String, dynamic>;
+          final dist = (step['distance'] as num?)?.toDouble() ?? 0;
+          steps.add(
+            _RouteStep(
+              instruction: _buildStepInstruction(step),
+              icon: _iconForStepData(step),
+              distanceM: dist,
+            ),
+          );
         }
       }
 
       if (mounted) {
         setState(() {
-          _routePoints    = decoded.map((p) => LatLng(p.latitude, p.longitude)).toList();
+          _routePoints = decoded
+              .map((p) => LatLng(p.latitude, p.longitude))
+              .toList();
           _routeDistanceM = distM;
           _routeEtaSeconds = durS;
-          _routeSteps     = steps;
+          _routeSteps = steps;
         });
       }
     } catch (_) {}
@@ -616,8 +681,11 @@ class _WorkingUIState extends State<WorkingUI> {
   @override
   Widget build(BuildContext context) {
     final stepIndex = GigStep.values.indexOf(_step);
-    final copy = workerInstructionFor(_step,
-        amount: widget.gig.budget, currencyCode: widget.gig.currencyCode);
+    final copy = workerInstructionFor(
+      _step,
+      amount: widget.gig.budget,
+      currencyCode: widget.gig.currencyCode,
+    );
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -637,15 +705,25 @@ class _WorkingUIState extends State<WorkingUI> {
               Container(
                 width: double.infinity,
                 color: Colors.orange.shade700,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: Row(
                   children: [
-                    const Icon(Icons.location_off_rounded, color: Colors.white, size: 18),
+                    const Icon(
+                      Icons.location_off_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _locationWarning!,
-                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                     if (_locationWarning!.contains('settings'))
@@ -656,7 +734,13 @@ class _WorkingUIState extends State<WorkingUI> {
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        child: const Text('Settings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        child: const Text(
+                          'Settings',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -674,16 +758,54 @@ class _WorkingUIState extends State<WorkingUI> {
                       title: copy.title,
                       body: copy.body,
                       elapsed: _step == GigStep.working ? _fmt(_elapsed) : null,
-                      arrivedPromptVisible: !_cancelPending && _arrivedPromptVisible,
+                      arrivedPromptVisible:
+                          !_cancelPending && _arrivedPromptVisible,
                       onConfirmArrival: _confirmArrival,
                       isCancelPending: _cancelPending,
                       showStartGig: !_cancelPending && _step == GigStep.arrived,
                       onStartGig: _startWork,
-                      showGigComplete: !_cancelPending && _step == GigStep.working,
+                      showGigComplete:
+                          !_cancelPending && _step == GigStep.working,
                       onGigComplete: _completeWork,
                       accent: kWorkerAccent,
                     ),
                     const SizedBox(height: 16),
+
+                    // ── Reopen payment code entry (worker backed out of it
+                    // earlier). _paymentConfirmShown only ever flips once —
+                    // if the sheet gets dismissed via back press, nothing
+                    // else re-triggers it, so this button calls
+                    // _showWorkerPaymentConfirm directly instead of relying
+                    // on that one-shot flag.
+                    if (_step == GigStep.payment) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        height: 46,
+                        child: ElevatedButton.icon(
+                          onPressed: _showWorkerPaymentConfirm,
+                          icon: const Icon(
+                            Icons.qr_code_scanner_rounded,
+                            size: 20,
+                          ),
+                          label: const Text(
+                            'Enter Payment Code',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF22C55E),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
 
                     _ActiveGigMapCard(
                       gig: widget.gig,
@@ -720,7 +842,6 @@ class _WorkingUIState extends State<WorkingUI> {
     );
   }
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Map card — reuses _NavMapCore's existing GoogleMap/OSM instance & config;
@@ -969,7 +1090,9 @@ class _NavMapCoreState extends State<_NavMapCore> {
         // native map toolbar (Directions / Open in Google Maps) appears
         // alongside it automatically since mapToolbarEnabled defaults to true.
         infoWindow: InfoWindow(
-          title: widget.gig.title.isNotEmpty ? widget.gig.title : 'Gig Location',
+          title: widget.gig.title.isNotEmpty
+              ? widget.gig.title
+              : 'Gig Location',
           snippet: 'Tap for directions',
         ),
       ),
@@ -994,42 +1117,61 @@ class _NavMapCoreState extends State<_NavMapCore> {
       widget.gig.position.longitude,
     );
     final workerPos = widget.workerLocation != null
-        ? ll.LatLng(widget.workerLocation!.latitude, widget.workerLocation!.longitude)
+        ? ll.LatLng(
+            widget.workerLocation!.latitude,
+            widget.workerLocation!.longitude,
+          )
         : null;
     final osmMarkers = <fm.Marker>[];
     if (workerPos != null) {
-      osmMarkers.add(fm.Marker(
-        point: workerPos,
-        width: 28,
-        height: 28,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.lightBlue,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+      osmMarkers.add(
+        fm.Marker(
+          point: workerPos,
+          width: 28,
+          height: 28,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.lightBlue,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: const [
+                BoxShadow(color: Colors.black26, blurRadius: 4),
+              ],
+            ),
+            child: const Icon(
+              Icons.person_rounded,
+              color: Colors.white,
+              size: 14,
+            ),
           ),
-          child: const Icon(Icons.person_rounded, color: Colors.white, size: 14),
         ),
-      ));
+      );
     }
-    osmMarkers.add(fm.Marker(
-      point: gigPos,
-      width: 32,
-      height: 32,
-      child: GestureDetector(
-        onTap: widget.onDestinationTap,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.red,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+    osmMarkers.add(
+      fm.Marker(
+        point: gigPos,
+        width: 32,
+        height: 32,
+        child: GestureDetector(
+          onTap: widget.onDestinationTap,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.red,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: const [
+                BoxShadow(color: Colors.black26, blurRadius: 4),
+              ],
+            ),
+            child: const Icon(
+              Icons.work_rounded,
+              color: Colors.white,
+              size: 16,
+            ),
           ),
-          child: const Icon(Icons.work_rounded, color: Colors.white, size: 16),
         ),
       ),
-    ));
+    );
     final routePoints = widget.routePoints
         .map((p) => ll.LatLng(p.latitude, p.longitude))
         .toList();
@@ -1043,7 +1185,8 @@ class _NavMapCoreState extends State<_NavMapCore> {
           _animateToFit();
         },
         interactionOptions: const fm.InteractionOptions(
-          flags: fm.InteractiveFlag.pinchZoom |
+          flags:
+              fm.InteractiveFlag.pinchZoom |
               fm.InteractiveFlag.doubleTapZoom |
               fm.InteractiveFlag.drag,
         ),
@@ -1106,7 +1249,8 @@ class _NavMapCoreState extends State<_NavMapCore> {
             polylines: _buildPolylines(),
             gestureRecognizers: {
               Factory<OneSequenceGestureRecognizer>(
-                  () => EagerGestureRecognizer()),
+                () => EagerGestureRecognizer(),
+              ),
             },
           )
         : _buildOsmMap();
@@ -1126,7 +1270,9 @@ class _NavMapCoreState extends State<_NavMapCore> {
         height: widget.height,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          border: widget.divider != null ? Border.all(color: widget.divider!) : null,
+          border: widget.divider != null
+              ? Border.all(color: widget.divider!)
+              : null,
         ),
         child: stack,
       ),
@@ -1181,7 +1327,10 @@ class _GigHostCard extends StatelessWidget {
                 text: TextSpan(
                   children: [
                     TextSpan(
-                      text: CurrencyFormatter.format(gig.budget, gig.currencyCode),
+                      text: CurrencyFormatter.format(
+                        gig.budget,
+                        gig.currencyCode,
+                      ),
                       style: TextStyle(
                         color: kWorkerAccent.solid,
                         fontSize: 16,
@@ -1205,11 +1354,18 @@ class _GigHostCard extends StatelessWidget {
             const SizedBox(height: 4),
             Row(
               children: [
-                Icon(Icons.groups_rounded, color: activeGigTextMuted(isDark), size: 12),
+                Icon(
+                  Icons.groups_rounded,
+                  color: activeGigTextMuted(isDark),
+                  size: 12,
+                ),
                 const SizedBox(width: 5),
                 Text(
                   'You\'re one of ${gig.workerSlots} workers on this gig, paid independently',
-                  style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 10.5),
+                  style: TextStyle(
+                    color: activeGigTextMuted(isDark),
+                    fontSize: 10.5,
+                  ),
                 ),
               ],
             ),
@@ -1219,20 +1375,30 @@ class _GigHostCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.location_on_outlined,
-                    color: activeGigTextMuted(isDark), size: 14),
+                Icon(
+                  Icons.location_on_outlined,
+                  color: activeGigTextMuted(isDark),
+                  size: 14,
+                ),
                 const SizedBox(width: 5),
                 Expanded(
                   child: Text(
                     dedupedAddress(gig.address),
-                    style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 11),
+                    style: TextStyle(
+                      color: activeGigTextMuted(isDark),
+                      fontSize: 11,
+                    ),
                   ),
                 ),
               ],
             ),
           ],
           const SizedBox(height: 14),
-          Divider(height: 0, thickness: 1, color: activeGigDividerColor(isDark)),
+          Divider(
+            height: 0,
+            thickness: 1,
+            color: activeGigDividerColor(isDark),
+          ),
           const SizedBox(height: 14),
           if (gig.hostId.isNotEmpty)
             Row(
@@ -1268,8 +1434,13 @@ class _GigHostCard extends StatelessWidget {
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
-                      Text('Your host',
-                          style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 10.5)),
+                      Text(
+                        'Your host',
+                        style: TextStyle(
+                          color: activeGigTextMuted(isDark),
+                          fontSize: 10.5,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1317,10 +1488,7 @@ class _HostRatingDialog extends StatefulWidget {
   final String hostId;
   final String hostName;
 
-  const _HostRatingDialog({
-    required this.hostId,
-    required this.hostName,
-  });
+  const _HostRatingDialog({required this.hostId, required this.hostName});
 
   @override
   State<_HostRatingDialog> createState() => _HostRatingDialogState();
@@ -1341,13 +1509,10 @@ class _HostRatingDialogState extends State<_HostRatingDialog> {
       final db = FirebaseFirestore.instance;
       final snap = await db.collection('users').doc(widget.hostId).get();
       final data = snap.data() ?? {};
-      final currentRating =
-          (data['ratingAsHost'] as num?)?.toDouble() ?? 5.0;
-      final currentCount =
-          (data['ratingAsHostCount'] as num?)?.toInt() ?? 0;
+      final currentRating = (data['ratingAsHost'] as num?)?.toDouble() ?? 5.0;
+      final currentCount = (data['ratingAsHostCount'] as num?)?.toInt() ?? 0;
       final newCount = currentCount + 1;
-      final newRating =
-          ((currentRating * currentCount) + _selected) / newCount;
+      final newRating = ((currentRating * currentCount) + _selected) / newCount;
       await db.collection('users').doc(widget.hostId).update({
         'ratingAsHost': double.parse(newRating.toStringAsFixed(2)),
         'ratingAsHostCount': newCount,
@@ -1421,8 +1586,7 @@ class _HostRatingDialogState extends State<_HostRatingDialog> {
               style: TextStyle(
                 color: _selected > 0 ? _starActive : kSub,
                 fontSize: 13,
-                fontWeight:
-                    _selected > 0 ? FontWeight.bold : FontWeight.normal,
+                fontWeight: _selected > 0 ? FontWeight.bold : FontWeight.normal,
               ),
             ),
           ),
@@ -1431,10 +1595,11 @@ class _HostRatingDialogState extends State<_HostRatingDialog> {
             children: [
               Expanded(
                 child: TextButton(
-                  onPressed:
-                      _submitting ? null : () => Navigator.pop(context),
-                  child: const Text('Skip',
-                      style: TextStyle(color: kSub, fontSize: 14)),
+                  onPressed: _submitting ? null : () => Navigator.pop(context),
+                  child: const Text(
+                    'Skip',
+                    style: TextStyle(color: kSub, fontSize: 14),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1448,7 +1613,8 @@ class _HostRatingDialogState extends State<_HostRatingDialog> {
                     disabledBackgroundColor: _green.withValues(alpha: 0.4),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 13),
                   ),
                   child: _submitting
@@ -1456,11 +1622,17 @@ class _HostRatingDialogState extends State<_HostRatingDialog> {
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2),
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
                         )
-                      : const Text('Submit',
+                      : const Text(
+                          'Submit',
                           style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.bold)),
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
               ),
             ],
@@ -1522,8 +1694,11 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
               color: Colors.redAccent.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.cancel_outlined,
-                color: Colors.redAccent, size: 28),
+            child: const Icon(
+              Icons.cancel_outlined,
+              color: Colors.redAccent,
+              size: 28,
+            ),
           ),
           const SizedBox(height: 14),
           Text(
@@ -1548,8 +1723,10 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
             style: TextStyle(color: onSurface, fontSize: 13),
             decoration: InputDecoration(
               hintText: 'Describe your reason for cancelling...',
-              hintStyle:
-                  TextStyle(color: kSub.withValues(alpha: 0.6), fontSize: 13),
+              hintStyle: TextStyle(
+                color: kSub.withValues(alpha: 0.6),
+                fontSize: 13,
+              ),
               filled: true,
               fillColor: isDark
                   ? Colors.white.withValues(alpha: 0.05)
@@ -1557,20 +1734,26 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(
-                    color: Colors.redAccent.withValues(alpha: 0.3)),
+                  color: Colors.redAccent.withValues(alpha: 0.3),
+                ),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(
-                    color: Colors.redAccent.withValues(alpha: 0.25)),
+                  color: Colors.redAccent.withValues(alpha: 0.25),
+                ),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide:
-                    const BorderSide(color: Colors.redAccent, width: 1.5),
+                borderSide: const BorderSide(
+                  color: Colors.redAccent,
+                  width: 1.5,
+                ),
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -1579,29 +1762,32 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
               Expanded(
                 child: TextButton(
                   onPressed: () => Navigator.pop(context, false),
-                  child:
-                      const Text('Go Back', style: TextStyle(color: kSub)),
+                  child: const Text('Go Back', style: TextStyle(color: kSub)),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 flex: 2,
                 child: ElevatedButton(
-                  onPressed:
-                      _hasText ? () => Navigator.pop(context, true) : null,
+                  onPressed: _hasText
+                      ? () => Navigator.pop(context, true)
+                      : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.redAccent,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor:
-                        Colors.redAccent.withValues(alpha: 0.35),
+                    disabledBackgroundColor: Colors.redAccent.withValues(
+                      alpha: 0.35,
+                    ),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 13),
                   ),
-                  child: const Text('Submit Request',
-                      style: TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'Submit Request',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             ],

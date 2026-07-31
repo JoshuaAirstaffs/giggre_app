@@ -18,6 +18,7 @@ class WorkerHeader extends StatelessWidget {
   final String isVerified;
   final bool showBackButton;
   final VoidCallback? onNotifications;
+  final VoidCallback? onSwitchToHost;
 
   const WorkerHeader({
     super.key,
@@ -34,6 +35,7 @@ class WorkerHeader extends StatelessWidget {
     required this.isVerified,
     this.showBackButton = true,
     this.onNotifications,
+    this.onSwitchToHost,
   });
 
   @override
@@ -98,7 +100,7 @@ class WorkerHeader extends StatelessWidget {
                         ),
                       ),
                     ),
-                    if (onNotifications != null)
+                    if (onNotifications != null) ...[
                       GestureDetector(
                         onTap: onNotifications,
                         child: Container(
@@ -110,6 +112,25 @@ class WorkerHeader extends StatelessWidget {
                           ),
                           child: const Icon(
                             Icons.notifications_outlined,
+                            color: Colors.white,
+                            size: 19,
+                          ),
+                        ),
+                      ),
+                      if (onSwitchToHost != null) const SizedBox(width: 8),
+                    ],
+                    if (onSwitchToHost != null)
+                      GestureDetector(
+                        onTap: onSwitchToHost,
+                        child: Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.18),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.business_center_outlined,
                             color: Colors.white,
                             size: 19,
                           ),

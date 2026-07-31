@@ -71,38 +71,41 @@ class _WorkerShellState extends State<WorkerShell> {
         .where('userId', isEqualTo: uid)
         .where('isSupport', isEqualTo: true)
         .snapshots()
-        .listen((roomsSnap) {
-      for (final s in _supportMsgSubs) {
-        s.cancel();
-      }
-      _supportMsgSubs.clear();
-      if (roomsSnap.docs.isEmpty) {
-        if (mounted) setState(() => _hasUnreadSupport = false);
-        return;
-      }
-      final roomUnread = <int, bool>{};
-      for (var i = 0; i < roomsSnap.docs.length; i++) {
-        final room = roomsSnap.docs[i];
-        final sub = FirebaseFirestore.instance
-            .collection('chat_rooms')
-            .doc(room.id)
-            .collection('messages')
-            .where('isSupport', isEqualTo: true)
-            .where('hasSeen', isEqualTo: false)
-            .limit(1)
-            .snapshots()
-            .map((s) => s.docs.isNotEmpty)
-            .listen((hasUnread) {
-          roomUnread[i] = hasUnread;
-          final any = roomUnread.values.any((v) => v);
-          if (mounted) setState(() => _hasUnreadSupport = any);
-        });
-        _supportMsgSubs.add(sub);
-      }
-    }, onError: (e) {
-      if (FirebaseAuth.instance.currentUser == null) return;
-      debugPrint('[WorkerShell] support unread stream error: $e');
-    });
+        .listen(
+          (roomsSnap) {
+            for (final s in _supportMsgSubs) {
+              s.cancel();
+            }
+            _supportMsgSubs.clear();
+            if (roomsSnap.docs.isEmpty) {
+              if (mounted) setState(() => _hasUnreadSupport = false);
+              return;
+            }
+            final roomUnread = <int, bool>{};
+            for (var i = 0; i < roomsSnap.docs.length; i++) {
+              final room = roomsSnap.docs[i];
+              final sub = FirebaseFirestore.instance
+                  .collection('chat_rooms')
+                  .doc(room.id)
+                  .collection('messages')
+                  .where('isSupport', isEqualTo: true)
+                  .where('hasSeen', isEqualTo: false)
+                  .limit(1)
+                  .snapshots()
+                  .map((s) => s.docs.isNotEmpty)
+                  .listen((hasUnread) {
+                    roomUnread[i] = hasUnread;
+                    final any = roomUnread.values.any((v) => v);
+                    if (mounted) setState(() => _hasUnreadSupport = any);
+                  });
+              _supportMsgSubs.add(sub);
+            }
+          },
+          onError: (e) {
+            if (FirebaseAuth.instance.currentUser == null) return;
+            debugPrint('[WorkerShell] support unread stream error: $e');
+          },
+        );
   }
 
   void _listenForUnreadGig() {
@@ -112,44 +115,47 @@ class _WorkerShellState extends State<WorkerShell> {
         .collection('chat_rooms')
         .where('participants', arrayContains: uid)
         .snapshots()
-        .listen((roomsSnap) {
-      for (final s in _gigMsgSubs) {
-        s.cancel();
-      }
-      _gigMsgSubs.clear();
-      if (roomsSnap.docs.isEmpty) {
-        if (mounted) setState(() => _hasUnreadGig = false);
-        return;
-      }
-      final roomUnread = <int, bool>{};
-      for (var i = 0; i < roomsSnap.docs.length; i++) {
-        final room = roomsSnap.docs[i];
-        final participants =
-            (room.data()['participants'] as List<dynamic>?) ?? [];
-        final otherUid =
-            participants.firstWhere((p) => p != uid, orElse: () => '')
-                as String;
-        if (otherUid.isEmpty) continue;
-        final sub = FirebaseFirestore.instance
-            .collection('chat_rooms')
-            .doc(room.id)
-            .collection('messages')
-            .where('senderId', isEqualTo: otherUid)
-            .where('hasSeen', isEqualTo: false)
-            .limit(1)
-            .snapshots()
-            .map((s) => s.docs.isNotEmpty)
-            .listen((hasUnread) {
-          roomUnread[i] = hasUnread;
-          final any = roomUnread.values.any((v) => v);
-          if (mounted) setState(() => _hasUnreadGig = any);
-        });
-        _gigMsgSubs.add(sub);
-      }
-    }, onError: (e) {
-      if (FirebaseAuth.instance.currentUser == null) return;
-      debugPrint('[WorkerShell] gig unread stream error: $e');
-    });
+        .listen(
+          (roomsSnap) {
+            for (final s in _gigMsgSubs) {
+              s.cancel();
+            }
+            _gigMsgSubs.clear();
+            if (roomsSnap.docs.isEmpty) {
+              if (mounted) setState(() => _hasUnreadGig = false);
+              return;
+            }
+            final roomUnread = <int, bool>{};
+            for (var i = 0; i < roomsSnap.docs.length; i++) {
+              final room = roomsSnap.docs[i];
+              final participants =
+                  (room.data()['participants'] as List<dynamic>?) ?? [];
+              final otherUid =
+                  participants.firstWhere((p) => p != uid, orElse: () => '')
+                      as String;
+              if (otherUid.isEmpty) continue;
+              final sub = FirebaseFirestore.instance
+                  .collection('chat_rooms')
+                  .doc(room.id)
+                  .collection('messages')
+                  .where('senderId', isEqualTo: otherUid)
+                  .where('hasSeen', isEqualTo: false)
+                  .limit(1)
+                  .snapshots()
+                  .map((s) => s.docs.isNotEmpty)
+                  .listen((hasUnread) {
+                    roomUnread[i] = hasUnread;
+                    final any = roomUnread.values.any((v) => v);
+                    if (mounted) setState(() => _hasUnreadGig = any);
+                  });
+              _gigMsgSubs.add(sub);
+            }
+          },
+          onError: (e) {
+            if (FirebaseAuth.instance.currentUser == null) return;
+            debugPrint('[WorkerShell] gig unread stream error: $e');
+          },
+        );
   }
 
   void _goToHome() => setState(() => _index = 0);
@@ -182,7 +188,13 @@ class _WorkerShellState extends State<WorkerShell> {
   @override
   Widget build(BuildContext context) {
     final tabs = [
-      const GigWorkerScreen(isTabRoot: true),
+      GigWorkerScreen(
+        isTabRoot: true,
+        onSwitchToHost: () => Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const HostShell()),
+        ),
+      ),
       SavedPlaceholder(onGoToDashboard: _goToHome),
       const HomeChat(showBackButton: false),
       Scaffold(
@@ -241,7 +253,9 @@ class _WorkerBottomNavBar extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        border: Border(top: BorderSide(color: Theme.of(context).dividerColor, width: 1)),
+        border: Border(
+          top: BorderSide(color: Theme.of(context).dividerColor, width: 1),
+        ),
       ),
       child: SafeArea(
         top: false,
@@ -284,7 +298,9 @@ class _WorkerBottomNavBar extends StatelessWidget {
                         item.label,
                         style: TextStyle(
                           fontSize: 9.5,
-                          fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                          fontWeight: active
+                              ? FontWeight.w700
+                              : FontWeight.w500,
                           color: color,
                         ),
                       ),

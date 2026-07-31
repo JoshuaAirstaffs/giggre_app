@@ -20,7 +20,8 @@ import '../../gig_worker/presentation/worker_ratings_screen.dart';
 import '../../gig_worker/presentation/worker_settings_screen.dart';
 import '../../gig_worker/presentation/widgets/toolchest_sheet.dart';
 import '../../gig_worker/presentation/widgets/worker_notifications_sheet.dart';
-import '../../gig_host/presentation/widgets/notifications_sheet.dart' as host_notif;
+import '../../gig_host/presentation/widgets/notifications_sheet.dart'
+    as host_notif;
 import '../../gig_host/presentation/widgets/favorite_workers_sheet.dart';
 import '../../gig_host/presentation/widgets/payment_history_sheet.dart';
 import '../../gig_host/presentation/widgets/ratings_given_sheet.dart';
@@ -221,35 +222,31 @@ class _ProfileTabState extends State<ProfileTab> {
           if (data['createdAt'] != null) {
             final ts = data['createdAt'] as Timestamp;
             final dt = ts.toDate();
-            createdAtStr =
-                'Member since ${_monthName(dt.month)} ${dt.year}';
+            createdAtStr = 'Member since ${_monthName(dt.month)} ${dt.year}';
           }
 
-          final earningsMap =
-              data['earnings'] as Map<String, dynamic>? ?? {};
-          final totalMap =
-              earningsMap['total'] as Map<String, dynamic>? ?? {};
+          final earningsMap = data['earnings'] as Map<String, dynamic>? ?? {};
+          final totalMap = earningsMap['total'] as Map<String, dynamic>? ?? {};
           final weeklyMap =
               earningsMap['weekly'] as Map<String, dynamic>? ?? {};
 
           final earningsByCode = <String, double>{};
           totalMap.forEach(
-              (k, v) => earningsByCode[k] = (v as num? ?? 0).toDouble());
+            (k, v) => earningsByCode[k] = (v as num? ?? 0).toDouble(),
+          );
 
           final weeklyByCode = <String, double>{};
           weeklyMap.forEach(
-              (k, v) => weeklyByCode[k] = (v as num? ?? 0).toDouble());
+            (k, v) => weeklyByCode[k] = (v as num? ?? 0).toDouble(),
+          );
 
-          final skillsXP =
-              data['skillsXP'] as Map<String, dynamic>? ?? {};
+          final skillsXP = data['skillsXP'] as Map<String, dynamic>? ?? {};
 
           if (!mounted) return;
           setState(() {
             _name = data['name'] ?? '';
             _email =
-                FirebaseAuth.instance.currentUser?.email ??
-                data['email'] ??
-                '';
+                FirebaseAuth.instance.currentUser?.email ?? data['email'] ?? '';
             _phone = data['phone'] ?? '';
             _bio = data['bio'] ?? '';
             _company = data['company'] ?? '';
@@ -260,20 +257,17 @@ class _ProfileTabState extends State<ProfileTab> {
             _createdAt = createdAtStr;
             _isVerified = data['isVerified'] ?? '';
 
-            _ratingAsWorker =
-                (data['ratingAsWorker'] as num? ?? 5.0).toDouble();
-            _workerRatingCount =
-                (data['ratingCount'] as num? ?? 0).toInt();
+            _ratingAsWorker = (data['ratingAsWorker'] as num? ?? 5.0)
+                .toDouble();
+            _workerRatingCount = (data['ratingCount'] as num? ?? 0).toInt();
             _earningsByCode = earningsByCode;
             _weeklyByCode = weeklyByCode;
-            _completedGigsWorker =
-                (earningsMap['completedGigs'] as num? ?? 0).toInt();
+            _completedGigsWorker = (earningsMap['completedGigs'] as num? ?? 0)
+                .toInt();
             _skills = skillsXP.keys.toList();
 
-            _ratingAsHost =
-                (data['ratingAsHost'] as num? ?? 5.0).toDouble();
-            _hostRatingCount =
-                (data['ratingAsHostCount'] as num? ?? 0).toInt();
+            _ratingAsHost = (data['ratingAsHost'] as num? ?? 5.0).toDouble();
+            _hostRatingCount = (data['ratingAsHostCount'] as num? ?? 0).toInt();
 
             _loading = false;
           });
@@ -327,11 +321,7 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   void _recomputeHostStats() {
-    final allDocs = [
-      ..._quickGigsDocs,
-      ..._openGigsDocs,
-      ..._offeredGigsDocs,
-    ];
+    final allDocs = [..._quickGigsDocs, ..._openGigsDocs, ..._offeredGigsDocs];
     int gigsPosted = allDocs.length;
     int activeGigs = 0;
     int completedGigs = 0;
@@ -354,8 +344,7 @@ class _ProfileTabState extends State<ProfileTab> {
       _activeGigs = activeGigs;
       _completedGigsHost = completedGigs;
       _spentByCurrency = spentByCode;
-      _completionRate =
-          gigsPosted > 0 ? (completedGigs / gigsPosted) * 100 : 0;
+      _completionRate = gigsPosted > 0 ? (completedGigs / gigsPosted) * 100 : 0;
     });
   }
 
@@ -403,10 +392,7 @@ class _ProfileTabState extends State<ProfileTab> {
             ),
             child: Container(
               margin: const EdgeInsets.all(16),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 28,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
               decoration: BoxDecoration(
                 color: cardColor,
                 borderRadius: BorderRadius.circular(24),
@@ -451,15 +437,12 @@ class _ProfileTabState extends State<ProfileTab> {
                           onTap: saving
                               ? null
                               : () async {
-                                  final source =
-                                      await showDialog<ImageSource>(
+                                  final source = await showDialog<ImageSource>(
                                     context: ctx,
                                     builder: (c) => AlertDialog(
-                                      backgroundColor:
-                                          Theme.of(c).cardColor,
+                                      backgroundColor: Theme.of(c).cardColor,
                                       shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(16),
+                                        borderRadius: BorderRadius.circular(16),
                                       ),
                                       content: Column(
                                         mainAxisSize: MainAxisSize.min,
@@ -480,8 +463,7 @@ class _ProfileTabState extends State<ProfileTab> {
                                               Icons.photo_library_rounded,
                                               color: kBlue,
                                             ),
-                                            title:
-                                                const Text('Gallery'),
+                                            title: const Text('Gallery'),
                                             onTap: () => Navigator.pop(
                                               c,
                                               ImageSource.gallery,
@@ -492,8 +474,7 @@ class _ProfileTabState extends State<ProfileTab> {
                                     ),
                                   );
                                   if (source == null) return;
-                                  final picked =
-                                      await ImagePicker().pickImage(
+                                  final picked = await ImagePicker().pickImage(
                                     source: source,
                                     imageQuality: 80,
                                     maxWidth: 512,
@@ -524,16 +505,12 @@ class _ProfileTabState extends State<ProfileTab> {
                                       ? CachedNetworkImage(
                                           imageUrl: _photoUrl,
                                           fit: BoxFit.cover,
-                                          errorWidget: (_, _, _) =>
-                                              const Icon(
+                                          errorWidget: (_, _, _) => const Icon(
                                             Icons.person,
                                             size: 40,
                                           ),
                                         )
-                                      : const Icon(
-                                          Icons.person,
-                                          size: 40,
-                                        ),
+                                      : const Icon(Icons.person, size: 40),
                                 ),
                               ),
                               Positioned(
@@ -569,9 +546,7 @@ class _ProfileTabState extends State<ProfileTab> {
                         cardColor: cardColor,
                         onSurface: onSurface,
                         validator: (v) =>
-                            (v == null || v.trim().isEmpty)
-                            ? 'Required'
-                            : null,
+                            (v == null || v.trim().isEmpty) ? 'Required' : null,
                       ),
                       const SizedBox(height: 12),
                       _EditField(
@@ -609,10 +584,7 @@ class _ProfileTabState extends State<ProfileTab> {
                           controller: bioCtrl,
                           maxLines: 3,
                           maxLength: 200,
-                          style: TextStyle(
-                            color: onSurface,
-                            fontSize: 14,
-                          ),
+                          style: TextStyle(color: onSurface, fontSize: 14),
                           decoration: InputDecoration(
                             labelText: 'About / Bio',
                             labelStyle: const TextStyle(
@@ -650,28 +622,23 @@ class _ProfileTabState extends State<ProfileTab> {
                                     return;
                                   }
                                   setModal(() => saving = true);
-                                  final uid = FirebaseAuth
-                                      .instance.currentUser?.uid;
+                                  final uid =
+                                      FirebaseAuth.instance.currentUser?.uid;
                                   if (uid == null) return;
                                   try {
                                     String? newPhotoUrl;
                                     if (pickedImage != null) {
-                                      final ref = FirebaseStorage
-                                          .instance
+                                      final ref = FirebaseStorage.instance
                                           .ref()
-                                          .child(
-                                            'profile_images/$uid.jpg',
-                                          );
+                                          .child('profile_images/$uid.jpg');
                                       await ref.putFile(
                                         File(pickedImage!.path),
                                       );
-                                      newPhotoUrl =
-                                          await ref.getDownloadURL();
+                                      newPhotoUrl = await ref.getDownloadURL();
                                     }
                                     final updates = <String, dynamic>{
                                       'name': nameCtrl.text.trim(),
-                                      'company':
-                                          companyCtrl.text.trim(),
+                                      'company': companyCtrl.text.trim(),
                                       'phone': phoneCtrl.text.trim(),
                                       'bio': bioCtrl.text.trim(),
                                     };
@@ -693,9 +660,7 @@ class _ProfileTabState extends State<ProfileTab> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: kBlue,
                             foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 16,
-                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14),
                             ),
@@ -918,8 +883,9 @@ class _ProfileTabState extends State<ProfileTab> {
                           icon: Icons.construction_rounded,
                           iconColor: kGold,
                           label: 'My Toolchest',
-                          badge:
-                              _skills.isNotEmpty ? '${_skills.length}' : null,
+                          badge: _skills.isNotEmpty
+                              ? '${_skills.length}'
+                              : null,
                           badgeColor: kGold,
                           tokens: tokens,
                           onTap: () => ToolchestSheet.show(context, _uid),
@@ -974,8 +940,7 @@ class _ProfileTabState extends State<ProfileTab> {
                             context: context,
                             isScrollControlled: true,
                             backgroundColor: Colors.transparent,
-                            builder: (_) =>
-                                FavoriteWorkersSheet(hostId: _uid),
+                            builder: (_) => FavoriteWorkersSheet(hostId: _uid),
                           ),
                         ),
                         _ActionDivider(tokens: tokens),
@@ -998,17 +963,18 @@ class _ProfileTabState extends State<ProfileTab> {
                           label: 'Payment History',
                           tokens: tokens,
                           onTap: () {
-                            final completed = [
-                              ..._quickGigsDocs,
-                              ..._openGigsDocs,
-                              ..._offeredGigsDocs,
-                            ]
-                                .where(
-                                  (g) =>
-                                      (g['status'] as String?) ==
-                                      'completed',
-                                )
-                                .toList();
+                            final completed =
+                                [
+                                      ..._quickGigsDocs,
+                                      ..._openGigsDocs,
+                                      ..._offeredGigsDocs,
+                                    ]
+                                    .where(
+                                      (g) =>
+                                          (g['status'] as String?) ==
+                                          'completed',
+                                    )
+                                    .toList();
                             PaymentHistorySheet.show(
                               context: context,
                               completedGigs: completed,
@@ -1070,9 +1036,7 @@ class _ProfileTabState extends State<ProfileTab> {
                     tokens: tokens,
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => MyReferralScreen(),
-                      ),
+                      MaterialPageRoute(builder: (_) => MyReferralScreen()),
                     ),
                   ),
                   _ActionDivider(tokens: tokens),
@@ -1091,84 +1055,6 @@ class _ProfileTabState extends State<ProfileTab> {
                 ],
               ),
               const SizedBox(height: 16),
-
-              // ── Switch Role ──────────────────────────────────────────────
-              if (widget.onSwitchRole != null) ...[
-                _SectionHeader(label: 'Switch Mode', tokens: tokens),
-                const SizedBox(height: 10),
-                GestureDetector(
-                  onTap: widget.onSwitchRole,
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 16,
-                      horizontal: 18,
-                    ),
-                    decoration: BoxDecoration(
-                      color: tokens.cardSurface,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: tokens.cardBorder),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: (widget.initialRole == 'worker'
-                                    ? kGold
-                                    : kBlue)
-                                .withValues(alpha: tokens.iconTintAlpha),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(
-                            widget.initialRole == 'worker'
-                                ? Icons.business_center_outlined
-                                : Icons.work_outline_rounded,
-                            color: widget.initialRole == 'worker'
-                                ? kGold
-                                : kBlue,
-                            size: 18,
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                widget.initialRole == 'worker'
-                                    ? 'Switch to Host Mode'
-                                    : 'Switch to Worker Mode',
-                                style: TextStyle(
-                                  color: tokens.textPrimary,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              Text(
-                                widget.initialRole == 'worker'
-                                    ? 'Post gigs and hire workers'
-                                    : 'Find gigs and earn money',
-                                style: TextStyle(
-                                  color: tokens.textSecondary,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          color: tokens.textSecondary,
-                          size: 20,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
 
               // ── Logout ───────────────────────────────────────────────────
               _ActionCard(
@@ -1302,11 +1188,7 @@ class _ProfileCard extends StatelessWidget {
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          Icons.edit_outlined,
-                          color: _kCoverEnd,
-                          size: 13,
-                        ),
+                        Icon(Icons.edit_outlined, color: _kCoverEnd, size: 13),
                         SizedBox(width: 5),
                         Text(
                           'Edit',
@@ -1333,8 +1215,10 @@ class _ProfileCard extends StatelessWidget {
                       height: 76,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        border:
-                            Border.all(color: tokens.cardSurface, width: 3.5),
+                        border: Border.all(
+                          color: tokens.cardSurface,
+                          width: 3.5,
+                        ),
                       ),
                       child: ClipOval(
                         child: photoUrl.isNotEmpty
@@ -1370,7 +1254,9 @@ class _ProfileCard extends StatelessWidget {
                             color: _kGreen,
                             shape: BoxShape.circle,
                             border: Border.all(
-                                color: tokens.cardSurface, width: 2.5),
+                              color: tokens.cardSurface,
+                              width: 2.5,
+                            ),
                           ),
                           child: const Icon(
                             Icons.check,
@@ -1656,7 +1542,11 @@ class _StatColumn {
   final String label;
   final Color? valueColor;
 
-  const _StatColumn({required this.value, required this.label, this.valueColor});
+  const _StatColumn({
+    required this.value,
+    required this.label,
+    this.valueColor,
+  });
 }
 
 class _StatsCard extends StatelessWidget {
@@ -1686,7 +1576,8 @@ class _StatsCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               for (var i = 0; i < columns.length; i++) ...[
-                if (i > 0) Container(width: 1, height: 34, color: tokens.divider),
+                if (i > 0)
+                  Container(width: 1, height: 34, color: tokens.divider),
                 Expanded(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -1833,13 +1724,11 @@ class _ActionRow extends StatelessWidget {
             ),
             if (badge != null) ...[
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: (badgeColor ?? kBlue)
-                      .withValues(alpha: tokens.iconTintAlpha),
+                  color: (badgeColor ?? kBlue).withValues(
+                    alpha: tokens.iconTintAlpha,
+                  ),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -1888,9 +1777,7 @@ class _DefaultAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initial = name.trim().isNotEmpty
-        ? name.trim()[0].toUpperCase()
-        : '?';
+    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
     return Container(
       width: size,
       height: size,

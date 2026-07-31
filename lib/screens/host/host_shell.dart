@@ -39,7 +39,8 @@ class HostShell extends StatefulWidget {
   State<HostShell> createState() => _HostShellState();
 }
 
-class _HostShellState extends State<HostShell> with SingleTickerProviderStateMixin {
+class _HostShellState extends State<HostShell>
+    with SingleTickerProviderStateMixin {
   int _tabIndex = 0;
   bool _dialOpen = false;
   late final AnimationController _dialCtrl = AnimationController(
@@ -85,38 +86,41 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
         .where('userId', isEqualTo: uid)
         .where('isSupport', isEqualTo: true)
         .snapshots()
-        .listen((roomsSnap) {
-      for (final s in _supportMsgSubs) {
-        s.cancel();
-      }
-      _supportMsgSubs.clear();
-      if (roomsSnap.docs.isEmpty) {
-        if (mounted) setState(() => _hasUnreadSupport = false);
-        return;
-      }
-      final roomUnread = <int, bool>{};
-      for (var i = 0; i < roomsSnap.docs.length; i++) {
-        final room = roomsSnap.docs[i];
-        final sub = FirebaseFirestore.instance
-            .collection('chat_rooms')
-            .doc(room.id)
-            .collection('messages')
-            .where('isSupport', isEqualTo: true)
-            .where('hasSeen', isEqualTo: false)
-            .limit(1)
-            .snapshots()
-            .map((s) => s.docs.isNotEmpty)
-            .listen((hasUnread) {
-          roomUnread[i] = hasUnread;
-          final any = roomUnread.values.any((v) => v);
-          if (mounted) setState(() => _hasUnreadSupport = any);
-        });
-        _supportMsgSubs.add(sub);
-      }
-    }, onError: (e) {
-      if (FirebaseAuth.instance.currentUser == null) return;
-      debugPrint('[HostShell] support unread stream error: $e');
-    });
+        .listen(
+          (roomsSnap) {
+            for (final s in _supportMsgSubs) {
+              s.cancel();
+            }
+            _supportMsgSubs.clear();
+            if (roomsSnap.docs.isEmpty) {
+              if (mounted) setState(() => _hasUnreadSupport = false);
+              return;
+            }
+            final roomUnread = <int, bool>{};
+            for (var i = 0; i < roomsSnap.docs.length; i++) {
+              final room = roomsSnap.docs[i];
+              final sub = FirebaseFirestore.instance
+                  .collection('chat_rooms')
+                  .doc(room.id)
+                  .collection('messages')
+                  .where('isSupport', isEqualTo: true)
+                  .where('hasSeen', isEqualTo: false)
+                  .limit(1)
+                  .snapshots()
+                  .map((s) => s.docs.isNotEmpty)
+                  .listen((hasUnread) {
+                    roomUnread[i] = hasUnread;
+                    final any = roomUnread.values.any((v) => v);
+                    if (mounted) setState(() => _hasUnreadSupport = any);
+                  });
+              _supportMsgSubs.add(sub);
+            }
+          },
+          onError: (e) {
+            if (FirebaseAuth.instance.currentUser == null) return;
+            debugPrint('[HostShell] support unread stream error: $e');
+          },
+        );
   }
 
   void _listenForUnreadGig() {
@@ -126,44 +130,47 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
         .collection('chat_rooms')
         .where('participants', arrayContains: uid)
         .snapshots()
-        .listen((roomsSnap) {
-      for (final s in _gigMsgSubs) {
-        s.cancel();
-      }
-      _gigMsgSubs.clear();
-      if (roomsSnap.docs.isEmpty) {
-        if (mounted) setState(() => _hasUnreadGig = false);
-        return;
-      }
-      final roomUnread = <int, bool>{};
-      for (var i = 0; i < roomsSnap.docs.length; i++) {
-        final room = roomsSnap.docs[i];
-        final participants =
-            (room.data()['participants'] as List<dynamic>?) ?? [];
-        final otherUid =
-            participants.firstWhere((p) => p != uid, orElse: () => '')
-                as String;
-        if (otherUid.isEmpty) continue;
-        final sub = FirebaseFirestore.instance
-            .collection('chat_rooms')
-            .doc(room.id)
-            .collection('messages')
-            .where('senderId', isEqualTo: otherUid)
-            .where('hasSeen', isEqualTo: false)
-            .limit(1)
-            .snapshots()
-            .map((s) => s.docs.isNotEmpty)
-            .listen((hasUnread) {
-          roomUnread[i] = hasUnread;
-          final any = roomUnread.values.any((v) => v);
-          if (mounted) setState(() => _hasUnreadGig = any);
-        });
-        _gigMsgSubs.add(sub);
-      }
-    }, onError: (e) {
-      if (FirebaseAuth.instance.currentUser == null) return;
-      debugPrint('[HostShell] gig unread stream error: $e');
-    });
+        .listen(
+          (roomsSnap) {
+            for (final s in _gigMsgSubs) {
+              s.cancel();
+            }
+            _gigMsgSubs.clear();
+            if (roomsSnap.docs.isEmpty) {
+              if (mounted) setState(() => _hasUnreadGig = false);
+              return;
+            }
+            final roomUnread = <int, bool>{};
+            for (var i = 0; i < roomsSnap.docs.length; i++) {
+              final room = roomsSnap.docs[i];
+              final participants =
+                  (room.data()['participants'] as List<dynamic>?) ?? [];
+              final otherUid =
+                  participants.firstWhere((p) => p != uid, orElse: () => '')
+                      as String;
+              if (otherUid.isEmpty) continue;
+              final sub = FirebaseFirestore.instance
+                  .collection('chat_rooms')
+                  .doc(room.id)
+                  .collection('messages')
+                  .where('senderId', isEqualTo: otherUid)
+                  .where('hasSeen', isEqualTo: false)
+                  .limit(1)
+                  .snapshots()
+                  .map((s) => s.docs.isNotEmpty)
+                  .listen((hasUnread) {
+                    roomUnread[i] = hasUnread;
+                    final any = roomUnread.values.any((v) => v);
+                    if (mounted) setState(() => _hasUnreadGig = any);
+                  });
+              _gigMsgSubs.add(sub);
+            }
+          },
+          onError: (e) {
+            if (FirebaseAuth.instance.currentUser == null) return;
+            debugPrint('[HostShell] gig unread stream error: $e');
+          },
+        );
   }
 
   void _toggleDial() {
@@ -215,7 +222,8 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => PostQuickGigScreen(hostName: provider.currentName ?? ''),
+          builder: (_) =>
+              PostQuickGigScreen(hostName: provider.currentName ?? ''),
         ),
       );
     });
@@ -228,7 +236,8 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => PostOpenGigScreen(hostName: provider.currentName ?? ''),
+          builder: (_) =>
+              PostOpenGigScreen(hostName: provider.currentName ?? ''),
         ),
       );
     });
@@ -241,7 +250,8 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => PostOfferedGigScreen(hostName: provider.currentName ?? ''),
+          builder: (_) =>
+              PostOfferedGigScreen(hostName: provider.currentName ?? ''),
         ),
       );
     });
@@ -275,10 +285,17 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final navBarHeight = _kFlatBarHeight + MediaQuery.of(context).padding.bottom;
+    final navBarHeight =
+        _kFlatBarHeight + MediaQuery.of(context).padding.bottom;
 
     final tabs = [
-      const GigHostScreen(isTabRoot: true),
+      GigHostScreen(
+        isTabRoot: true,
+        onSwitchToWorker: () => Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const WorkerShell()),
+        ),
+      ),
       HostGigsScreen(uid: uid, isTabRoot: true),
       const HomeChat(showBackButton: false),
       Scaffold(
@@ -325,7 +342,10 @@ class _HostShellState extends State<HostShell> with SingleTickerProviderStateMix
             right: 0,
             bottom: navBarHeight - 30,
             child: Center(
-              child: HostSpeedDialButton(controller: _dialCtrl, onTap: _toggleDial),
+              child: HostSpeedDialButton(
+                controller: _dialCtrl,
+                onTap: _toggleDial,
+              ),
             ),
           ),
         ],

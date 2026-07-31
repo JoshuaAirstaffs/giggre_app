@@ -2272,7 +2272,7 @@ class _AuthField extends StatelessWidget {
 // ─────────────────────────────────────────────────────
 // Social Logo Row
 // ─────────────────────────────────────────────────────
-class _SocialLogoRow extends StatefulWidget {
+class _SocialLogoRow extends StatelessWidget {
   final ProfileTabTokens tokens;
   final VoidCallback onGoogleTap;
   final bool isGoogleLoading;
@@ -2284,177 +2284,32 @@ class _SocialLogoRow extends StatefulWidget {
   });
 
   @override
-  State<_SocialLogoRow> createState() => _SocialLogoRowState();
-}
-
-class _SocialLogoRowState extends State<_SocialLogoRow>
-    with SingleTickerProviderStateMixin {
-  String? _expanded;
-
-  late final AnimationController _ctrl;
-  late final Animation<double> _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-    );
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _toggle(String key) {
-    if (_expanded == key) {
-      _ctrl.reverse().then((_) => setState(() => _expanded = null));
-    } else {
-      setState(() => _expanded = key);
-      _ctrl.forward(from: 0);
-    }
-  }
-
-  Widget _circle(String key) {
-    const double size = 46;
-    final bool isComingSoon = key == 'apple' || key == 'facebook';
-    final tokens = widget.tokens;
-
-    Widget iconWidget;
-    switch (key) {
-      case 'google':
-        iconWidget = Image.asset(
-          'assets/images/g-logo.png',
-          width: 22,
-          height: 22,
-        );
-        break;
-      case 'apple':
-        iconWidget = Icon(Icons.apple, size: 24, color: tokens.textSecondary);
-        break;
-      default:
-        iconWidget = Icon(
-          Icons.facebook,
-          size: 24,
-          color: tokens.textSecondary,
-        );
-    }
-
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: isComingSoon ? tokens.insetBg : tokens.cardSurface,
-            border: isComingSoon
-                ? null
-                : Border.all(color: tokens.cardBorder, width: 1),
-          ),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: isComingSoon ? null : () => _toggle(key),
-            child: Center(child: iconWidget),
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: OutlinedButton.icon(
+        onPressed: isGoogleLoading ? null : onGoogleTap,
+        icon: isGoogleLoading
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
+        label: Text(
+          isGoogleLoading ? 'Signing in...' : 'Continue with Google',
+          style: TextStyle(
+            fontSize: 14.5,
+            fontWeight: FontWeight.w700,
+            color: tokens.textPrimary,
           ),
         ),
-        if (isComingSoon)
-          Positioned(
-            top: -4,
-            right: -6,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              decoration: BoxDecoration(
-                color: _kGold,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'SOON',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 7.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _expandedButton() {
-    if (_expanded != 'google') return const SizedBox.shrink();
-
-    return FadeTransition(
-      opacity: _anim,
-      child: SizeTransition(
-        sizeFactor: _anim,
-        axisAlignment: -1,
-        child: Padding(
-          padding: const EdgeInsets.only(top: 14),
-          child: SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: OutlinedButton.icon(
-              onPressed: widget.isGoogleLoading ? null : widget.onGoogleTap,
-              icon: widget.isGoogleLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Image.asset(
-                      'assets/images/g-logo.png',
-                      width: 22,
-                      height: 22,
-                    ),
-              label: Text(
-                widget.isGoogleLoading
-                    ? 'Signing in...'
-                    : 'Continue with Google',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: widget.tokens.textPrimary,
-                ),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: widget.tokens.cardBorder),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
-                ),
-              ),
-            ),
-          ),
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: tokens.cardBorder),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         ),
       ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _circle('google'),
-            // Apple/Facebook sign-in commented out for now — not ready for
-            // testers. mainAxisAlignment.center keeps Google centered with
-            // these removed.
-            // const SizedBox(width: 22),
-            // _circle('apple'),
-            // const SizedBox(width: 22),
-            // _circle('facebook'),
-          ],
-        ),
-        _expandedButton(),
-      ],
     );
   }
 }

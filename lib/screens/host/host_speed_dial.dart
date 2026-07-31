@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+import '../../core/theme/profile_tab_theme.dart';
 
 const _kGoldStart = Color(0xFFF0A830);
 const _kGoldEnd = Color(0xFFD88810);
@@ -6,7 +10,6 @@ const _kScreenBg = Color(0xFFF4F6FA);
 const _kBubbleGold = Color(0xFFD88810);
 const _kBubbleBlue = Color(0xFF2B6FB5);
 const _kBubblePurple = Color(0xFF8B6FD8);
-const _kLabelText = Color(0xFF17263D);
 
 // Hand-picked pastel icon-tile backgrounds rather than a raw alpha blend of
 // the accent color — a flat opacity blend washes out warmer hues (gold)
@@ -16,6 +19,11 @@ const _kLabelText = Color(0xFF17263D);
 const _kBubbleGoldBg = Color(0xFFFCEACB);
 const _kBubbleBlueBg = Color(0xFFE1EBF7);
 const _kBubblePurpleBg = Color(0xFFEDE7FB);
+
+// Tooltip surface — fixed, mode-agnostic neutrals. Never pull from the
+// surrounding Worker/Host theme, unlike the bubble tints above.
+const _kTooltipBg = Color(0xFF1A1A1A);
+const _kTooltipText = Colors.white;
 
 // Bubble circle diameter (54) plus the gap + label height below it (9 + 22),
 // i.e. the vertical distance from the circle's center down to the bottom of
@@ -48,7 +56,10 @@ class HostSpeedDialButton extends StatelessWidget {
         width: 56,
         height: 56,
         padding: const EdgeInsets.all(4),
-        decoration: const BoxDecoration(shape: BoxShape.circle, color: _kScreenBg),
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          color: _kScreenBg,
+        ),
         child: Container(
           width: 48,
           height: 48,
@@ -70,7 +81,11 @@ class HostSpeedDialButton extends StatelessWidget {
           child: Center(
             child: RotationTransition(
               turns: Tween<double>(begin: 0, end: 0.125).animate(controller),
-              child: const Icon(Icons.add_rounded, color: Colors.white, size: 26),
+              child: const Icon(
+                Icons.add_rounded,
+                color: Colors.white,
+                size: 26,
+              ),
             ),
           ),
         ),
@@ -133,48 +148,67 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
       animation: widget.controller,
       builder: (context, _) {
         if (widget.controller.value == 0) return const SizedBox.shrink();
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: widget.onClose,
-                child: Container(
-                  color: Colors.black
-                      .withValues(alpha: 0.55 * widget.controller.value.clamp(0.0, 1.0)),
+        // This overlay sits as a sibling of Scaffold (not inside it — see
+        // host_shell.dart), so it never gets Scaffold's own Material-provided
+        // DefaultTextStyle. Without a Material ancestor, Text here fell back
+        // to Flutter's built-in "no DefaultTextStyle found" debug style —
+        // large red text with a yellow underline — which only wasn't fully
+        // obvious because explicit TextStyle properties (size/weight/color)
+        // masked most of it, leaving just the underline and wrong font
+        // showing through. `transparency` restores normal text/icon
+        // rendering without painting any surface of its own.
+        return Material(
+          type: MaterialType.transparency,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: widget.onClose,
+                  child: Container(
+                    color: Colors.black.withValues(
+                      alpha: 0.55 * widget.controller.value.clamp(0.0, 1.0),
+                    ),
+                  ),
                 ),
               ),
-            ),
-            _bubble(
-              curve: _quickCurve,
-              target: const Offset(-88, -46),
-              anchorFromBottom: anchorFromBottom,
-              tint: _kBubbleGold,
-              iconBg: _kBubbleGoldBg,
-              icon: Icons.bolt_rounded,
-              label: 'Quick Gig',
-              onTap: widget.onQuickGig,
-            ),
-            _bubble(
-              curve: _openCurve,
-              target: const Offset(0, -100),
-              anchorFromBottom: anchorFromBottom,
-              tint: _kBubbleBlue,
-              iconBg: _kBubbleBlueBg,
-              icon: Icons.work_rounded,
-              label: 'Open Gig',
-              onTap: widget.onOpenGig,
-            ),
-            _bubble(
-              curve: _offeredCurve,
-              target: const Offset(88, -46),
-              anchorFromBottom: anchorFromBottom,
-              tint: _kBubblePurple,
-              iconBg: _kBubblePurpleBg,
-              icon: Icons.send_rounded,
-              label: 'Offered Gig',
-              onTap: widget.onOfferedGig,
-            ),
-          ],
+              _bubble(
+                curve: _quickCurve,
+                target: const Offset(-88, -46),
+                anchorFromBottom: anchorFromBottom,
+                tint: _kBubbleGold,
+                iconBg: _kBubbleGoldBg,
+                icon: Icons.bolt_rounded,
+                label: 'Quick Gig',
+                infoText:
+                    "We'll instantly match you with the nearest, most reliable worker available.",
+                onTap: widget.onQuickGig,
+              ),
+              _bubble(
+                curve: _openCurve,
+                target: const Offset(0, -100),
+                anchorFromBottom: anchorFromBottom,
+                tint: _kBubbleBlue,
+                iconBg: _kBubbleBlueBg,
+                icon: Icons.work_rounded,
+                label: 'Open Gig',
+                infoText:
+                    'Posted publicly. Qualified workers come to you, and you choose who to hire.',
+                onTap: widget.onOpenGig,
+              ),
+              _bubble(
+                curve: _offeredCurve,
+                target: const Offset(88, -46),
+                anchorFromBottom: anchorFromBottom,
+                tint: _kBubblePurple,
+                iconBg: _kBubblePurpleBg,
+                icon: Icons.send_rounded,
+                label: 'Offered Gig',
+                infoText:
+                    'Sent directly to one trusted worker you already have in mind.',
+                onTap: widget.onOfferedGig,
+              ),
+            ],
+          ),
         );
       },
     );
@@ -188,6 +222,7 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
     required Color iconBg,
     required IconData icon,
     required String label,
+    required String infoText,
     required VoidCallback onTap,
   }) {
     final t = curve.value;
@@ -217,6 +252,7 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                   iconBg: iconBg,
                   icon: icon,
                   label: label,
+                  infoText: infoText,
                 ),
               ),
             ),
@@ -232,88 +268,100 @@ class _BubbleContent extends StatelessWidget {
   final Color iconBg;
   final IconData icon;
   final String label;
+  final String infoText;
 
   const _BubbleContent({
     required this.tint,
     required this.iconBg,
     required this.icon,
     required this.label,
+    required this.infoText,
   });
 
   @override
   Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 54,
-          height: 54,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Colors.white, Color(0xFFFAFAFC)],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.black.withValues(alpha: 0.04)),
-            boxShadow: [
-              // Tinted glow (matches the bubble's own accent) plus a tight
-              // neutral shadow underneath — flat black-only shadows are what
-              // make a floating chip read as a generic template.
-              BoxShadow(
-                color: tint.withValues(alpha: 0.28),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 4,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          child: Center(
-            child: Container(
-              width: 38,
-              height: 38,
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 54,
+              height: 54,
               decoration: BoxDecoration(
-                color: iconBg,
-                borderRadius: BorderRadius.circular(14),
+                gradient: isDark
+                    ? null
+                    : const LinearGradient(
+                        colors: [Colors.white, Color(0xFFFAFAFC)],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
+                color: isDark ? tokens.cardSurface : null,
+                shape: BoxShape.circle,
+                border: Border.all(color: tokens.cardBorder),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.08),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
               ),
-              child: Icon(icon, color: tint, size: 21),
+              child: Center(
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: iconBg,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: tint, size: 21),
+                ),
+              ),
             ),
-          ),
+            Positioned(
+              top: -2,
+              right: -2,
+              child: _InfoBadge(text: infoText, tint: tint, tokens: tokens),
+            ),
+          ],
         ),
         const SizedBox(height: 9),
         Container(
-          height: 22,
-          padding: const EdgeInsets.symmetric(horizontal: 11),
+          // No fixed `height` — a tight cross-axis constraint here previously
+          // forced the Row into exactly 22px regardless of the bold 10px
+          // text's real line-height, which overflowed by a pixel or two and
+          // showed as Flutter's yellow/black debug overflow stripes under the
+          // label. Vertical padding lets the pill size itself around the
+          // text instead, so it can't overflow.
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: tokens.cardSurface,
             borderRadius: BorderRadius.circular(11),
-            border: Border.all(color: const Color(0x1417263D)),
+            border: Border.all(color: tokens.cardBorder),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.10),
+                color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.10),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
             ],
           ),
-          // No `alignment` here: Container+alignment (with a fixed height but
-          // no width) expands to fill all available width instead of hugging
-          // the text. A Row with mainAxisSize.min shrink-wraps correctly while
-          // still centering the label vertically within the fixed height.
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 label,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
-                  color: _kLabelText,
+                  color: tokens.textPrimary,
                   letterSpacing: 0.1,
+                  decoration: TextDecoration.none,
                 ),
               ),
             ],
@@ -321,5 +369,145 @@ class _BubbleContent extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Info badge — sits on the corner of the option's icon circle rather than
+//  next to its label, so it never touches the label pill's layout. Tap shows
+//  a small tooltip near the badge, auto-dismissing after ~2.5s or on an
+//  outside tap. Uses its own tap recognizer (not the bubble's) so it never
+//  triggers the parent option's onTap — see nested-GestureDetector arena
+//  resolution: whichever recognizer accepts the "up" event first (the
+//  innermost, here) wins and blocks the ancestor's from also firing.
+// ─────────────────────────────────────────────────────────────────────────────
+class _InfoBadge extends StatelessWidget {
+  final String text;
+  // The bubble's own accent (gold/blue/purple) — ties the badge to its
+  // option's existing color language. Independent of the Worker/Host
+  // screen-wide theme, which this badge never reads from.
+  final Color tint;
+  // Light/dark surface tokens, unlike `tint` — the badge's own base color
+  // still needs to flip with system theme so it doesn't float as a
+  // stray light-mode dot on a dark bubble.
+  final ProfileTabTokens tokens;
+
+  const _InfoBadge({
+    required this.text,
+    required this.tint,
+    required this.tokens,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: (details) => _InfoTooltip.show(
+        context,
+        anchor: details.globalPosition,
+        text: text,
+      ),
+      child: Container(
+        width: 20,
+        height: 20,
+        decoration: BoxDecoration(
+          color: tokens.cardSurface,
+          shape: BoxShape.circle,
+          border: Border.all(color: tint.withValues(alpha: 0.35)),
+          boxShadow: [
+            BoxShadow(
+              color: tint.withValues(alpha: 0.20),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Icon(Icons.info_outline, size: 12, color: tint),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Tap-to-show tooltip via a raw OverlayEntry — Flutter's built-in Tooltip is
+//  hover/long-press only, so a custom overlay is the lightest option that
+//  doesn't pull in a new dependency for this one popup.
+// ─────────────────────────────────────────────────────────────────────────────
+class _InfoTooltip {
+  static OverlayEntry? _entry;
+  static Timer? _timer;
+
+  static void dismiss() {
+    _timer?.cancel();
+    _timer = null;
+    _entry?.remove();
+    _entry = null;
+  }
+
+  static void show(
+    BuildContext context, {
+    required Offset anchor,
+    required String text,
+  }) {
+    dismiss(); // only one tooltip at a time — close any existing one first.
+
+    final screenSize = MediaQuery.of(context).size;
+    const maxWidth = 220.0;
+    const gap = 10.0;
+
+    // Flip below the icon when there isn't enough room above it to avoid
+    // clipping off the top of the screen (the "Open Gig" bubble, centered
+    // highest in the arc, is the one most likely to need this).
+    final flipBelow = anchor.dy < 160;
+    final right = (screenSize.width - anchor.dx).clamp(
+      8.0,
+      screenSize.width - maxWidth - 8.0,
+    );
+
+    final overlay = Overlay.of(context);
+    _entry = OverlayEntry(
+      builder: (_) => Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: dismiss,
+            ),
+          ),
+          Positioned(
+            right: right,
+            top: flipBelow ? anchor.dy + gap : null,
+            bottom: flipBelow ? null : screenSize.height - anchor.dy + gap,
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: maxWidth),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: _kTooltipBg.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  text,
+                  // No explicit fontFamily — inherits the app's Inter default
+                  // from ThemeData (see theme_provider.dart), same as every
+                  // other Text in the app.
+                  style: const TextStyle(
+                    color: _kTooltipText,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    overlay.insert(_entry!);
+    _timer = Timer(const Duration(milliseconds: 2500), dismiss);
   }
 }

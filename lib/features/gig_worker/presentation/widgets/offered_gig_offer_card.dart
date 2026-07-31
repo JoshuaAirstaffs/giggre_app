@@ -14,6 +14,7 @@ class OfferedGigOfferCard extends StatelessWidget {
   final String skillRequired;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
+  final VoidCallback onDecideLater;
 
   const OfferedGigOfferCard({
     super.key,
@@ -22,6 +23,7 @@ class OfferedGigOfferCard extends StatelessWidget {
     required this.skillRequired,
     required this.onAccept,
     required this.onDecline,
+    required this.onDecideLater,
   });
 
   static const _purple = Color(0xFF8B5CF6);
@@ -121,7 +123,9 @@ class OfferedGigOfferCard extends StatelessWidget {
                             gig.experienceLevel.isNotEmpty) ...[
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
                             decoration: BoxDecoration(
                               color: _purple.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
@@ -236,12 +240,14 @@ class OfferedGigOfferCard extends StatelessWidget {
                     foregroundColor: kSub,
                     side: BorderSide(color: divider),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Decline',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  child: const Text(
+                    'Decline',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -254,15 +260,27 @@ class OfferedGigOfferCard extends StatelessWidget {
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Accept Offer',
-                      style:
-                          TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'Accept Offer',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             ],
+          ),
+          Center(
+            child: TextButton(
+              onPressed: onDecideLater,
+              style: TextButton.styleFrom(foregroundColor: kSub),
+              child: const Text(
+                'Decide Later',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
           ),
         ],
       ),
@@ -342,8 +360,9 @@ class _ChipGrid extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                   maxLines: chip.allowWrap ? null : 1,
-                  overflow:
-                      chip.allowWrap ? TextOverflow.visible : TextOverflow.ellipsis,
+                  overflow: chip.allowWrap
+                      ? TextOverflow.visible
+                      : TextOverflow.ellipsis,
                 ),
               ],
             ),
