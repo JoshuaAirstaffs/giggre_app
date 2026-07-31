@@ -32,6 +32,7 @@ class CurrencyService {
       );
       final countryCode =
           await countryCodeFromCoordinates(pos.latitude, pos.longitude);
+      if (countryCode == null) return null;
       return CurrencyFormatter.countryToCurrency(countryCode);
     } catch (_) {
       return null;
