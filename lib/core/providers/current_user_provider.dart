@@ -41,6 +41,14 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool _currencyInitialized = false;
   bool _currencyRefreshing = false;
 
+  // Last GPS fix seen anywhere in the app this session (captured off the
+  // currency-detection flow below). Screens like the gig map read this
+  // synchronously at init so they can center on the worker immediately
+  // instead of showing a placeholder location while they run their own
+  // GPS lookup.
+  double? _lastLat;
+  double? _lastLng;
+
   String? get currentEmail => _currentEmail;
   String? get currentName => _currentName;
   String? get uid => _uid;
@@ -48,6 +56,13 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   String? get isVerified => _isVerified;
   bool get isLoggedIn => _uid != null;
   String get currencyCode => _currencyCode;
+  double? get lastLat => _lastLat;
+  double? get lastLng => _lastLng;
+
+  void setLastLocation(double lat, double lng) {
+    _lastLat = lat;
+    _lastLng = lng;
+  }
 
   // Called once per session after setCurrentUserInfo. Applies the stored
   // currencyCode from the user doc immediately (GPS/reverse-geocode can take
@@ -64,7 +79,11 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       _currencyCode = existing;
       notifyListeners();
     }
-    final code = await CurrencyService.initForUser(uid, userDoc);
+    final code = await CurrencyService.initForUser(
+      uid,
+      userDoc,
+      onPosition: setLastLocation,
+    );
     if (code != _currencyCode) {
       _currencyCode = code;
       notifyListeners();
@@ -84,7 +103,9 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (_uid == null || _currencyRefreshing) return;
     _currencyRefreshing = true;
     try {
-      final detected = await CurrencyService.detectCurrency();
+      final detected = await CurrencyService.detectCurrency(
+        onPosition: setLastLocation,
+      );
       if (detected == null || detected == _currencyCode || _uid == null) {
         return;
       }
@@ -423,6 +444,8 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
     _uid = null;
     _currencyCode = 'USD';
     _currencyInitialized = false;
+    _lastLat = null;
+    _lastLng = null;
     _callSubscription?.cancel();
     _callSubscription = null;
     _stopRingtone();

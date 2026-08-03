@@ -130,7 +130,7 @@ class WorkerHeader extends StatelessWidget {
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(
-                            Icons.business_center_outlined,
+                            Icons.sync_alt,
                             color: Colors.white,
                             size: 19,
                           ),

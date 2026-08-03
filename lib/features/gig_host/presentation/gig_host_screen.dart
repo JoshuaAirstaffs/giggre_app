@@ -11,6 +11,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
+import '../../../core/providers/current_user_provider.dart';
 import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/map_style.dart';
@@ -378,7 +380,7 @@ class _HostHeader extends StatelessWidget {
                               IconButton(
                                 tooltip: 'Switch to Worker Mode',
                                 icon: const Icon(
-                                  Icons.work_outline_rounded,
+                                  Icons.sync_alt,
                                   size: 19,
                                 ),
                                 onPressed: onSwitchToWorker,
@@ -1234,6 +1236,11 @@ class _WorkerMapSection extends StatefulWidget {
 }
 
 class _WorkerMapSectionState extends State<_WorkerMapSection> {
+  // Last resolved host location, kept for the life of the app so reopening
+  // this map (a new State instance) can seed straight to it instead of
+  // flashing the Manila default while a fresh GPS fix is fetched.
+  static LatLng? _lastKnownHostLocation;
+
   GoogleMapController? _googleMapController;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();
@@ -1293,6 +1300,10 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   @override
   void initState() {
     super.initState();
+    final providerLoc = context.read<CurrentUserProvider>();
+    _myLocation = (providerLoc.lastLat != null && providerLoc.lastLng != null)
+        ? LatLng(providerLoc.lastLat!, providerLoc.lastLng!)
+        : _lastKnownHostLocation;
     _initMap();
     _startWorkersSub();
     _loadBlueCircleIcon();
@@ -1462,6 +1473,38 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever)
         return;
+
+      // Cheap, cached fix first so the map can jump straight to roughly the
+      // right place instead of sitting on the Manila default while the slow
+      // high-accuracy fix below is still resolving.
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null && mounted && _myLocation == null) {
+        final quickLoc = LatLng(lastKnown.latitude, lastKnown.longitude);
+        setState(() {
+          _myLocation = quickLoc;
+          _recomputeVisibleWorkers();
+        });
+        _lastKnownHostLocation = quickLoc;
+        context.read<CurrentUserProvider>().setLastLocation(
+          quickLoc.latitude,
+          quickLoc.longitude,
+        );
+        _fullScreenTick.value++;
+        if (_useGoogleMaps) {
+          _googleMapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(quickLoc, 14.0),
+          );
+          _fullScreenGoogleMapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(quickLoc, 14.0),
+          );
+        } else if (_osmMapReady) {
+          _osmController.move(
+            ll.LatLng(quickLoc.latitude, quickLoc.longitude),
+            14.0,
+          );
+        }
+      }
+
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -1473,6 +1516,11 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         _myLocation = loc;
         _recomputeVisibleWorkers();
       });
+      _lastKnownHostLocation = loc;
+      context.read<CurrentUserProvider>().setLastLocation(
+        loc.latitude,
+        loc.longitude,
+      );
       _fullScreenTick.value++;
       _ensureWorkerAvatarIcons(_workers);
       if (_useGoogleMaps) {
@@ -2096,9 +2144,9 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                         );
                       }
                     },
-                    initialCameraPosition: const CameraPosition(
-                      target: LatLng(14.5995, 120.9842),
-                      zoom: 12.0,
+                    initialCameraPosition: CameraPosition(
+                      target: _myLocation ?? const LatLng(14.5995, 120.9842),
+                      zoom: _myLocation != null ? 14.0 : 12.0,
                     ),
                     myLocationEnabled: true,
                     myLocationButtonEnabled: false,

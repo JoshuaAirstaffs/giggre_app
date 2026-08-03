@@ -9,7 +9,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/map_style.dart';
 import '../../../../core/services/gms_availability.dart';
@@ -143,6 +145,11 @@ class GigMapSection extends StatefulWidget {
 }
 
 class _GigMapSectionState extends State<GigMapSection> {
+  // Last resolved worker location, kept for the life of the app so that
+  // reopening the map (a new State instance) can seed straight to it instead
+  // of flashing the Manila default while a fresh GPS fix is fetched.
+  static LatLng? _lastKnownWorkerLocation;
+
   GoogleMapController? _googleMapController;
   double _zoom = 12.0;
   LatLng? _myLocation;
@@ -344,6 +351,10 @@ class _GigMapSectionState extends State<GigMapSection> {
   void initState() {
     super.initState();
     _mapInteractive = widget.fullScreen;
+    final providerLoc = context.read<CurrentUserProvider>();
+    _myLocation = (providerLoc.lastLat != null && providerLoc.lastLng != null)
+        ? LatLng(providerLoc.lastLat!, providerLoc.lastLng!)
+        : _lastKnownWorkerLocation;
     _loadBaseIcons();
     _fetchAllSkills();
     if (!widget.fullScreen) _loadSavedViewMode();
@@ -403,6 +414,30 @@ class _GigMapSectionState extends State<GigMapSection> {
         }
         return;
       }
+      // Cheap, cached fix first so the map can jump straight to roughly the
+      // right place instead of sitting on the Manila default while the slow
+      // high-accuracy fix below is still resolving.
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null && mounted && _myLocation == null) {
+        final quickLoc = LatLng(lastKnown.latitude, lastKnown.longitude);
+        setState(() => _myLocation = quickLoc);
+        _lastKnownWorkerLocation = quickLoc;
+        if (mounted) {
+          context.read<CurrentUserProvider>().setLastLocation(
+            quickLoc.latitude,
+            quickLoc.longitude,
+          );
+        }
+        _resolveMyCountry(quickLoc);
+        if (_useGoogleMaps) {
+          _googleMapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(quickLoc, 14.0),
+          );
+        } else if (_osmMapReady) {
+          _osmController.move(ll.LatLng(quickLoc.latitude, quickLoc.longitude), 14.0);
+        }
+      }
+
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -412,6 +447,11 @@ class _GigMapSectionState extends State<GigMapSection> {
       if (!mounted) return;
       final loc = LatLng(pos.latitude, pos.longitude);
       setState(() => _myLocation = loc);
+      _lastKnownWorkerLocation = loc;
+      context.read<CurrentUserProvider>().setLastLocation(
+        loc.latitude,
+        loc.longitude,
+      );
       _resolveMyCountry(loc);
       if (_useGoogleMaps) {
         _googleMapController?.animateCamera(
@@ -569,8 +609,99 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   static const _kFarGigThresholdKm = 50.0;
 
+  Future<void> _showDifferentCountryDialog() {
+    return showDialog<void>(
+      context: context,
+      builder: (dCtx) {
+        final isDark = Theme.of(dCtx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: Theme.of(dCtx).cardColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.public_off_rounded,
+                  color: Colors.redAccent,
+                  size: 34,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'This gig is out of reach',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(dCtx).colorScheme.onSurface,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "This gig is based in a different country than yours, so applying isn't available. Try one closer to home instead.",
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                  height: 1.4,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 22),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(dCtx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kAmber,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  child: const Text(
+                    'Got it',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _applyToOpenGig(GigMarkerData gig) async {
     final myLoc = _myLocation;
+    if (myLoc != null) {
+      final myCountry =
+          _myCountryCode ??
+          await countryCodeFromCoordinates(myLoc.latitude, myLoc.longitude);
+      final gigCountryKey = _countryCacheKey(
+        gig.position.latitude,
+        gig.position.longitude,
+      );
+      final gigCountry =
+          _countryCodeCache[gigCountryKey] ??
+          await countryCodeFromCoordinates(
+            gig.position.latitude,
+            gig.position.longitude,
+          );
+      if (myCountry != null && gigCountry != null && myCountry != gigCountry) {
+        if (!mounted) return;
+        await _showDifferentCountryDialog();
+        return;
+      }
+    }
     if (myLoc != null) {
       final distKm =
           Geolocator.distanceBetween(
@@ -956,15 +1087,6 @@ class _GigMapSectionState extends State<GigMapSection> {
     }
 
     final myLoc = _myLocation;
-    final myCountry = _myCountryCode;
-    if (myCountry != null) {
-      gigs = gigs.where((g) {
-        final key = _countryCacheKey(g.position.latitude, g.position.longitude);
-        final gigCountry = _countryCodeCache[key];
-        // Not resolved yet — keep it visible rather than hiding it while we wait.
-        return gigCountry == null || gigCountry == myCountry;
-      }).toList();
-    }
 
     final radiusKm = _radiusKm;
     if (radiusKm != null && myLoc != null) {
@@ -2524,9 +2646,13 @@ class _GigMapSectionState extends State<GigMapSection> {
                       }
                       _pendingCameraTarget = null;
                     },
-                    initialCameraPosition: const CameraPosition(
-                      target: LatLng(14.5995, 120.9842),
-                      zoom: 12.0,
+                    initialCameraPosition: CameraPosition(
+                      target: _pendingCameraTarget ??
+                          _myLocation ??
+                          const LatLng(14.5995, 120.9842),
+                      zoom: _myLocation != null || _pendingCameraTarget != null
+                          ? 14.0
+                          : 12.0,
                     ),
                     myLocationEnabled: false,
                     myLocationButtonEnabled: false,
@@ -2555,8 +2681,6 @@ class _GigMapSectionState extends State<GigMapSection> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _legendChipDot(_kQuickDot, 'Quick'),
-                const SizedBox(width: 8),
                 _legendChipDot(_kOpenDot, 'Open'),
                 const SizedBox(width: 8),
                 _legendChipDot(_kOfferedDot, 'Offered'),
@@ -2957,9 +3081,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                       );
                     }
                   },
-                  initialCameraPosition: const CameraPosition(
-                    target: LatLng(14.5995, 120.9842),
-                    zoom: 12.0,
+                  initialCameraPosition: CameraPosition(
+                    target: _myLocation ?? const LatLng(14.5995, 120.9842),
+                    zoom: _myLocation != null ? 14.0 : 12.0,
                   ),
                   myLocationEnabled: false,
                   myLocationButtonEnabled: false,
@@ -3107,8 +3231,6 @@ class _GigMapSectionState extends State<GigMapSection> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const _LegendDot(color: kGold, label: 'Quick'),
-                const SizedBox(height: 6),
                 const _LegendDot(color: kBlue, label: 'Open'),
                 if (offeredCount > 0) ...[
                   const SizedBox(height: 6),

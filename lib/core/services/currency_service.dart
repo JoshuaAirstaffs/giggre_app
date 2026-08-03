@@ -8,7 +8,12 @@ class CurrencyService {
   // Returns 'PHP' for the Philippines, 'USD' for everything else.
   // Returns null if detection is unavailable (permission denied, GPS error),
   // so callers can distinguish "couldn't detect" from a real 'PHP' result.
-  static Future<String?> detectCurrency() async {
+  // [onPosition] reports the raw GPS fix back to the caller (e.g. so it can
+  // be cached for other screens, like the gig map, to reuse as an instant
+  // initial center instead of each doing their own separate GPS wait).
+  static Future<String?> detectCurrency({
+    void Function(double lat, double lng)? onPosition,
+  }) async {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) return null;
@@ -30,6 +35,7 @@ class CurrencyService {
           timeLimit: Duration(seconds: 10),
         ),
       );
+      onPosition?.call(pos.latitude, pos.longitude);
       final countryCode =
           await countryCodeFromCoordinates(pos.latitude, pos.longitude);
       if (countryCode == null) return null;
@@ -44,9 +50,12 @@ class CurrencyService {
   // Falls back to the stored value when detection is unavailable, or 'USD' on
   // first use with no stored value.
   static Future<String> initForUser(
-      String uid, Map<String, dynamic> userDoc) async {
+    String uid,
+    Map<String, dynamic> userDoc, {
+    void Function(double lat, double lng)? onPosition,
+  }) async {
     final existing = userDoc['currencyCode'] as String?;
-    final detected = await detectCurrency();
+    final detected = await detectCurrency(onPosition: onPosition);
 
     if (detected == null) {
       return existing ?? 'USD';
