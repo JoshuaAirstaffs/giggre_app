@@ -11,6 +11,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
+import '../../../core/providers/current_user_provider.dart';
 import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/map_style.dart';
@@ -29,8 +31,13 @@ class GigHostScreen extends StatefulWidget {
   // True when hosted as the Home tab root inside HostShell — suppresses the
   // header's back arrow since there's no dashboard-level route to pop to.
   final bool isTabRoot;
+  final VoidCallback? onSwitchToWorker;
 
-  const GigHostScreen({super.key, this.isTabRoot = false});
+  const GigHostScreen({
+    super.key,
+    this.isTabRoot = false,
+    this.onSwitchToWorker,
+  });
 
   @override
   State<GigHostScreen> createState() => _GigHostScreenState();
@@ -50,8 +57,10 @@ class _GigHostScreenState extends State<GigHostScreen> {
   Future<void> _loadUser() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final doc =
-        await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
     if (!mounted) return;
     setState(() {
       _userName = doc.data()?['name'] ?? '';
@@ -100,6 +109,7 @@ class _GigHostScreenState extends State<GigHostScreen> {
               showBackButton: !widget.isTabRoot,
               onTemplates: _showTemplates,
               onViewWorkers: _scrollToWorkerMap,
+              onSwitchToWorker: widget.onSwitchToWorker,
             ),
           ),
 
@@ -128,7 +138,8 @@ class _GigHostScreenState extends State<GigHostScreen> {
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                            builder: (_) => HostGigsScreen(uid: uid)),
+                          builder: (_) => HostGigsScreen(uid: uid),
+                        ),
                       ),
                       child: const Text(
                         'See all',
@@ -162,6 +173,7 @@ class _HostHeader extends StatelessWidget {
   final bool showBackButton;
   final VoidCallback onTemplates;
   final VoidCallback onViewWorkers;
+  final VoidCallback? onSwitchToWorker;
 
   const _HostHeader({
     required this.firstName,
@@ -170,6 +182,7 @@ class _HostHeader extends StatelessWidget {
     required this.showBackButton,
     required this.onTemplates,
     required this.onViewWorkers,
+    this.onSwitchToWorker,
   });
 
   @override
@@ -185,219 +198,255 @@ class _HostHeader extends StatelessWidget {
             bottomRight: Radius.circular(26),
           ),
           child: Container(
-          width: double.infinity,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [kGold, Color(0xFFD88810)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 4, 44),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ── Action row ──────────────────────────────
-                  Row(
-                    children: [
-                      // Left: back (when pushed) + "Gig Host / Dashboard" label
-                      GestureDetector(
-                        onTap: showBackButton
-                            ? () => Navigator.pop(context)
-                            : null,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (showBackButton) ...[
-                              Container(
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.18),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: const Icon(
-                                  Icons.arrow_back_ios_new_rounded,
-                                  color: Colors.white,
-                                  size: 15,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                            ],
-                            const Text(
-                              'Host Dashboard',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 17,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.3,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Spacer(),
-                      // Right: action icons (white)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Bell with unread dot
-                          StreamBuilder<QuerySnapshot>(
-                            stream: FirebaseFirestore.instance
-                                .collection('open_gigs')
-                                .where('hostId', isEqualTo: uid)
-                                .where('status', isEqualTo: 'open')
-                                .snapshots(),
-                            builder: (context, snap) {
-                              final hasApplicants =
-                                  snap.data?.docs.any((d) {
-                                        final applicants = (d.data()
-                                                as Map<String, dynamic>)[
-                                            'applicants'] as List?;
-                                        return applicants != null &&
-                                            applicants.isNotEmpty;
-                                      }) ??
-                                      false;
-                              return Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Notifications',
-                                    icon: const Icon(
-                                      Icons.notifications_outlined,
-                                      size: 19,
-                                    ),
-                                    onPressed: () =>
-                                        NotificationsSheet.show(context),
-                                    style: IconButton.styleFrom(
-                                      foregroundColor: Colors.white,
-                                      backgroundColor:
-                                          Colors.white.withValues(alpha: 0.18),
-                                      shape: const CircleBorder(),
-                                      fixedSize: const Size(38, 38),
-                                    ),
-                                  ),
-                                  if (hasApplicants)
-                                    Positioned(
-                                      top: 8,
-                                      right: 8,
-                                      child: Container(
-                                        width: 8,
-                                        height: 8,
-                                        decoration: const BoxDecoration(
-                                          color: Colors.red,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              );
-                            },
-                          ),
-                          // More menu (templates + gig config)
-                          PopupMenuButton<String>(
-                            tooltip: 'More',
-                            icon: Container(
-                              width: 38,
-                              height: 38,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.18),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.more_vert_rounded,
-                                color: Colors.white,
-                                size: 19,
-                              ),
-                            ),
-                            color: Theme.of(context).cardColor,
-                            onSelected: (val) {
-                              if (val == 'templates') onTemplates();
-                              if (val == 'config') {
-                                AdminGigConfigSheet.show(context);
-                              }
-                            },
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(
-                                value: 'templates',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.bookmark_add_outlined,
-                                        size: 16, color: kSub),
-                                    SizedBox(width: 10),
-                                    Text('Saved Templates',
-                                        style: TextStyle(fontSize: 13)),
-                                  ],
-                                ),
-                              ),
-                              PopupMenuItem(
-                                value: 'config',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.tune_rounded,
-                                        size: 16, color: kSub),
-                                    SizedBox(width: 10),
-                                    Text('Gig Config',
-                                        style: TextStyle(fontSize: 13)),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  // ── Profile strip ────────────────────────────
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 22,
-                        backgroundColor: Colors.white.withValues(alpha: 0.22),
-                        backgroundImage: photoUrl.isNotEmpty
-                            ? CachedNetworkImageProvider(photoUrl)
-                            : null,
-                        child: photoUrl.isEmpty
-                            ? const Icon(
-                                Icons.account_circle_rounded,
-                                color: Colors.white,
-                                size: 26,
-                              )
-                            : null,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              firstName.isNotEmpty ? firstName : 'Welcome, Host!',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const Text(
-                              'Manage your gigs and find workers',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+            width: double.infinity,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [kGold, Color(0xFFD88810)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
-          ),
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 4, 44),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Action row ──────────────────────────────
+                    Row(
+                      children: [
+                        // Left: back (when pushed) + "Gig Host / Dashboard" label
+                        GestureDetector(
+                          onTap: showBackButton
+                              ? () => Navigator.pop(context)
+                              : null,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (showBackButton) ...[
+                                Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.18),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    Icons.arrow_back_ios_new_rounded,
+                                    color: Colors.white,
+                                    size: 15,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                              ],
+                              const Text(
+                                'Host Dashboard',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Spacer(),
+                        // Right: action icons (white)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Bell with unread dot
+                            StreamBuilder<QuerySnapshot>(
+                              stream: FirebaseFirestore.instance
+                                  .collection('open_gigs')
+                                  .where('hostId', isEqualTo: uid)
+                                  .where('status', isEqualTo: 'open')
+                                  .snapshots(),
+                              builder: (context, snap) {
+                                final hasApplicants =
+                                    snap.data?.docs.any((d) {
+                                      final applicants =
+                                          (d.data()
+                                                  as Map<
+                                                    String,
+                                                    dynamic
+                                                  >)['applicants']
+                                              as List?;
+                                      return applicants != null &&
+                                          applicants.isNotEmpty;
+                                    }) ??
+                                    false;
+                                return Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Notifications',
+                                      icon: const Icon(
+                                        Icons.notifications_outlined,
+                                        size: 19,
+                                      ),
+                                      onPressed: () =>
+                                          NotificationsSheet.show(context),
+                                      style: IconButton.styleFrom(
+                                        foregroundColor: Colors.white,
+                                        backgroundColor: Colors.white
+                                            .withValues(alpha: 0.18),
+                                        shape: const CircleBorder(),
+                                        fixedSize: const Size(38, 38),
+                                      ),
+                                    ),
+                                    if (hasApplicants)
+                                      Positioned(
+                                        top: 8,
+                                        right: 8,
+                                        child: Container(
+                                          width: 8,
+                                          height: 8,
+                                          decoration: const BoxDecoration(
+                                            color: Colors.red,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              },
+                            ),
+                            const SizedBox(width: 4),
+                            // More menu (templates + gig config)
+                            PopupMenuButton<String>(
+                              tooltip: 'More',
+                              icon: Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.18),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.more_vert_rounded,
+                                  color: Colors.white,
+                                  size: 19,
+                                ),
+                              ),
+                              color: Theme.of(context).cardColor,
+                              onSelected: (val) {
+                                if (val == 'templates') onTemplates();
+                                if (val == 'config') {
+                                  AdminGigConfigSheet.show(context);
+                                }
+                              },
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(
+                                  value: 'templates',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.bookmark_add_outlined,
+                                        size: 16,
+                                        color: kSub,
+                                      ),
+                                      SizedBox(width: 10),
+                                      Text(
+                                        'Saved Templates',
+                                        style: TextStyle(fontSize: 13),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'config',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.tune_rounded,
+                                        size: 16,
+                                        color: kSub,
+                                      ),
+                                      SizedBox(width: 10),
+                                      Text(
+                                        'Gig Config',
+                                        style: TextStyle(fontSize: 13),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (onSwitchToWorker != null) ...[
+                              const SizedBox(width: 4),
+                              IconButton(
+                                tooltip: 'Switch to Worker Mode',
+                                icon: const Icon(
+                                  Icons.sync_alt,
+                                  size: 19,
+                                ),
+                                onPressed: onSwitchToWorker,
+                                style: IconButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  backgroundColor: Colors.white.withValues(
+                                    alpha: 0.18,
+                                  ),
+                                  shape: const CircleBorder(),
+                                  fixedSize: const Size(38, 38),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    // ── Profile strip ────────────────────────────
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: Colors.white.withValues(alpha: 0.22),
+                          backgroundImage: photoUrl.isNotEmpty
+                              ? CachedNetworkImageProvider(photoUrl)
+                              : null,
+                          child: photoUrl.isEmpty
+                              ? const Icon(
+                                  Icons.account_circle_rounded,
+                                  color: Colors.white,
+                                  size: 26,
+                                )
+                              : null,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                firstName.isNotEmpty
+                                    ? firstName
+                                    : 'Welcome, Host!',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const Text(
+                                'Manage your gigs and find workers',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
         // Workers-online card — always shown, overlapping the header's
@@ -482,17 +531,20 @@ class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
         .collection('users')
         .where('isOnline', isEqualTo: true)
         .snapshots()
-        .listen((snap) {
-      _seekingLocations = snap.docs
-          .where((d) => d.data()['seekingQuickGigs'] == true)
-          .map((d) => d.data()['location'] as GeoPoint?)
-          .whereType<GeoPoint>()
-          .toList();
-      if (mounted) setState(_recomputeOnlineCount);
-    }, onError: (e) {
-      if (FirebaseAuth.instance.currentUser == null) return;
-      debugPrint('[_WorkersOnlineCard] stream error: $e');
-    });
+        .listen(
+          (snap) {
+            _seekingLocations = snap.docs
+                .where((d) => d.data()['seekingQuickGigs'] == true)
+                .map((d) => d.data()['location'] as GeoPoint?)
+                .whereType<GeoPoint>()
+                .toList();
+            if (mounted) setState(_recomputeOnlineCount);
+          },
+          onError: (e) {
+            if (FirebaseAuth.instance.currentUser == null) return;
+            debugPrint('[_WorkersOnlineCard] stream error: $e');
+          },
+        );
   }
 
   // Falls back to counting everyone if the host's own location hasn't
@@ -521,10 +573,12 @@ class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) return;
+          perm == LocationPermission.deniedForever)
+        return;
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
       if (!mounted) return;
       setState(() {
@@ -596,7 +650,8 @@ class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
                 side: const BorderSide(color: _kGoldDark),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15)),
+                  borderRadius: BorderRadius.circular(15),
+                ),
               ),
               child: const Text(
                 'View',
@@ -651,16 +706,19 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
         .where('status', isEqualTo: 'open')
         .snapshots()
         .listen((snap) {
-      final pending = snap.docs.map((d) {
-        final data = Map<String, dynamic>.from(d.data());
-        data['id'] = d.id;
-        return data;
-      }).where((d) {
-        final applicants = d['applicants'] as List?;
-        return applicants != null && applicants.isNotEmpty;
-      }).toList();
-      if (mounted) setState(() => _pendingGigs = pending);
-    }, onError: onErr);
+          final pending = snap.docs
+              .map((d) {
+                final data = Map<String, dynamic>.from(d.data());
+                data['id'] = d.id;
+                return data;
+              })
+              .where((d) {
+                final applicants = d['applicants'] as List?;
+                return applicants != null && applicants.isNotEmpty;
+              })
+              .toList();
+          if (mounted) setState(() => _pendingGigs = pending);
+        }, onError: onErr);
 
     // Same query shape as NotificationsSheet (userId + createdAt ordering,
     // category filtered client-side) — no new Firestore index needed.
@@ -671,12 +729,12 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
         .limit(100)
         .snapshots()
         .listen((snap) {
-      final notifs = snap.docs
-          .map((d) => d.data())
-          .where((d) => d['category'] == 'new_applicant')
-          .toList();
-      if (mounted) setState(() => _applicantNotifs = notifs);
-    }, onError: onErr);
+          final notifs = snap.docs
+              .map((d) => d.data())
+              .where((d) => d['category'] == 'new_applicant')
+              .toList();
+          if (mounted) setState(() => _applicantNotifs = notifs);
+        }, onError: onErr);
   }
 
   @override
@@ -696,14 +754,13 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
 
   // Newest new_applicant notification for one specific gig, if any.
   Map<String, dynamic>? _mostRecentNotifFor(String gigId) {
-    final matches = _applicantNotifs
-        .where((n) => (n['gigId'] as String?) == gigId)
-        .toList()
-      ..sort((a, b) {
-        final aTs = (a['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
-        final bTs = (b['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
-        return bTs.compareTo(aTs);
-      });
+    final matches =
+        _applicantNotifs.where((n) => (n['gigId'] as String?) == gigId).toList()
+          ..sort((a, b) {
+            final aTs = (a['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
+            final bTs = (b['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
+            return bTs.compareTo(aTs);
+          });
     return matches.isNotEmpty ? matches.first : null;
   }
 
@@ -714,7 +771,8 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
     // One banner per pending gig — a worker who applied to 2 different gigs
     // must surface 2 banners, not collapse into a single aggregate one.
     // Freshest activity (by that gig's own most recent applicant notif) first.
-    final gigs = [..._pendingGigs]..sort((a, b) {
+    final gigs = [..._pendingGigs]
+      ..sort((a, b) {
         final aTs =
             (_mostRecentNotifFor(a['id'] as String)?['createdAt'] as Timestamp?)
                 ?.toDate() ??
@@ -742,11 +800,12 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
     final applicantCount = applicants.length;
     final notif = _mostRecentNotifFor(gigId);
     final mostRecentTs = (notif?['createdAt'] as Timestamp?)?.toDate();
-    final applicantName = notif?['workerName'] as String? ??
+    final applicantName =
+        notif?['workerName'] as String? ??
         (applicants.isNotEmpty
             ? (applicants.last as Map<String, dynamic>)['workerName']
-                    as String? ??
-                'A worker'
+                      as String? ??
+                  'A worker'
             : 'A worker');
     final gigTitle = gig['title'] as String? ?? 'your gig';
 
@@ -819,7 +878,8 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15)),
+                  borderRadius: BorderRadius.circular(15),
+                ),
               ),
               child: const Text(
                 'Review',
@@ -873,9 +933,7 @@ class _GigTypeCard extends StatelessWidget {
           color: enabled ? accentColor.withValues(alpha: 0.08) : cardColor,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: enabled
-                ? accentColor.withValues(alpha: 0.5)
-                : borderColor,
+            color: enabled ? accentColor.withValues(alpha: 0.5) : borderColor,
           ),
         ),
         child: Row(
@@ -887,11 +945,13 @@ class _GigTypeCard extends StatelessWidget {
                 color: accentColor.withValues(alpha: enabled ? 0.18 : 0.08),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(icon,
-                  color: enabled
-                      ? accentColor
-                      : accentColor.withValues(alpha: 0.4),
-                  size: 26),
+              child: Icon(
+                icon,
+                color: enabled
+                    ? accentColor
+                    : accentColor.withValues(alpha: 0.4),
+                size: 26,
+              ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -903,53 +963,65 @@ class _GigTypeCard extends StatelessWidget {
                       Text(
                         title,
                         style: TextStyle(
-                            color: enabled
-                                ? titleColor
-                                : titleColor.withValues(alpha: 0.4),
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold),
+                          color: enabled
+                              ? titleColor
+                              : titleColor.withValues(alpha: 0.4),
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 2),
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: badgeColor.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                              color: badgeColor.withValues(alpha: 0.4)),
+                            color: badgeColor.withValues(alpha: 0.4),
+                          ),
                         ),
                         child: Text(
                           badge,
                           style: TextStyle(
-                              color: badgeColor,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.8),
+                            color: badgeColor,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.8,
+                          ),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Text(subtitle,
-                      style: TextStyle(
-                          color: enabled
-                              ? kSub
-                              : kSub.withValues(alpha: 0.5),
-                          fontSize: 12)),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: enabled ? kSub : kSub.withValues(alpha: 0.5),
+                      fontSize: 12,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(example,
-                      style: TextStyle(
-                          color: enabled
-                              ? accentColor.withValues(alpha: 0.7)
-                              : kSub.withValues(alpha: 0.3),
-                          fontSize: 11)),
+                  Text(
+                    example,
+                    style: TextStyle(
+                      color: enabled
+                          ? accentColor.withValues(alpha: 0.7)
+                          : kSub.withValues(alpha: 0.3),
+                      fontSize: 11,
+                    ),
+                  ),
                 ],
               ),
             ),
             if (enabled)
-              Icon(Icons.arrow_forward_ios_rounded,
-                  color: accentColor.withValues(alpha: 0.6), size: 16),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                color: accentColor.withValues(alpha: 0.6),
+                size: 16,
+              ),
           ],
         ),
       ),
@@ -988,45 +1060,54 @@ class _GigPreviewListState extends State<_GigPreviewList> {
         .where('hostId', isEqualTo: widget.uid)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .listen((s) => setState(() {
-              _quick = s.docs.map((d) {
-                final m = Map<String, dynamic>.from(d.data());
-                m['gigType'] = m['gigType'] ?? 'quick';
-                m['docId'] = d.id;
-                return m;
-              }).toList();
-              _loading = false;
-            }), onError: onErr);
+        .listen(
+          (s) => setState(() {
+            _quick = s.docs.map((d) {
+              final m = Map<String, dynamic>.from(d.data());
+              m['gigType'] = m['gigType'] ?? 'quick';
+              m['docId'] = d.id;
+              return m;
+            }).toList();
+            _loading = false;
+          }),
+          onError: onErr,
+        );
 
     _openSub = db
         .collection('open_gigs')
         .where('hostId', isEqualTo: widget.uid)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .listen((s) => setState(() {
-              _open = s.docs.map((d) {
-                final m = Map<String, dynamic>.from(d.data());
-                m['gigType'] = m['gigType'] ?? 'open';
-                m['docId'] = d.id;
-                return m;
-              }).toList();
-              _loading = false;
-            }), onError: onErr);
+        .listen(
+          (s) => setState(() {
+            _open = s.docs.map((d) {
+              final m = Map<String, dynamic>.from(d.data());
+              m['gigType'] = m['gigType'] ?? 'open';
+              m['docId'] = d.id;
+              return m;
+            }).toList();
+            _loading = false;
+          }),
+          onError: onErr,
+        );
 
     _offeredSub = db
         .collection('offered_gigs')
         .where('hostId', isEqualTo: widget.uid)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .listen((s) => setState(() {
-              _offered = s.docs.map((d) {
-                final m = Map<String, dynamic>.from(d.data());
-                m['gigType'] = m['gigType'] ?? 'offered';
-                m['docId'] = d.id;
-                return m;
-              }).toList();
-              _loading = false;
-            }), onError: onErr);
+        .listen(
+          (s) => setState(() {
+            _offered = s.docs.map((d) {
+              final m = Map<String, dynamic>.from(d.data());
+              m['gigType'] = m['gigType'] ?? 'offered';
+              m['docId'] = d.id;
+              return m;
+            }).toList();
+            _loading = false;
+          }),
+          onError: onErr,
+        );
   }
 
   @override
@@ -1038,12 +1119,10 @@ class _GigPreviewListState extends State<_GigPreviewList> {
   }
 
   List<Map<String, dynamic>> get _latest {
-    final all = [..._quick, ..._open, ..._offered]
-        .where((d) {
-          final s = d['status'] as String? ?? '';
-          return s != 'cancelled' && s != 'completed';
-        })
-        .toList();
+    final all = [..._quick, ..._open, ..._offered].where((d) {
+      final s = d['status'] as String? ?? '';
+      return s != 'cancelled' && s != 'completed';
+    }).toList();
     all.sort((a, b) {
       final aTs = a['createdAt'] as Timestamp?;
       final bTs = b['createdAt'] as Timestamp?;
@@ -1101,7 +1180,9 @@ class _GigPreviewListState extends State<_GigPreviewList> {
     }
 
     return Column(
-      children: preview.map((d) => HostGigCard(data: d, showActions: false)).toList(),
+      children: preview
+          .map((d) => HostGigCard(data: d, showActions: false))
+          .toList(),
     );
   }
 }
@@ -1155,6 +1236,11 @@ class _WorkerMapSection extends StatefulWidget {
 }
 
 class _WorkerMapSectionState extends State<_WorkerMapSection> {
+  // Last resolved host location, kept for the life of the app so reopening
+  // this map (a new State instance) can seed straight to it instead of
+  // flashing the Manila default while a fresh GPS fix is fetched.
+  static LatLng? _lastKnownHostLocation;
+
   GoogleMapController? _googleMapController;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();
@@ -1214,6 +1300,10 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   @override
   void initState() {
     super.initState();
+    final providerLoc = context.read<CurrentUserProvider>();
+    _myLocation = (providerLoc.lastLat != null && providerLoc.lastLng != null)
+        ? LatLng(providerLoc.lastLat!, providerLoc.lastLng!)
+        : _lastKnownHostLocation;
     _initMap();
     _startWorkersSub();
     _loadBlueCircleIcon();
@@ -1350,17 +1440,17 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   // OSM-path equivalent of the "W" fallback baked into _blueCircleIcon for
   // Google Maps — shown while a worker's photo loads, or if they have none.
   static Widget _workerFallbackAvatar() => Container(
-        color: _kAvatarBlue,
-        alignment: Alignment.center,
-        child: const Text(
-          'W',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      );
+    color: _kAvatarBlue,
+    alignment: Alignment.center,
+    child: const Text(
+      'W',
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: 10,
+        fontWeight: FontWeight.bold,
+      ),
+    ),
+  );
 
   @override
   void dispose() {
@@ -1381,10 +1471,44 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) return;
+          perm == LocationPermission.deniedForever)
+        return;
+
+      // Cheap, cached fix first so the map can jump straight to roughly the
+      // right place instead of sitting on the Manila default while the slow
+      // high-accuracy fix below is still resolving.
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null && mounted && _myLocation == null) {
+        final quickLoc = LatLng(lastKnown.latitude, lastKnown.longitude);
+        setState(() {
+          _myLocation = quickLoc;
+          _recomputeVisibleWorkers();
+        });
+        _lastKnownHostLocation = quickLoc;
+        context.read<CurrentUserProvider>().setLastLocation(
+          quickLoc.latitude,
+          quickLoc.longitude,
+        );
+        _fullScreenTick.value++;
+        if (_useGoogleMaps) {
+          _googleMapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(quickLoc, 14.0),
+          );
+          _fullScreenGoogleMapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(quickLoc, 14.0),
+          );
+        } else if (_osmMapReady) {
+          _osmController.move(
+            ll.LatLng(quickLoc.latitude, quickLoc.longitude),
+            14.0,
+          );
+        }
+      }
+
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
       if (!mounted) return;
       final loc = LatLng(pos.latitude, pos.longitude);
@@ -1392,6 +1516,11 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         _myLocation = loc;
         _recomputeVisibleWorkers();
       });
+      _lastKnownHostLocation = loc;
+      context.read<CurrentUserProvider>().setLastLocation(
+        loc.latitude,
+        loc.longitude,
+      );
       _fullScreenTick.value++;
       _ensureWorkerAvatarIcons(_workers);
       if (_useGoogleMaps) {
@@ -1414,39 +1543,47 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         .collection('users')
         .where('isOnline', isEqualTo: true)
         .snapshots()
-        .listen((snap) {
-      // Exclude the host's own doc — a host account that's also gone online
-      // as a worker before (common on a shared test account) would otherwise
-      // show up as a worker pin right on top of the host's own location dot.
-      final workers = snap.docs
-          .where((d) => d.id != myUid && d.data()['availableForGigs'] == true)
-          .map((d) {
-        final data = d.data();
-        final geo = data['location'] as GeoPoint?;
-        if (geo == null) return null;
-        final skills = (data['skills'] as List?)?.cast<String>() ?? [];
-        return _WorkerData(
-          id: d.id,
-          name: data['name'] as String? ?? 'Worker',
-          skill: skills.isNotEmpty ? skills.first : 'General',
-          position: LatLng(geo.latitude, geo.longitude),
-          photoUrl: data['photoUrl'] as String? ?? '',
-          rating: (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0,
-          ratingCount: (data['ratingCount'] as num?)?.toInt() ?? 0,
+        .listen(
+          (snap) {
+            // Exclude the host's own doc — a host account that's also gone online
+            // as a worker before (common on a shared test account) would otherwise
+            // show up as a worker pin right on top of the host's own location dot.
+            final workers = snap.docs
+                .where(
+                  (d) => d.id != myUid && d.data()['availableForGigs'] == true,
+                )
+                .map((d) {
+                  final data = d.data();
+                  final geo = data['location'] as GeoPoint?;
+                  if (geo == null) return null;
+                  final skills =
+                      (data['skills'] as List?)?.cast<String>() ?? [];
+                  return _WorkerData(
+                    id: d.id,
+                    name: data['name'] as String? ?? 'Worker',
+                    skill: skills.isNotEmpty ? skills.first : 'General',
+                    position: LatLng(geo.latitude, geo.longitude),
+                    photoUrl: data['photoUrl'] as String? ?? '',
+                    rating: (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0,
+                    ratingCount: (data['ratingCount'] as num?)?.toInt() ?? 0,
+                  );
+                })
+                .whereType<_WorkerData>()
+                .toList();
+            if (mounted) {
+              setState(() {
+                _allWorkers = workers;
+                _recomputeVisibleWorkers();
+              });
+              _fullScreenTick.value++;
+              _ensureWorkerAvatarIcons(_workers);
+            }
+          },
+          onError: (e) {
+            if (FirebaseAuth.instance.currentUser == null) return;
+            debugPrint('[_WorkerMapSection] stream error: $e');
+          },
         );
-      }).whereType<_WorkerData>().toList();
-      if (mounted) {
-        setState(() {
-          _allWorkers = workers;
-          _recomputeVisibleWorkers();
-        });
-        _fullScreenTick.value++;
-        _ensureWorkerAvatarIcons(_workers);
-      }
-    }, onError: (e) {
-      if (FirebaseAuth.instance.currentUser == null) return;
-      debugPrint('[_WorkerMapSection] stream error: $e');
-    });
   }
 
   // Cluster radius in metres shrinks as zoom increases
@@ -1488,12 +1625,14 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
           group.fold(0.0, (s, w) => s + w.position.latitude) / group.length;
       final avgLng =
           group.fold(0.0, (s, w) => s + w.position.longitude) / group.length;
-      clusters.add(_WorkerCluster(
-        center: LatLng(avgLat, avgLng),
-        count: group.length,
-        workers: group,
-        singleWorker: group.length == 1 ? group.first : null,
-      ));
+      clusters.add(
+        _WorkerCluster(
+          center: LatLng(avgLat, avgLng),
+          count: group.length,
+          workers: group,
+          singleWorker: group.length == 1 ? group.first : null,
+        ),
+      );
     }
     return clusters;
   }
@@ -1507,7 +1646,8 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         return Marker(
           markerId: MarkerId('worker_${worker.id}'),
           position: cluster.center,
-          icon: _workerAvatarIcons[worker.id] ??
+          icon:
+              _workerAvatarIcons[worker.id] ??
               _blueCircleIcon ??
               BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
           onTap: ctx != null ? () => _showWorkerSheet(ctx, worker) : null,
@@ -1515,7 +1655,9 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
       }
       // Cluster marker — use yellow/amber hue
       return Marker(
-        markerId: MarkerId('cluster_${cluster.center.latitude}_${cluster.center.longitude}'),
+        markerId: MarkerId(
+          'cluster_${cluster.center.latitude}_${cluster.center.longitude}',
+        ),
         position: cluster.center,
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
         onTap: ctx != null ? () => _showWorkerList(ctx, cluster.workers) : null,
@@ -1530,75 +1672,93 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     for (final cluster in clusters) {
       if (cluster.count == 1 && cluster.singleWorker != null) {
         final worker = cluster.singleWorker!;
-        osmMarkers.add(fm.Marker(
-          point: ll.LatLng(cluster.center.latitude, cluster.center.longitude),
-          width: 20,
-          height: 20,
-          child: GestureDetector(
-            onTap: ctx != null ? () => _showWorkerSheet(ctx, worker) : null,
-            child: Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 1.5),
-                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-              ),
-              child: ClipOval(
-                child: worker.photoUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                        imageUrl: worker.photoUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (_, _) => _workerFallbackAvatar(),
-                        errorWidget: (_, _, _) => _workerFallbackAvatar(),
-                      )
-                    : _workerFallbackAvatar(),
+        osmMarkers.add(
+          fm.Marker(
+            point: ll.LatLng(cluster.center.latitude, cluster.center.longitude),
+            width: 20,
+            height: 20,
+            child: GestureDetector(
+              onTap: ctx != null ? () => _showWorkerSheet(ctx, worker) : null,
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black26, blurRadius: 4),
+                  ],
+                ),
+                child: ClipOval(
+                  child: worker.photoUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: worker.photoUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (_, _) => _workerFallbackAvatar(),
+                          errorWidget: (_, _, _) => _workerFallbackAvatar(),
+                        )
+                      : _workerFallbackAvatar(),
+                ),
               ),
             ),
           ),
-        ));
+        );
       } else {
-        osmMarkers.add(fm.Marker(
-          point: ll.LatLng(cluster.center.latitude, cluster.center.longitude),
-          width: 36,
-          height: 36,
-          child: GestureDetector(
-            onTap: ctx != null ? () => _showWorkerList(ctx, cluster.workers) : null,
-            child: Container(
-              decoration: BoxDecoration(
-                color: kAmber,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-              ),
-              child: Center(
-                child: Text(
-                  '${cluster.count}',
-                  style: const TextStyle(
-                    color: Colors.black,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+        osmMarkers.add(
+          fm.Marker(
+            point: ll.LatLng(cluster.center.latitude, cluster.center.longitude),
+            width: 36,
+            height: 36,
+            child: GestureDetector(
+              onTap: ctx != null
+                  ? () => _showWorkerList(ctx, cluster.workers)
+                  : null,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: kAmber,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black26, blurRadius: 4),
+                  ],
+                ),
+                child: Center(
+                  child: Text(
+                    '${cluster.count}',
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ));
+        );
       }
     }
     if (_myLocation != null) {
-      osmMarkers.add(fm.Marker(
-        point: ll.LatLng(_myLocation!.latitude, _myLocation!.longitude),
-        width: 28,
-        height: 28,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.cyan,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+      osmMarkers.add(
+        fm.Marker(
+          point: ll.LatLng(_myLocation!.latitude, _myLocation!.longitude),
+          width: 28,
+          height: 28,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.cyan,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: const [
+                BoxShadow(color: Colors.black26, blurRadius: 4),
+              ],
+            ),
+            child: const Icon(
+              Icons.my_location_rounded,
+              color: Colors.white,
+              size: 14,
+            ),
           ),
-          child: const Icon(Icons.my_location_rounded, color: Colors.white, size: 14),
         ),
-      ));
+      );
     }
     return fm.FlutterMap(
       mapController: _osmController,
@@ -1626,7 +1786,8 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   }
 
   Future<({int completedGigs, bool isFavorite})> _fetchWorkerSheetData(
-      String workerId) async {
+    String workerId,
+  ) async {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     int count = 0;
     for (final col in ['quick_gigs', 'open_gigs', 'offered_gigs']) {
@@ -1681,14 +1842,19 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                         : null,
                   ),
                   const SizedBox(height: 12),
-                  Text(worker.name,
-                      style: TextStyle(
-                          color: onSurface,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
+                  Text(
+                    worker.name,
+                    style: TextStyle(
+                      color: onSurface,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(worker.skill,
-                      style: const TextStyle(color: kSub, fontSize: 13)),
+                  Text(
+                    worker.skill,
+                    style: const TextStyle(color: kSub, fontSize: 13),
+                  ),
                   const SizedBox(height: 6),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -1702,19 +1868,23 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      const Text('Online now',
-                          style: TextStyle(
-                              color: Color(0xFF22C55E), fontSize: 12)),
+                      const Text(
+                        'Online now',
+                        style: TextStyle(
+                          color: Color(0xFF22C55E),
+                          fontSize: 12,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        vertical: 12, horizontal: 8),
+                      vertical: 12,
+                      horizontal: 8,
+                    ),
                     decoration: BoxDecoration(
-                      color: Theme.of(ctx)
-                          .colorScheme
-                          .surfaceContainerHighest
+                      color: Theme.of(ctx).colorScheme.surfaceContainerHighest
                           .withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: borderColor),
@@ -1746,23 +1916,28 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                       child: ElevatedButton.icon(
                         onPressed: () {
                           Navigator.pop(ctx);
-                          Navigator.of(context).push(MaterialPageRoute(
-                            builder: (_) => PostOfferedGigScreen(
-                              hostName: widget.hostName,
-                              preselectedWorkerId: worker.id,
-                              preselectedWorkerName: worker.name,
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => PostOfferedGigScreen(
+                                hostName: widget.hostName,
+                                preselectedWorkerId: worker.id,
+                                preselectedWorkerName: worker.name,
+                              ),
                             ),
-                          ));
+                          );
                         },
                         icon: const Icon(Icons.send_rounded, size: 16),
-                        label: const Text('Offer a Gig',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        label: const Text(
+                          'Offer a Gig',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: kBlue,
                           foregroundColor: Colors.white,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14)),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                         ),
                       ),
                     ),
@@ -1773,8 +1948,9 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                         'Add this worker to your Favorites to offer a gig',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            color: kSub.withValues(alpha: 0.8),
-                            fontSize: 12),
+                          color: kSub.withValues(alpha: 0.8),
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   const SizedBox(height: 8),
@@ -1826,20 +2002,28 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                         color: kAmber.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.people_alt_outlined,
-                          color: kAmber, size: 18),
+                      child: const Icon(
+                        Icons.people_alt_outlined,
+                        color: kAmber,
+                        size: 18,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('${workers.length} Workers in this area',
-                            style: TextStyle(
-                                color: onSurface,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
-                        const Text('Tap a worker to offer a gig',
-                            style: TextStyle(color: kSub, fontSize: 11)),
+                        Text(
+                          '${workers.length} Workers in this area',
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Text(
+                          'Tap a worker to offer a gig',
+                          style: TextStyle(color: kSub, fontSize: 11),
+                        ),
                       ],
                     ),
                   ],
@@ -1847,9 +2031,10 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
               ),
               const SizedBox(height: 12),
               Divider(
-                  color: isDark
-                      ? kBorder.withValues(alpha: 0.5)
-                      : Colors.grey.withValues(alpha: 0.15)),
+                color: isDark
+                    ? kBorder.withValues(alpha: 0.5)
+                    : Colors.grey.withValues(alpha: 0.15),
+              ),
               ConstrainedBox(
                 constraints: BoxConstraints(
                   maxHeight: MediaQuery.of(ctx).size.height * 0.45,
@@ -1857,7 +2042,9 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                 child: ListView.separated(
                   shrinkWrap: true,
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8),
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   itemCount: workers.length,
                   separatorBuilder: (_, i) => Divider(
                     height: 1,
@@ -1871,13 +2058,15 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                       w: w,
                       onOffer: () {
                         Navigator.pop(ctx);
-                        Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => PostOfferedGigScreen(
-                            hostName: widget.hostName,
-                            preselectedWorkerId: w.id,
-                            preselectedWorkerName: w.name,
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => PostOfferedGigScreen(
+                              hostName: widget.hostName,
+                              preselectedWorkerId: w.id,
+                              preselectedWorkerName: w.name,
+                            ),
                           ),
-                        ));
+                        );
                       },
                     );
                   },
@@ -1955,9 +2144,9 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                         );
                       }
                     },
-                    initialCameraPosition: const CameraPosition(
-                      target: LatLng(14.5995, 120.9842),
-                      zoom: 12.0,
+                    initialCameraPosition: CameraPosition(
+                      target: _myLocation ?? const LatLng(14.5995, 120.9842),
+                      zoom: _myLocation != null ? 14.0 : 12.0,
                     ),
                     myLocationEnabled: true,
                     myLocationButtonEnabled: false,
@@ -2004,10 +2193,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                         SizedBox(width: 5),
                         Text(
                           'Tap to interact with map',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                          ),
+                          style: TextStyle(color: Colors.white, fontSize: 11),
                         ),
                       ],
                     ),
@@ -2045,10 +2231,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                       SizedBox(width: 5),
                       Text(
                         'Tap to lock map',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                        ),
+                        style: TextStyle(color: Colors.white, fontSize: 11),
                       ),
                     ],
                   ),
@@ -2144,7 +2327,9 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
               decoration: BoxDecoration(
                 color: const Color(0xFF22C55E).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
+                border: Border.all(
+                  color: const Color(0xFF22C55E).withValues(alpha: 0.4),
+                ),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -2211,12 +2396,16 @@ class _StatCell extends StatelessWidget {
       children: [
         Icon(icon, color: iconColor, size: 18),
         const SizedBox(height: 4),
-        Text(value,
-            style: TextStyle(
-                color: onSurface, fontSize: 15, fontWeight: FontWeight.bold)),
+        Text(
+          value,
+          style: TextStyle(
+            color: onSurface,
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         const SizedBox(height: 2),
-        Text(label,
-            style: const TextStyle(color: kSub, fontSize: 11)),
+        Text(label, style: const TextStyle(color: kSub, fontSize: 11)),
       ],
     );
   }
@@ -2306,21 +2495,29 @@ class _ClusterWorkerTileState extends State<_ClusterWorkerTile> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(w.name,
-                    style: TextStyle(
-                        color: onSurface,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600)),
+                Text(
+                  w.name,
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    const Icon(Icons.work_outline_rounded,
-                        color: kSub, size: 12),
+                    const Icon(
+                      Icons.work_outline_rounded,
+                      color: kSub,
+                      size: 12,
+                    ),
                     const SizedBox(width: 4),
                     Flexible(
-                      child: Text(w.skill,
-                          style: const TextStyle(color: kSub, fontSize: 12),
-                          overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        w.skill,
+                        style: const TextStyle(color: kSub, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Container(
@@ -2332,28 +2529,40 @@ class _ClusterWorkerTileState extends State<_ClusterWorkerTile> {
                       ),
                     ),
                     const SizedBox(width: 4),
-                    const Text('Online',
-                        style: TextStyle(
-                            color: Color(0xFF22C55E), fontSize: 11)),
+                    const Text(
+                      'Online',
+                      style: TextStyle(color: Color(0xFF22C55E), fontSize: 11),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(Icons.star_rounded,
-                        color: Colors.amber, size: 13),
+                    const Icon(
+                      Icons.star_rounded,
+                      color: Colors.amber,
+                      size: 13,
+                    ),
                     const SizedBox(width: 3),
-                    Text(w.rating.toStringAsFixed(1),
-                        style: TextStyle(
-                            color: onSurface,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600)),
+                    Text(
+                      w.rating.toStringAsFixed(1),
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(width: 10),
-                    const Icon(Icons.check_circle_rounded,
-                        color: Color(0xFF10B981), size: 13),
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      color: Color(0xFF10B981),
+                      size: 13,
+                    ),
                     const SizedBox(width: 3),
-                    Text(_loading ? '—' : '$_completedGigs done',
-                        style: const TextStyle(color: kSub, fontSize: 12)),
+                    Text(
+                      _loading ? '—' : '$_completedGigs done',
+                      style: const TextStyle(color: kSub, fontSize: 12),
+                    ),
                   ],
                 ),
               ],
@@ -2373,29 +2582,38 @@ class _ClusterWorkerTileState extends State<_ClusterWorkerTile> {
               style: TextButton.styleFrom(
                 backgroundColor: kBlue.withValues(alpha: 0.1),
                 foregroundColor: kBlue,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              child: const Text('Offer',
-                  style:
-                      TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              child: const Text(
+                'Offer',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              ),
             )
           else
             Tooltip(
               message: 'Add to favorites to offer',
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 6),
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: kSub.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.lock_outline_rounded,
-                    color: kSub, size: 14),
+                child: const Icon(
+                  Icons.lock_outline_rounded,
+                  color: kSub,
+                  size: 14,
+                ),
               ),
             ),
         ],
@@ -2420,12 +2638,17 @@ class _TemplatesSheet extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: Theme.of(ctx).cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Delete Template',
-            style: TextStyle(
-                color: Theme.of(ctx).colorScheme.onSurface,
-                fontWeight: FontWeight.bold)),
-        content: const Text('Remove this template?',
-            style: TextStyle(color: kSub, fontSize: 13)),
+        title: Text(
+          'Delete Template',
+          style: TextStyle(
+            color: Theme.of(ctx).colorScheme.onSurface,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: const Text(
+          'Remove this template?',
+          style: TextStyle(color: kSub, fontSize: 13),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -2433,8 +2656,10 @@ class _TemplatesSheet extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete',
-                style: TextStyle(color: Colors.redAccent)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
         ],
       ),
@@ -2450,22 +2675,29 @@ class _TemplatesSheet extends StatelessWidget {
     Navigator.pop(context);
     switch (t.gigType) {
       case 'open':
-        Navigator.push(context, MaterialPageRoute(
-          builder: (_) =>
-              PostOpenGigScreen(hostName: hostName, template: t),
-        ));
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PostOpenGigScreen(hostName: hostName, template: t),
+          ),
+        );
         break;
       case 'offered':
-        Navigator.push(context, MaterialPageRoute(
-          builder: (_) =>
-              PostOfferedGigScreen(hostName: hostName, template: t),
-        ));
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                PostOfferedGigScreen(hostName: hostName, template: t),
+          ),
+        );
         break;
       default:
-        Navigator.push(context, MaterialPageRoute(
-          builder: (_) =>
-              PostQuickGigScreen(hostName: hostName, template: t),
-        ));
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PostQuickGigScreen(hostName: hostName, template: t),
+          ),
+        );
     }
   }
 
@@ -2483,8 +2715,7 @@ class _TemplatesSheet extends StatelessWidget {
       builder: (ctx, scroll) => Container(
         decoration: BoxDecoration(
           color: cardColor,
-          borderRadius:
-              const BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
@@ -2493,10 +2724,9 @@ class _TemplatesSheet extends StatelessWidget {
               .snapshots(),
           builder: (ctx, snapshot) {
             final docs = snapshot.data?.docs ?? [];
-            final templates = docs
-                .map((d) => GigTemplateModel.fromDoc(d))
-                .toList()
-              ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+            final templates =
+                docs.map((d) => GigTemplateModel.fromDoc(d)).toList()
+                  ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
             return ListView(
               controller: scroll,
@@ -2522,23 +2752,28 @@ class _TemplatesSheet extends StatelessWidget {
                         color: kAmber.withValues(alpha: 0.15),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.bookmark_rounded,
-                          color: kAmber, size: 20),
+                      child: const Icon(
+                        Icons.bookmark_rounded,
+                        color: kAmber,
+                        size: 20,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Saved Templates',
-                              style: TextStyle(
-                                  color: onSurface,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold)),
+                          Text(
+                            'Saved Templates',
+                            style: TextStyle(
+                              color: onSurface,
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           Text(
                             '${templates.length} template${templates.length != 1 ? 's' : ''}',
-                            style:
-                                const TextStyle(color: kSub, fontSize: 12),
+                            style: const TextStyle(color: kSub, fontSize: 12),
                           ),
                         ],
                       ),
@@ -2551,7 +2786,9 @@ class _TemplatesSheet extends StatelessWidget {
                     child: Padding(
                       padding: EdgeInsets.all(32),
                       child: CircularProgressIndicator(
-                          color: kAmber, strokeWidth: 2),
+                        color: kAmber,
+                        strokeWidth: 2,
+                      ),
                     ),
                   )
                 else if (templates.isEmpty)
@@ -2566,21 +2803,30 @@ class _TemplatesSheet extends StatelessWidget {
                             color: kAmber.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.bookmark_add_outlined,
-                              color: kAmber, size: 34),
+                          child: const Icon(
+                            Icons.bookmark_add_outlined,
+                            color: kAmber,
+                            size: 34,
+                          ),
                         ),
                         const SizedBox(height: 16),
-                        Text('No templates yet',
-                            style: TextStyle(
-                                color: onSurface,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600)),
+                        Text(
+                          'No templates yet',
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                         const SizedBox(height: 6),
                         const Text(
                           'Fill in a gig form and tap\n"Save as Template" to reuse it later.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                              color: kSub, fontSize: 13, height: 1.5),
+                            color: kSub,
+                            fontSize: 13,
+                            height: 1.5,
+                          ),
                         ),
                       ],
                     ),
@@ -2595,8 +2841,7 @@ class _TemplatesSheet extends StatelessWidget {
     );
   }
 
-  Widget _buildCard(
-      BuildContext context, GigTemplateModel t, bool isDark) {
+  Widget _buildCard(BuildContext context, GigTemplateModel t, bool isDark) {
     final Color accent;
     final IconData typeIcon;
     final String typeLabel;
@@ -2644,13 +2889,16 @@ class _TemplatesSheet extends StatelessWidget {
           ),
           child: Icon(typeIcon, color: accent, size: 20),
         ),
-        title: Text(t.name,
-            style: TextStyle(
-                color: onSurface,
-                fontSize: 14,
-                fontWeight: FontWeight.bold),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis),
+        title: Text(
+          t.name,
+          style: TextStyle(
+            color: onSurface,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2658,108 +2906,64 @@ class _TemplatesSheet extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: accent.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: Text(typeLabel,
-                      style: TextStyle(
-                          color: accent,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600)),
+                  child: Text(
+                    typeLabel,
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 6),
-                Text(CurrencyFormatter.format(t.budget, t.currencyCode),
-                    style: const TextStyle(
-                        color: kAmber,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600)),
+                Text(
+                  CurrencyFormatter.format(t.budget, t.currencyCode),
+                  style: const TextStyle(
+                    color: kAmber,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 if (t.skillRequired.isNotEmpty) ...[
                   const SizedBox(width: 6),
                   Flexible(
-                    child: Text('• ${t.skillRequired}',
-                        style:
-                            const TextStyle(color: kSub, fontSize: 11),
-                        overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      '• ${t.skillRequired}',
+                      style: const TextStyle(color: kSub, fontSize: 11),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
               ],
             ),
             if (t.title.isNotEmpty) ...[
               const SizedBox(height: 3),
-              Text(t.title,
-                  style: const TextStyle(color: kSub, fontSize: 12),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
+              Text(
+                t.title,
+                style: const TextStyle(color: kSub, fontSize: 12),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ],
         ),
         trailing: IconButton(
-          icon: const Icon(Icons.delete_outline_rounded,
-              color: Colors.redAccent, size: 20),
+          icon: const Icon(
+            Icons.delete_outline_rounded,
+            color: Colors.redAccent,
+            size: 20,
+          ),
           onPressed: () => _deleteTemplate(context, t.id!),
         ),
       ),
     );
   }
-}
-
-// Public so HostShell's speed dial can show the same "not verified" prompt
-// as the (now-removed) dashboard post-gig cards used to.
-void showUnverifiedHostModal(
-  BuildContext context,
-) {
-  showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      contentPadding: const EdgeInsets.all(24),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: ( Colors.red).withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.error_outline,
-              color: Colors.red,
-              size: 40,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Account not Verified',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your account needs to be verified before you can continue. Please request verification from the admin.',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor:  Colors.red,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK', style: TextStyle(color: Colors.white)),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
 }

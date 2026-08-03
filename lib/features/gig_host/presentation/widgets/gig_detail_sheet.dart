@@ -373,7 +373,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         'Worker';
     final title = data['title'] as String? ?? 'Gig';
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
-    final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
+    final currencyCode = (data['currencyCode'] as String?) ?? 'USD';
 
     String? paymentCode;
     await PaymentSelectionSheet.show(
@@ -419,6 +419,55 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     if (!mounted) return;
 
     if (workerId != null && workerId.isNotEmpty) {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _RatingDialog(
+          workerId: workerId,
+          workerName: workerName,
+          gigId: widget.gigId,
+          gigCollection: _collection,
+        ),
+      );
+    }
+    if (mounted) Navigator.pop(context);
+  }
+
+  // Re-shows the payment code/QR sheet using the code already generated and
+  // saved to Firestore — for when the host accidentally backed out of
+  // _confirmCompleted's HostPaymentCodeSheet (status is already 'payment' by
+  // that point, so there's no payment method to re-select and no new code to
+  // generate; this just re-displays the existing one and resumes the same
+  // celebration/rating flow on confirmation).
+  Future<void> _reopenPaymentCodeSheet(
+    String paymentCode,
+    String workerId,
+    String workerName,
+    double budget,
+    String currencyCode,
+  ) async {
+    final workerConfirmed = await HostPaymentCodeSheet.show(
+      context: context,
+      gigId: widget.gigId,
+      gigCollection: _collection,
+      paymentCode: paymentCode,
+      budget: budget,
+      currencyCode: currencyCode,
+      workerName: workerName,
+      workerId: workerId,
+    );
+    if (!mounted || !workerConfirmed) return;
+
+    await GigCompletionCelebration.show(
+      context: context,
+      title: 'Gig Complete!',
+      subtitle: 'Payment confirmed — nice work getting this one done!',
+      icon: Icons.emoji_events_rounded,
+      accentColor: kAmber,
+    );
+    if (!mounted) return;
+
+    if (workerId.isNotEmpty) {
       await showDialog(
         context: context,
         barrierDismissible: false,
@@ -635,7 +684,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             (gigData['ratePerSlot'] as num?)?.toDouble() ??
             (gigData['budget'] as num?)?.toDouble() ??
             0;
-        final currencyCode = (gigData['currencyCode'] as String?) ?? 'PHP';
+        final currencyCode = (gigData['currencyCode'] as String?) ?? 'USD';
         final hostName = (gigData['hostName'] as String?) ?? '';
 
         if (filled >= slots) {
@@ -784,7 +833,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         final status = data['status'] as String? ?? '';
         final title = data['title'] as String? ?? 'Gig';
         final budget = (data['budget'] as num?)?.toDouble() ?? 0;
-        final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
+        final currencyCode = (data['currencyCode'] as String?) ?? 'USD';
         final address = data['address'] as String? ?? '';
         final scheduledDate = data['scheduledDate'] as Timestamp?;
         final geo = data['location'] as GeoPoint?;
@@ -827,6 +876,8 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             status != 'cancellation_requested' &&
             (isMultiWorker ? filledSlotCount < workerSlots : status == 'open');
         final isTaskComplete = status == 'task_complete';
+        final isPaymentPending = status == 'payment';
+        final paymentCode = data['paymentCode'] as String? ?? '';
         final progressStatus = status == 'cancellation_requested'
             ? (data['lastProgressStatus'] as String? ?? 'working')
             : status;
@@ -1131,6 +1182,40 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     showGigComplete: isTaskComplete,
                     onGigComplete: _confirmCompleted,
                     accent: kHostAccent,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
+                // ── Reopen payment code (host backed out of it earlier) ──
+                if (isPaymentPending && paymentCode.isNotEmpty) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _reopenPaymentCodeSheet(
+                        paymentCode,
+                        workerId,
+                        workerName,
+                        budget,
+                        currencyCode,
+                      ),
+                      icon: const Icon(Icons.qr_code_rounded, size: 20),
+                      label: const Text(
+                        'Show Payment Code',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kActiveGigSuccessGreen,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -1618,9 +1703,7 @@ Future<BitmapDescriptor> _drawWorkerAvatarMarker({
     canvas.restore();
   } else {
     canvas.drawCircle(center, radius, Paint()..color = kBlue);
-    final initial = name.trim().isNotEmpty
-        ? name.trim()[0].toUpperCase()
-        : '?';
+    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
     final pb =
         ui.ParagraphBuilder(
             ui.ParagraphStyle(
@@ -1637,8 +1720,7 @@ Future<BitmapDescriptor> _drawWorkerAvatarMarker({
             ),
           )
           ..addText(initial);
-    final paragraph = pb.build()
-      ..layout(ui.ParagraphConstraints(width: size));
+    final paragraph = pb.build()..layout(ui.ParagraphConstraints(width: size));
     canvas.drawParagraph(
       paragraph,
       Offset(0, center.dy - paragraph.height / 2),
@@ -2779,8 +2861,10 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
                 // Own live stream so the full-screen map keeps tracking every
                 // worker while open, instead of a one-time snapshot from the
                 // embedded card.
-                stream: workersRef(widget.gigCollection, widget.gigId)
-                    .snapshots(),
+                stream: workersRef(
+                  widget.gigCollection,
+                  widget.gigId,
+                ).snapshots(),
                 builder: (context, snap) {
                   final liveWorkers = (snap.data?.docs ?? const [])
                       .map((d) => WorkerSlotModel.fromDoc(d))
@@ -2793,9 +2877,7 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
                   return StatefulBuilder(
                     builder: (context, setLocalState) {
                       final effectiveSelectedId =
-                          liveWorkers.any(
-                            (w) => w.workerId == selectedWorkerId,
-                          )
+                          liveWorkers.any((w) => w.workerId == selectedWorkerId)
                           ? selectedWorkerId
                           : null;
                       void selectWorker(String id) => setLocalState(
@@ -2829,8 +2911,8 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
                                       ? Icons.groups_rounded
                                       : Icons.groups_outlined,
                                   onTap: () => setLocalState(
-                                    () => workerListVisible =
-                                        !workerListVisible,
+                                    () =>
+                                        workerListVisible = !workerListVisible,
                                   ),
                                 ),
                                 if (workerListVisible) ...[
@@ -2976,8 +3058,7 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
                             bottom: 10,
                             child: _MapRoundButton(
                               icon: Icons.fullscreen_rounded,
-                              onTap: () =>
-                                  _openFullScreenTrackingMap(context),
+                              onTap: () => _openFullScreenTrackingMap(context),
                             ),
                           ),
                         ],
@@ -3058,8 +3139,7 @@ class _WorkerAvatarColumnState extends State<_WorkerAvatarColumn> {
 
   void _ensurePhotos() {
     for (final w in widget.workers) {
-      if (_photoUrls.containsKey(w.workerId) ||
-          _loading.contains(w.workerId)) {
+      if (_photoUrls.containsKey(w.workerId) || _loading.contains(w.workerId)) {
         continue;
       }
       _loading.add(w.workerId);
@@ -3071,7 +3151,8 @@ class _WorkerAvatarColumnState extends State<_WorkerAvatarColumn> {
             _loading.remove(w.workerId);
             if (!mounted) return;
             setState(
-              () => _photoUrls[w.workerId] = snap.data()?['photoUrl'] as String?,
+              () =>
+                  _photoUrls[w.workerId] = snap.data()?['photoUrl'] as String?,
             );
           })
           .catchError((_) {

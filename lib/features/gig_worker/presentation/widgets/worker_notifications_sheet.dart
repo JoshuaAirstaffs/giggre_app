@@ -140,7 +140,7 @@ class _WorkerNotificationsSheetState
       final gigTitle = gig['title'] as String? ?? 'Gig';
       final hostName = gig['hostName'] as String? ?? 'Host';
       final budget = (gig['budget'] as num?)?.toDouble() ?? 0;
-      final currencyCode = (gig['currencyCode'] as String?) ?? 'PHP';
+      final currencyCode = (gig['currencyCode'] as String?) ?? 'USD';
       final gigType = gig['gigType'] as String? ?? 'quick';
       final status = gig['status'] as String? ?? '';
       final payMethod = gig['paymentMethod'] as String? ?? 'cash';

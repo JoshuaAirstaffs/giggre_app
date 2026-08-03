@@ -9,13 +9,16 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/map_style.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/worker_active_gig.dart';
+import '../../../../core/widgets/account_not_verified_modal.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data models
@@ -48,7 +51,7 @@ class GigMarkerData {
     required this.title,
     required this.gigType,
     required this.budget,
-    this.currencyCode = 'PHP',
+    this.currencyCode = 'USD',
     required this.status,
     required this.hostName,
     required this.address,
@@ -119,6 +122,7 @@ class GigMapSection extends StatefulWidget {
   final bool seekingQuickGigs;
   final ValueChanged<GigMarkerData>? onQuickGigStarted;
   final ValueChanged<GigMarkerData>? onOpenGigApplied;
+  final ValueChanged<GigMarkerData>? onOfferedGigAccepted;
   final String isVerified;
   final List<String> workerSkills;
   final bool fullScreen;
@@ -130,6 +134,7 @@ class GigMapSection extends StatefulWidget {
     required this.seekingQuickGigs,
     this.onQuickGigStarted,
     this.onOpenGigApplied,
+    this.onOfferedGigAccepted,
     required this.isVerified,
     this.workerSkills = const [],
     this.fullScreen = false,
@@ -140,6 +145,11 @@ class GigMapSection extends StatefulWidget {
 }
 
 class _GigMapSectionState extends State<GigMapSection> {
+  // Last resolved worker location, kept for the life of the app so that
+  // reopening the map (a new State instance) can seed straight to it instead
+  // of flashing the Manila default while a fresh GPS fix is fetched.
+  static LatLng? _lastKnownWorkerLocation;
+
   GoogleMapController? _googleMapController;
   double _zoom = 12.0;
   LatLng? _myLocation;
@@ -181,20 +191,20 @@ class _GigMapSectionState extends State<GigMapSection> {
     );
   }
 
-  List<GigMarkerData> _quickGigs = [];
   List<GigMarkerData> _openGigs = [];
   List<GigMarkerData> _offeredGigs = [];
 
   // Whether each gig stream has delivered its first snapshot yet — used to
   // show a loading state in list mode instead of a premature "no gigs" empty
   // state while the initial Firestore reads are still in flight.
-  bool _quickLoaded = false;
+  //
+  // Quick Gigs are intentionally NOT streamed here — they're dispatched
+  // directly to one matched worker (see _startDispatchSub / DispatchOfferCard),
+  // never browsed/self-started from this general feed.
   bool _openLoaded = false;
   bool _offeredLoaded = false;
-  bool get _gigsStillLoading =>
-      !(_quickLoaded && _openLoaded && _offeredLoaded);
+  bool get _gigsStillLoading => !(_openLoaded && _offeredLoaded);
 
-  StreamSubscription? _quickSub;
   late StreamSubscription _openSub, _offeredSub;
 
   // ── Country matching (only show gigs in the worker's own country) ─────────
@@ -341,13 +351,16 @@ class _GigMapSectionState extends State<GigMapSection> {
   void initState() {
     super.initState();
     _mapInteractive = widget.fullScreen;
+    final providerLoc = context.read<CurrentUserProvider>();
+    _myLocation = (providerLoc.lastLat != null && providerLoc.lastLng != null)
+        ? LatLng(providerLoc.lastLat!, providerLoc.lastLng!)
+        : _lastKnownWorkerLocation;
     _loadBaseIcons();
     _fetchAllSkills();
     if (!widget.fullScreen) _loadSavedViewMode();
     final db = FirebaseFirestore.instance;
     _startOpenSub(db);
     _startOfferedSub(db);
-    _startQuickSub(db);
     _initMap();
   }
 
@@ -401,6 +414,30 @@ class _GigMapSectionState extends State<GigMapSection> {
         }
         return;
       }
+      // Cheap, cached fix first so the map can jump straight to roughly the
+      // right place instead of sitting on the Manila default while the slow
+      // high-accuracy fix below is still resolving.
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null && mounted && _myLocation == null) {
+        final quickLoc = LatLng(lastKnown.latitude, lastKnown.longitude);
+        setState(() => _myLocation = quickLoc);
+        _lastKnownWorkerLocation = quickLoc;
+        if (mounted) {
+          context.read<CurrentUserProvider>().setLastLocation(
+            quickLoc.latitude,
+            quickLoc.longitude,
+          );
+        }
+        _resolveMyCountry(quickLoc);
+        if (_useGoogleMaps) {
+          _googleMapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(quickLoc, 14.0),
+          );
+        } else if (_osmMapReady) {
+          _osmController.move(ll.LatLng(quickLoc.latitude, quickLoc.longitude), 14.0);
+        }
+      }
+
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -410,6 +447,11 @@ class _GigMapSectionState extends State<GigMapSection> {
       if (!mounted) return;
       final loc = LatLng(pos.latitude, pos.longitude);
       setState(() => _myLocation = loc);
+      _lastKnownWorkerLocation = loc;
+      context.read<CurrentUserProvider>().setLastLocation(
+        loc.latitude,
+        loc.longitude,
+      );
       _resolveMyCountry(loc);
       if (_useGoogleMaps) {
         _googleMapController?.animateCamera(
@@ -512,38 +554,6 @@ class _GigMapSectionState extends State<GigMapSection> {
     super.didUpdateWidget(old);
   }
 
-  void _startQuickSub(FirebaseFirestore db) {
-    _quickSub = db
-        .collection('quick_gigs')
-        .where('status', whereIn: ['scanning', 'in_progress'])
-        .snapshots()
-        .listen(
-          (s) {
-            final all = s.docs
-                .map((d) {
-                  final data = d.data();
-                  final status = data['status'] as String? ?? '';
-                  if (status == 'in_progress' &&
-                      data['assignedWorkerId'] != widget.uid) {
-                    return null;
-                  }
-                  return _toMarker(d.id, data, 'quick');
-                })
-                .whereType<GigMarkerData>()
-                .toList();
-            setState(() {
-              _quickGigs = all;
-              _quickLoaded = true;
-            });
-            _ensureCountriesResolved(all);
-          },
-          onError: (e) {
-            debugPrint('[GigMap] quick stream error: $e');
-            if (mounted) setState(() => _quickLoaded = true);
-          },
-        );
-  }
-
   void _startOpenSub(FirebaseFirestore db) {
     _openSub = db
         .collection('open_gigs')
@@ -599,10 +609,102 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   static const _kFarGigThresholdKm = 50.0;
 
+  Future<void> _showDifferentCountryDialog() {
+    return showDialog<void>(
+      context: context,
+      builder: (dCtx) {
+        final isDark = Theme.of(dCtx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: Theme.of(dCtx).cardColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.public_off_rounded,
+                  color: Colors.redAccent,
+                  size: 34,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'This gig is out of reach',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(dCtx).colorScheme.onSurface,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "This gig is based in a different country than yours, so applying isn't available. Try one closer to home instead.",
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                  height: 1.4,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 22),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(dCtx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kAmber,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  child: const Text(
+                    'Got it',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _applyToOpenGig(GigMarkerData gig) async {
     final myLoc = _myLocation;
     if (myLoc != null) {
-      final distKm = Geolocator.distanceBetween(
+      final myCountry =
+          _myCountryCode ??
+          await countryCodeFromCoordinates(myLoc.latitude, myLoc.longitude);
+      final gigCountryKey = _countryCacheKey(
+        gig.position.latitude,
+        gig.position.longitude,
+      );
+      final gigCountry =
+          _countryCodeCache[gigCountryKey] ??
+          await countryCodeFromCoordinates(
+            gig.position.latitude,
+            gig.position.longitude,
+          );
+      if (myCountry != null && gigCountry != null && myCountry != gigCountry) {
+        if (!mounted) return;
+        await _showDifferentCountryDialog();
+        return;
+      }
+    }
+    if (myLoc != null) {
+      final distKm =
+          Geolocator.distanceBetween(
             myLoc.latitude,
             myLoc.longitude,
             gig.position.latitude,
@@ -617,7 +719,9 @@ class _GigMapSectionState extends State<GigMapSection> {
             final isDark = Theme.of(dCtx).brightness == Brightness.dark;
             return AlertDialog(
               backgroundColor: Theme.of(dCtx).cardColor,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -649,7 +753,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                     'It\'s about ${distKm.round()} km from your current location. Make sure you\'re able to travel there before applying.',
                     style: TextStyle(
                       fontSize: 13,
-                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                      color: isDark
+                          ? Colors.grey.shade400
+                          : Colors.grey.shade600,
                       height: 1.4,
                     ),
                     textAlign: TextAlign.center,
@@ -662,14 +768,18 @@ class _GigMapSectionState extends State<GigMapSection> {
                           onPressed: () => Navigator.pop(dCtx, false),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: kSub,
-                            side: BorderSide(color: Theme.of(dCtx).dividerColor),
+                            side: BorderSide(
+                              color: Theme.of(dCtx).dividerColor,
+                            ),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                             padding: const EdgeInsets.symmetric(vertical: 13),
                           ),
-                          child: const Text('Go back',
-                              style: TextStyle(fontWeight: FontWeight.w600)),
+                          child: const Text(
+                            'Go back',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -686,8 +796,10 @@ class _GigMapSectionState extends State<GigMapSection> {
                             ),
                             padding: const EdgeInsets.symmetric(vertical: 13),
                           ),
-                          child: const Text('Apply Anyway',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
+                          child: const Text(
+                            'Apply Anyway',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                         ),
                       ),
                     ],
@@ -719,14 +831,15 @@ class _GigMapSectionState extends State<GigMapSection> {
       }
       final currentStatus = snap.data()?['status'] as String? ?? '';
       final workerSlots = (snap.data()?['workerSlots'] as num?)?.toInt() ?? 1;
-      final filledSlotCount = (snap.data()?['filledSlotCount'] as num?)?.toInt() ?? 0;
+      final filledSlotCount =
+          (snap.data()?['filledSlotCount'] as num?)?.toInt() ?? 0;
       // Multi-slot gigs keep accepting applicants past the initial 'open'
       // status (it moves to 'partially_filled' once the first worker is
       // assigned) as long as capacity remains; single-slot gigs are
       // unchanged — 'open' is the only status that still has room.
       final stillAcceptingApplicants = workerSlots > 1
           ? (currentStatus == 'open' || currentStatus == 'partially_filled') &&
-              filledSlotCount < workerSlots
+                filledSlotCount < workerSlots
           : currentStatus == 'open';
       if (!stillAcceptingApplicants) {
         if (mounted) {
@@ -842,7 +955,9 @@ class _GigMapSectionState extends State<GigMapSection> {
   // stops applying at that point).
   Future<void> _cancelApplication(GigMarkerData gig) async {
     try {
-      final gigRef = FirebaseFirestore.instance.collection('open_gigs').doc(gig.id);
+      final gigRef = FirebaseFirestore.instance
+          .collection('open_gigs')
+          .doc(gig.id);
       final snap = await gigRef.get();
       final applicants = List<dynamic>.from(snap.data()?['applicants'] ?? []);
       final mine = applicants.firstWhere(
@@ -894,7 +1009,6 @@ class _GigMapSectionState extends State<GigMapSection> {
   void dispose() {
     _googleMapController?.dispose();
     _osmController.dispose();
-    _quickSub?.cancel();
     _openSub.cancel();
     _offeredSub.cancel();
     _searchController.dispose();
@@ -931,7 +1045,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       hostId: data['hostId'] as String? ?? '',
       hasApplied: hasApplied,
       scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
-      currencyCode: (data['currencyCode'] as String?) ?? 'PHP',
+      currencyCode: (data['currencyCode'] as String?) ?? 'USD',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
       applicantCount: type == 'open' ? applicants.length : 0,
       workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
@@ -939,11 +1053,7 @@ class _GigMapSectionState extends State<GigMapSection> {
     );
   }
 
-  List<GigMarkerData> get _unfilteredGigs => [
-    ..._quickGigs,
-    ..._openGigs,
-    ..._offeredGigs,
-  ];
+  List<GigMarkerData> get _unfilteredGigs => [..._openGigs, ..._offeredGigs];
 
   bool _matchesSkill(String skill, String other) =>
       skill.toLowerCase().trim() == other.toLowerCase().trim();
@@ -977,15 +1087,6 @@ class _GigMapSectionState extends State<GigMapSection> {
     }
 
     final myLoc = _myLocation;
-    final myCountry = _myCountryCode;
-    if (myCountry != null) {
-      gigs = gigs.where((g) {
-        final key = _countryCacheKey(g.position.latitude, g.position.longitude);
-        final gigCountry = _countryCodeCache[key];
-        // Not resolved yet — keep it visible rather than hiding it while we wait.
-        return gigCountry == null || gigCountry == myCountry;
-      }).toList();
-    }
 
     final radiusKm = _radiusKm;
     if (radiusKm != null && myLoc != null) {
@@ -1540,7 +1641,10 @@ class _GigMapSectionState extends State<GigMapSection> {
                           fontWeight: FontWeight.w700,
                         ),
                         children: [
-                          TextSpan(text: '${gig.openSlots} of ${gig.workerSlots} spots open'),
+                          TextSpan(
+                            text:
+                                '${gig.openSlots} of ${gig.workerSlots} spots open',
+                          ),
                           TextSpan(
                             text: ' · each worker paid independently',
                             style: TextStyle(
@@ -1719,10 +1823,12 @@ class _GigMapSectionState extends State<GigMapSection> {
                       color: canTapApply
                           ? null
                           : isAppliedPending
-                              ? Colors.redAccent.withValues(alpha: 0.08)
-                              : neutralSurface,
+                          ? Colors.redAccent.withValues(alpha: 0.08)
+                          : neutralSurface,
                       border: isAppliedPending
-                          ? Border.all(color: Colors.redAccent.withValues(alpha: 0.4))
+                          ? Border.all(
+                              color: Colors.redAccent.withValues(alpha: 0.4),
+                            )
                           : null,
                       borderRadius: BorderRadius.circular(15),
                     ),
@@ -1733,62 +1839,70 @@ class _GigMapSectionState extends State<GigMapSection> {
                         onTap: canTapApply
                             ? () {
                                 if (widget.isVerified != 'verified') {
-                                  _showModal(context);
+                                  showAccountNotVerifiedModal(context);
                                   return;
                                 }
                                 Navigator.pop(ctx);
-                                if (gig.gigType == 'quick') {
-                                  widget.onQuickGigStarted?.call(gig);
-                                } else if (gig.gigType == 'open') {
+                                if (gig.gigType == 'open') {
                                   _applyToOpenGig(gig);
+                                } else if (gig.gigType == 'offered') {
+                                  widget.onOfferedGigAccepted?.call(gig);
+                                } else if (gig.gigType == 'quick') {
+                                  widget.onQuickGigStarted?.call(gig);
                                 }
                               }
                             : isAppliedPending
-                                ? () async {
-                                    final confirm = await showDialog<bool>(
-                                      context: ctx,
-                                      builder: (dCtx) => AlertDialog(
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(18),
-                                        ),
-                                        title: const Text('Withdraw Application?'),
-                                        content: const Text(
-                                          'You can apply again later if the gig is still accepting applicants.',
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () => Navigator.pop(dCtx, false),
-                                            child: const Text('Cancel'),
-                                          ),
-                                          TextButton(
-                                            onPressed: () => Navigator.pop(dCtx, true),
-                                            child: const Text(
-                                              'Withdraw',
-                                              style: TextStyle(color: Colors.redAccent),
-                                            ),
-                                          ),
-                                        ],
+                            ? () async {
+                                final confirm = await showDialog<bool>(
+                                  context: ctx,
+                                  builder: (dCtx) => AlertDialog(
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(18),
+                                    ),
+                                    title: const Text('Withdraw Application?'),
+                                    content: const Text(
+                                      'You can apply again later if the gig is still accepting applicants.',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dCtx, false),
+                                        child: const Text('Cancel'),
                                       ),
-                                    );
-                                    if (confirm == true && ctx.mounted) {
-                                      Navigator.pop(ctx);
-                                      _cancelApplication(gig);
-                                    }
-                                  }
-                                : null,
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dCtx, true),
+                                        child: const Text(
+                                          'Withdraw',
+                                          style: TextStyle(
+                                            color: Colors.redAccent,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirm == true && ctx.mounted) {
+                                  Navigator.pop(ctx);
+                                  _cancelApplication(gig);
+                                }
+                              }
+                            : null,
                         child: Center(
                           child: Text(
                             isAppliedPending
                                 ? 'Application sent'
                                 : gig.gigType == 'quick'
                                 ? 'Take It'
+                                : gig.gigType == 'offered'
+                                ? "I'm In"
                                 : 'Put In',
                             style: TextStyle(
                               color: canTapApply
                                   ? Colors.white
                                   : isAppliedPending
-                                      ? Colors.redAccent
-                                      : kSub,
+                                  ? Colors.redAccent
+                                  : kSub,
                               fontSize: 14.5,
                               fontWeight: FontWeight.w800,
                             ),
@@ -2028,14 +2142,14 @@ class _GigMapSectionState extends State<GigMapSection> {
                           ? () {
                               if (widget.isVerified != 'verified') {
                                 Navigator.pop(ctx);
-                                _showModal(context);
+                                showAccountNotVerifiedModal(context);
                                 return;
                               }
                               Navigator.pop(ctx);
-                              if (g.gigType == 'quick') {
-                                widget.onQuickGigStarted?.call(g);
-                              } else if (g.gigType == 'open') {
+                              if (g.gigType == 'open') {
                                 _applyToOpenGig(g);
+                              } else if (g.gigType == 'offered') {
+                                widget.onOfferedGigAccepted?.call(g);
                               }
                             }
                           : null,
@@ -2536,9 +2650,13 @@ class _GigMapSectionState extends State<GigMapSection> {
                       }
                       _pendingCameraTarget = null;
                     },
-                    initialCameraPosition: const CameraPosition(
-                      target: LatLng(14.5995, 120.9842),
-                      zoom: 12.0,
+                    initialCameraPosition: CameraPosition(
+                      target: _pendingCameraTarget ??
+                          _myLocation ??
+                          const LatLng(14.5995, 120.9842),
+                      zoom: _myLocation != null || _pendingCameraTarget != null
+                          ? 14.0
+                          : 12.0,
                     ),
                     myLocationEnabled: false,
                     myLocationButtonEnabled: false,
@@ -2567,8 +2685,6 @@ class _GigMapSectionState extends State<GigMapSection> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _legendChipDot(_kQuickDot, 'Quick'),
-                const SizedBox(width: 8),
                 _legendChipDot(_kOpenDot, 'Open'),
                 const SizedBox(width: 8),
                 _legendChipDot(_kOfferedDot, 'Offered'),
@@ -2721,6 +2837,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                     seekingQuickGigs: widget.seekingQuickGigs,
                     onQuickGigStarted: widget.onQuickGigStarted,
                     onOpenGigApplied: widget.onOpenGigApplied,
+                    onOfferedGigAccepted: widget.onOfferedGigAccepted,
                     isVerified: widget.isVerified,
                     workerSkills: widget.workerSkills,
                   ),
@@ -2968,9 +3085,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                       );
                     }
                   },
-                  initialCameraPosition: const CameraPosition(
-                    target: LatLng(14.5995, 120.9842),
-                    zoom: 12.0,
+                  initialCameraPosition: CameraPosition(
+                    target: _myLocation ?? const LatLng(14.5995, 120.9842),
+                    zoom: _myLocation != null ? 14.0 : 12.0,
                   ),
                   myLocationEnabled: false,
                   myLocationButtonEnabled: false,
@@ -3118,8 +3235,6 @@ class _GigMapSectionState extends State<GigMapSection> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const _LegendDot(color: kGold, label: 'Quick'),
-                const SizedBox(height: 6),
                 const _LegendDot(color: kBlue, label: 'Open'),
                 if (offeredCount > 0) ...[
                   const SizedBox(height: 6),
@@ -3318,7 +3433,10 @@ class _GigListCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 if (gig.isMultiWorker) ...[
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFF2E9E6B).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
@@ -3454,12 +3572,7 @@ class _InfoGridCell extends StatelessWidget {
   final String label;
   final String? value;
   final Widget? child;
-  const _InfoGridCell({
-    this.icon,
-    required this.label,
-    this.value,
-    this.child,
-  });
+  const _InfoGridCell({this.icon, required this.label, this.value, this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -3513,57 +3626,4 @@ class _InfoGridCell extends StatelessWidget {
       ],
     );
   }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Verification modal
-// ─────────────────────────────────────────────────────────────────────────────
-void _showModal(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      contentPadding: const EdgeInsets.all(24),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: (Colors.red).withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.error_outline, color: Colors.red, size: 40),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Account not Verified',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your account needs to be verified before you can continue. Please request verification from the admin.',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK', style: TextStyle(color: Colors.white)),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
 }

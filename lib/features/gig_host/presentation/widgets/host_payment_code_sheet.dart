@@ -32,7 +32,7 @@ class HostPaymentCodeSheet extends StatefulWidget {
     required this.gigCollection,
     required this.paymentCode,
     required this.budget,
-    this.currencyCode = 'PHP',
+    this.currencyCode = 'USD',
     required this.workerName,
     required this.workerId,
     this.slotWorkerId,
@@ -44,7 +44,7 @@ class HostPaymentCodeSheet extends StatefulWidget {
     required String gigCollection,
     required String paymentCode,
     required double budget,
-    String currencyCode = 'PHP',
+    String currencyCode = 'USD',
     required String workerName,
     required String workerId,
     String? slotWorkerId,
@@ -115,8 +115,9 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
         final cardColor = Theme.of(ctx).cardColor;
         return AlertDialog(
           backgroundColor: cardColor,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
           contentPadding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -128,16 +129,20 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
                   color: kAmber.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.warning_amber_rounded,
-                    color: kAmber, size: 26),
+                child: const Icon(
+                  Icons.warning_amber_rounded,
+                  color: kAmber,
+                  size: 26,
+                ),
               ),
               const SizedBox(height: 14),
               Text(
                 'Confirm Manually?',
                 style: TextStyle(
-                    color: onSurface,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold),
+                  color: onSurface,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 6),
               const Text(
@@ -153,11 +158,14 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(color: kSub.withValues(alpha: 0.4)),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(11)),
+                          borderRadius: BorderRadius.circular(11),
+                        ),
                         padding: const EdgeInsets.symmetric(vertical: 13),
                       ),
-                      child:
-                          const Text('Cancel', style: TextStyle(color: kSub)),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(color: kSub),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -170,11 +178,14 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(11)),
+                          borderRadius: BorderRadius.circular(11),
+                        ),
                         padding: const EdgeInsets.symmetric(vertical: 13),
                       ),
-                      child: const Text('Confirm',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      child: const Text(
+                        'Confirm',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
                 ],
@@ -218,7 +229,8 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
           final gigSnap = await tx.get(gigRef);
           final gigData = gigSnap.data() ?? {};
           final slots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
-          final completed = ((gigData['slotsCompleted'] as num?)?.toInt() ?? 0) + 1;
+          final completed =
+              ((gigData['slotsCompleted'] as num?)?.toInt() ?? 0) + 1;
           tx.update(gigRef, {
             'slotsCompleted': completed,
             if (completed >= slots) 'status': 'completed',
@@ -273,8 +285,7 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
                 color: green.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child:
-                  const Icon(Icons.payments_rounded, color: green, size: 28),
+              child: const Icon(Icons.payments_rounded, color: green, size: 28),
             ),
             const SizedBox(height: 14),
             Text(
@@ -332,8 +343,7 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
 
             // ── Code display with copy button ─────────────────────────────
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               decoration: BoxDecoration(
                 color: isDark
                     ? Colors.white.withValues(alpha: 0.05)
@@ -358,7 +368,8 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
                   GestureDetector(
                     onTap: () {
                       Clipboard.setData(
-                          ClipboardData(text: widget.paymentCode));
+                        ClipboardData(text: widget.paymentCode),
+                      );
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Code copied to clipboard'),
@@ -373,8 +384,11 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
                         color: green.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(Icons.copy_rounded,
-                          color: green, size: 18),
+                      child: const Icon(
+                        Icons.copy_rounded,
+                        color: green,
+                        size: 18,
+                      ),
                     ),
                   ),
                 ],
@@ -385,8 +399,7 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
 
             // ── Amount pill ───────────────────────────────────────────────
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
               decoration: BoxDecoration(
                 color: green.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(30),
@@ -415,7 +428,9 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
             if (!_confirmed)
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 10),
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: kAmber.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
@@ -435,8 +450,7 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
                     const SizedBox(width: 8),
                     Text(
                       'Waiting for ${widget.workerName} to confirm…',
-                      style:
-                          const TextStyle(color: kAmber, fontSize: 12),
+                      style: const TextStyle(color: kAmber, fontSize: 12),
                     ),
                   ],
                 ),
@@ -451,17 +465,23 @@ class _HostPaymentCodeSheetState extends State<HostPaymentCodeSheet> {
             SizedBox(
               width: double.infinity,
               child: TextButton.icon(
-                onPressed:
-                    (_confirmed || _manualProcessing) ? null : _manualConfirm,
+                onPressed: (_confirmed || _manualProcessing)
+                    ? null
+                    : _manualConfirm,
                 icon: _manualProcessing
                     ? const SizedBox(
                         width: 14,
                         height: 14,
                         child: CircularProgressIndicator(
-                            color: kSub, strokeWidth: 2),
+                          color: kSub,
+                          strokeWidth: 2,
+                        ),
                       )
-                    : const Icon(Icons.check_circle_outline_rounded,
-                        size: 16, color: kSub),
+                    : const Icon(
+                        Icons.check_circle_outline_rounded,
+                        size: 16,
+                        color: kSub,
+                      ),
                 label: const Text(
                   'Confirm Manually',
                   style: TextStyle(color: kSub, fontSize: 13),

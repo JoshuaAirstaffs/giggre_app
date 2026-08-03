@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -19,25 +20,34 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
   final _auth = FirebaseAuth.instance;
   final _firestore = FirebaseFirestore.instance;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _statusSub;
 
   @override
   void initState() {
     super.initState();
-    _fetchVerificationStatus();
+    _listenToVerificationStatus();
     _checkUploadedDocuments();
   }
 
-  Future<void> _fetchVerificationStatus() async {
+  @override
+  void dispose() {
+    _statusSub?.cancel();
+    super.dispose();
+  }
+
+  void _listenToVerificationStatus() {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
 
-    final doc = await _firestore.collection('users').doc(uid).get();
-    if (mounted) {
+    _statusSub = _firestore.collection('users').doc(uid).snapshots().listen((
+      doc,
+    ) {
+      if (!mounted) return;
       setState(() {
         _isVerified = doc.data()?['isVerified'] ?? 'unverified';
         _loadingStatus = false;
       });
-    }
+    });
   }
 
   @override

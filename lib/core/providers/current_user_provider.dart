@@ -14,7 +14,11 @@ import 'package:giggre_app/screens/chat/chat.dart';
 import '../services/currency_service.dart';
 import '../services/push_notification_service.dart';
 
-class CurrentUserProvider extends ChangeNotifier {
+class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
+  CurrentUserProvider() {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
   String? _currentEmail;
   String? _currentName;
   String? _uid;
@@ -33,8 +37,17 @@ class CurrentUserProvider extends ChangeNotifier {
 
   static GlobalKey<NavigatorState>? navigatorKey;
 
-  String _currencyCode = 'PHP';
+  String _currencyCode = 'USD';
   bool _currencyInitialized = false;
+  bool _currencyRefreshing = false;
+
+  // Last GPS fix seen anywhere in the app this session (captured off the
+  // currency-detection flow below). Screens like the gig map read this
+  // synchronously at init so they can center on the worker immediately
+  // instead of showing a placeholder location while they run their own
+  // GPS lookup.
+  double? _lastLat;
+  double? _lastLng;
 
   String? get currentEmail => _currentEmail;
   String? get currentName => _currentName;
@@ -43,17 +56,68 @@ class CurrentUserProvider extends ChangeNotifier {
   String? get isVerified => _isVerified;
   bool get isLoggedIn => _uid != null;
   String get currencyCode => _currencyCode;
+  double? get lastLat => _lastLat;
+  double? get lastLng => _lastLng;
 
-  // Called once per session after setCurrentUserInfo. Reads the stored
-  // currencyCode from the user doc; if absent, detects it via GPS and persists
-  // it to Firestore. No-op on subsequent calls within the same session.
+  void setLastLocation(double lat, double lng) {
+    _lastLat = lat;
+    _lastLng = lng;
+  }
+
+  // Called once per session after setCurrentUserInfo. Applies the stored
+  // currencyCode from the user doc immediately (GPS/reverse-geocode can take
+  // up to 10s, and screens read currencyCode synchronously as soon as this
+  // returns/before it resolves) then detects via GPS in the background and
+  // persists to Firestore if it disagrees. No-op on subsequent calls within
+  // the same session.
   Future<void> initCurrencyCode(
       String uid, Map<String, dynamic> userDoc) async {
     if (_currencyInitialized) return;
     _currencyInitialized = true;
-    final code = await CurrencyService.initForUser(uid, userDoc);
-    _currencyCode = code;
-    notifyListeners();
+    final existing = userDoc['currencyCode'] as String?;
+    if (existing != null) {
+      _currencyCode = existing;
+      notifyListeners();
+    }
+    final code = await CurrencyService.initForUser(
+      uid,
+      userDoc,
+      onPosition: setLastLocation,
+    );
+    if (code != _currencyCode) {
+      _currencyCode = code;
+      notifyListeners();
+    }
+  }
+
+  // Re-detects location on every foreground resume so a user who travels
+  // while staying logged in (app backgrounded, not signed out) gets synced
+  // to the new country's currency, instead of being stuck with whatever was
+  // detected at login for the rest of the session.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshCurrencyCode();
+  }
+
+  Future<void> _refreshCurrencyCode() async {
+    if (_uid == null || _currencyRefreshing) return;
+    _currencyRefreshing = true;
+    try {
+      final detected = await CurrencyService.detectCurrency(
+        onPosition: setLastLocation,
+      );
+      if (detected == null || detected == _currencyCode || _uid == null) {
+        return;
+      }
+      _currencyCode = detected;
+      notifyListeners();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_uid)
+          .update({'currencyCode': detected});
+    } finally {
+      _currencyRefreshing = false;
+    }
   }
 
   static Future<void> initNotifications() async {
@@ -327,6 +391,15 @@ class CurrentUserProvider extends ChangeNotifier {
     );
   }
 
+  // Pushes a freshly-fetched (non-cached) status into the provider so gates
+  // reading `isVerified` (e.g. HostShell's speed dial) reflect it immediately
+  // after the user returns from VerificationScreen, instead of only updating
+  // on the next login or manual pull-to-refresh.
+  void updateVerificationStatus(String isVerified) {
+    _isVerified = isVerified;
+    notifyListeners();
+  }
+
   void setCurrentUserInfo(
     String? email,
     String? name,
@@ -353,6 +426,12 @@ class CurrentUserProvider extends ChangeNotifier {
   static Future<void> unregisterPushForUid(String uid) =>
       _pushService.unregisterForUser(uid);
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
   // Awaited by every logout call site so the FCM token removal below
   // reaches Firestore (isAuth() rule) before signOut() invalidates the
   // session — otherwise the write silently fails as permission-denied and
@@ -363,8 +442,10 @@ class CurrentUserProvider extends ChangeNotifier {
     _currentEmail = null;
     _currentName = null;
     _uid = null;
-    _currencyCode = 'PHP';
+    _currencyCode = 'USD';
     _currencyInitialized = false;
+    _lastLat = null;
+    _lastLng = null;
     _callSubscription?.cancel();
     _callSubscription = null;
     _stopRingtone();
@@ -403,6 +484,12 @@ class CurrentUserProvider extends ChangeNotifier {
           if (!snap.exists) return;
           final data = snap.data();
           if (data == null) return;
+
+          final newIsVerified = data['isVerified'] as String?;
+          if (newIsVerified != _isVerified) {
+            _isVerified = newIsVerified;
+            notifyListeners();
+          }
 
           final incomingCall = data['incomingCall'];
           debugPrint('📞 incomingCall: $incomingCall');

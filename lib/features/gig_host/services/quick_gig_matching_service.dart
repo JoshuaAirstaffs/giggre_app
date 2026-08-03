@@ -410,7 +410,7 @@ class QuickGigMatchingService {
       final ratePerSlot = (initData['ratePerSlot'] as num?)?.toDouble() ??
           (initData['budget'] as num?)?.toDouble() ??
           0;
-      final currencyCode = (initData['currencyCode'] as String?) ?? 'PHP';
+      final currencyCode = (initData['currencyCode'] as String?) ?? 'USD';
       final hostId = initData['hostId'] as String? ?? '';
       final hostName = initData['hostName'] as String? ?? '';
       final initStatus = initData['status'] as String? ?? '';
@@ -676,7 +676,7 @@ class QuickGigMatchingService {
           rate: (gigData['ratePerSlot'] as num?)?.toDouble() ??
               (gigData['budget'] as num?)?.toDouble() ??
               0,
-          currencyCode: gigData['currencyCode'] as String? ?? 'PHP',
+          currencyCode: gigData['currencyCode'] as String? ?? 'USD',
         );
 
         final slotRef = gigRef.collection('workers').doc(candidateId);

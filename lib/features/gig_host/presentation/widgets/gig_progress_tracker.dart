@@ -69,10 +69,13 @@ class _GigProgressTrackerState extends State<GigProgressTracker> {
         .where('hostId', isEqualTo: widget.hostId)
         .where('status', whereIn: ['scanning', 'in_progress'])
         .snapshots()
-        .listen((snap) {
-          if (!mounted) return;
-          setState(() => _searchingDocs = snap.docs);
-        }, onError: (e) => debugPrint('[GigProgressTracker] search stream: $e'));
+        .listen(
+          (snap) {
+            if (!mounted) return;
+            setState(() => _searchingDocs = snap.docs);
+          },
+          onError: (e) => debugPrint('[GigProgressTracker] search stream: $e'),
+        );
 
     _quickSub = FirebaseFirestore.instance
         .collection('quick_gigs')
@@ -241,9 +244,10 @@ class _SearchingCardState extends State<_SearchingCard>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
-    _opacity = Tween(begin: 0.4, end: 1.0).animate(
-      CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
-    );
+    _opacity = Tween(
+      begin: 0.4,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _pulse, curve: Curves.easeInOut));
     _initCountdown();
   }
 
@@ -252,7 +256,10 @@ class _SearchingCardState extends State<_SearchingCard>
     final searchStartedAt = (data['searchStartedAt'] as Timestamp?)?.toDate();
     if (searchStartedAt != null) {
       final elapsed = DateTime.now().difference(searchStartedAt).inSeconds;
-      _secondsRemaining = (_searchDurationSeconds - elapsed).clamp(0, _searchDurationSeconds);
+      _secondsRemaining = (_searchDurationSeconds - elapsed).clamp(
+        0,
+        _searchDurationSeconds,
+      );
     }
     if (_secondsRemaining <= 0) {
       _expireSearch();
@@ -301,7 +308,7 @@ class _SearchingCardState extends State<_SearchingCard>
     final data = widget.doc.data() as Map<String, dynamic>;
     final title = data['title'] as String? ?? 'Quick Gig';
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
-    final currencyCode = data['currencyCode'] as String? ?? 'PHP';
+    final currencyCode = data['currencyCode'] as String? ?? 'USD';
     final status = data['status'] as String? ?? 'scanning';
 
     final cardColor = Theme.of(context).cardColor;
@@ -335,7 +342,11 @@ class _SearchingCardState extends State<_SearchingCard>
                   color: kAmber.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.flash_on_rounded, color: kAmber, size: 18),
+                child: const Icon(
+                  Icons.flash_on_rounded,
+                  color: kAmber,
+                  size: 18,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -396,7 +407,11 @@ class _SearchingCardState extends State<_SearchingCard>
             children: [
               FadeTransition(
                 opacity: _opacity,
-                child: const Icon(Icons.person_search_rounded, color: kAmber, size: 16),
+                child: const Icon(
+                  Icons.person_search_rounded,
+                  color: kAmber,
+                  size: 16,
+                ),
               ),
               const SizedBox(width: 8),
               FadeTransition(
@@ -533,6 +548,41 @@ class _GigProgressCard extends StatelessWidget {
     }
   }
 
+  // Re-shows the payment code/QR sheet using the code already generated and
+  // saved to Firestore — for when the host accidentally backed out of
+  // _showPaymentAndComplete's HostPaymentCodeSheet (status is already
+  // 'payment' by that point, so there's no method to re-select and no new
+  // code to generate; this just re-displays the existing one).
+  Future<void> _reopenPaymentCodeSheet(
+    BuildContext context,
+    String gigId,
+    String? workerId,
+    String workerName,
+    String paymentCode,
+    double budget,
+    String currencyCode,
+  ) async {
+    final workerConfirmed = await HostPaymentCodeSheet.show(
+      context: context,
+      gigId: gigId,
+      gigCollection: gigCollection,
+      paymentCode: paymentCode,
+      budget: budget,
+      currencyCode: currencyCode,
+      workerName: workerName,
+      workerId: workerId ?? '',
+    );
+
+    if (workerConfirmed && workerId != null && workerId.isNotEmpty) {
+      await onPaymentConfirmed?.call(
+        workerId,
+        workerName,
+        gigId,
+        gigCollection,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = doc.data() as Map<String, dynamic>;
@@ -552,10 +602,11 @@ class _GigProgressCard extends StatelessWidget {
         title: title,
         workerSlots: workerSlots,
         filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
-        ratePerSlot: (data['ratePerSlot'] as num?)?.toDouble() ??
+        ratePerSlot:
+            (data['ratePerSlot'] as num?)?.toDouble() ??
             (data['budget'] as num?)?.toDouble() ??
             0,
-        currencyCode: (data['currencyCode'] as String?) ?? 'PHP',
+        currencyCode: (data['currencyCode'] as String?) ?? 'USD',
         isOfferedGig: gigCollection == 'offered_gigs',
         isOpenGig: gigCollection == 'open_gigs',
       );
@@ -568,7 +619,7 @@ class _GigProgressCard extends StatelessWidget {
     final workerId =
         data['assignedWorkerId'] as String? ?? data['workerId'] as String?;
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
-    final currencyCode = (data['currencyCode'] as String?) ?? 'PHP';
+    final currencyCode = (data['currencyCode'] as String?) ?? 'USD';
     final isOfferedGig = gigCollection == 'offered_gigs';
     final isOpenGig = gigCollection == 'open_gigs';
     final isCancelPending = status == 'cancellation_requested';
@@ -582,6 +633,8 @@ class _GigProgressCard extends StatelessWidget {
         : status;
     final stepIndex = steps.indexOf(progressStatus).clamp(0, steps.length - 1);
     final isTaskComplete = status == 'task_complete';
+    final isPaymentPending = status == 'payment';
+    final paymentCode = data['paymentCode'] as String? ?? '';
 
     final cardColor = Theme.of(context).cardColor;
     final divider = Theme.of(context).dividerColor;
@@ -936,6 +989,39 @@ class _GigProgressCard extends StatelessWidget {
               ),
             ),
           ],
+
+          // ── Reopen payment code (host backed out of it earlier) ──
+          if (isPaymentPending && paymentCode.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: ElevatedButton.icon(
+                onPressed: () => _reopenPaymentCodeSheet(
+                  context,
+                  gigId,
+                  workerId,
+                  workerName,
+                  paymentCode,
+                  budget,
+                  currencyCode,
+                ),
+                icon: const Icon(Icons.qr_code_rounded, size: 20),
+                label: const Text(
+                  'Show Payment Code',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: green,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -979,8 +1065,8 @@ class _MultiWorkerSummaryCard extends StatelessWidget {
     final accent = isOfferedGig
         ? const Color(0xFF8B5CF6)
         : isOpenGig
-            ? kBlue
-            : kAmber;
+        ? kBlue
+        : kAmber;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -1035,7 +1121,11 @@ class _MultiWorkerSummaryCard extends StatelessWidget {
                           style: const TextStyle(color: kSub, fontSize: 11),
                         ),
                         const SizedBox(width: 10),
-                        const Icon(Icons.attach_money_rounded, color: kAmber, size: 12),
+                        const Icon(
+                          Icons.attach_money_rounded,
+                          color: kAmber,
+                          size: 12,
+                        ),
                         Text(
                           '${CurrencyFormatter.format(ratePerSlot, currencyCode)}/worker',
                           style: const TextStyle(
@@ -1061,16 +1151,23 @@ class _MultiWorkerSummaryCard extends StatelessWidget {
             builder: (context, snap) {
               final docs = snap.data?.docs ?? [];
               final readyForPayment = docs
-                  .where((d) => (d.data()['status'] as String?) == 'task_complete')
+                  .where(
+                    (d) => (d.data()['status'] as String?) == 'task_complete',
+                  )
                   .length;
               if (readyForPayment == 0) return const SizedBox.shrink();
               return Container(
                 margin: const EdgeInsets.only(top: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFF22C55E).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4)),
+                  border: Border.all(
+                    color: const Color(0xFF22C55E).withValues(alpha: 0.4),
+                  ),
                 ),
                 child: Text(
                   '$readyForPayment worker${readyForPayment == 1 ? '' : 's'} ready for payment — open the gig to pay',
@@ -1418,8 +1515,10 @@ class _WorkerTrackingMapState extends State<_WorkerTrackingMap> {
             children: [
               if (_routeEtaSeconds > 0) ...[
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.65),
                     borderRadius: BorderRadius.circular(8),

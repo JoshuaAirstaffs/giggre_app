@@ -545,7 +545,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                     return null;
                   },
                   prefix: Text(
-                      '${CurrencyFormatter.symbol(context.read<CurrentUserProvider>().currencyCode)} ',
+                      '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
                       style: const TextStyle(
                           color: kAmber,
                           fontSize: 15,

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 
@@ -112,7 +114,7 @@ class EarningsSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final entries = totalByCurrency.isEmpty
-        ? [const MapEntry('PHP', 0.0)]
+        ? [MapEntry(context.watch<CurrentUserProvider>().currencyCode, 0.0)]
         : (totalByCurrency.entries.toList()
             ..sort((a, b) => a.key.compareTo(b.key)));
     final primary = entries.first;

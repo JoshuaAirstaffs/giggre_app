@@ -21,7 +21,7 @@ class PaymentSelectionSheet extends StatefulWidget {
     super.key,
     required this.gigTitle,
     required this.budget,
-    this.currencyCode = 'PHP',
+    this.currencyCode = 'USD',
     required this.onConfirm,
   });
 
@@ -29,7 +29,7 @@ class PaymentSelectionSheet extends StatefulWidget {
     required BuildContext context,
     required String gigTitle,
     required double budget,
-    String currencyCode = 'PHP',
+    String currencyCode = 'USD',
     required Future<void> Function(String paymentMethod) onConfirm,
   }) {
     return showModalBottomSheet(

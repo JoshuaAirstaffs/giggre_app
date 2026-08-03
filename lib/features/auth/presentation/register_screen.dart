@@ -1625,7 +1625,7 @@ class _PasswordRequirementsChecklist extends StatelessWidget {
 // ─────────────────────────────────────────────────────
 // Social Logo Row
 // ─────────────────────────────────────────────────────
-class _SocialLogoRow extends StatefulWidget {
+class _SocialLogoRow extends StatelessWidget {
   final VoidCallback onGoogleTap;
   final bool isGoogleLoading;
 
@@ -1635,204 +1635,30 @@ class _SocialLogoRow extends StatefulWidget {
   });
 
   @override
-  State<_SocialLogoRow> createState() => _SocialLogoRowState();
-}
-
-class _SocialLogoRowState extends State<_SocialLogoRow>
-    with SingleTickerProviderStateMixin {
-  String? _expanded;
-  late final AnimationController _ctrl;
-  late final Animation<double> _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 250));
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _toggle(String key) {
-    if (_expanded == key) {
-      _ctrl.reverse().then((_) => setState(() => _expanded = null));
-    } else {
-      setState(() => _expanded = key);
-      _ctrl.forward(from: 0);
-    }
-  }
-
-  Widget _logo(String key) {
-    const double size = 52;
-    final bool active = _expanded == key;
-    final bool isComingSoon = key == 'apple' || key == 'facebook';
-    final surfaceColor = Theme.of(context).colorScheme.surface;
-    final surfaceVariant =
-        Theme.of(context).colorScheme.surfaceContainerHighest;
-
-    Widget iconWidget;
-    Color borderColor;
-    String label;
-
-    switch (key) {
-      case 'google':
-        iconWidget = Image.asset('assets/images/g-logo.png',
-            width: 26, height: 26);
-        borderColor = active ? Colors.redAccent : Colors.grey[300]!;
-        label = 'Google';
-        break;
-      case 'apple':
-        iconWidget =
-            const Icon(Icons.apple, size: 28, color: Colors.grey);
-        borderColor = Colors.grey[300]!;
-        label = 'Apple';
-        break;
-      default:
-        iconWidget =
-            const Icon(Icons.facebook, size: 28, color: Colors.grey);
-        borderColor = Colors.grey[300]!;
-        label = 'Facebook';
-    }
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border:
-                    Border.all(color: borderColor, width: active ? 2 : 1),
-                color: isComingSoon
-                    ? surfaceVariant
-                    : (active
-                        ? borderColor.withValues(alpha: 0.07)
-                        : surfaceColor),
-                boxShadow: active && !isComingSoon
-                    ? [
-                        BoxShadow(
-                            color: borderColor.withValues(alpha: 0.18),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3))
-                      ]
-                    : [],
-              ),
-              child: InkWell(
-                customBorder: const CircleBorder(),
-                onTap: isComingSoon ? () {} : () => _toggle(key),
-                child: Center(
-                  child: Opacity(
-                      opacity: isComingSoon ? 0.4 : 1.0,
-                      child: iconWidget),
-                ),
-              ),
-            ),
-            if (isComingSoon)
-              Positioned(
-                top: -6,
-                right: -6,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 4, vertical: 2),
-                  decoration: BoxDecoration(
-                      color: Colors.orange,
-                      borderRadius: BorderRadius.circular(6)),
-                  child: const Text('Soon',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 8,
-                          fontWeight: FontWeight.bold)),
-                ),
-              ),
-          ],
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 54,
+      child: OutlinedButton.icon(
+        onPressed: isGoogleLoading ? null : onGoogleTap,
+        icon: isGoogleLoading
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
+        label: Text(
+          isGoogleLoading ? 'Signing in...' : 'Continue with Google',
+          style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87),
         ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.normal,
-            color: isComingSoon
-                ? Colors.grey[400]
-                : (active ? borderColor : Colors.grey[600]),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _expandedButton() {
-    if (_expanded != 'google') return const SizedBox.shrink();
-    return FadeTransition(
-      opacity: _anim,
-      child: SizeTransition(
-        sizeFactor: _anim,
-        axisAlignment: -1,
-        child: Padding(
-          padding: const EdgeInsets.only(top: 14),
-          child: SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: OutlinedButton.icon(
-              onPressed:
-                  widget.isGoogleLoading ? null : widget.onGoogleTap,
-              icon: widget.isGoogleLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : Image.asset('assets/images/g-logo.png',
-                      width: 22, height: 22),
-              label: Text(
-                widget.isGoogleLoading
-                    ? 'Signing in...'
-                    : 'Continue with Google',
-                style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: Colors.grey[400]!),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
-              ),
-            ),
-          ),
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: Colors.grey[400]!),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
         ),
       ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _logo('google'),
-            // Apple/Facebook sign-in commented out for now — not ready for
-            // testers. mainAxisAlignment.center keeps Google centered with
-            // these removed.
-            // const SizedBox(width: 20),
-            // _logo('apple'),
-            // const SizedBox(width: 20),
-            // _logo('facebook'),
-          ],
-        ),
-        _expandedButton(),
-      ],
     );
   }
 }

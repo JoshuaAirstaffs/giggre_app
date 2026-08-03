@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
+import '../../../core/widgets/account_not_verified_modal.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/worker_active_gig.dart';
@@ -38,11 +39,13 @@ class GigWorkerScreen extends StatefulWidget {
   // True when hosted as the Home tab root inside WorkerShell — suppresses the
   // header's back arrow since there's no dashboard-level route to pop to.
   final bool isTabRoot;
+  final VoidCallback? onSwitchToHost;
 
   const GigWorkerScreen({
     super.key,
     this.restoreActiveGigOnEntry = false,
     this.isTabRoot = false,
+    this.onSwitchToHost,
   });
 
   @override
@@ -412,20 +415,26 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               gigType: gigCollection == 'quick_gigs'
                   ? 'quick'
                   : gigCollection == 'offered_gigs'
-                      ? 'offered'
-                      : 'open',
+                  ? 'offered'
+                  : 'open',
               budget: (slot['rate'] as num?)?.toDouble() ?? 0,
-              currencyCode: slot['currencyCode'] as String? ?? 'PHP',
+              currencyCode: slot['currencyCode'] as String? ?? 'USD',
               status: slot['status'] as String? ?? 'navigating',
               hostName:
-                  slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
+                  slot['hostName'] as String? ??
+                  gigData['hostName'] as String? ??
+                  '',
               address: gigData['address'] as String? ?? '',
               position: LatLng(geo.latitude, geo.longitude),
               assignedWorkerId: uid,
-              hostId: slot['hostId'] as String? ?? gigData['hostId'] as String? ?? '',
+              hostId:
+                  slot['hostId'] as String? ??
+                  gigData['hostId'] as String? ??
+                  '',
               scheduledDate: (gigData['scheduledDate'] as Timestamp?)?.toDate(),
               workerSlots: (gigData['workerSlots'] as num?)?.toInt() ?? 1,
-              filledSlotCount: (gigData['filledSlotCount'] as num?)?.toInt() ?? 0,
+              filledSlotCount:
+                  (gigData['filledSlotCount'] as num?)?.toInt() ?? 0,
             );
             setState(() {
               if (gigCollection == 'quick_gigs') {
@@ -484,7 +493,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 hostId: data['hostId'] as String? ?? '',
                 scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
                 workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
-                filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
+                filledSlotCount:
+                    (data['filledSlotCount'] as num?)?.toInt() ?? 0,
               );
               _pendingOfferedGigDesc = data['description'] as String? ?? '';
               _pendingOfferedGigSkill = data['skillRequired'] as String? ?? '';
@@ -504,54 +514,71 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .where('gigCollection', isEqualTo: 'offered_gigs')
         .where('status', isEqualTo: 'offered')
         .snapshots()
-        .listen((snap) async {
-          if (!mounted) return;
-          if (snap.docs.isEmpty) {
-            if (_pendingOfferedGig != null && _pendingOfferedGig!.isMultiWorker) {
-              setState(() => _pendingOfferedGig = null);
+        .listen(
+          (snap) async {
+            if (!mounted) return;
+            if (snap.docs.isEmpty) {
+              if (_pendingOfferedGig != null &&
+                  _pendingOfferedGig!.isMultiWorker) {
+                setState(() => _pendingOfferedGig = null);
+              }
+              return;
             }
-            return;
-          }
-          final slot = snap.docs.first.data();
-          final gigId = slot['gigId'] as String?;
-          if (gigId == null) return;
-          try {
-            final gigSnap = await FirebaseFirestore.instance
-                .collection('offered_gigs')
-                .doc(gigId)
-                .get();
-            final gigData = gigSnap.data();
-            final geo = gigData?['location'] as GeoPoint?;
-            if (gigData == null || geo == null || !mounted) return;
-            setState(() {
-              _pendingOfferedGig = GigMarkerData(
-                id: gigId,
-                title: gigData['title'] as String? ?? 'Offered Gig',
-                gigType: 'offered',
-                budget: (slot['rate'] as num?)?.toDouble() ?? 0,
-                currencyCode: slot['currencyCode'] as String? ?? 'PHP',
-                status: 'offered',
-                hostName: slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
-                address: gigData['address'] as String? ?? '',
-                position: LatLng(geo.latitude, geo.longitude),
-                assignedWorkerId: uid,
-                experienceLevel: gigData['experienceLevel'] as String? ?? '',
-                requiredSkills: gigData['skillRequired'] != null
-                    ? [gigData['skillRequired'] as String]
-                    : [],
-                hostId: slot['hostId'] as String? ?? gigData['hostId'] as String? ?? '',
-                scheduledDate: (gigData['scheduledDate'] as Timestamp?)?.toDate(),
-                workerSlots: (gigData['workerSlots'] as num?)?.toInt() ?? 1,
-                filledSlotCount: (gigData['filledSlotCount'] as num?)?.toInt() ?? 0,
+            final slot = snap.docs.first.data();
+            final gigId = slot['gigId'] as String?;
+            if (gigId == null) return;
+            try {
+              final gigSnap = await FirebaseFirestore.instance
+                  .collection('offered_gigs')
+                  .doc(gigId)
+                  .get();
+              final gigData = gigSnap.data();
+              final geo = gigData?['location'] as GeoPoint?;
+              if (gigData == null || geo == null || !mounted) return;
+              setState(() {
+                _pendingOfferedGig = GigMarkerData(
+                  id: gigId,
+                  title: gigData['title'] as String? ?? 'Offered Gig',
+                  gigType: 'offered',
+                  budget: (slot['rate'] as num?)?.toDouble() ?? 0,
+                  currencyCode: slot['currencyCode'] as String? ?? 'USD',
+                  status: 'offered',
+                  hostName:
+                      slot['hostName'] as String? ??
+                      gigData['hostName'] as String? ??
+                      '',
+                  address: gigData['address'] as String? ?? '',
+                  position: LatLng(geo.latitude, geo.longitude),
+                  assignedWorkerId: uid,
+                  experienceLevel: gigData['experienceLevel'] as String? ?? '',
+                  requiredSkills: gigData['skillRequired'] != null
+                      ? [gigData['skillRequired'] as String]
+                      : [],
+                  hostId:
+                      slot['hostId'] as String? ??
+                      gigData['hostId'] as String? ??
+                      '',
+                  scheduledDate: (gigData['scheduledDate'] as Timestamp?)
+                      ?.toDate(),
+                  workerSlots: (gigData['workerSlots'] as num?)?.toInt() ?? 1,
+                  filledSlotCount:
+                      (gigData['filledSlotCount'] as num?)?.toInt() ?? 0,
+                );
+                _pendingOfferedGigDesc =
+                    gigData['description'] as String? ?? '';
+                _pendingOfferedGigSkill =
+                    gigData['skillRequired'] as String? ?? '';
+              });
+            } catch (e) {
+              debugPrint(
+                '[GigWorker] multi-worker offered gig lookup error: $e',
               );
-              _pendingOfferedGigDesc = gigData['description'] as String? ?? '';
-              _pendingOfferedGigSkill = gigData['skillRequired'] as String? ?? '';
-            });
-          } catch (e) {
-            debugPrint('[GigWorker] multi-worker offered gig lookup error: $e');
-          }
-        }, onError: (e) =>
-            debugPrint('[GigWorker] multi-worker offered gig stream error: $e'));
+            }
+          },
+          onError: (e) => debugPrint(
+            '[GigWorker] multi-worker offered gig stream error: $e',
+          ),
+        );
   }
 
   // Watches for open gig assignments initiated by the host (worker doesn't tap accept).
@@ -589,7 +616,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   scheduledDate: (data['scheduledDate'] as Timestamp?)
                       ?.toDate(),
                   workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
-                  filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
+                  filledSlotCount:
+                      (data['filledSlotCount'] as num?)?.toInt() ?? 0,
                 );
                 _showAssignedPopup(gig);
                 break;
@@ -646,16 +674,17 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       final gigType = gigCollection == 'quick_gigs'
           ? 'quick'
           : gigCollection == 'offered_gigs'
-              ? 'offered'
-              : 'open';
+          ? 'offered'
+          : 'open';
       final gig = GigMarkerData(
         id: gigId,
         title: gigData['title'] as String? ?? 'Gig',
         gigType: gigType,
         budget: (slot['rate'] as num?)?.toDouble() ?? 0,
-        currencyCode: slot['currencyCode'] as String? ?? 'PHP',
+        currencyCode: slot['currencyCode'] as String? ?? 'USD',
         status: 'navigating',
-        hostName: slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
+        hostName:
+            slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
         address: gigData['address'] as String? ?? '',
         position: LatLng(geo.latitude, geo.longitude),
         assignedWorkerId: FirebaseAuth.instance.currentUser?.uid,
@@ -927,51 +956,62 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .where('gigCollection', isEqualTo: 'quick_gigs')
         .where('status', isEqualTo: 'in_progress')
         .snapshots()
-        .listen((snap) async {
-          if (!mounted) return;
-          if (snap.docs.isEmpty) {
-            if (_dispatchedGig != null && _dispatchedGig!.isMultiWorker) {
-              setState(() => _dispatchedGig = null);
-            }
-            return;
-          }
-          final slot = snap.docs.first.data();
-          final gigId = slot['gigId'] as String?;
-          if (gigId == null) return;
-          try {
-            final gigSnap = await FirebaseFirestore.instance
-                .collection('quick_gigs')
-                .doc(gigId)
-                .get();
-            final gigData = gigSnap.data();
-            final geo = gigData?['location'] as GeoPoint?;
-            if (gigData == null || geo == null || !mounted) return;
-            final gig = GigMarkerData(
-              id: gigId,
-              title: gigData['title'] as String? ?? 'Quick Gig',
-              gigType: 'quick',
-              budget: (slot['rate'] as num?)?.toDouble() ?? 0,
-              currencyCode: slot['currencyCode'] as String? ?? 'PHP',
-              status: 'in_progress',
-              hostName: slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
-              address: gigData['address'] as String? ?? '',
-              position: LatLng(geo.latitude, geo.longitude),
-              assignedWorkerId: uid,
-              hostId: slot['hostId'] as String? ?? gigData['hostId'] as String? ?? '',
-              scheduledDate: (gigData['scheduledDate'] as Timestamp?)?.toDate(),
-              workerSlots: (gigData['workerSlots'] as num?)?.toInt() ?? 1,
-              filledSlotCount: (gigData['filledSlotCount'] as num?)?.toInt() ?? 0,
-            );
-            if (_autoAccept) {
-              _acceptDispatch(gig);
+        .listen(
+          (snap) async {
+            if (!mounted) return;
+            if (snap.docs.isEmpty) {
+              if (_dispatchedGig != null && _dispatchedGig!.isMultiWorker) {
+                setState(() => _dispatchedGig = null);
+              }
               return;
             }
-            setState(() => _dispatchedGig = gig);
-          } catch (e) {
-            debugPrint('[GigWorker] multi-worker dispatch lookup error: $e');
-          }
-        }, onError: (e) =>
-            debugPrint('[GigWorker] multi-worker dispatch stream error: $e'));
+            final slot = snap.docs.first.data();
+            final gigId = slot['gigId'] as String?;
+            if (gigId == null) return;
+            try {
+              final gigSnap = await FirebaseFirestore.instance
+                  .collection('quick_gigs')
+                  .doc(gigId)
+                  .get();
+              final gigData = gigSnap.data();
+              final geo = gigData?['location'] as GeoPoint?;
+              if (gigData == null || geo == null || !mounted) return;
+              final gig = GigMarkerData(
+                id: gigId,
+                title: gigData['title'] as String? ?? 'Quick Gig',
+                gigType: 'quick',
+                budget: (slot['rate'] as num?)?.toDouble() ?? 0,
+                currencyCode: slot['currencyCode'] as String? ?? 'USD',
+                status: 'in_progress',
+                hostName:
+                    slot['hostName'] as String? ??
+                    gigData['hostName'] as String? ??
+                    '',
+                address: gigData['address'] as String? ?? '',
+                position: LatLng(geo.latitude, geo.longitude),
+                assignedWorkerId: uid,
+                hostId:
+                    slot['hostId'] as String? ??
+                    gigData['hostId'] as String? ??
+                    '',
+                scheduledDate: (gigData['scheduledDate'] as Timestamp?)
+                    ?.toDate(),
+                workerSlots: (gigData['workerSlots'] as num?)?.toInt() ?? 1,
+                filledSlotCount:
+                    (gigData['filledSlotCount'] as num?)?.toInt() ?? 0,
+              );
+              if (_autoAccept) {
+                _acceptDispatch(gig);
+                return;
+              }
+              setState(() => _dispatchedGig = gig);
+            } catch (e) {
+              debugPrint('[GigWorker] multi-worker dispatch lookup error: $e');
+            }
+          },
+          onError: (e) =>
+              debugPrint('[GigWorker] multi-worker dispatch stream error: $e'),
+        );
   }
 
   Future<void> _saveLocationToFirestore() async {
@@ -1060,8 +1100,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         // This worker's own `workers/{uid}` slot doc already carries the
         // admin-approved 'cancelled' status — remove it so it drops off the
         // host's live worker list instead of lingering there forever.
-        final gigRef =
-            FirebaseFirestore.instance.collection('open_gigs').doc(gig.id);
+        final gigRef = FirebaseFirestore.instance
+            .collection('open_gigs')
+            .doc(gig.id);
         await gigRef.collection('workers').doc(uid).delete();
 
         // Free up the slot this worker vacated so the host can assign a new
@@ -1075,8 +1116,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           final data = snap.data()!;
           final status = data['status'] as String? ?? '';
           if (['cancelled', 'completed', 'no_worker'].contains(status)) return;
-          final filled =
-              ((data['filledSlotCount'] as num?)?.toInt() ?? 1) - 1;
+          final filled = ((data['filledSlotCount'] as num?)?.toInt() ?? 1) - 1;
           final newFilled = filled < 0 ? 0 : filled;
           tx.update(gigRef, {
             'filledSlotCount': newFilled,
@@ -1090,12 +1130,14 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         // own doc. Check who actually requested it before reopening: the
         // host still wants this gig filled if their worker backed out, but
         // not if the host cancelled it themselves.
-        final gigRef =
-            FirebaseFirestore.instance.collection('open_gigs').doc(gig.id);
+        final gigRef = FirebaseFirestore.instance
+            .collection('open_gigs')
+            .doc(gig.id);
         final snap = await gigRef.get();
         final reasons = snap.data()?['cancellation_reason'] as List?;
         final requestedBy = reasons != null && reasons.isNotEmpty
-            ? ((reasons.last as Map<String, dynamic>?)?['requestedBy'] as String?)
+            ? ((reasons.last as Map<String, dynamic>?)?['requestedBy']
+                  as String?)
             : null;
         await gigRef.update({
           'workerId': FieldValue.delete(),
@@ -1134,9 +1176,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             .collection('workers')
             .doc(uid)
             .update({
-          'status': 'navigating',
-          'acceptedAt': FieldValue.serverTimestamp(),
-        }),
+              'status': 'navigating',
+              'acceptedAt': FieldValue.serverTimestamp(),
+            }),
         FirebaseFirestore.instance.collection('users').doc(uid).update({
           'slot': 'LOCKED',
           'acceptanceRate': FieldValue.increment(0.02),
@@ -1248,8 +1290,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         // host's live worker list instead of lingering there forever. Never
         // overwrite the shared gig doc's status here — doing so would wrongly
         // cancel the whole gig out from under every other worker's slot.
-        final gigRef =
-            FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id);
+        final gigRef = FirebaseFirestore.instance
+            .collection('quick_gigs')
+            .doc(gig.id);
         await gigRef.collection('workers').doc(uid).delete();
 
         // Free up the slot this worker vacated so the gig's fill count
@@ -1261,8 +1304,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           final data = snap.data()!;
           final status = data['status'] as String? ?? '';
           if (['cancelled', 'completed', 'no_worker'].contains(status)) return;
-          final filled =
-              ((data['filledSlotCount'] as num?)?.toInt() ?? 1) - 1;
+          final filled = ((data['filledSlotCount'] as num?)?.toInt() ?? 1) - 1;
           final newFilled = filled < 0 ? 0 : filled;
           tx.update(gigRef, {
             'filledSlotCount': newFilled,
@@ -1282,12 +1324,14 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         // own doc. Check who actually requested it before deciding whether
         // to reopen the search: the host still wants this gig done if their
         // worker backed out, but not if the host cancelled it themselves.
-        final gigRef =
-            FirebaseFirestore.instance.collection('quick_gigs').doc(gig.id);
+        final gigRef = FirebaseFirestore.instance
+            .collection('quick_gigs')
+            .doc(gig.id);
         final snap = await gigRef.get();
         final reasons = snap.data()?['cancellation_reason'] as List?;
         final requestedBy = reasons != null && reasons.isNotEmpty
-            ? ((reasons.last as Map<String, dynamic>?)?['requestedBy'] as String?)
+            ? ((reasons.last as Map<String, dynamic>?)?['requestedBy']
+                  as String?)
             : null;
         if (requestedBy == 'worker') {
           // Reopen the search instead of leaving the gig permanently
@@ -1306,7 +1350,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
           });
           QuickGigMatchingService.startAutoSearch(
             gigId: gig.id,
-            gigLocation: GeoPoint(gig.position.latitude, gig.position.longitude),
+            gigLocation: GeoPoint(
+              gig.position.latitude,
+              gig.position.longitude,
+            ),
           );
         }
         // else: host cancelled the whole gig — its 'cancelled' status is
@@ -1648,6 +1695,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 showBackButton: !widget.isTabRoot,
                                 onNotifications: () =>
                                     WorkerNotificationsSheet.show(context),
+                                onSwitchToHost: widget.onSwitchToHost,
                               ),
                               Transform.translate(
                                 offset: const Offset(0, -24),
@@ -1663,7 +1711,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                     },
                                     isVerified: _isVerified,
                                     onVerificationRequired: () =>
-                                        _showWorkerVerificationModal(context),
+                                        _showVerificationModal(context),
                                   ),
                                 ),
                               ),
@@ -1716,7 +1764,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 },
                                 isVerified: _isVerified,
                                 onVerificationRequired: () =>
-                                    _showWorkerVerificationModal(context),
+                                    _showVerificationModal(context),
                               ),
                               const SizedBox(height: 20),
 
@@ -1727,6 +1775,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 seekingQuickGigs: _seekingQuickGigs,
                                 onQuickGigStarted: _onQuickGigStarted,
                                 onOpenGigApplied: _onOpenGigApplied,
+                                onOfferedGigAccepted: _acceptOfferedGig,
                                 isVerified: _isVerified,
                                 workerSkills: _skills,
                               ),
@@ -1760,6 +1809,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                               _acceptOfferedGig(_pendingOfferedGig!),
                           onDecline: () =>
                               _declineOfferedGig(_pendingOfferedGig!),
+                          // Dismiss locally only — leaves the offer's
+                          // Firestore status untouched (still 'offered'), so
+                          // it resurfaces via _startOfferedGigSub next time
+                          // rather than being declined.
+                          onDecideLater: () =>
+                              setState(() => _pendingOfferedGig = null),
                         ),
                       ),
                     if (showActiveGigBar)
@@ -1775,55 +1830,17 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             ),
     );
   }
-}
 
-void _showWorkerVerificationModal(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      contentPadding: const EdgeInsets.all(24),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.error_outline, color: Colors.red, size: 40),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Account not Verified',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your account needs to be verified before you can continue. '
-            'Please request verification from the admin.',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK', style: TextStyle(color: Colors.white)),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
+  // The profile snapshot listener (_listenToProfile) already reacts to a
+  // status change in real time, but that update can lag slightly behind the
+  // user's own navigation — so also recheck explicitly the moment they leave
+  // VerificationScreen, and reflect it in local state immediately.
+  void _showVerificationModal(BuildContext context) {
+    showAccountNotVerifiedModal(
+      context,
+      onStatusRechecked: (status) {
+        if (mounted) setState(() => _isVerified = status);
+      },
+    );
+  }
 }

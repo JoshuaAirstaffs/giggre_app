@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
+import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
 
@@ -80,7 +82,7 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
         title: d['title'] as String? ?? type,
         address: d['address'] as String? ?? '',
         budget: (d['budget'] as num?)?.toDouble() ?? 0,
-        currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
+        currencyCode: (d['currencyCode'] as String?) ?? 'USD',
         completedAt: completedAt,
         hostName: d['hostName'] as String? ?? '',
         workerSlots: (d['workerSlots'] as num?)?.toInt() ?? 1,
@@ -125,7 +127,7 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
         title: gigData?['title'] as String? ?? typeLabel,
         address: gigData?['address'] as String? ?? '',
         budget: (d['rate'] as num?)?.toDouble() ?? 0,
-        currencyCode: (d['currencyCode'] as String?) ?? 'PHP',
+        currencyCode: (d['currencyCode'] as String?) ?? 'USD',
         completedAt: completedAt,
         hostName: d['hostName'] as String? ?? gigData?['hostName'] as String? ?? '',
         workerSlots: (gigData?['workerSlots'] as num?)?.toInt() ?? 1,
@@ -233,7 +235,7 @@ class _GigHistoryHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sortedEntries = earningsByCode.isEmpty
-        ? [const MapEntry('PHP', 0.0)]
+        ? [MapEntry(context.watch<CurrentUserProvider>().currencyCode, 0.0)]
         : (earningsByCode.entries.toList()..sort((a, b) => a.key.compareTo(b.key)));
 
     final earningsValue = sortedEntries
