@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
+import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 
@@ -64,10 +66,15 @@ class PaymentHistorySheet extends StatelessWidget {
     return map;
   }
 
-  String _totalSpentLabel() {
+  String _totalSpentLabel(BuildContext context) {
     final entries = _totalByCurrency.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
-    if (entries.isEmpty) return CurrencyFormatter.format(0, 'USD');
+    if (entries.isEmpty) {
+      return CurrencyFormatter.format(
+        0,
+        context.watch<CurrentUserProvider>().currencyCode,
+      );
+    }
     return entries
         .map((e) => CurrencyFormatter.format(e.value, e.key))
         .join('  ');
@@ -138,7 +145,7 @@ class PaymentHistorySheet extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(_totalSpentLabel(),
+                        Text(_totalSpentLabel(context),
                             style: TextStyle(
                                 color: onSurface,
                                 fontSize: 16,

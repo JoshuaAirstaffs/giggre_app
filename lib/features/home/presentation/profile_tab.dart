@@ -8,10 +8,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:provider/provider.dart';
 import 'package:giggre_app/services/delete_acc_service.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
+import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/profile_tab_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
@@ -91,8 +93,8 @@ String _formatPhoneForDisplay(String raw) {
 
 // Joins a per-currency-code amount map into a display string using the
 // existing CurrencyFormatter — unchanged calculation, just centralized.
-String _formatByCode(Map<String, double> byCode) {
-  if (byCode.isEmpty) return CurrencyFormatter.format(0, 'USD');
+String _formatByCode(Map<String, double> byCode, String defaultCurrencyCode) {
+  if (byCode.isEmpty) return CurrencyFormatter.format(0, defaultCurrencyCode);
   return (byCode.entries.toList()..sort((a, b) => a.key.compareTo(b.key)))
       .map((e) => CurrencyFormatter.format(e.value, e.key))
       .join('  ');
@@ -763,9 +765,10 @@ class _ProfileTabState extends State<ProfileTab> {
       );
     }
 
-    final totalStr = _formatByCode(_earningsByCode);
-    final weeklyStr = _formatByCode(_weeklyByCode);
-    final spentStr = _formatByCode(_spentByCurrency);
+    final defaultCurrencyCode = context.watch<CurrentUserProvider>().currencyCode;
+    final totalStr = _formatByCode(_earningsByCode, defaultCurrencyCode);
+    final weeklyStr = _formatByCode(_weeklyByCode, defaultCurrencyCode);
+    final spentStr = _formatByCode(_spentByCurrency, defaultCurrencyCode);
 
     final workerColumns = <_StatColumn>[
       if (_workerRatingCount > 0)

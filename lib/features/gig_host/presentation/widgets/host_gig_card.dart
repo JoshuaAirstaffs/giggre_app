@@ -449,6 +449,7 @@ class _HostGigCardState extends State<HostGigCard> {
               title: gigInfo['title'] as String? ?? '',
               description: gigInfo['description'] as String? ?? '',
               budget: budgetVal,
+              currencyCode: gigInfo['currencyCode'] as String? ?? 'USD',
               skillRequired: skillRequired,
               experienceLevel: gigInfo['experienceLevel'] as String? ?? '',
               createdAt: DateTime.now(),

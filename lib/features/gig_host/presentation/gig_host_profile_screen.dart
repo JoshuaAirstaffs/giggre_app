@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
+import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/utils/currency_formatter.dart';
@@ -994,7 +995,10 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                         _StatCard2(
                           label: 'Total Spent',
                           value: _spentByCurrency.isEmpty
-                              ? CurrencyFormatter.format(0, 'USD')
+                              ? CurrencyFormatter.format(
+                                  0,
+                                  context.watch<CurrentUserProvider>().currencyCode,
+                                )
                               : (_spentByCurrency.entries.toList()
                                       ..sort((a, b) => a.key.compareTo(b.key)))
                                     .map(
