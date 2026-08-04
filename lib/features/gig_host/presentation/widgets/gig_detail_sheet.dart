@@ -734,7 +734,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final onSurface = activeGigTextPrimary(isDark);
 
-    return Column(
+    return TutorialAnchor(
+      id: 'openGig.applicants',
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
@@ -802,14 +804,31 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             }).toList(),
           ),
       ],
+      ),
     );
   }
 
-  // Only Quick Gig has a tutorial defined so far; other gig types render
-  // this same progress card untouched.
+  // Every gig type flows through this same ActiveGigProgressCard once
+  // active — each just anchors it under its own flow's step id.
   Widget _maybeTutorialAnchor(Widget child) {
-    if (widget.gigType != 'quick') return child;
-    return TutorialAnchor(id: 'quickGig.detail.progress', child: child);
+    final anchorId = switch (widget.gigType) {
+      'quick' => 'quickGig.detail.progress',
+      'open' => 'openGig.detail.progress',
+      'offered' => 'offeredGig.detail.progress',
+      _ => null,
+    };
+    if (anchorId == null) return child;
+    return TutorialAnchor(id: anchorId, child: child);
+  }
+
+  // Wraps the status dot + label shown while an Offered Gig is still
+  // waiting for the assigned worker to respond. Quick Gig has its own
+  // dedicated searching sheet, and Open Gig's equivalent moment is the
+  // applicants list (see _buildApplicantsSection), so only Offered needs
+  // this one.
+  Widget _maybeStatusAnchor(Widget child) {
+    if (widget.gigType != 'offered') return child;
+    return TutorialAnchor(id: 'offeredGig.status', child: child);
   }
 
   @override
@@ -984,27 +1003,29 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            color: _gigTypeAccent(widget.gigType),
-                            shape: BoxShape.circle,
+                    _maybeStatusAnchor(
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: _gigTypeAccent(widget.gigType),
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          _hostSheetStatusLabel(status),
-                          style: TextStyle(
-                            color: _gigTypeAccent(widget.gigType),
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
+                          const SizedBox(width: 5),
+                          Text(
+                            _hostSheetStatusLabel(status),
+                            style: TextStyle(
+                              color: _gigTypeAccent(widget.gigType),
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -1358,27 +1379,29 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            color: _gigTypeAccent(widget.gigType),
-                            shape: BoxShape.circle,
+                    _maybeStatusAnchor(
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: _gigTypeAccent(widget.gigType),
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          _hostSheetStatusLabel(status),
-                          style: TextStyle(
-                            color: _gigTypeAccent(widget.gigType),
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
+                          const SizedBox(width: 5),
+                          Text(
+                            _hostSheetStatusLabel(status),
+                            style: TextStyle(
+                              color: _gigTypeAccent(widget.gigType),
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),

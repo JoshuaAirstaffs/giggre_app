@@ -714,12 +714,18 @@ class _HostGigCardState extends State<HostGigCard> {
       ),
     );
 
-    // Anchored so the tutorial can point at "the gig you just posted" —
-    // only while it's actually in the scanning state that follows a Quick
-    // Gig post, to avoid ambiguity if the host has other gigs in the list.
+    // Anchored so a tutorial can point at "the gig you just posted" — only
+    // while it's in the status that immediately follows posting for its gig
+    // type, to avoid ambiguity if the host has other gigs in the list.
     if (gigType == 'quick' &&
         (status == 'scanning' || status == 'in_progress')) {
       return TutorialAnchor(id: 'quickGig.hostCard', child: card);
+    }
+    if (gigType == 'open' && status == 'open') {
+      return TutorialAnchor(id: 'openGig.hostCard', child: card);
+    }
+    if (gigType == 'offered' && status == 'offered') {
+      return TutorialAnchor(id: 'offeredGig.hostCard', child: card);
     }
     return card;
   }

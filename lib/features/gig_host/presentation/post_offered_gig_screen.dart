@@ -22,6 +22,9 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/map_style.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../tutorial/controller/tutorial_controller.dart';
+import '../../tutorial/flows/offered_gig_flow.dart';
+import '../../tutorial/widgets/tutorial_anchor.dart';
 import '../models/gig_template_model.dart';
 import '../models/offered_gig_model.dart';
 import '../models/worker_slot_model.dart';
@@ -129,6 +132,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   bool _posting = false;
   final _errorPlayer = AudioPlayer();
 
+  bool _tutorialAvailable = false;
+
   @override
   void initState() {
     super.initState();
@@ -145,6 +150,12 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     if (preId != null && preId.isNotEmpty) {
       _preloadWorker(preId, widget.preselectedWorkerName ?? '');
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final controller = context.read<TutorialController>();
+      controller.startIfNeeded(offeredGigFlow);
+      final available = await controller.isAvailable(offeredGigFlow);
+      if (mounted) setState(() => _tutorialAvailable = available);
+    });
   }
 
   Future<void> _preloadWorker(String uid, String fallbackName) async {
@@ -668,6 +679,15 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
             ),
           ],
         ),
+        actions: [
+          if (_tutorialAvailable)
+            IconButton(
+              tooltip: 'Tutorial',
+              icon: const Icon(Icons.school_outlined, color: kSub, size: 22),
+              onPressed: () =>
+                  context.read<TutorialController>().restart(offeredGigFlow),
+            ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -685,70 +705,88 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                   style: TextStyle(color: kSub, fontSize: 12),
                 ),
                 const SizedBox(height: 10),
-                _buildWorkerField(),
+                TutorialAnchor(
+                  id: 'offeredGig.worker',
+                  child: _buildWorkerField(),
+                ),
                 const SizedBox(height: 20),
 
                 // ── Title ─────────────────────────────────────────
                 _SectionLabel('Title'),
                 const SizedBox(height: 10),
-                _buildTextField(
-                  controller: _titleCtrl,
-                  hint: 'e.g. Fix the plumbing in my bathroom',
-                  validator: (v) => v == null || v.trim().isEmpty
-                      ? 'Title is required'
-                      : null,
+                TutorialAnchor(
+                  id: 'postGig.title',
+                  child: _buildTextField(
+                    controller: _titleCtrl,
+                    hint: 'e.g. Fix the plumbing in my bathroom',
+                    validator: (v) => v == null || v.trim().isEmpty
+                        ? 'Title is required'
+                        : null,
+                  ),
                 ),
                 const SizedBox(height: 20),
 
                 // ── Description ───────────────────────────────────
                 _SectionLabel('Description'),
                 const SizedBox(height: 10),
-                _buildTextField(
-                  controller: _descCtrl,
-                  hint:
-                      'Describe the task, expectations, and any special notes...',
-                  maxLines: 4,
+                TutorialAnchor(
+                  id: 'postGig.description',
+                  child: _buildTextField(
+                    controller: _descCtrl,
+                    hint:
+                        'Describe the task, expectations, and any special notes...',
+                    maxLines: 4,
+                  ),
                 ),
                 const SizedBox(height: 20),
 
                 // ── Skill Required ────────────────────────────────
                 _SectionLabel('Skill Required'),
                 const SizedBox(height: 10),
-                _buildSkillDropdown(),
+                TutorialAnchor(
+                  id: 'postGig.skillRequired',
+                  child: _buildSkillDropdown(),
+                ),
                 const SizedBox(height: 20),
 
                 // ── Experience Level ──────────────────────────────
                 _SectionLabel('Experience Level'),
                 const SizedBox(height: 10),
-                _buildExperienceDropdown(),
+                TutorialAnchor(
+                  id: 'postGig.experienceLevel',
+                  child: _buildExperienceDropdown(),
+                ),
                 const SizedBox(height: 20),
 
                 // ── Amount ────────────────────────────────────────
                 _SectionLabel('Amount'),
                 const SizedBox(height: 10),
-                _buildTextField(
-                  controller: _budgetCtrl,
-                  hint: '0.00',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(
-                      RegExp(r'^\d+\.?\d{0,2}'),
+                TutorialAnchor(
+                  id: 'postGig.amount',
+                  child: _buildTextField(
+                    controller: _budgetCtrl,
+                    hint: '0.00',
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
                     ),
-                  ],
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Enter amount';
-                    final n = double.tryParse(v.trim());
-                    if (n == null || n <= 0) return 'Enter a valid amount';
-                    return null;
-                  },
-                  prefix: Text(
-                    '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
-                    style: const TextStyle(
-                      color: _kPurple,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'^\d+\.?\d{0,2}'),
+                      ),
+                    ],
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Enter amount';
+                      final n = double.tryParse(v.trim());
+                      if (n == null || n <= 0) return 'Enter a valid amount';
+                      return null;
+                    },
+                    prefix: Text(
+                      '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
+                      style: const TextStyle(
+                        color: _kPurple,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -768,45 +806,55 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                _buildScheduleRow(),
+                TutorialAnchor(
+                  id: 'postGig.schedule',
+                  child: _buildScheduleRow(),
+                ),
                 const SizedBox(height: 20),
 
                 // ── Location ──────────────────────────────────────
                 _SectionLabel('Location'),
                 const SizedBox(height: 10),
-                _buildLocationSection(),
+                TutorialAnchor(
+                  id: 'postGig.location',
+                  child: _buildLocationSection(),
+                ),
                 const SizedBox(height: 36),
 
                 // ── Post Button ───────────────────────────────────
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: ElevatedButton.icon(
-                    onPressed: _posting ? null : _submit,
-                    icon: _posting
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2.5,
-                            ),
-                          )
-                        : const Icon(Icons.send_rounded, size: 18),
-                    label: Text(
-                      _posting ? 'Sending Offer...' : 'Send Offered Gig',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                TutorialAnchor(
+                  id: 'postGig.submit',
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: ElevatedButton.icon(
+                      onPressed: _posting ? null : _submit,
+                      icon: _posting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : const Icon(Icons.send_rounded, size: 18),
+                      label: Text(
+                        _posting ? 'Sending Offer...' : 'Send Offered Gig',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _kPurple,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: _kPurple.withValues(alpha: 0.4),
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _kPurple,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor:
+                            _kPurple.withValues(alpha: 0.4),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
                       ),
                     ),
                   ),

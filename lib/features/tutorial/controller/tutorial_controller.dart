@@ -24,8 +24,18 @@ class TutorialController extends ChangeNotifier {
   bool get isWaitingForAnchor =>
       currentStep != null && currentAnchorKey == null;
 
+  // Whether this flow should be visible/launchable at all right now — used
+  // by screens to decide whether to render their "Tutorial" button. Regular
+  // flows are always available; devOnly flows need their Developer Mode
+  // toggle on.
+  Future<bool> isAvailable(TutorialFlow flow) async {
+    if (!flow.devOnly) return true;
+    return _service.isDevEnabled(flow.id);
+  }
+
   Future<void> startIfNeeded(TutorialFlow flow) async {
     if (_flow != null) return; // a flow (this or another) is already running
+    if (flow.devOnly && !await _service.isDevEnabled(flow.id)) return;
     if (await _service.hasCompleted(flow.id)) return;
     _flow = flow;
     _stepIndex = 0;
