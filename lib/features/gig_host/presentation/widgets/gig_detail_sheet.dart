@@ -27,6 +27,7 @@ import '../../../../core/widgets/gig_completion_celebration.dart';
 import '../../../gig_shared/active_gig_theme.dart';
 import '../../../gig_shared/active_gig_step.dart';
 import '../../../gig_shared/active_gig_widgets.dart';
+import '../../../tutorial/widgets/tutorial_anchor.dart';
 
 String _generatePaymentCode() {
   final r = Random();
@@ -804,6 +805,13 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     );
   }
 
+  // Only Quick Gig has a tutorial defined so far; other gig types render
+  // this same progress card untouched.
+  Widget _maybeTutorialAnchor(Widget child) {
+    if (widget.gigType != 'quick') return child;
+    return TutorialAnchor(id: 'quickGig.detail.progress', child: child);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1170,19 +1178,21 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 // ── Progress card: stepper + host-perspective instructions ──
                 // Hidden while searching — shown only after a worker accepts.
                 if (!isSearching) ...[
-                  ActiveGigProgressCard(
-                    stepIndex: hostStepIndex,
-                    title: hostCopy.title,
-                    body: hostCopy.body,
-                    arrivedPromptVisible: false,
-                    onConfirmArrival: () {},
-                    isCancelPending: false,
-                    showStartGig: false,
-                    onStartGig: () {},
-                    showGigComplete: isTaskComplete,
-                    onGigComplete: _confirmCompleted,
-                    accent: kHostAccent,
-                    stepLabels: kStepLabelsHost,
+                  _maybeTutorialAnchor(
+                    ActiveGigProgressCard(
+                      stepIndex: hostStepIndex,
+                      title: hostCopy.title,
+                      body: hostCopy.body,
+                      arrivedPromptVisible: false,
+                      onConfirmArrival: () {},
+                      isCancelPending: false,
+                      showStartGig: false,
+                      onStartGig: () {},
+                      showGigComplete: isTaskComplete,
+                      onGigComplete: _confirmCompleted,
+                      accent: kHostAccent,
+                      stepLabels: kStepLabelsHost,
+                    ),
                   ),
                   const SizedBox(height: 16),
                 ],

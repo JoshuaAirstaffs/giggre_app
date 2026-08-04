@@ -6,6 +6,7 @@ import 'package:giggre_app/features/gig_host/models/gig_template_model.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../gig_shared/active_gig_step.dart';
+import '../../../tutorial/widgets/tutorial_anchor.dart';
 import '../../services/quick_gig_matching_service.dart';
 import 'gig_detail_sheet.dart';
 import 'quick_gig_search_sheet.dart';
@@ -620,7 +621,7 @@ class _HostGigCardState extends State<HostGigCard> {
     final mutedColor = isDark ? kSub : _kMutedColor;
     final chevronColor = isDark ? kSub : _kChevronColor;
 
-    return GestureDetector(
+    final card = GestureDetector(
       onTap: _showDetail,
       onLongPress: widget.showActions ? _showActionsSheet : null,
       child: Container(
@@ -712,6 +713,15 @@ class _HostGigCardState extends State<HostGigCard> {
         ),
       ),
     );
+
+    // Anchored so the tutorial can point at "the gig you just posted" —
+    // only while it's actually in the scanning state that follows a Quick
+    // Gig post, to avoid ambiguity if the host has other gigs in the list.
+    if (gigType == 'quick' &&
+        (status == 'scanning' || status == 'in_progress')) {
+      return TutorialAnchor(id: 'quickGig.hostCard', child: card);
+    }
+    return card;
   }
 }
 

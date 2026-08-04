@@ -13,6 +13,9 @@ import 'features/auth/presentation/welcome_screen.dart';
 import 'core/widgets/main_navigation.dart';
 import 'core/widgets/app_update_checker.dart';
 import 'core/theme/theme_provider.dart';
+import 'features/tutorial/controller/tutorial_controller.dart';
+import 'features/tutorial/services/tutorial_service.dart';
+import 'features/tutorial/widgets/tutorial_overlay.dart';
 import 'services/delete_acc_service.dart';
 import 'firebase_options_dev.dart' as dev;
 import 'firebase_options_prod.dart' as prod;
@@ -75,6 +78,8 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => CurrentUserProvider()),
+        ChangeNotifierProvider(
+            create: (_) => TutorialController(TutorialService())),
       ],
       child: GiggreApp(firebaseError: firebaseError),
     ),
@@ -592,8 +597,9 @@ class GiggreApp extends StatelessWidget {
       theme: ThemeProvider.lightTheme,
       darkTheme: ThemeProvider.darkTheme,
       themeMode: themeProvider.mode,
-      builder: (context, child) =>
-          AppUpdateChecker(child: child ?? const SizedBox()),
+      builder: (context, child) => TutorialOverlayHost(
+        child: AppUpdateChecker(child: child ?? const SizedBox()),
+      ),
       navigatorObservers: [welcomeRouteObserver],
       home: firebaseError != null
           ? _FirebaseErrorScreen(firebaseError!)

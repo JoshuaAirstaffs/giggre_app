@@ -21,6 +21,9 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/map_style.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../tutorial/controller/tutorial_controller.dart';
+import '../../tutorial/flows/quick_gig_flow.dart';
+import '../../tutorial/widgets/tutorial_anchor.dart';
 import '../models/gig_template_model.dart';
 import '../models/quick_gig_model.dart';
 import '../services/quick_gig_matching_service.dart';
@@ -66,6 +69,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => context.read<TutorialController>().startIfNeeded(quickGigFlow),
+    );
     _fetchGpsLocation();
     // Recompute the "Total: ..." hint under the worker-slots stepper live.
     _budgetCtrl.addListener(() {
@@ -496,6 +502,14 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                     fontSize: 16)),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Tutorial',
+            icon: const Icon(Icons.school_outlined, color: kSub, size: 22),
+            onPressed: () =>
+                context.read<TutorialController>().restart(quickGigFlow),
+          ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -508,48 +522,58 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 // ── Title ────────────────────────────────────────
                 _SectionLabel('Title'),
                 const SizedBox(height: 10),
-                _buildTextField(
-                  controller: _titleCtrl,
-                  hint: 'e.g. Wash dishes after event',
-                  validator: (v) =>
-                      v == null || v.trim().isEmpty ? 'Title is required' : null,
+                TutorialAnchor(
+                  id: 'postGig.title',
+                  child: _buildTextField(
+                    controller: _titleCtrl,
+                    hint: 'e.g. Wash dishes after event',
+                    validator: (v) => v == null || v.trim().isEmpty
+                        ? 'Title is required'
+                        : null,
+                  ),
                 ),
                 const SizedBox(height: 20),
 
                 // ── Description ───────────────────────────────────
                 _SectionLabel('Description'),
                 const SizedBox(height: 10),
-                _buildTextField(
-                  controller: _descCtrl,
-                  hint: 'Add any details the worker should know...',
-                  maxLines: 3,
+                TutorialAnchor(
+                  id: 'postGig.description',
+                  child: _buildTextField(
+                    controller: _descCtrl,
+                    hint: 'Add any details the worker should know...',
+                    maxLines: 3,
+                  ),
                 ),
                 const SizedBox(height: 20),
 
                 // ── Amount ────────────────────────────────────────
                 _SectionLabel('Amount'),
                 const SizedBox(height: 10),
-                _buildTextField(
-                  controller: _budgetCtrl,
-                  hint: '0.00',
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(
-                        RegExp(r'^\d+\.?\d{0,2}')),
-                  ],
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Enter amount';
-                    final n = double.tryParse(v.trim());
-                    if (n == null || n <= 0) return 'Enter a valid amount';
-                    return null;
-                  },
-                  prefix: Text(
-                      '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
-                      style: const TextStyle(
-                          color: kAmber,
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold)),
+                TutorialAnchor(
+                  id: 'postGig.amount',
+                  child: _buildTextField(
+                    controller: _budgetCtrl,
+                    hint: '0.00',
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                          RegExp(r'^\d+\.?\d{0,2}')),
+                    ],
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Enter amount';
+                      final n = double.tryParse(v.trim());
+                      if (n == null || n <= 0) return 'Enter a valid amount';
+                      return null;
+                    },
+                    prefix: Text(
+                        '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
+                        style: const TextStyle(
+                            color: kAmber,
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold)),
+                  ),
                 ),
                 const SizedBox(height: 20),
 
@@ -562,7 +586,10 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                       color: kSub.withValues(alpha: 0.8), fontSize: 12),
                 ),
                 const SizedBox(height: 12),
-                _buildWorkerSlotsStepper(),
+                TutorialAnchor(
+                  id: 'postGig.workerSlots',
+                  child: _buildWorkerSlotsStepper(),
+                ),
                 const SizedBox(height: 20),
 
                 // ── Schedule ──────────────────────────────────────
@@ -576,41 +603,50 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                _buildScheduleRow(),
+                TutorialAnchor(
+                  id: 'postGig.schedule',
+                  child: _buildScheduleRow(),
+                ),
                 const SizedBox(height: 20),
 
                 // ── Location ──────────────────────────────────────
                 _SectionLabel('Location'),
                 const SizedBox(height: 10),
-                _buildLocationSection(),
+                TutorialAnchor(
+                  id: 'postGig.location',
+                  child: _buildLocationSection(),
+                ),
                 const SizedBox(height: 36),
 
                 // ── Dispatch Button ───────────────────────────────
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: ElevatedButton.icon(
-                    onPressed: _posting ? null : _submit,
-                    icon: _posting
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                                color: Colors.black, strokeWidth: 2.5),
-                          )
-                        : const Icon(Icons.send_rounded, size: 18),
-                    label: Text(
-                      _posting ? 'Posting...' : 'Post Quick Gig',
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kAmber,
-                      foregroundColor: Colors.black,
-                      disabledBackgroundColor: kAmber.withValues(alpha: 0.4),
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30)),
+                TutorialAnchor(
+                  id: 'postGig.submit',
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: ElevatedButton.icon(
+                      onPressed: _posting ? null : _submit,
+                      icon: _posting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  color: Colors.black, strokeWidth: 2.5),
+                            )
+                          : const Icon(Icons.send_rounded, size: 18),
+                      label: Text(
+                        _posting ? 'Posting...' : 'Post Quick Gig',
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kAmber,
+                        foregroundColor: Colors.black,
+                        disabledBackgroundColor: kAmber.withValues(alpha: 0.4),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30)),
+                      ),
                     ),
                   ),
                 ),

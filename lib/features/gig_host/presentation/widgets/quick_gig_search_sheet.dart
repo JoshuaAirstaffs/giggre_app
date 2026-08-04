@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../gig_shared/active_gig_theme.dart';
+import '../../../tutorial/widgets/tutorial_anchor.dart';
 import '../../services/quick_gig_matching_service.dart';
 import 'quick_gig_search_painter.dart';
 
@@ -390,27 +391,36 @@ class _QuickGigSearchSheetState extends State<QuickGigSearchSheet>
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          _buildHero(isDark),
-          const SizedBox(height: 20),
-          Text(
-            _statusText,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: _isPositiveStatus
-                  ? kActiveGigSuccessGreen
-                  : activeGigTextSecondary(isDark),
+          TutorialAnchor(
+            id: 'quickGig.searching',
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildHero(isDark),
+                const SizedBox(height: 20),
+                Text(
+                  _statusText,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: _isPositiveStatus
+                        ? kActiveGigSuccessGreen
+                        : activeGigTextSecondary(isDark),
+                  ),
+                ),
+                if (_phase == _SearchPhase.searching ||
+                    _phase == _SearchPhase.found) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Searching for $_timeText',
+                    style: TextStyle(
+                        fontSize: 12, color: activeGigTextMuted(isDark)),
+                  ),
+                ],
+              ],
             ),
           ),
-          if (_phase == _SearchPhase.searching ||
-              _phase == _SearchPhase.found) ...[
-            const SizedBox(height: 4),
-            Text(
-              'Searching for $_timeText',
-              style: TextStyle(fontSize: 12, color: activeGigTextMuted(isDark)),
-            ),
-          ],
           const SizedBox(height: 22),
           _buildButton(isDark),
         ],

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:giggre_app/core/theme/theme_provider.dart';
+import 'package:giggre_app/features/dev_tools/widgets/dev_mode_entry_point.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -85,9 +86,11 @@ class _PrivacyPolicyState extends State<PrivacyPolicy> {
           ),
         ),
       ),
-       body: SafeArea(
-        child: 
-        _isLoading 
+       body: Stack(
+        children: [
+        SafeArea(
+        child:
+        _isLoading
         ? Center(
           child: CircularProgressIndicator(
             strokeWidth: 2,
@@ -152,6 +155,13 @@ class _PrivacyPolicyState extends State<PrivacyPolicy> {
           ),
         ),
        ),
+       const Positioned(
+         right: 0,
+         bottom: 0,
+         child: DevModeEntryPoint(),
+       ),
+       ],
+      ),
     );
   }
 }
