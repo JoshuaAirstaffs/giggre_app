@@ -62,6 +62,16 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   void setLastLocation(double lat, double lng) {
     _lastLat = lat;
     _lastLng = lng;
+    // Login/restore fires the GPS fetch that feeds this without awaiting it
+    // (see initCurrencyCode below), so the gig map/host worker map screens
+    // typically finish their own initState — reading lastLat/lastLng once,
+    // synchronously — before this value ever lands. Without notifying,
+    // those screens would silently keep showing the Manila/placeholder
+    // default until their own separate GPS fetch resolves, defeating the
+    // whole point of caching a fix here. Listeners (see gig_map_section.dart
+    // /gig_host_screen.dart) pick this up once it arrives, even if their
+    // initState missed it.
+    notifyListeners();
   }
 
   // Called once per session after setCurrentUserInfo. Applies the stored

@@ -252,9 +252,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         final provider = GoogleAuthProvider();
         userCred = await FirebaseAuth.instance.signInWithPopup(provider);
       } else {
-        final googleUser = await GoogleSignIn(
-          serverClientId: googleServerClientId,
-        ).signIn();
+        final googleSignIn = GoogleSignIn(serverClientId: googleServerClientId);
+        // Force the account picker to reappear every attempt — signIn() alone
+        // silently re-returns whatever account was picked last time (e.g. an
+        // unregistered account chosen by mistake), even across app restarts.
+        await googleSignIn.signOut();
+        final googleUser = await googleSignIn.signIn();
         if (googleUser == null) {
           setState(() => isGoogleLoading = false);
           return;
@@ -354,9 +357,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       _signupError = '';
     });
     try {
-      final googleUser = await GoogleSignIn(
-        serverClientId: googleServerClientId,
-      ).signIn();
+      final googleSignIn = GoogleSignIn(serverClientId: googleServerClientId);
+      // Force the account picker to reappear every attempt — signIn() alone
+      // silently re-returns whatever account was picked last time (e.g. an
+      // unregistered account chosen by mistake), even across app restarts.
+      await googleSignIn.signOut();
+      final googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
         setState(() => _signupIsGoogleLoading = false);
         return;

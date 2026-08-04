@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../core/theme/profile_tab_theme.dart';
@@ -19,11 +17,6 @@ const _kBubblePurple = Color(0xFF8B6FD8);
 const _kBubbleGoldBg = Color(0xFFFCEACB);
 const _kBubbleBlueBg = Color(0xFFE1EBF7);
 const _kBubblePurpleBg = Color(0xFFEDE7FB);
-
-// Tooltip surface — fixed, mode-agnostic neutrals. Never pull from the
-// surrounding Worker/Host theme, unlike the bubble tints above.
-const _kTooltipBg = Color(0xFF1A1A1A);
-const _kTooltipText = Colors.white;
 
 // Bubble circle diameter (54) plus the gap + label height below it (9 + 22),
 // i.e. the vertical distance from the circle's center down to the bottom of
@@ -179,8 +172,6 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                 iconBg: _kBubbleGoldBg,
                 icon: Icons.bolt_rounded,
                 label: 'Quick Gig',
-                infoText:
-                    "We'll instantly match you with the nearest, most reliable worker available.",
                 onTap: widget.onQuickGig,
               ),
               _bubble(
@@ -191,8 +182,6 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                 iconBg: _kBubbleBlueBg,
                 icon: Icons.work_rounded,
                 label: 'Open Gig',
-                infoText:
-                    'Posted publicly. Qualified workers come to you, and you choose who to hire.',
                 onTap: widget.onOpenGig,
               ),
               _bubble(
@@ -203,15 +192,61 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                 iconBg: _kBubblePurpleBg,
                 icon: Icons.send_rounded,
                 label: 'Offered Gig',
-                infoText:
-                    'Sent directly to one trusted worker you already have in mind.',
                 onTap: widget.onOfferedGig,
               ),
+              // Single info button for all three gig types — sits level with
+              // the Open Gig bubble (the topmost one in the arc) but pinned
+              // near the screen's right edge, so it reads as the two ends of
+              // the same horizontal band rather than crowding any one bubble.
+              _infoButton(anchorFromBottom: anchorFromBottom, context: context),
             ],
           ),
         );
       },
     );
+  }
+
+  Widget _infoButton({
+    required double anchorFromBottom,
+    required BuildContext context,
+  }) {
+    final t = _openCurve.value;
+    final screenWidth = MediaQuery.of(context).size.width;
+    const iconDiameter = 34.0;
+    const rightMargin = 16.0;
+    final restingDx = screenWidth / 2 - rightMargin - iconDiameter / 2;
+    final dx = restingDx * t;
+    // Matches Open Gig's target.dy (-100) so the icon's center lands level
+    // with its icon circle's center, then shifts by half this widget's own
+    // height — the same "center to bottom-of-widget" conversion
+    // _kBubbleCenterToColumnBottom does for the taller bubble+label column.
+    final dy = -100 * t + iconDiameter / 2;
+    final opacity = t.clamp(0.0, 1.0);
+    final scale = t < 0 ? 0.0 : t;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Transform.translate(
+        offset: Offset(dx, -anchorFromBottom + dy),
+        child: IgnorePointer(
+          ignoring: opacity < 0.6,
+          child: Opacity(
+            opacity: opacity,
+            child: Transform.scale(
+              scale: scale,
+              child: GestureDetector(
+                onTap: () => _showGigTypesDialog(context),
+                child: _AllGigTypesInfoButton(diameter: iconDiameter),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showGigTypesDialog(BuildContext context) {
+    showDialog<void>(context: context, builder: (_) => const _GigTypesDialog());
   }
 
   Widget _bubble({
@@ -222,7 +257,6 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
     required Color iconBg,
     required IconData icon,
     required String label,
-    required String infoText,
     required VoidCallback onTap,
   }) {
     final t = curve.value;
@@ -252,7 +286,6 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                   iconBg: iconBg,
                   icon: icon,
                   label: label,
-                  infoText: infoText,
                 ),
               ),
             ),
@@ -268,14 +301,12 @@ class _BubbleContent extends StatelessWidget {
   final Color iconBg;
   final IconData icon;
   final String label;
-  final String infoText;
 
   const _BubbleContent({
     required this.tint,
     required this.iconBg,
     required this.icon,
     required this.label,
-    required this.infoText,
   });
 
   @override
@@ -286,49 +317,39 @@ class _BubbleContent extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: 54,
-              height: 54,
+        Container(
+          width: 54,
+          height: 54,
+          decoration: BoxDecoration(
+            gradient: isDark
+                ? null
+                : const LinearGradient(
+                    colors: [Colors.white, Color(0xFFFAFAFC)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+            color: isDark ? tokens.cardSurface : null,
+            shape: BoxShape.circle,
+            border: Border.all(color: tokens.cardBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.08),
+                blurRadius: 4,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Container(
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
-                gradient: isDark
-                    ? null
-                    : const LinearGradient(
-                        colors: [Colors.white, Color(0xFFFAFAFC)],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                      ),
-                color: isDark ? tokens.cardSurface : null,
-                shape: BoxShape.circle,
-                border: Border.all(color: tokens.cardBorder),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.08),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
+                color: iconBg,
+                borderRadius: BorderRadius.circular(14),
               ),
-              child: Center(
-                child: Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: iconBg,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Icon(icon, color: tint, size: 21),
-                ),
-              ),
+              child: Icon(icon, color: tint, size: 21),
             ),
-            Positioned(
-              top: -2,
-              right: -2,
-              child: _InfoBadge(text: infoText, tint: tint, tokens: tokens),
-            ),
-          ],
+          ),
         ),
         const SizedBox(height: 9),
         Container(
@@ -373,141 +394,170 @@ class _BubbleContent extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Info badge — sits on the corner of the option's icon circle rather than
-//  next to its label, so it never touches the label pill's layout. Tap shows
-//  a small tooltip near the badge, auto-dismissing after ~2.5s or on an
-//  outside tap. Uses its own tap recognizer (not the bubble's) so it never
-//  triggers the parent option's onTap — see nested-GestureDetector arena
-//  resolution: whichever recognizer accepts the "up" event first (the
-//  innermost, here) wins and blocks the ancestor's from also firing.
+//  Single info button covering all three gig types — replaces the old
+//  per-bubble info badges. Tap opens a dialog listing every definition at
+//  once instead of one small tooltip per option.
 // ─────────────────────────────────────────────────────────────────────────────
-class _InfoBadge extends StatelessWidget {
-  final String text;
-  // The bubble's own accent (gold/blue/purple) — ties the badge to its
-  // option's existing color language. Independent of the Worker/Host
-  // screen-wide theme, which this badge never reads from.
-  final Color tint;
-  // Light/dark surface tokens, unlike `tint` — the badge's own base color
-  // still needs to flip with system theme so it doesn't float as a
-  // stray light-mode dot on a dark bubble.
-  final ProfileTabTokens tokens;
+class _AllGigTypesInfoButton extends StatelessWidget {
+  final double diameter;
 
-  const _InfoBadge({
-    required this.text,
-    required this.tint,
-    required this.tokens,
-  });
+  const _AllGigTypesInfoButton({required this.diameter});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapUp: (details) => _InfoTooltip.show(
-        context,
-        anchor: details.globalPosition,
-        text: text,
+    final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      width: diameter,
+      height: diameter,
+      decoration: BoxDecoration(
+        color: isDark ? tokens.cardSurface : Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(color: tokens.cardBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.08),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
-      child: Container(
-        width: 20,
-        height: 20,
-        decoration: BoxDecoration(
-          color: tokens.cardSurface,
-          shape: BoxShape.circle,
-          border: Border.all(color: tint.withValues(alpha: 0.35)),
-          boxShadow: [
-            BoxShadow(
-              color: tint.withValues(alpha: 0.20),
-              blurRadius: 4,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Icon(Icons.info_outline, size: 12, color: tint),
+      child: Icon(
+        Icons.info_outline_rounded,
+        size: diameter * 0.5,
+        color: tokens.textMuted,
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Tap-to-show tooltip via a raw OverlayEntry — Flutter's built-in Tooltip is
-//  hover/long-press only, so a custom overlay is the lightest option that
-//  doesn't pull in a new dependency for this one popup.
+//  Gig types dialog — explains Quick/Open/Offered gigs in one place, opened
+//  from the single info button above.
 // ─────────────────────────────────────────────────────────────────────────────
-class _InfoTooltip {
-  static OverlayEntry? _entry;
-  static Timer? _timer;
+class _GigTypesDialog extends StatelessWidget {
+  const _GigTypesDialog();
 
-  static void dismiss() {
-    _timer?.cancel();
-    _timer = null;
-    _entry?.remove();
-    _entry = null;
-  }
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
 
-  static void show(
-    BuildContext context, {
-    required Offset anchor,
-    required String text,
-  }) {
-    dismiss(); // only one tooltip at a time — close any existing one first.
-
-    final screenSize = MediaQuery.of(context).size;
-    const maxWidth = 220.0;
-    const gap = 10.0;
-
-    // Flip below the icon when there isn't enough room above it to avoid
-    // clipping off the top of the screen (the "Open Gig" bubble, centered
-    // highest in the arc, is the one most likely to need this).
-    final flipBelow = anchor.dy < 160;
-    final right = (screenSize.width - anchor.dx).clamp(
-      8.0,
-      screenSize.width - maxWidth - 8.0,
-    );
-
-    final overlay = Overlay.of(context);
-    _entry = OverlayEntry(
-      builder: (_) => Stack(
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: dismiss,
+    return Dialog(
+      backgroundColor: tokens.cardSurface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 22, 20, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Gig Types',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: tokens.textPrimary,
+              ),
             ),
-          ),
-          Positioned(
-            right: right,
-            top: flipBelow ? anchor.dy + gap : null,
-            bottom: flipBelow ? null : screenSize.height - anchor.dy + gap,
-            child: Material(
-              color: Colors.transparent,
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: maxWidth),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: _kTooltipBg.withValues(alpha: 0.92),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  text,
-                  // No explicit fontFamily — inherits the app's Inter default
-                  // from ThemeData (see theme_provider.dart), same as every
-                  // other Text in the app.
-                  style: const TextStyle(
-                    color: _kTooltipText,
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
+            const SizedBox(height: 16),
+            _GigTypeRow(
+              tint: _kBubbleGold,
+              iconBg: _kBubbleGoldBg,
+              icon: Icons.bolt_rounded,
+              label: 'Quick Gig',
+              description:
+                  "We'll instantly match you with the nearest, most reliable worker available.",
+              tokens: tokens,
+            ),
+            const SizedBox(height: 14),
+            _GigTypeRow(
+              tint: _kBubbleBlue,
+              iconBg: _kBubbleBlueBg,
+              icon: Icons.work_rounded,
+              label: 'Open Gig',
+              description:
+                  'Posted publicly. Qualified workers come to you, and you choose who to hire.',
+              tokens: tokens,
+            ),
+            const SizedBox(height: 14),
+            _GigTypeRow(
+              tint: _kBubblePurple,
+              iconBg: _kBubblePurpleBg,
+              icon: Icons.send_rounded,
+              label: 'Offered Gig',
+              description:
+                  'Sent directly to one trusted worker you already have in mind.',
+              tokens: tokens,
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Got it',
+                  style: TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
-    overlay.insert(_entry!);
-    _timer = Timer(const Duration(milliseconds: 2500), dismiss);
+  }
+}
+
+class _GigTypeRow extends StatelessWidget {
+  final Color tint;
+  final Color iconBg;
+  final IconData icon;
+  final String label;
+  final String description;
+  final ProfileTabTokens tokens;
+
+  const _GigTypeRow({
+    required this.tint,
+    required this.iconBg,
+    required this.icon,
+    required this.label,
+    required this.description,
+    required this.tokens,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(12)),
+          child: Icon(icon, color: tint, size: 18),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: tokens.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                description,
+                style: TextStyle(fontSize: 12, color: tokens.textMuted, height: 1.35),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }

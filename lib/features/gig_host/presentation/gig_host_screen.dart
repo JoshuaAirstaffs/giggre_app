@@ -21,7 +21,6 @@ import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
 import '../models/gig_template_model.dart';
 import '../../../core/utils/currency_formatter.dart';
-import 'widgets/admin_gig_config_sheet.dart';
 import 'widgets/notifications_sheet.dart';
 import 'widgets/gig_detail_sheet.dart';
 import 'widgets/host_gig_card.dart';
@@ -315,65 +314,21 @@ class _HostHeader extends StatelessWidget {
                               },
                             ),
                             const SizedBox(width: 4),
-                            // More menu (templates + gig config)
-                            PopupMenuButton<String>(
-                              tooltip: 'More',
-                              icon: Container(
-                                width: 38,
-                                height: 38,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.18),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.more_vert_rounded,
-                                  color: Colors.white,
-                                  size: 19,
-                                ),
+                            IconButton(
+                              tooltip: 'Save Template',
+                              icon: const Icon(
+                                Icons.bookmark_add_outlined,
+                                size: 19,
                               ),
-                              color: Theme.of(context).cardColor,
-                              onSelected: (val) {
-                                if (val == 'templates') onTemplates();
-                                if (val == 'config') {
-                                  AdminGigConfigSheet.show(context);
-                                }
-                              },
-                              itemBuilder: (_) => const [
-                                PopupMenuItem(
-                                  value: 'templates',
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.bookmark_add_outlined,
-                                        size: 16,
-                                        color: kSub,
-                                      ),
-                                      SizedBox(width: 10),
-                                      Text(
-                                        'Saved Templates',
-                                        style: TextStyle(fontSize: 13),
-                                      ),
-                                    ],
-                                  ),
+                              onPressed: onTemplates,
+                              style: IconButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.18,
                                 ),
-                                PopupMenuItem(
-                                  value: 'config',
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.tune_rounded,
-                                        size: 16,
-                                        color: kSub,
-                                      ),
-                                      SizedBox(width: 10),
-                                      Text(
-                                        'Gig Config',
-                                        style: TextStyle(fontSize: 13),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                                shape: const CircleBorder(),
+                                fixedSize: const Size(38, 38),
+                              ),
                             ),
                             if (onSwitchToWorker != null) ...[
                               const SizedBox(width: 4),
@@ -1297,16 +1252,46 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
           }).toList();
   }
 
+  late final CurrentUserProvider _userProvider;
+
   @override
   void initState() {
     super.initState();
-    final providerLoc = context.read<CurrentUserProvider>();
-    _myLocation = (providerLoc.lastLat != null && providerLoc.lastLng != null)
-        ? LatLng(providerLoc.lastLat!, providerLoc.lastLng!)
+    _userProvider = context.read<CurrentUserProvider>();
+    _myLocation = (_userProvider.lastLat != null && _userProvider.lastLng != null)
+        ? LatLng(_userProvider.lastLat!, _userProvider.lastLng!)
         : _lastKnownHostLocation;
+    // Login/restore kicks off the GPS fetch that feeds the provider's cached
+    // location WITHOUT awaiting it, so this screen routinely finishes
+    // mounting (the read above) before that fetch lands — the provider only
+    // has a value already on a second+ visit within the same app process.
+    // Listening picks up the first-visit case too, once it arrives.
+    _userProvider.addListener(_onProviderLocationChanged);
     _initMap();
     _startWorkersSub();
     _loadBlueCircleIcon();
+  }
+
+  void _onProviderLocationChanged() {
+    if (!mounted || _myLocation != null) return;
+    final lat = _userProvider.lastLat;
+    final lng = _userProvider.lastLng;
+    if (lat == null || lng == null) return;
+    final loc = LatLng(lat, lng);
+    setState(() {
+      _myLocation = loc;
+      _recomputeVisibleWorkers();
+    });
+    _lastKnownHostLocation = loc;
+    _fullScreenTick.value++;
+    if (_useGoogleMaps) {
+      _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(loc, 14.0));
+      _fullScreenGoogleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(loc, 14.0),
+      );
+    } else if (_osmMapReady) {
+      _osmController.move(ll.LatLng(loc.latitude, loc.longitude), 14.0);
+    }
   }
 
   // Draws a fixed-size blue circle with a "W" letter (blue fill, white
@@ -1454,6 +1439,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
 
   @override
   void dispose() {
+    _userProvider.removeListener(_onProviderLocationChanged);
     _workerSub?.cancel();
     _googleMapController?.dispose();
     _fullScreenGoogleMapController?.dispose();

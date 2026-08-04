@@ -664,6 +664,15 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
 
   @override
   void dispose() {
+    // Leaving this screen without finishing means the picked Google account
+    // was never actually signed into Firebase (see the deferred sign-in in
+    // signInWithGoogle/_signupSignInWithGoogle) — but GoogleSignIn's own
+    // plugin cache still remembers it as "selected", so the next attempt
+    // would silently reuse the same account instead of showing the picker
+    // again. Clear it here so backing out always gives a clean retry.
+    if (widget.pendingCredential != null) {
+      GoogleSignIn().signOut();
+    }
     _nameController.dispose();
     _phoneController.dispose();
     _referralCodeController.dispose();
@@ -909,9 +918,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       error = '';
     });
     try {
-      final googleUser = await GoogleSignIn(
-        serverClientId: googleServerClientId,
-      ).signIn();
+      final googleSignIn = GoogleSignIn(serverClientId: googleServerClientId);
+      // Force the account picker to reappear every attempt — signIn() alone
+      // silently re-returns whatever account was picked last time (e.g. an
+      // unregistered account chosen by mistake), even across app restarts.
+      await googleSignIn.signOut();
+      final googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
         setState(() => isGoogleLoading = false);
         return;

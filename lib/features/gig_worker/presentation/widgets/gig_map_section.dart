@@ -347,14 +347,22 @@ class _GigMapSectionState extends State<GigMapSection> {
         BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
   }
 
+  late final CurrentUserProvider _userProvider;
+
   @override
   void initState() {
     super.initState();
     _mapInteractive = widget.fullScreen;
-    final providerLoc = context.read<CurrentUserProvider>();
-    _myLocation = (providerLoc.lastLat != null && providerLoc.lastLng != null)
-        ? LatLng(providerLoc.lastLat!, providerLoc.lastLng!)
+    _userProvider = context.read<CurrentUserProvider>();
+    _myLocation = (_userProvider.lastLat != null && _userProvider.lastLng != null)
+        ? LatLng(_userProvider.lastLat!, _userProvider.lastLng!)
         : _lastKnownWorkerLocation;
+    // Login/restore kicks off the GPS fetch that feeds the provider's cached
+    // location WITHOUT awaiting it, so this screen routinely finishes
+    // mounting (the read above) before that fetch lands — the provider only
+    // has a value already on a second+ visit within the same app process.
+    // Listening picks up the first-visit case too, once it arrives.
+    _userProvider.addListener(_onProviderLocationChanged);
     _loadBaseIcons();
     _fetchAllSkills();
     if (!widget.fullScreen) _loadSavedViewMode();
@@ -362,6 +370,22 @@ class _GigMapSectionState extends State<GigMapSection> {
     _startOpenSub(db);
     _startOfferedSub(db);
     _initMap();
+  }
+
+  void _onProviderLocationChanged() {
+    if (!mounted || _myLocation != null) return;
+    final lat = _userProvider.lastLat;
+    final lng = _userProvider.lastLng;
+    if (lat == null || lng == null) return;
+    final loc = LatLng(lat, lng);
+    setState(() => _myLocation = loc);
+    _lastKnownWorkerLocation = loc;
+    _resolveMyCountry(loc);
+    if (_useGoogleMaps) {
+      _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(loc, 14.0));
+    } else if (_osmMapReady) {
+      _osmController.move(ll.LatLng(loc.latitude, loc.longitude), 14.0);
+    }
   }
 
   Future<void> _initMap() async {
@@ -1007,6 +1031,7 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   @override
   void dispose() {
+    _userProvider.removeListener(_onProviderLocationChanged);
     _googleMapController?.dispose();
     _osmController.dispose();
     _openSub.cancel();
