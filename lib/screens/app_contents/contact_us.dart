@@ -964,7 +964,7 @@ class _HelpContainer extends StatelessWidget {
                 ),
                 SizedBox(height: 4),
                 Text(
-                  'Send us a message and we\'ll respond within 24 - 48 hours.',
+                  'Send us a message and we\'ll respond within 24–48 hours.',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 10,

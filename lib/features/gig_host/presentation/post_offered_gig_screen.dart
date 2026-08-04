@@ -391,7 +391,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       );
       if (scheduledCheck.isBefore(DateTime.now())) {
         _showSnack(
-          'Schedule invalid — the date and time you picked have already passed. Please choose a time in the future.',
+          'That time has already passed. Please choose a time in the future.',
           isError: true,
         );
         return;
@@ -538,13 +538,13 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
             ),
             const SizedBox(height: 16),
             const Text(
-              'Location Outside Your Country',
+              'Outside Your Country',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              'You can only post gigs within your own country. Please pick a location closer to you.',
+              'You can only post gigs within your own country. Choose a location closer to you.',
               style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
               textAlign: TextAlign.center,
             ),

@@ -474,12 +474,12 @@ class _GigProgressCard extends StatelessWidget {
   ];
 
   static const _stepLabels = [
-    'On the way',
-    'Arrived',
-    'Working',
-    'Done',
-    'Payment',
-    'Completed',
+    "Worker's on the Way",
+    'Worker Arrived',
+    'On the Job',
+    'All Done',
+    'Ready for Payment',
+    'Wrapped Up',
   ];
 
   static const _stepIcons = [

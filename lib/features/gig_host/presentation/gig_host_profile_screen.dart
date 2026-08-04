@@ -462,7 +462,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                     const SizedBox(height: 12),
                     _ModalField(
                       controller: companyCtrl,
-                      label: 'Company / Business',
+                      label: 'Business Name (optional)',
                       icon: Icons.business_outlined,
                       isDark: isDark,
                       cardColor: cardColor,
@@ -496,7 +496,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                         maxLength: 200,
                         style: TextStyle(color: onSurface, fontSize: 14),
                         decoration: InputDecoration(
-                          labelText: 'About / Bio',
+                          labelText: 'Bio',
                           labelStyle: const TextStyle(
                             color: kSub,
                             fontSize: 13,

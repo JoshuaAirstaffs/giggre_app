@@ -463,7 +463,7 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
                               fontWeight: FontWeight.w600)),
                       const SizedBox(height: 4),
                       const Text(
-                          'Gig movements will appear here',
+                          'Gig updates will appear here',
                           style: TextStyle(color: kSub, fontSize: 12)),
                     ],
                   ),

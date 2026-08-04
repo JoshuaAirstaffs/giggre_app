@@ -846,7 +846,7 @@ class _GigMapSectionState extends State<GigMapSection> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Gig is no longer available (status: $currentStatus).',
+                'This gig is no longer available.',
               ),
               backgroundColor: Colors.orange,
             ),
@@ -940,7 +940,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to apply: $e'),
+            content: Text("Couldn't submit your application. Please try again."),
             backgroundColor: Colors.redAccent,
           ),
         );

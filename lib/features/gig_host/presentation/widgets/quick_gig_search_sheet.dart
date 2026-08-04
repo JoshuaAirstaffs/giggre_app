@@ -17,7 +17,7 @@ const _kSlotOffsets = [Offset(0, -58), Offset(50, 29), Offset(-50, 29)];
 const _kMessages = [
   'Searching nearby workers…',
   'Checking availability…',
-  'Matching job requirements…',
+  'Matching gig requirements…',
 ];
 
 /// Animated "finding a worker" bottom sheet for a quick gig, driven live by

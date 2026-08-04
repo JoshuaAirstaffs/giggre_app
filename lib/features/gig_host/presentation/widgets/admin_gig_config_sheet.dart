@@ -135,7 +135,7 @@ class _AdminGigConfigSheetState extends State<AdminGigConfigSheet> {
                             _SectionCard(
                               icon: Icons.settings_suggest_rounded,
                               iconColor: kBlue,
-                              title: 'Matching Engine',
+                              title: 'Gig Matching',
                               children: _buildMatchingRows(),
                             ),
                           ],

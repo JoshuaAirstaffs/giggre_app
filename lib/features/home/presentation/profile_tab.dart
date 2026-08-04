@@ -553,7 +553,7 @@ class _ProfileTabState extends State<ProfileTab> {
                       const SizedBox(height: 12),
                       _EditField(
                         ctrl: companyCtrl,
-                        label: 'Company / Business',
+                        label: 'Business Name (optional)',
                         icon: Icons.business_outlined,
                         isDark: isDark,
                         cardColor: cardColor,
@@ -588,7 +588,7 @@ class _ProfileTabState extends State<ProfileTab> {
                           maxLength: 200,
                           style: TextStyle(color: onSurface, fontSize: 14),
                           decoration: InputDecoration(
-                            labelText: 'About / Bio',
+                            labelText: 'Bio',
                             labelStyle: const TextStyle(
                               color: kSub,
                               fontSize: 13,
@@ -740,8 +740,8 @@ class _ProfileTabState extends State<ProfileTab> {
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
-              'Log out',
-              style: TextStyle(color: _kRed, fontWeight: FontWeight.w600),
+              'Log Out',
+              style: TextStyle(color: Colors.redAccent),
             ),
           ),
         ],
@@ -1066,7 +1066,7 @@ class _ProfileTabState extends State<ProfileTab> {
                   _ActionRow(
                     icon: Icons.logout_rounded,
                     iconColor: _kRed,
-                    label: 'Log out',
+                    label: 'Log Out',
                     labelColor: _kRed,
                     labelWeight: FontWeight.w600,
                     tokens: tokens,

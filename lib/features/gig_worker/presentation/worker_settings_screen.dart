@@ -184,7 +184,7 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
                 const SizedBox(height: 24),
 
                 // ── Gig Rules ─────────────────────────────────────
-                const SectionLabel('GIG RULES (ADMIN CONFIG)'),
+                const SectionLabel('HOW GIGS ARE MATCHED'),
                 const SizedBox(height: 8),
                 _ConfigSection(
                   suspensionConfig: _suspensionConfig,
@@ -426,7 +426,7 @@ class _ConfigSection extends StatelessWidget {
         _ConfigCard(
           icon: Icons.settings_suggest_rounded,
           iconColor: kBlue,
-          title: 'Matching Engine',
+          title: 'Gig Matching',
           rows: _buildMatchingRows(context),
         ),
       ],

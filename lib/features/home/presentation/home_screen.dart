@@ -521,7 +521,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     await FirebaseAuth.instance.signOut();
                   },
                   child: const Text(
-                    'Sign Out',
+                    'Log Out',
                     style: TextStyle(color: Colors.grey, fontSize: 14),
                   ),
                 ),
@@ -591,7 +591,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 14),
               Text(
-                'Log out?',
+                'Log Out?',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w600,
@@ -639,7 +639,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         onPressed: () => Navigator.pop(context, true),
                         child: const Text(
-                          'Log out',
+                          'Log Out',
                           style: TextStyle(
                             color: Colors.redAccent,
                             fontSize: 15,
@@ -1176,7 +1176,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       _FooterLink('About', AboutGiggre()),
                       _FooterLink('Terms', TermsAndConditions()),
                       _FooterLink('Privacy', PrivacyPolicy()),
-                      _FooterLink('Help/FAQ', HelpFaq()),
+                      _FooterLink('Help', HelpFaq()),
                       _FooterLink('Contact Us', ContactUs()),
                     ],
                   ),
@@ -1426,7 +1426,7 @@ class _GiggreMenu extends StatelessWidget {
       tintAlphaLight: 0.12,
     ),
     _GiggreMenuItem(
-      title: 'Help/FAQ',
+      title: 'Help & FAQ',
       icon: Icons.help_outline_rounded,
       screen: HelpFaq(),
       color: _kMenuGoldDeep,
@@ -1538,7 +1538,7 @@ class _GiggreMenu extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'The fastest way to find jobs or hire workers near you',
+                  'The fastest way to find gigs or hire workers near you',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: subtleText, fontSize: 10.5),
                 ),

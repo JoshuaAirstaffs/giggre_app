@@ -918,7 +918,7 @@ class _MessageBubble extends StatelessWidget {
                               ),
                               const SizedBox(width: 4),
                               Text(
-                                'Auto Reply',
+                                'Auto-Reply',
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: msg.isMe

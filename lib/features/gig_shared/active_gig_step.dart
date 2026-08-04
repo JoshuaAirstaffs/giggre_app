@@ -25,7 +25,8 @@ GigStep gigStepFromStatus(String s) {
   }
 }
 
-const kStepLabels = ['On the way', 'Arrived', 'Working', 'Done', 'Payment', 'Complete'];
+const kStepLabels = ['On My Way', "I'm Here", 'On the Job', 'All Done', 'Getting Paid', 'Wrapped Up'];
+const kStepLabelsHost = ["Worker's on the Way", 'Worker Arrived', 'On the Job', 'All Done', 'Ready for Payment', 'Wrapped Up'];
 
 // Title/body copy for the progress card's instruction block.
 class GigStepCopy {

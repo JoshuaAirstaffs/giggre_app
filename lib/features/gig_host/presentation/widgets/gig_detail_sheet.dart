@@ -739,7 +739,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         Row(
           children: [
             Text(
-              'Applicants',
+              'Interested Workers',
               style: TextStyle(
                 color: onSurface,
                 fontSize: 14,
@@ -776,7 +776,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               border: Border.all(color: activeGigCardBorder(isDark)),
             ),
             child: Text(
-              'No applicants yet',
+              'No interested workers yet',
               style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 13),
             ),
           )
@@ -1182,6 +1182,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     showGigComplete: isTaskComplete,
                     onGigComplete: _confirmCompleted,
                     accent: kHostAccent,
+                    stepLabels: kStepLabelsHost,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -2215,13 +2216,13 @@ String _gigTypeLabel(String gigType) {
 String _hostSheetStatusLabel(String status) {
   switch (status) {
     case 'scanning':
-      return 'Scanning';
+      return 'Looking for a Worker';
     case 'in_progress':
-      return 'Searching';
+      return 'Offer Waiting';
     case 'open':
       return 'Open';
     case 'offered':
-      return 'Offered';
+      return 'Offer Waiting';
     case 'no_worker':
       return 'No worker';
     case 'cancelled':
@@ -2351,17 +2352,17 @@ String _fmtScheduledShort(Timestamp ts) {
 String _hostStatusChipLabel(GigStep step, String workerName) {
   switch (step) {
     case GigStep.navigating:
-      return '$workerName on the way';
+      return "$workerName's on the way";
     case GigStep.arrived:
       return '$workerName arrived';
     case GigStep.working:
-      return 'Working';
+      return 'On the job';
     case GigStep.taskComplete:
-      return 'Work done';
+      return 'All done';
     case GigStep.payment:
-      return 'Payment in progress';
+      return 'Ready for payment';
     case GigStep.completed:
-      return 'Completed';
+      return 'Wrapped up';
   }
 }
 

@@ -161,7 +161,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
     const perks = [
       (Icons.verified, Colors.purple, 'Verified Badge', 'A badge visible to all workers on your profile and gig listings'),
       (Icons.trending_up, Colors.green, 'Higher Visibility', 'Verified hosts appear higher in worker search results'),
-      (Icons.people_alt_outlined, Colors.blue, 'More Applicants', 'Workers are more likely to apply to gigs from verified hosts'),
+      (Icons.people_alt_outlined, Colors.blue, 'More Interested Workers', 'Workers are more likely to apply to gigs from verified hosts'),
       (Icons.security_outlined, Colors.orange, 'Trust & Safety', 'Show workers that your business is legitimate and trustworthy'),
     ];
 

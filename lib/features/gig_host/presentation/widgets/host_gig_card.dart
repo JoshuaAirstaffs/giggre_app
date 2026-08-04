@@ -50,24 +50,24 @@ _StatusMeta _statusMeta(String status) {
     case 'open':
       return const _StatusMeta('Open', _kOpenColor);
     case 'offered':
-      return const _StatusMeta('Offered', _kOfferedColor);
+      return const _StatusMeta('Offer Waiting', _kOfferedColor);
     case 'scanning':
     case 'in_progress':
-      return const _StatusMeta('Searching', kGold);
+      return const _StatusMeta('Looking for a Worker', kGold);
     case 'no_worker':
       return const _StatusMeta('No worker found', _kCancelColor);
     case 'navigating':
     case 'arrived':
     case 'working':
     case 'assigned':
-      return const _StatusMeta('In progress', _kProgressColor);
+      return const _StatusMeta('Underway', _kProgressColor);
     case 'task_complete':
     case 'payment':
-      return const _StatusMeta('Wrapping up', _kWrapUpColor);
+      return const _StatusMeta('All Done', _kWrapUpColor);
     case 'cancellation_requested':
       return const _StatusMeta('Cancellation requested', _kCancelColor);
     case 'completed':
-      return const _StatusMeta('Completed', _kMutedColor);
+      return const _StatusMeta('Wrapped Up', _kMutedColor);
     case 'cancelled':
       return const _StatusMeta('Cancelled', _kMutedColor);
     default:
@@ -122,9 +122,9 @@ String? _sublineFor({
     final applicants = data['applicants'] as List<dynamic>? ?? const [];
     if (applicants.isNotEmpty) {
       final n = applicants.length;
-      return '$n applicant${n == 1 ? '' : 's'} waiting for your review';
+      return '$n interested worker${n == 1 ? '' : 's'} waiting for your review';
     }
-    return 'No applicants yet';
+    return 'No interested workers yet';
   }
 
   if (_kActiveStatuses.contains(status)) {
@@ -134,17 +134,17 @@ String? _sublineFor({
         'Worker';
     switch (gigStepFromStatus(status)) {
       case GigStep.navigating:
-        return '$workerName is on the way';
+        return "$workerName's on the way";
       case GigStep.arrived:
         return '$workerName has arrived';
       case GigStep.working:
-        return '$workerName is working';
+        return "$workerName's on the job";
       case GigStep.taskComplete:
-        return '$workerName is finished';
+        return "$workerName's all done";
       case GigStep.payment:
-        return '$workerName is in payment';
+        return "$workerName's getting paid";
       case GigStep.completed:
-        return '$workerName is finished';
+        return "$workerName's all done";
     }
   }
 
@@ -561,7 +561,7 @@ class _HostGigCardState extends State<HostGigCard> {
               ),
             ListTile(
               leading: const Icon(Icons.save_outlined, color: Colors.blue),
-              title: const Text('Save as template'),
+              title: const Text('Save as Template'),
               onTap: () {
                 Navigator.pop(ctx);
                 _saveAsTemplate();

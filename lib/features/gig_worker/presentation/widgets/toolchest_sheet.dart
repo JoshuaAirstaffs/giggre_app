@@ -284,7 +284,7 @@ class _ToolchestSheetState extends State<ToolchestSheet>
                       ],
                     ),
                   ),
-                  const Tab(text: 'Apply'),
+                  const Tab(text: 'Browse'),
                 ],
               ),
             ),
@@ -795,7 +795,7 @@ class _ApplySkillCard extends StatelessWidget {
           bg: Colors.orangeAccent,
           text: Colors.black,
           icon: Icons.info_outline_rounded,
-          label: 'Need Info',
+          label: 'Needs More Info',
         ),
       'approved' => (
           bg: const Color(0xFF22C55E),
@@ -914,7 +914,7 @@ class _ApplySkillCard extends StatelessWidget {
                   children: [
                     Icon(Icons.send_rounded, color: kAmber, size: 12),
                     SizedBox(width: 4),
-                    Text('Apply',
+                    Text('Request',
                         style: TextStyle(
                             color: kAmber,
                             fontSize: 12,
@@ -972,7 +972,7 @@ class _SkillRequestCard extends StatelessWidget {
         'approved' => 'Approved',
         'rejected' => 'Rejected',
         'under_review' => 'Under Review',
-        'need_more_info' => 'Need More Info',
+        'need_more_info' => 'Needs More Info',
         _ => 'Pending',
       };
 

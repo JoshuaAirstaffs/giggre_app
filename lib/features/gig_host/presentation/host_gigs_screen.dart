@@ -222,7 +222,7 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
                           items: const [
                             ('all', 'All Statuses'),
                             ('active', 'Active'),
-                            ('scanning', 'Scanning'),
+                            ('scanning', 'Looking for a Worker'),
                             ('no_worker', 'No Worker'),
                             ('completed', 'Completed'),
                             ('cancelled', 'Cancelled'),
@@ -271,7 +271,7 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
                                     ),
                                   ),
                                   child: Text(
-                                    'Load more (${filtered.length - _visibleCount} remaining)',
+                                    'Load More',
                                     style: const TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w600,
