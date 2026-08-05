@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:in_app_update/in_app_update.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -109,7 +110,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (info.updateAvailability == UpdateAvailability.updateAvailable) {
         if (!mounted) return;
         setState(() => _hasUpdate = true);
-        _showUpdateModal();
       }
     } catch (e) {
       debugPrint('[AppUpdate] check error: $e');
@@ -513,7 +513,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           .read<CurrentUserProvider>()
                           .clearUser();
                       Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => const WelcomeScreen(),
+                        ),
                         (route) => false,
                       );
                     }
@@ -1381,6 +1383,199 @@ const _kMenuPink = Color(0xFFEC4899);
 const _kMenuSubtleLight = Color(0xFFB7C0CD);
 const _kMenuHandleLight = Color(0xFFD5DCE6);
 
+const _kSupportContactName = 'Julius Airstaffs';
+const _kSupportContactNumber = '0916-872-0618';
+
+// Tap the logo 3 times to reach the maintainer's direct contact info.
+class _SecretLogoTap extends StatefulWidget {
+  const _SecretLogoTap();
+
+  @override
+  State<_SecretLogoTap> createState() => _SecretLogoTapState();
+}
+
+class _SecretLogoTapState extends State<_SecretLogoTap> {
+  int _taps = 0;
+
+  void _onTap() {
+    _taps++;
+    if (_taps >= 3) {
+      _taps = 0;
+      showDialog(
+        context: context,
+        builder: (_) => const _SupportContactDialog(),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _onTap,
+      child: Image.asset('assets/images/logo.png', height: 40),
+    );
+  }
+}
+
+class _SupportContactDialog extends StatelessWidget {
+  const _SupportContactDialog();
+
+  static const _accent = kGold;
+
+  Future<void> _callNumber(BuildContext context) async {
+    final uri = Uri(scheme: 'tel', path: _kSupportContactNumber);
+    final launched = await launchUrl(uri);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not open dialer')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF1A2236) : Colors.white;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final muted = isDark ? Colors.white54 : kSub;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(28, 32, 28, 28),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.2),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: _accent.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.support_agent_rounded,
+                color: _accent,
+                size: 42,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'Support Contact',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: onSurface,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'For internal use only',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: muted, fontSize: 12),
+            ),
+            const SizedBox(height: 22),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _accent.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.person_rounded,
+                        color: _accent,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _kSupportContactName,
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _callNumber(context),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.phone_rounded,
+                          color: _accent,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _kSupportContactNumber,
+                            style: TextStyle(
+                              color: onSurface,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const Icon(
+                          Icons.call_rounded,
+                          color: _accent,
+                          size: 16,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 22),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _accent,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text(
+                  'Close',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _GiggreMenuItem {
   final String title;
   final IconData icon;
@@ -1470,7 +1665,7 @@ class _GiggreMenu extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 18),
-                Image.asset('assets/images/logo.png', height: 40),
+                const _SecretLogoTap(),
                 const SizedBox(height: 12),
                 FutureBuilder<PackageInfo>(
                   future: PackageInfo.fromPlatform(),
@@ -1498,7 +1693,9 @@ class _GiggreMenu extends StatelessWidget {
                             },
                             child: Container(
                               height: 20,
-                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 color: kBlue,
@@ -1584,8 +1781,9 @@ class _GiggreMenuRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final alpha =
-        isDark ? (item.tintAlphaLight + 0.08).clamp(0.0, 1.0) : item.tintAlphaLight;
+    final alpha = isDark
+        ? (item.tintAlphaLight + 0.08).clamp(0.0, 1.0)
+        : item.tintAlphaLight;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
