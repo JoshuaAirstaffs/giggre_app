@@ -34,21 +34,21 @@ const quickGigFlow = TutorialFlow(
       id: 'quickGig.workerSlots',
       anchorId: 'postGig.workerSlots',
       title: 'Need more than one worker?',
-      body: 'Bump this up if the job needs multiple people — each one is '
+      body: 'Bump this up if the gig needs multiple people — each one is '
           'paid the amount above independently.',
     ),
     TutorialStep(
       id: 'quickGig.schedule',
       anchorId: 'postGig.schedule',
       title: 'Pick a date and time',
-      body: 'Set when the work should happen. Leave it as-is for as-soon-as-'
+      body: 'Set when the gig should happen. Leave it as-is for as-soon-as-'
           'possible gigs.',
     ),
     TutorialStep(
       id: 'quickGig.location',
       anchorId: 'postGig.location',
       title: 'Confirm the location',
-      body: 'We use your GPS by default — switch to the map if the job is '
+      body: 'We use your GPS by default — switch to the map if the gig is '
           'somewhere else.',
     ),
     TutorialStep(
@@ -77,7 +77,7 @@ const quickGigFlow = TutorialFlow(
       anchorId: 'quickGig.detail.progress',
       title: 'Track the gig',
       body: 'Once a worker accepts, follow their progress here — and mark '
-          'the gig complete once the work is done.',
+          'the gig complete once it\'s done.',
       advance: TutorialAdvance.autoOnAnchor,
     ),
   ],

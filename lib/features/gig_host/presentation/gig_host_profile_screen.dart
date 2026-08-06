@@ -2358,14 +2358,14 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
                 if (workStartedAt != null)
                   _HistoryDetailRow(
                     icon: Icons.play_circle_outline_rounded,
-                    label: 'Work Started',
+                    label: 'Gig Started',
                     value: _fmtDateTime(workStartedAt),
                     onSurface: onSurface,
                   ),
                 if (workCompletedAt != null)
                   _HistoryDetailRow(
                     icon: Icons.stop_circle_outlined,
-                    label: 'Work Ended',
+                    label: 'Gig Ended',
                     value: _fmtDateTime(workCompletedAt),
                     onSurface: onSurface,
                   ),

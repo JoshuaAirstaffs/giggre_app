@@ -190,18 +190,18 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
         'workStartedAt',
         _ActivityType.working,
         '$workerName Started Working',
-        'Work in progress on "$gigTitle"',
+        'Gig in progress on "$gigTitle"',
       );
       tryAdd(
         'arrivedAt',
         _ActivityType.arrived,
         '$workerName Has Arrived',
-        'Ready to start work on "$gigTitle"',
+        'Ready to start the gig, "$gigTitle"',
       );
       tryAdd(
         'assignedAt',
         _ActivityType.assigned,
-        'Worker Assigned',
+        'Worker Selected',
         '$workerName accepted "$gigTitle"',
       );
       // Cancellation requested — show who initiated it

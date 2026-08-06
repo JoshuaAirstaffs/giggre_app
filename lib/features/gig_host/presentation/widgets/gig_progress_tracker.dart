@@ -478,7 +478,7 @@ class _GigProgressCard extends StatelessWidget {
     'Worker Arrived',
     'On the Job',
     'All Done',
-    'Ready for Payment',
+    'Awaiting Payout',
     'Wrapped Up',
   ];
 
@@ -848,7 +848,7 @@ class _GigProgressCard extends StatelessWidget {
                   const SizedBox(width: 8),
                   Text(
                     workerGeoPoint != null
-                        ? 'Worker is on the way'
+                        ? "Worker's on the Way"
                         : 'Waiting for worker location…',
                     style: const TextStyle(
                       color: kBlue,
@@ -1780,7 +1780,7 @@ class _FullScreenTrackingMapState extends State<_FullScreenTrackingMap> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Worker is on the way',
+              "Worker's on the Way",
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,

@@ -14,7 +14,7 @@ const offeredGigFlow = TutorialFlow(
       anchorId: 'offeredGig.worker',
       title: 'Choose a worker',
       body: 'Pick the worker you want to offer this gig to directly — no '
-          'search or applicants needed.',
+          'search or interested workers needed.',
     ),
     TutorialStep(
       id: 'offeredGig.title',
@@ -26,20 +26,20 @@ const offeredGigFlow = TutorialFlow(
     TutorialStep(
       id: 'offeredGig.description',
       anchorId: 'postGig.description',
-      title: 'Describe the work',
+      title: 'Describe the gig',
       body: 'Anything the worker should know before accepting.',
     ),
     TutorialStep(
       id: 'offeredGig.skillRequired',
       anchorId: 'postGig.skillRequired',
       title: 'Confirm the skill',
-      body: 'Should match what this worker is being offered the job for.',
+      body: 'Should match what this worker is being offered the gig for.',
     ),
     TutorialStep(
       id: 'offeredGig.experienceLevel',
       anchorId: 'postGig.experienceLevel',
       title: 'Set the experience level',
-      body: 'Just a record of the expected level for this job.',
+      body: 'Just a record of the expected level for this gig.',
     ),
     TutorialStep(
       id: 'offeredGig.amount',
@@ -51,13 +51,13 @@ const offeredGigFlow = TutorialFlow(
       id: 'offeredGig.schedule',
       anchorId: 'postGig.schedule',
       title: 'Pick a date and time',
-      body: 'Set when the work should happen.',
+      body: 'Set when the gig should happen.',
     ),
     TutorialStep(
       id: 'offeredGig.location',
       anchorId: 'postGig.location',
       title: 'Confirm the location',
-      body: 'We use your GPS by default — switch to the map if the job is '
+      body: 'We use your GPS by default — switch to the map if the gig is '
           'somewhere else.',
     ),
     TutorialStep(
@@ -85,7 +85,7 @@ const offeredGigFlow = TutorialFlow(
       anchorId: 'offeredGig.detail.progress',
       title: 'Track the gig',
       body: 'Once they accept, follow their progress here — and mark the '
-          'gig complete once the work is done.',
+          'gig complete once it\'s done.',
       advance: TutorialAdvance.autoOnAnchor,
     ),
   ],

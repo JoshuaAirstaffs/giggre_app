@@ -210,7 +210,7 @@ class _AdminGigConfigSheetState extends State<AdminGigConfigSheet> {
         iconColor: reassignment == true ? Colors.greenAccent : kSub,
       ),
       _ConfigRow(
-        label: 'Max Dispatch Attempts',
+        label: 'Max Match Attempts',
         value: maxAttempts?.toString() ?? '—',
         icon: Icons.repeat_rounded,
         iconColor: kBlue,
@@ -222,7 +222,7 @@ class _AdminGigConfigSheetState extends State<AdminGigConfigSheet> {
         iconColor: Colors.tealAccent,
       ),
       _ConfigRow(
-        label: 'Review Window (sec)',
+        label: 'Response Time (sec)',
         value: reviewWindow?.toString() ?? '—',
         icon: Icons.timer_outlined,
         iconColor: Colors.purpleAccent,

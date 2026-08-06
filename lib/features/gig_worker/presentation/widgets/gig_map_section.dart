@@ -669,7 +669,7 @@ class _GigMapSectionState extends State<GigMapSection> {
               ),
               const SizedBox(height: 8),
               Text(
-                "This gig is based in a different country than yours, so applying isn't available. Try one closer to home instead.",
+                "This gig is based in a different country than yours, so you can't take it from here. Try one closer to home instead.",
                 style: TextStyle(
                   fontSize: 13,
                   color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
@@ -774,7 +774,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'It\'s about ${distKm.round()} km from your current location. Make sure you\'re able to travel there before applying.',
+                    'It\'s about ${distKm.round()} km from your current location. Make sure you\'re able to travel there before you take it.',
                     style: TextStyle(
                       fontSize: 13,
                       color: isDark
@@ -821,7 +821,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                             padding: const EdgeInsets.symmetric(vertical: 13),
                           ),
                           child: const Text(
-                            'Apply Anyway',
+                            'Take Gig Anyway',
                             style: TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
@@ -888,7 +888,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('You have already applied to this gig.'),
+              content: Text('You\'ve already put in for this gig.'),
               backgroundColor: Colors.orange,
               behavior: SnackBarBehavior.floating,
             ),
@@ -917,7 +917,7 @@ class _GigMapSectionState extends State<GigMapSection> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'You need to finish your current gig before applying to another one.',
+                'You need to finish your current gig before taking another one.',
               ),
               backgroundColor: Colors.orange,
               behavior: SnackBarBehavior.floating,
@@ -1021,7 +1021,9 @@ class _GigMapSectionState extends State<GigMapSection> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to withdraw application: $e'),
+            content: Text(
+              "Couldn't withdraw your application. Please try again.",
+            ),
             backgroundColor: Colors.redAccent,
           ),
         );
@@ -1780,7 +1782,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'You lack ${missing.length == 1 ? 'a required skill' : '${missing.length} required skills'}: ${missing.join(', ')}',
+                              'Missing ${missing.length == 1 ? 'skill' : 'skills'}: ${missing.join(', ')}',
                               style: const TextStyle(
                                 color: Colors.red,
                                 fontSize: 12,
@@ -1882,9 +1884,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(18),
                                     ),
-                                    title: const Text('Withdraw Application?'),
+                                    title: const Text('Pass?'),
                                     content: const Text(
-                                      'You can apply again later if the gig is still accepting applicants.',
+                                      'You can take it again later if this gig is still open.',
                                     ),
                                     actions: [
                                       TextButton(
@@ -1896,7 +1898,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                                         onPressed: () =>
                                             Navigator.pop(dCtx, true),
                                         child: const Text(
-                                          'Withdraw',
+                                          'Pass',
                                           style: TextStyle(
                                             color: Colors.redAccent,
                                           ),
@@ -1914,10 +1916,10 @@ class _GigMapSectionState extends State<GigMapSection> {
                         child: Center(
                           child: Text(
                             isAppliedPending
-                                ? 'Withdraw Application'
+                                ? 'Pass'
                                 : gig.gigType == 'offered'
-                                ? 'Accept Offer'
-                                : 'Apply now',
+                                ? "I'm In"
+                                : 'Take Gig',
                             style: TextStyle(
                               color: canTapApply
                                   ? Colors.white
@@ -1936,7 +1938,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                 if (gig.gigType == 'open' && !isAppliedPending) ...[
                   const SizedBox(height: 10),
                   const Text(
-                    "You can withdraw your application anytime before it's accepted",
+                    "You can pass anytime before you're selected",
                     textAlign: TextAlign.center,
                     style: TextStyle(color: kSub, fontSize: 10.5),
                   ),
@@ -2055,10 +2057,10 @@ class _GigMapSectionState extends State<GigMapSection> {
                       ? 'Offered'
                       : 'Quick';
                   final btnLabel = g.gigType == 'open'
-                      ? 'Apply'
+                      ? 'Take Gig'
                       : g.gigType == 'offered'
-                      ? 'Accept'
-                      : 'Start';
+                      ? "I'm In"
+                      : 'Take It';
                   final missing =
                       g.gigType == 'open' && g.requiredSkills.isNotEmpty
                       ? g.requiredSkills

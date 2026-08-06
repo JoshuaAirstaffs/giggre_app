@@ -137,15 +137,15 @@ String? _sublineFor({
       case GigStep.navigating:
         return "$workerName's on the way";
       case GigStep.arrived:
-        return '$workerName has arrived';
+        return 'Worker Arrived';
       case GigStep.working:
-        return "$workerName's on the job";
+        return 'On the Job';
       case GigStep.taskComplete:
-        return "$workerName's all done";
+        return 'All Done';
       case GigStep.payment:
-        return "$workerName's getting paid";
+        return 'Awaiting Payout';
       case GigStep.completed:
-        return "$workerName's all done";
+        return 'Wrapped Up';
     }
   }
 

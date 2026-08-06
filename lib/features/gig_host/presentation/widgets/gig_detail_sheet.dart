@@ -579,7 +579,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               ),
               const SizedBox(height: 14),
               Text(
-                'Assign $workerName?',
+                'Select $workerName?',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w600,
@@ -588,7 +588,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'This worker will be assigned to the gig and notified to proceed.',
+                'This worker will be selected for the gig and notified to get started.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
               ),
@@ -627,7 +627,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                         ),
                         onPressed: () => Navigator.pop(ctx, true),
                         child: const Text(
-                          'Assign',
+                          'Select',
                           style: TextStyle(
                             color: Color(0xFF22C55E),
                             fontSize: 15,
@@ -695,7 +695,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         final slotRef = gigRef.collection('workers').doc(workerId);
         final slotSnap = await tx.get(slotRef);
         if (slotSnap.exists) {
-          failureMsg = '$workerName is already assigned to this gig.';
+          failureMsg = '$workerName is already selected for this gig.';
           return;
         }
 
@@ -721,7 +721,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         });
       });
     } catch (e) {
-      failureMsg = 'Could not assign worker. Please try again.';
+      failureMsg = 'Could not select this worker. Please try again.';
     }
     if (failureMsg != null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1412,7 +1412,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     if (createdAt != null)
                       'posted ${_timeAgo(createdAt.toDate())}',
                     if (widget.gigType == 'open')
-                      '${applicantsList.length} applicant${applicantsList.length == 1 ? '' : 's'}',
+                      '${applicantsList.length} interested worker${applicantsList.length == 1 ? '' : 's'}',
                   ].join(' · '),
                   style: TextStyle(
                     color: activeGigTextMuted(isDark),
@@ -2261,7 +2261,7 @@ String _hostSheetStatusLabel(String status) {
     case 'cancelled':
       return 'Cancelled';
     case 'cancellation_requested':
-      return 'Cancel pending';
+      return 'Cancellation requested';
     default:
       return status.isEmpty
           ? ''
@@ -2387,15 +2387,15 @@ String _hostStatusChipLabel(GigStep step, String workerName) {
     case GigStep.navigating:
       return "$workerName's on the way";
     case GigStep.arrived:
-      return '$workerName arrived';
+      return 'Worker Arrived';
     case GigStep.working:
-      return 'On the job';
+      return 'On the Job';
     case GigStep.taskComplete:
-      return 'All done';
+      return 'All Done';
     case GigStep.payment:
-      return 'Ready for payment';
+      return 'Awaiting Payout';
     case GigStep.completed:
-      return 'Wrapped up';
+      return 'Wrapped Up';
   }
 }
 
@@ -2816,27 +2816,27 @@ Color _workerStatusColor(String status) {
 String _workerStatusLabel(String status) {
   switch (status) {
     case 'in_progress':
-      return 'Awaiting response';
+      return 'Offer Waiting';
     case 'offered':
-      return 'Offer sent';
+      return 'Offer Waiting';
     case 'navigating':
-      return 'On the way';
+      return "Worker's on the Way";
     case 'arrived':
-      return 'Arrived';
+      return 'Worker Arrived';
     case 'working':
-      return 'Working';
+      return 'On the Job';
     case 'task_complete':
-      return 'Ready for payment';
+      return 'All Done';
     case 'payment':
-      return 'Payment in progress';
+      return 'Awaiting Payout';
     case 'completed':
-      return 'Paid';
+      return 'Wrapped Up';
     case 'declined':
       return 'Declined';
     case 'cancelled':
       return 'Cancelled';
     case 'cancellation_requested':
-      return 'Cancellation pending';
+      return 'Cancellation requested';
     default:
       return status;
   }

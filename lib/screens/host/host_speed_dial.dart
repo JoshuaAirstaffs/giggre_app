@@ -477,7 +477,7 @@ class _GigTypesDialog extends StatelessWidget {
               icon: Icons.work_rounded,
               label: 'Open Gig',
               description:
-                  'Posted publicly. Qualified workers come to you, and you choose who to hire.',
+                  'Posted publicly. Qualified workers come to you, and you choose who to select.',
               tokens: tokens,
             ),
             const SizedBox(height: 14),

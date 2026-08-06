@@ -435,7 +435,7 @@ class _PendingDeletionScreen extends StatelessWidget {
                   await FirebaseAuth.instance.signOut();
                 },
                 child: const Text(
-                  'Sign Out',
+                  'Log Out',
                   style: TextStyle(color: Colors.grey, fontSize: 14),
                 ),
               ),
@@ -501,7 +501,7 @@ class _RestoreErrorScreen extends StatelessWidget {
                   await FirebaseAuth.instance.signOut();
                 },
                 child: const Text(
-                  'Sign Out',
+                  'Log Out',
                   style: TextStyle(color: Colors.grey, fontSize: 14),
                 ),
               ),

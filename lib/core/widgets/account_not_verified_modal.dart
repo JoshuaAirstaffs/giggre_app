@@ -43,7 +43,7 @@ Future<void> showAccountNotVerifiedModal(
           ),
           const SizedBox(height: 16),
           const Text(
-            'Account not Verified',
+            'Account Not Verified',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             textAlign: TextAlign.center,
           ),

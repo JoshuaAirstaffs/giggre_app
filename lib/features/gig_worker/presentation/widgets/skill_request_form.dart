@@ -18,7 +18,7 @@ const _kCategories = [
   'Others',
 ];
 
-const _kLevels = ['Beginner', 'Intermediate', 'Expert'];
+const _kLevels = ['Entry Level', 'Intermediate', 'Expert'];
 
 class SkillRequestForm extends StatefulWidget {
   final String? initialSkillName;
@@ -121,7 +121,7 @@ class _SkillRequestFormState extends State<SkillRequestForm> {
       } else if (years >= 3) {
         newLevel = 'Intermediate';
       } else {
-        newLevel = 'Beginner';
+        newLevel = 'Entry Level';
       }
     }
     if (newLevel != _level) {

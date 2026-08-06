@@ -115,7 +115,7 @@ class PendingCancellationCard extends StatelessWidget {
                 ),
                 SizedBox(height: 2),
                 Text(
-                  "You'll be able to apply for new gigs once it's approved",
+                  "You'll be able to take new gigs once it's approved",
                   style: TextStyle(
                     color: _color,
                     fontSize: 11,

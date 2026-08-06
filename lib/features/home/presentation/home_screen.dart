@@ -1163,7 +1163,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   Image.asset('assets/images/logo.png', width: 94, height: 64),
                   const Text(
-                    'The fastest way to find gigs or hire workers near you.',
+                    'The fastest way to find gigs or get help near you.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: kSub),
                   ),
@@ -1735,7 +1735,7 @@ class _GiggreMenu extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'The fastest way to find gigs or hire workers near you',
+                  'The fastest way to find gigs or get help near you',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: subtleText, fontSize: 10.5),
                 ),

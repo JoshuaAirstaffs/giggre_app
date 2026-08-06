@@ -218,13 +218,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           message = 'Invalid email or password.';
           break;
         case 'user-disabled':
-          message = 'This account has been disabled.';
+          message = 'This account has been disabled. Contact support for help.';
           break;
         case 'too-many-requests':
           message = 'Too many failed attempts. Please try again later.';
           break;
         case 'network-request-failed':
-          message = 'No internet connection.';
+          message = 'No internet connection. Check your connection and try again.';
           break;
         case 'invalid-email':
           message = 'Please enter a valid email address.';
@@ -652,7 +652,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Account created successfully! Welcome to Giggre!',
+                        'Welcome to Giggre! Your account is ready.',
                       ),
                     ),
                   ],
@@ -672,10 +672,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       String message;
       switch (e.code) {
         case 'email-already-in-use':
-          message = 'This email is already registered.';
+          message = 'This email is already registered. Try logging in instead.';
           break;
         case 'account-exists-with-different-credential':
-          message = 'This email is linked to a Google account.';
+          message = 'This email is linked to a Google account. Log in with Google instead.';
           break;
         case 'invalid-email':
           message = 'Please enter a valid email address.';
@@ -684,7 +684,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           message = 'Password is too weak. Please choose a stronger one.';
           break;
         case 'network-request-failed':
-          message = 'No internet connection.';
+          message = 'No internet connection. Check your connection and try again.';
           break;
         case 'too-many-requests':
           message = 'Too many attempts. Please try again later.';
@@ -693,7 +693,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           message = 'Email registration is currently unavailable.';
           break;
         case 'user-disabled':
-          message = 'This account has been disabled.';
+          message = 'This account has been disabled. Contact support for help.';
           break;
         default:
           message = e.message ?? 'Registration failed. Please try again.';
@@ -998,7 +998,7 @@ class _WelcomeContent extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Find work or hire trusted help near you fast, fair, and local.',
+                  'Find work or get trusted help near you fast, fair, and local.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: tokens.textMuted),
                 ),
@@ -1059,7 +1059,7 @@ class _WelcomeContent extends StatelessWidget {
                       ),
                     ),
                     child: Text(
-                      'Log in',
+                      'Log In',
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -1416,7 +1416,7 @@ class _LoginPanel extends StatelessWidget {
                           ),
                         )
                       : const Text(
-                          'Log in',
+                          'Log In',
                           style: TextStyle(
                             fontSize: 14.5,
                             fontWeight: FontWeight.w800,
@@ -1767,7 +1767,7 @@ class _SignupPanel extends StatelessWidget {
               GestureDetector(
                 onTap: onLogin,
                 child: const Text(
-                  'Log in',
+                  'Log In',
                   style: TextStyle(
                     color: _kBlueAccent,
                     fontWeight: FontWeight.w700,

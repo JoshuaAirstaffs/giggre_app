@@ -497,13 +497,13 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         switch (e.code) {
           case 'account-exists-with-different-credential':
             message =
-                'This email is already registered. Please log in with email instead.';
+                'This email is linked to a Google account. Log in with Google instead.';
             break;
           case 'network-request-failed':
-            message = 'No internet connection.';
+            message = 'No internet connection. Check your connection and try again.';
             break;
           case 'user-disabled':
-            message = 'This account has been disabled.';
+            message = 'This account has been disabled. Contact support for help.';
             break;
           case 'too-many-requests':
             message = 'Too many attempts. Please try again later.';
@@ -625,7 +625,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                 content: const Row(children: [
                   Icon(Icons.check_circle_outline, color: Colors.white),
                   SizedBox(width: 10),
-                  Expanded(child: Text('Profile saved! Welcome to Giggre!')),
+                  Expanded(child: Text('Welcome to Giggre! Your account is ready.')),
                 ]),
                 backgroundColor: const Color(0xFF1B6CA8),
                 behavior: SnackBarBehavior.floating,
@@ -870,8 +870,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                             child: CircularProgressIndicator(
                                 color: Colors.white, strokeWidth: 2.5),
                           )
-                        : const Text('SAVE & CONTINUE',
-                            style: TextStyle(
+                        : Text('Save & Continue'.toUpperCase(),
+                            style: const TextStyle(
                                 fontSize: 15, fontWeight: FontWeight.bold)),
                   ),
                 ),
@@ -1182,7 +1182,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   SizedBox(width: 10),
                   Expanded(
                       child: Text(
-                          'Account created successfully! Welcome to Giggre!')),
+                          'Welcome to Giggre! Your account is ready.')),
                 ]),
                 backgroundColor: const Color(0xFF1B6CA8),
                 behavior: SnackBarBehavior.floating,
@@ -1198,10 +1198,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       String message;
       switch (e.code) {
         case 'email-already-in-use':
-          message = 'This email is already registered.';
+          message = 'This email is already registered. Try logging in instead.';
           break;
         case 'account-exists-with-different-credential':
-          message = 'This email is linked to a Google account.';
+          message = 'This email is linked to a Google account. Log in with Google instead.';
           break;
         case 'invalid-email':
           message = 'Please enter a valid email address.';
@@ -1210,7 +1210,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           message = 'Password is too weak. Please choose a stronger one.';
           break;
         case 'network-request-failed':
-          message = 'No internet connection.';
+          message = 'No internet connection. Check your connection and try again.';
           break;
         case 'too-many-requests':
           message = 'Too many attempts. Please try again later.';
@@ -1219,7 +1219,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           message = 'Email registration is currently unavailable.';
           break;
         case 'user-disabled':
-          message = 'This account has been disabled.';
+          message = 'This account has been disabled. Contact support for help.';
           break;
         default:
           message = e.message ?? 'Registration failed. Please try again.';
@@ -1518,8 +1518,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             child: CircularProgressIndicator(
                                 color: Colors.white, strokeWidth: 2.5),
                           )
-                        : const Text('CREATE ACCOUNT',
-                            style: TextStyle(
+                        : Text('Create Account'.toUpperCase(),
+                            style: const TextStyle(
                                 fontSize: 15, fontWeight: FontWeight.bold)),
                   ),
                 ),

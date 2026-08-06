@@ -127,9 +127,9 @@ class _LoginScreenState extends State<LoginScreen> {
         case 'user-not-found':         message = 'No account found with this email.'; break;
         case 'wrong-password':         message = 'Incorrect password. Please try again.'; break;
         case 'invalid-credential':     message = 'Invalid email or password.'; break;
-        case 'user-disabled':          message = 'This account has been disabled.'; break;
+        case 'user-disabled':          message = 'This account has been disabled. Contact support for help.'; break;
         case 'too-many-requests':      message = 'Too many failed attempts. Please try again later.'; break;
-        case 'network-request-failed': message = 'No internet connection.'; break;
+        case 'network-request-failed': message = 'No internet connection. Check your connection and try again.'; break;
         case 'invalid-email':          message = 'Please enter a valid email address.'; break;
         default:                       message = e.message ?? 'Login failed. Please try again.';
       }
@@ -508,7 +508,7 @@ class _LoginPanel extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Find your next gig or hire the perfect help.',
+              'Find your next gig, or get trusted help nearby.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11.5, color: tokens.textMuted),
             ),
@@ -598,7 +598,7 @@ class _LoginPanel extends StatelessWidget {
                             ),
                           )
                         : const Text(
-                            'Log in',
+                            'Log In',
                             style: TextStyle(
                               fontSize: 14.5,
                               fontWeight: FontWeight.w800,
@@ -769,9 +769,9 @@ class _SocialLogoRow extends StatelessWidget {
               color: _kGold,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Text(
-              'SOON',
-              style: TextStyle(
+            child: Text(
+              'Soon'.toUpperCase(),
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 7.5,
                 fontWeight: FontWeight.w800,

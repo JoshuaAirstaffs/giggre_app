@@ -840,7 +840,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                             )
                           : const Icon(Icons.send_rounded, size: 18),
                       label: Text(
-                        _posting ? 'Sending Offer...' : 'Send Offered Gig',
+                        _posting ? 'Sending Offer...' : 'Send Offer',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,

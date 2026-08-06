@@ -16,80 +16,80 @@ const openGigFlow = TutorialFlow(
       anchorId: 'postGig.title',
       title: 'Give it a title',
       body: 'A short, specific title helps workers know what they’re '
-          'applying for at a glance.',
+          'taking on at a glance.',
     ),
     TutorialStep(
       id: 'openGig.description',
       anchorId: 'postGig.description',
-      title: 'Describe the work',
-      body: 'Deliverables, expectations, anything an applicant should know '
-          'before they apply.',
+      title: 'Describe the gig',
+      body: 'Deliverables, expectations, anything a worker should know '
+          'before they take the gig.',
     ),
     TutorialStep(
       id: 'openGig.requiredSkills',
       anchorId: 'postGig.skillRequired',
       title: 'Pick the skill needed',
-      body: 'Only workers with this skill will be able to apply.',
+      body: 'Only workers with this skill will be able to take it.',
     ),
     TutorialStep(
       id: 'openGig.experienceLevel',
       anchorId: 'postGig.experienceLevel',
       title: 'Set the experience level',
-      body: 'Helps filter out applicants who aren’t a fit for this job.',
+      body: 'Helps filter out workers who aren’t a fit for this gig.',
     ),
     TutorialStep(
       id: 'openGig.amount',
       anchorId: 'postGig.amount',
       title: 'Set the pay',
-      body: 'What each hired worker earns for the gig.',
+      body: 'What each worker earns for taking the gig.',
     ),
     TutorialStep(
       id: 'openGig.workerSlots',
       anchorId: 'postGig.workerSlots',
       title: 'Need more than one worker?',
-      body: 'Bump this up if the job needs multiple people — each one is '
+      body: 'Bump this up if the gig needs multiple people — each one is '
           'paid the amount above independently.',
     ),
     TutorialStep(
       id: 'openGig.schedule',
       anchorId: 'postGig.schedule',
       title: 'Pick a date and time',
-      body: 'Set when the work should happen.',
+      body: 'Set when the gig should happen.',
     ),
     TutorialStep(
       id: 'openGig.location',
       anchorId: 'postGig.location',
       title: 'Confirm the location',
-      body: 'We use your GPS by default — switch to the map if the job is '
+      body: 'We use your GPS by default — switch to the map if the gig is '
           'somewhere else.',
     ),
     TutorialStep(
       id: 'openGig.submit',
       anchorId: 'postGig.submit',
       title: 'Post it',
-      body: 'Once posted, nearby workers with the right skill can apply.',
+      body: 'Once posted, nearby workers with the right skill can take it.',
     ),
     TutorialStep(
       id: 'openGig.hostCard',
       anchorId: 'openGig.hostCard',
       title: 'Your gig is live',
-      body: 'This card tracks it. Tap it any time to review applicants.',
+      body: 'This card tracks it. Tap it any time to review interested workers.',
       advance: TutorialAdvance.autoOnAnchor,
     ),
     TutorialStep(
       id: 'openGig.applicants',
       anchorId: 'openGig.applicants',
-      title: 'Review applicants',
+      title: 'Review interested workers',
       body: 'Interested workers show up here. Tap "Select" on the one you '
-          'want to hire.',
+          'want to select.',
       advance: TutorialAdvance.autoOnAnchor,
     ),
     TutorialStep(
       id: 'openGig.detailProgress',
       anchorId: 'openGig.detail.progress',
       title: 'Track the gig',
-      body: 'Once you hire a worker, follow their progress here — and mark '
-          'the gig complete once the work is done.',
+      body: 'Once you select a worker, follow their progress here — and mark '
+          'the gig complete once it\'s done.',
       advance: TutorialAdvance.autoOnAnchor,
     ),
   ],

@@ -1462,7 +1462,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         content: Text(
           pendingCancellation
               ? "Your cancellation request hasn't been approved by the admin yet."
-              : "You need to finish your current gig before applying to or accepting another one.",
+              : "You need to finish your current gig before taking or accepting another one.",
           textAlign: TextAlign.center,
           style: const TextStyle(color: kSub, fontSize: 14, height: 1.5),
         ),

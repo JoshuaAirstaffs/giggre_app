@@ -793,8 +793,7 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '$applicantCount ${applicantCount == 1 ? 'interested worker' : 'interested workers'} '
-                  'waiting to be selected',
+                  '$applicantCount ${applicantCount == 1 ? 'worker' : 'workers'} interested',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(

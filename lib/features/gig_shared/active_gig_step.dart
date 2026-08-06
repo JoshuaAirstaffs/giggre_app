@@ -26,7 +26,7 @@ GigStep gigStepFromStatus(String s) {
 }
 
 const kStepLabels = ['On My Way', "I'm Here", 'On the Job', 'All Done', 'Getting Paid', 'Wrapped Up'];
-const kStepLabelsHost = ["Worker's on the Way", 'Worker Arrived', 'On the Job', 'All Done', 'Ready for Payment', 'Wrapped Up'];
+const kStepLabelsHost = ["Worker's on the Way", 'Worker Arrived', 'On the Job', 'All Done', 'Awaiting Payout', 'Wrapped Up'];
 
 // Title/body copy for the progress card's instruction block.
 class GigStepCopy {
@@ -54,11 +54,11 @@ GigStepCopy workerInstructionFor(
     case GigStep.working:
       return const GigStepCopy(
         'Gig in progress',
-        'The host will mark the work as done when finished.',
+        'The host will mark the gig as done when finished.',
       );
     case GigStep.taskComplete:
       return const GigStepCopy(
-        'Work complete',
+        'Gig complete',
         'Waiting for the host to process your payment.',
       );
     case GigStep.payment:
@@ -93,13 +93,13 @@ GigStepCopy hostInstructionFor(
       );
     case GigStep.working:
       return const GigStepCopy(
-        'Work in progress',
-        'Mark the gig as done when the work is finished.',
+        'Gig in progress',
+        'Mark the gig as done when finished.',
       );
     case GigStep.taskComplete:
       return const GigStepCopy(
-        'Work marked as done',
-        'Review the work and proceed to payment.',
+        'Gig marked as done',
+        'Review the gig and proceed to payment.',
       );
     case GigStep.payment:
       return GigStepCopy(
