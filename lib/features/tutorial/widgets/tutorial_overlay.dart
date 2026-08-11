@@ -18,7 +18,7 @@ class TutorialOverlayHost extends StatefulWidget {
 }
 
 class _TutorialOverlayHostState extends State<TutorialOverlayHost>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   Ticker? _ticker;
   Duration _elapsed = Duration.zero;
   // Blocking steps swallow drags along with taps (see the bands in

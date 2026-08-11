@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../../tutorial/widgets/tutorial_anchor.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Worker Header — blue gradient band
@@ -19,6 +20,7 @@ class WorkerHeader extends StatelessWidget {
   final bool showBackButton;
   final VoidCallback? onNotifications;
   final VoidCallback? onSwitchToHost;
+  final VoidCallback? onTutorial;
 
   const WorkerHeader({
     super.key,
@@ -36,6 +38,7 @@ class WorkerHeader extends StatelessWidget {
     this.showBackButton = true,
     this.onNotifications,
     this.onSwitchToHost,
+    this.onTutorial,
   });
 
   @override
@@ -100,9 +103,9 @@ class WorkerHeader extends StatelessWidget {
                         ),
                       ),
                     ),
-                    if (onNotifications != null) ...[
+                    if (onTutorial != null) ...[
                       GestureDetector(
-                        onTap: onNotifications,
+                        onTap: onTutorial,
                         child: Container(
                           width: 38,
                           height: 38,
@@ -111,9 +114,31 @@ class WorkerHeader extends StatelessWidget {
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(
-                            Icons.notifications_outlined,
+                            Icons.school_outlined,
                             color: Colors.white,
                             size: 19,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    if (onNotifications != null) ...[
+                      GestureDetector(
+                        onTap: onNotifications,
+                        child: TutorialAnchor(
+                          id: 'workerHome.notificationsBell',
+                          child: Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.18),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.notifications_outlined,
+                              color: Colors.white,
+                              size: 19,
+                            ),
                           ),
                         ),
                       ),
@@ -143,33 +168,40 @@ class WorkerHeader extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        _WorkerAvatar(photoUrl: photoUrl, name: name, size: 50),
-                        if (isVerified == 'verified')
-                          Positioned(
-                            bottom: -1,
-                            right: -1,
-                            child: Container(
-                              width: 18,
-                              height: 18,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF2E9E6B),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 2,
+                    GestureDetector(
+                      onTap: onEdit,
+                      child: TutorialAnchor(
+                        id: 'workerHome.avatar',
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            _WorkerAvatar(
+                                photoUrl: photoUrl, name: name, size: 50),
+                            if (isVerified == 'verified')
+                              Positioned(
+                                bottom: -1,
+                                right: -1,
+                                child: Container(
+                                  width: 18,
+                                  height: 18,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF2E9E6B),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: const Icon(
+                                    Icons.check_rounded,
+                                    color: Colors.white,
+                                    size: 11,
+                                  ),
                                 ),
                               ),
-                              child: const Icon(
-                                Icons.check_rounded,
-                                color: Colors.white,
-                                size: 11,
-                              ),
-                            ),
-                          ),
-                      ],
+                          ],
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 14),
                     Expanded(

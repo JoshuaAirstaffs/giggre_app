@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/theme/profile_tab_theme.dart';
+import '../../features/tutorial/controller/tutorial_controller.dart';
+import '../../features/tutorial/flows/gig_types_flow.dart';
+import '../../features/tutorial/widgets/tutorial_anchor.dart';
 
 const _kGoldStart = Color(0xFFF0A830);
 const _kGoldEnd = Color(0xFFD88810);
@@ -172,6 +176,7 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                 iconBg: _kBubbleGoldBg,
                 icon: Icons.bolt_rounded,
                 label: 'Quick Gig',
+                anchorId: 'gigHost.quickGigBubble',
                 onTap: widget.onQuickGig,
               ),
               _bubble(
@@ -182,6 +187,7 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                 iconBg: _kBubbleBlueBg,
                 icon: Icons.work_rounded,
                 label: 'Open Gig',
+                anchorId: 'gigHost.openGigBubble',
                 onTap: widget.onOpenGig,
               ),
               _bubble(
@@ -192,6 +198,7 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                 iconBg: _kBubblePurpleBg,
                 icon: Icons.send_rounded,
                 label: 'Offered Gig',
+                anchorId: 'gigHost.offeredGigBubble',
                 onTap: widget.onOfferedGig,
               ),
               // Single info button for all three gig types — sits level with
@@ -235,7 +242,8 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
             child: Transform.scale(
               scale: scale,
               child: GestureDetector(
-                onTap: () => _showGigTypesDialog(context),
+                onTap: () =>
+                    context.read<TutorialController>().restart(gigTypesFlow),
                 child: _AllGigTypesInfoButton(diameter: iconDiameter),
               ),
             ),
@@ -243,10 +251,6 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
         ),
       ),
     );
-  }
-
-  void _showGigTypesDialog(BuildContext context) {
-    showDialog<void>(context: context, builder: (_) => const _GigTypesDialog());
   }
 
   Widget _bubble({
@@ -257,6 +261,7 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
     required Color iconBg,
     required IconData icon,
     required String label,
+    required String anchorId,
     required VoidCallback onTap,
   }) {
     final t = curve.value;
@@ -281,11 +286,14 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
               scale: scale,
               child: GestureDetector(
                 onTap: onTap,
-                child: _BubbleContent(
-                  tint: tint,
-                  iconBg: iconBg,
-                  icon: icon,
-                  label: label,
+                child: TutorialAnchor(
+                  id: anchorId,
+                  child: _BubbleContent(
+                    tint: tint,
+                    iconBg: iconBg,
+                    icon: icon,
+                    label: label,
+                  ),
                 ),
               ),
             ),
@@ -395,8 +403,8 @@ class _BubbleContent extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Single info button covering all three gig types — replaces the old
-//  per-bubble info badges. Tap opens a dialog listing every definition at
-//  once instead of one small tooltip per option.
+//  per-bubble info badges. Tap replays the gigTypesFlow tutorial, spotlighting
+//  each bubble in turn instead of opening a static dialog.
 // ─────────────────────────────────────────────────────────────────────────────
 class _AllGigTypesInfoButton extends StatelessWidget {
   final double diameter;
@@ -432,132 +440,3 @@ class _AllGigTypesInfoButton extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Gig types dialog — explains Quick/Open/Offered gigs in one place, opened
-//  from the single info button above.
-// ─────────────────────────────────────────────────────────────────────────────
-class _GigTypesDialog extends StatelessWidget {
-  const _GigTypesDialog();
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
-
-    return Dialog(
-      backgroundColor: tokens.cardSurface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 22, 20, 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Gig Types',
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-                color: tokens.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 16),
-            _GigTypeRow(
-              tint: _kBubbleGold,
-              iconBg: _kBubbleGoldBg,
-              icon: Icons.bolt_rounded,
-              label: 'Quick Gig',
-              description:
-                  "We'll instantly match you with the nearest, most reliable worker available.",
-              tokens: tokens,
-            ),
-            const SizedBox(height: 14),
-            _GigTypeRow(
-              tint: _kBubbleBlue,
-              iconBg: _kBubbleBlueBg,
-              icon: Icons.work_rounded,
-              label: 'Open Gig',
-              description:
-                  'Posted publicly. Qualified workers come to you, and you choose who to select.',
-              tokens: tokens,
-            ),
-            const SizedBox(height: 14),
-            _GigTypeRow(
-              tint: _kBubblePurple,
-              iconBg: _kBubblePurpleBg,
-              icon: Icons.send_rounded,
-              label: 'Offered Gig',
-              description:
-                  'Sent directly to one trusted worker you already have in mind.',
-              tokens: tokens,
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  'Got it',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GigTypeRow extends StatelessWidget {
-  final Color tint;
-  final Color iconBg;
-  final IconData icon;
-  final String label;
-  final String description;
-  final ProfileTabTokens tokens;
-
-  const _GigTypeRow({
-    required this.tint,
-    required this.iconBg,
-    required this.icon,
-    required this.label,
-    required this.description,
-    required this.tokens,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(12)),
-          child: Icon(icon, color: tint, size: 18),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  color: tokens.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                description,
-                style: TextStyle(fontSize: 12, color: tokens.textMuted, height: 1.35),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
