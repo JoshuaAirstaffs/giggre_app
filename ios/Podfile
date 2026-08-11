@@ -42,6 +42,14 @@ post_install do |installer|
     target.build_configurations.each do |config|
       # iOS 26+ simulators on Apple Silicon require arm64 — do not exclude it
       config.build_settings['SDKROOT'] = 'iphoneos' if target.name == 'native_assets'
+
+      # permission_handler strips each permission's native code unless its
+      # macro is enabled here — only the permissions this app actually
+      # requests (Permission.camera/microphone/notification) are turned on.
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'PERMISSION_CAMERA=1'
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'PERMISSION_MICROPHONE=1'
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'PERMISSION_NOTIFICATIONS=1'
     end
   end
 end

@@ -6,8 +6,12 @@
 	<string>Camera is used to take your profile photo or scan payment QR codes</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Giggre needs access to your photo library to set your profile picture.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Giggre needs microphone access for voice and video calls between gig hosts and workers.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>GMSApiKey</key>
+	<string>$(GOOGLE_MAPS_API_KEY)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -85,7 +89,7 @@
 		<string>Editor</string>
 		<key>CFBundleURLSchemes</key>
 		<array>
-		<string>com.googleusercontent.apps.770115931871-42as1vtljgj07rurcakgkv9c5i8qgfco</string>
+		<string>com.googleusercontent.apps.770115931871-hl1p4sh246vaqqb2679ma1dgbsdho5ge</string>
 		</array>
 	</dict>
 	</array>

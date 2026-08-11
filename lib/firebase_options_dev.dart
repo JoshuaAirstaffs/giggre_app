@@ -60,22 +60,22 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyCu8G-pI4L1N2Dam2fw9CbK05n_JcGdcMo',
-    appId: '1:770115931871:ios:6e268a217b93cbfb1de36a',
+    appId: '1:770115931871:ios:37f72eb7b9933e201de36a',
     messagingSenderId: '770115931871',
     projectId: 'simpleproject-8ff7a',
     storageBucket: 'simpleproject-8ff7a.firebasestorage.app',
-    iosClientId: '770115931871-4n5bcq4h4209ev8n7s28nb24jcuht4gc.apps.googleusercontent.com',
-    iosBundleId: 'com.example.giggreApp',
+    iosClientId: '770115931871-hl1p4sh246vaqqb2679ma1dgbsdho5ge.apps.googleusercontent.com',
+    iosBundleId: 'com.giggre.mobile.dev',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyCu8G-pI4L1N2Dam2fw9CbK05n_JcGdcMo',
-    appId: '1:770115931871:ios:6e268a217b93cbfb1de36a',
+    appId: '1:770115931871:ios:37f72eb7b9933e201de36a',
     messagingSenderId: '770115931871',
     projectId: 'simpleproject-8ff7a',
     storageBucket: 'simpleproject-8ff7a.firebasestorage.app',
-    iosClientId: '770115931871-4n5bcq4h4209ev8n7s28nb24jcuht4gc.apps.googleusercontent.com',
-    iosBundleId: 'com.example.giggreApp',
+    iosClientId: '770115931871-hl1p4sh246vaqqb2679ma1dgbsdho5ge.apps.googleusercontent.com',
+    iosBundleId: 'com.giggre.mobile.dev',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(

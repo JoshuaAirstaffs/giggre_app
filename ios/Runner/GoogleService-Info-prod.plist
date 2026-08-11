@@ -3,23 +3,23 @@
 <plist version="1.0">
 <dict>
 	<key>CLIENT_ID</key>
-	<string>770115931871-hl1p4sh246vaqqb2679ma1dgbsdho5ge.apps.googleusercontent.com</string>
+	<string>935744152330-lps42fobq27ht4kmn9f0gagmeln4fnn7.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.770115931871-hl1p4sh246vaqqb2679ma1dgbsdho5ge</string>
+	<string>com.googleusercontent.apps.935744152330-lps42fobq27ht4kmn9f0gagmeln4fnn7</string>
 	<key>ANDROID_CLIENT_ID</key>
-	<string>770115931871-46bnll7krv9v0eanooov776g86cio38f.apps.googleusercontent.com</string>
+	<string>935744152330-6eua0u9uis3ggqrhin88i1a9n7oe5cjs.apps.googleusercontent.com</string>
 	<key>API_KEY</key>
-	<string>AIzaSyCu8G-pI4L1N2Dam2fw9CbK05n_JcGdcMo</string>
+	<string>AIzaSyAk_gIjll8iaRYVUszn_J_iM0nRwo6QQBk</string>
 	<key>GCM_SENDER_ID</key>
-	<string>770115931871</string>
+	<string>935744152330</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.giggre.mobile.dev</string>
+	<string>com.giggre.mobile</string>
 	<key>PROJECT_ID</key>
-	<string>simpleproject-8ff7a</string>
+	<string>giggre-prod</string>
 	<key>STORAGE_BUCKET</key>
-	<string>simpleproject-8ff7a.firebasestorage.app</string>
+	<string>giggre-prod.firebasestorage.app</string>
 	<key>IS_ADS_ENABLED</key>
 	<false></false>
 	<key>IS_ANALYTICS_ENABLED</key>
@@ -31,6 +31,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:770115931871:ios:37f72eb7b9933e201de36a</string>
+	<string>1:935744152330:ios:b297e9ee08f2d5b0ee10f3</string>
 </dict>
 </plist>
