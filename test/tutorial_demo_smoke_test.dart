@@ -162,8 +162,15 @@ void main() {
         );
         await tester.pump();
 
+        // Narrated steps wait to hear back from the audio layer before
+        // scheduling their own advance, falling back to the step's own
+        // duration if that takes longer than DemoAudioController's load
+        // timeout (2s) — which it always does here, since there's no real
+        // audio plugin in a widget test. Padding every step by more than
+        // that keeps this test correct regardless of that implementation
+        // detail changing.
         for (final step in sequence.steps) {
-          await tester.pump(step.duration + const Duration(milliseconds: 50));
+          await tester.pump(step.duration + const Duration(seconds: 3));
         }
         // Let the completion overlay's own transitions settle.
         await tester.pump(const Duration(milliseconds: 500));

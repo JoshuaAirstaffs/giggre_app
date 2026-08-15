@@ -19,6 +19,26 @@ import 'widgets/demo_fade_in.dart';
 import 'widgets/demo_intro_hero.dart';
 import 'widgets/demo_theme.dart';
 
+// Guards against a fast double-tap on a demo row pushing `DemoPlayerScreen`
+// twice — each push starts its own narration + background music players, so
+// two live instances of the same demo audibly overlap. Shared across every
+// row on this screen since the tap and the route actually appearing on
+// screen aren't the same instant.
+DateTime? _lastDemoOpenAt;
+
+void _openDemoPlayer(BuildContext context, DemoSequence sequence) {
+  final now = DateTime.now();
+  if (_lastDemoOpenAt != null &&
+      now.difference(_lastDemoOpenAt!) < const Duration(milliseconds: 800)) {
+    return;
+  }
+  _lastDemoOpenAt = now;
+  Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => DemoPlayerScreen(sequence: sequence)),
+  );
+}
+
 /// Landing screen for the automated, mock-data-only product demo. Pick any
 /// sequence and it plays itself end-to-end — no taps required to advance.
 ///
@@ -148,9 +168,30 @@ class _TutorialDemoHubScreenState extends State<TutorialDemoHubScreen> {
               delay: const Duration(milliseconds: 700),
               child: _SequenceCard(sequences: _workerSequences),
             ),
+            const SizedBox(height: 24),
+            DemoFadeIn(
+              delay: const Duration(milliseconds: 800),
+              child: const _MusicCredit(),
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Attribution for the tutorial demos' looping background track, required by
+/// the Pixabay Content License.
+class _MusicCredit extends StatelessWidget {
+  const _MusicCredit();
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      'Background music: "Upbeat - Upbeat Music" by Tatamusic '
+      '(composer: Sosin Mykola), via Pixabay.',
+      textAlign: TextAlign.center,
+      style: TextStyle(color: dBody.withValues(alpha: 0.7), fontSize: 11),
     );
   }
 }
@@ -205,10 +246,7 @@ class _FeaturedIntroRow extends StatelessWidget {
     final resolved = sequence;
     return InkWell(
       borderRadius: BorderRadius.circular(16),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => DemoPlayerScreen(sequence: resolved)),
-      ),
+      onTap: () => _openDemoPlayer(context, resolved),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -318,12 +356,7 @@ class _SequenceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => DemoPlayerScreen(sequence: sequence),
-        ),
-      ),
+      onTap: () => _openDemoPlayer(context, sequence),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(

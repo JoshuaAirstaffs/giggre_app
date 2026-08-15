@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
+import '../controller/demo_audio_controller.dart';
 import '../controller/demo_controller.dart';
 import 'demo_theme.dart';
 
@@ -15,8 +16,14 @@ import 'demo_theme.dart';
 class DemoChrome extends StatelessWidget {
   final String title;
   final Widget child;
+  final DemoAudioController? audioController;
 
-  const DemoChrome({super.key, required this.title, required this.child});
+  const DemoChrome({
+    super.key,
+    required this.title,
+    required this.child,
+    this.audioController,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +50,10 @@ class DemoChrome extends StatelessWidget {
                           icon: Icons.close_rounded,
                           onTap: () => Navigator.of(context).pop(),
                         ),
+                        if (audioController != null) ...[
+                          const SizedBox(width: 10),
+                          _MuteButton(controller: audioController!),
+                        ],
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
@@ -120,6 +131,27 @@ class DemoChrome extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Mute/unmute toggle for the demo's narration and background music.
+/// Listens directly to [DemoAudioController] (a plain [ChangeNotifier])
+/// rather than through Provider, since only [DemoChrome] needs it.
+class _MuteButton extends StatelessWidget {
+  final DemoAudioController controller;
+  const _MuteButton({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) => _ChromeIconButton(
+        icon: controller.isMuted
+            ? Icons.volume_off_rounded
+            : Icons.volume_up_rounded,
+        onTap: controller.toggleMute,
+      ),
     );
   }
 }

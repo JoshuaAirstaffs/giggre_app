@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/theme_provider.dart';
+import '../controller/demo_audio_controller.dart';
 import '../controller/demo_controller.dart';
 import '../models/demo_sequence.dart';
 import '../widgets/demo_chrome.dart';
@@ -21,16 +22,40 @@ class DemoPlayerScreen extends StatefulWidget {
 
 class _DemoPlayerScreenState extends State<DemoPlayerScreen> {
   late final DemoController _controller;
+  DemoAudioController? _audioController;
+  int? _lastNotifiedStepIndex;
 
   @override
   void initState() {
     super.initState();
-    _controller = DemoController(widget.sequence)..start();
+    _controller = DemoController(
+      widget.sequence,
+      narratedSteps: DemoAudioController.narratedStepsFor(widget.sequence),
+    )..start();
+    if (DemoAudioController.supports(widget.sequence)) {
+      _audioController = DemoAudioController(
+        widget.sequence,
+        onNarrationDuration: _controller.setCurrentStepDuration,
+      )..start();
+      _controller.addListener(_onStepChanged);
+    }
+  }
+
+  // DemoController also notifies when it transitions to `isCompleted` on
+  // the last step, without the step index itself changing — guard against
+  // replaying that step's narration from the start when that happens.
+  void _onStepChanged() {
+    final stepIndex = _controller.stepIndex;
+    if (stepIndex == _lastNotifiedStepIndex) return;
+    _lastNotifiedStepIndex = stepIndex;
+    _audioController?.onStepChanged(stepIndex);
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_onStepChanged);
     _controller.dispose();
+    _audioController?.dispose();
     super.dispose();
   }
 
@@ -48,6 +73,7 @@ class _DemoPlayerScreenState extends State<DemoPlayerScreen> {
           backgroundColor: dBg,
           body: DemoChrome(
             title: widget.sequence.title,
+            audioController: _audioController,
             child: Consumer<DemoController>(
               builder: (context, controller, _) {
                 final step = widget.sequence.steps[controller.stepIndex];
