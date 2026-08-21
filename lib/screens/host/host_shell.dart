@@ -15,6 +15,8 @@ import '../../features/gig_host/presentation/post_quick_gig_screen.dart';
 import '../../features/gig_host/presentation/post_open_gig_screen.dart';
 import '../../features/gig_host/presentation/post_offered_gig_screen.dart';
 import '../../features/home/presentation/profile_tab.dart';
+import '../../features/tutorial/controller/tutorial_controller.dart';
+import '../../features/tutorial/flows/gig_types_flow.dart';
 import '../chat/home_chat.dart';
 import '../worker/worker_shell.dart';
 import 'host_speed_dial.dart';
@@ -176,7 +178,12 @@ class _HostShellState extends State<HostShell>
   void _toggleDial() {
     setState(() => _dialOpen = !_dialOpen);
     if (_dialOpen) {
-      _dialCtrl.forward();
+      // Wait for the bubbles to finish popping out before starting the
+      // tutorial — the anchors exist as soon as the overlay mounts, but
+      // spotlighting them mid-animation would chase a moving target.
+      _dialCtrl.forward().then((_) {
+        if (mounted) context.read<TutorialController>().startIfNeeded(gigTypesFlow);
+      });
     } else {
       _dialCtrl.reverse();
     }

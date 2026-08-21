@@ -18,7 +18,7 @@ class TutorialOverlayHost extends StatefulWidget {
 }
 
 class _TutorialOverlayHostState extends State<TutorialOverlayHost>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   Ticker? _ticker;
   Duration _elapsed = Duration.zero;
   // Blocking steps swallow drags along with taps (see the bands in
@@ -53,15 +53,17 @@ class _TutorialOverlayHostState extends State<TutorialOverlayHost>
     Rect? targetRect;
     final anchorKey = controller.currentAnchorKey;
     final anchorContext = anchorKey?.currentContext;
-    final renderObject = anchorContext?.findRenderObject();
-    if (renderObject is RenderBox && renderObject.attached) {
-      final origin = renderObject.localToGlobal(Offset.zero);
-      targetRect = Rect.fromLTWH(
-        origin.dx,
-        origin.dy,
-        renderObject.size.width,
-        renderObject.size.height,
-      ).inflate(6);
+    if (anchorContext != null && anchorContext.mounted) {
+      final renderObject = anchorContext.findRenderObject();
+      if (renderObject is RenderBox && renderObject.attached) {
+        final origin = renderObject.localToGlobal(Offset.zero);
+        targetRect = Rect.fromLTWH(
+          origin.dx,
+          origin.dy,
+          renderObject.size.width,
+          renderObject.size.height,
+        ).inflate(6);
+      }
     }
 
     if (step == null) {

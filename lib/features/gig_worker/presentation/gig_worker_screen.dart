@@ -15,6 +15,8 @@ import '../../gig_host/services/quick_gig_matching_service.dart';
 import '../../auth/presentation/welcome_screen.dart';
 import '../../../screens/host/host_shell.dart';
 import '../../home/presentation/profile_tab.dart';
+import '../../tutorial/controller/tutorial_controller.dart';
+import '../../tutorial/flows/gig_worker_home_flow.dart';
 import 'widgets/dashboard_summary_card.dart';
 import 'widgets/dispatch_offer_card.dart';
 import 'widgets/gig_map_section.dart';
@@ -142,6 +144,11 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       _activeGigBarStream = watchActiveWorkerGig(uid);
       _pendingCancellationStream = watchPendingCancellation(uid);
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<TutorialController>().startIfNeeded(gigWorkerHomeFlow);
+      }
+    });
   }
 
   @override
@@ -1702,6 +1709,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 onNotifications: () =>
                                     WorkerNotificationsSheet.show(context),
                                 onSwitchToHost: widget.onSwitchToHost,
+                                onTutorial: () => context
+                                    .read<TutorialController>()
+                                    .restart(gigWorkerHomeFlow),
                               ),
                               Transform.translate(
                                 offset: const Offset(0, -24),

@@ -19,6 +19,7 @@ import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/worker_active_gig.dart';
 import '../../../../core/widgets/account_not_verified_modal.dart';
+import '../../../tutorial/widgets/tutorial_anchor.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data models
@@ -2487,20 +2488,23 @@ class _GigMapSectionState extends State<GigMapSection> {
   static const Color _kOfferedDot = Color(0xFF8B6FD8);
 
   Widget _buildViewModeToggle() {
-    return Container(
-      width: 110,
-      height: 30,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        border: Border.all(color: Theme.of(context).dividerColor),
-        borderRadius: BorderRadius.circular(15),
-      ),
-      child: Row(
-        children: [
-          Expanded(child: _buildViewModeSegment(_GigViewMode.map, 'Map')),
-          Expanded(child: _buildViewModeSegment(_GigViewMode.list, 'List')),
-        ],
+    return TutorialAnchor(
+      id: 'workerHome.gigViewToggle',
+      child: Container(
+        width: 110,
+        height: 30,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          border: Border.all(color: Theme.of(context).dividerColor),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Row(
+          children: [
+            Expanded(child: _buildViewModeSegment(_GigViewMode.map, 'Map')),
+            Expanded(child: _buildViewModeSegment(_GigViewMode.list, 'List')),
+          ],
+        ),
       ),
     );
   }

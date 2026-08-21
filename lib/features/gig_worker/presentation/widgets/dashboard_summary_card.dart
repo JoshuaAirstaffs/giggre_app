@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../tutorial/widgets/tutorial_anchor.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Three separate cards matching the dashboard redesign mockup:
@@ -27,7 +28,9 @@ class AvailabilityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    return Container(
+    return TutorialAnchor(
+      id: 'workerHome.activeMode',
+      child: Container(
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(20),
@@ -93,6 +96,7 @@ class AvailabilityCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -204,12 +208,15 @@ class WorkPreferencesCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _ToggleRow(
-            label: 'Quick Gigs',
-            description: 'Get instant offers while online',
-            value: seekingQuickGigs,
-            activeColor: const Color(0xFF2BB673),
-            onChanged: (v) => _guarded(onQuickGigsChanged, v),
+          TutorialAnchor(
+            id: 'workerHome.quickGigsToggle',
+            child: _ToggleRow(
+              label: 'Quick Gigs',
+              description: 'Get instant offers while online',
+              value: seekingQuickGigs,
+              activeColor: const Color(0xFF2BB673),
+              onChanged: (v) => _guarded(onQuickGigsChanged, v),
+            ),
           ),
           Divider(height: 1, color: dividerColor),
           _ToggleRow(

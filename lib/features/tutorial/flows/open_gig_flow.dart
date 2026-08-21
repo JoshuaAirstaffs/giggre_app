@@ -1,15 +1,12 @@
 import '../models/tutorial_flow.dart';
 import '../models/tutorial_step.dart';
 
-// devOnly: true — only shown when the "Open Gig Tutorial" toggle in
-// Developer Options is on (see dev_toggles.dart). Reuses the shared
-// 'postGig.*' anchors from quick_gig_flow.dart wherever Open Gig's form uses
-// the same _buildTextField / _buildScheduleRow / _buildLocationSection /
-// _buildWorkerSlotsStepper / _buildSkillDropdown / _buildExperienceDropdown
-// helpers as the other post-gig screens.
+// Reuses the shared 'postGig.*' anchors from quick_gig_flow.dart wherever
+// Open Gig's form uses the same _buildTextField / _buildScheduleRow /
+// _buildLocationSection / _buildWorkerSlotsStepper / _buildSkillDropdown /
+// _buildExperienceDropdown helpers as the other post-gig screens.
 const openGigFlow = TutorialFlow(
   id: 'openGig',
-  devOnly: true,
   steps: [
     TutorialStep(
       id: 'openGig.title',

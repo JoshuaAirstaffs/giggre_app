@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/theme/profile_tab_theme.dart';
+import '../../features/tutorial/controller/tutorial_controller.dart';
+import '../../features/tutorial/flows/gig_types_flow.dart';
+import '../../features/tutorial/widgets/tutorial_anchor.dart';
 
 const _kGoldStart = Color(0xFFF0A830);
 const _kGoldEnd = Color(0xFFD88810);
@@ -140,7 +144,6 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (context, _) {
-        if (widget.controller.value == 0) return const SizedBox.shrink();
         // This overlay sits as a sibling of Scaffold (not inside it — see
         // host_shell.dart), so it never gets Scaffold's own Material-provided
         // DefaultTextStyle. Without a Material ancestor, Text here fell back
@@ -150,20 +153,36 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
         // masked most of it, leaving just the underline and wrong font
         // showing through. `transparency` restores normal text/icon
         // rendering without painting any surface of its own.
+        //
+        // The bubbles (and their TutorialAnchors) used to be torn down
+        // entirely via an `if (value == 0) return SizedBox.shrink()` guard
+        // on this whole subtree. That repeatedly unmounted/remounted their
+        // GlobalKeys on every open/close cycle — fragile on its own, and if
+        // it raced with the gig-type tutorial's spotlight overlay reading
+        // one of those same GlobalKeys (e.g. tapping a bubble closes the
+        // dial and pushes a new route in the same frame), it could trip
+        // Flutter's GlobalKey consistency assertion
+        // ("_elements.contains(element) is not true"). The bubbles already
+        // make themselves invisible and non-interactive at value == 0 via
+        // opacity/IgnorePointer below, so only the full-screen scrim needs
+        // to stop existing once closed — it's the one thing that would
+        // otherwise keep intercepting taps on the screen underneath.
+        final isOpen = widget.controller.value > 0;
         return Material(
           type: MaterialType.transparency,
           child: Stack(
             children: [
-              Positioned.fill(
-                child: GestureDetector(
-                  onTap: widget.onClose,
-                  child: Container(
-                    color: Colors.black.withValues(
-                      alpha: 0.55 * widget.controller.value.clamp(0.0, 1.0),
+              if (isOpen)
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: widget.onClose,
+                    child: Container(
+                      color: Colors.black.withValues(
+                        alpha: 0.55 * widget.controller.value.clamp(0.0, 1.0),
+                      ),
                     ),
                   ),
                 ),
-              ),
               _bubble(
                 curve: _quickCurve,
                 target: const Offset(-88, -46),
@@ -172,6 +191,7 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                 iconBg: _kBubbleGoldBg,
                 icon: Icons.bolt_rounded,
                 label: 'Quick Gig',
+                anchorId: 'gigHost.quickGigBubble',
                 onTap: widget.onQuickGig,
               ),
               _bubble(
@@ -182,6 +202,7 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                 iconBg: _kBubbleBlueBg,
                 icon: Icons.work_rounded,
                 label: 'Open Gig',
+                anchorId: 'gigHost.openGigBubble',
                 onTap: widget.onOpenGig,
               ),
               _bubble(
@@ -192,6 +213,7 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
                 iconBg: _kBubblePurpleBg,
                 icon: Icons.send_rounded,
                 label: 'Offered Gig',
+                anchorId: 'gigHost.offeredGigBubble',
                 onTap: widget.onOfferedGig,
               ),
               // Single info button for all three gig types — sits level with
@@ -199,6 +221,11 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
               // near the screen's right edge, so it reads as the two ends of
               // the same horizontal band rather than crowding any one bubble.
               _infoButton(anchorFromBottom: anchorFromBottom, context: context),
+              // Mirrors the info button on the opposite (left) edge, level
+              // with the same Open Gig bubble band — a separate entry point
+              // for replaying the gigTypesFlow spotlight tour on demand,
+              // distinct from the info button's static dialog.
+              _tutorialButton(anchorFromBottom: anchorFromBottom, context: context),
             ],
           ),
         );
@@ -249,6 +276,44 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
     showDialog<void>(context: context, builder: (_) => const _GigTypesDialog());
   }
 
+  Widget _tutorialButton({
+    required double anchorFromBottom,
+    required BuildContext context,
+  }) {
+    final t = _openCurve.value;
+    final screenWidth = MediaQuery.of(context).size.width;
+    const iconDiameter = 34.0;
+    const leftMargin = 16.0;
+    final restingDx = -(screenWidth / 2 - leftMargin - iconDiameter / 2);
+    final dx = restingDx * t;
+    // Same center-to-bottom conversion as the info button, so both sit on
+    // the same horizontal band level with the Open Gig bubble.
+    final dy = -100 * t + iconDiameter / 2;
+    final opacity = t.clamp(0.0, 1.0);
+    final scale = t < 0 ? 0.0 : t;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Transform.translate(
+        offset: Offset(dx, -anchorFromBottom + dy),
+        child: IgnorePointer(
+          ignoring: opacity < 0.6,
+          child: Opacity(
+            opacity: opacity,
+            child: Transform.scale(
+              scale: scale,
+              child: GestureDetector(
+                onTap: () =>
+                    context.read<TutorialController>().restart(gigTypesFlow),
+                child: _GigTypesTutorialButton(diameter: iconDiameter),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _bubble({
     required Animation<double> curve,
     required Offset target,
@@ -257,6 +322,7 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
     required Color iconBg,
     required IconData icon,
     required String label,
+    required String anchorId,
     required VoidCallback onTap,
   }) {
     final t = curve.value;
@@ -281,11 +347,14 @@ class _HostSpeedDialOverlayState extends State<HostSpeedDialOverlay> {
               scale: scale,
               child: GestureDetector(
                 onTap: onTap,
-                child: _BubbleContent(
-                  tint: tint,
-                  iconBg: iconBg,
-                  icon: icon,
-                  label: label,
+                child: TutorialAnchor(
+                  id: anchorId,
+                  child: _BubbleContent(
+                    tint: tint,
+                    iconBg: iconBg,
+                    icon: icon,
+                    label: label,
+                  ),
                 ),
               ),
             ),
@@ -427,6 +496,45 @@ class _AllGigTypesInfoButton extends StatelessWidget {
         Icons.info_outline_rounded,
         size: diameter * 0.5,
         color: tokens.textMuted,
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Separate entry point from the info button above — tap replays the
+//  gigTypesFlow tutorial, spotlighting each bubble in turn, instead of
+//  opening the static dialog.
+// ─────────────────────────────────────────────────────────────────────────────
+class _GigTypesTutorialButton extends StatelessWidget {
+  final double diameter;
+
+  const _GigTypesTutorialButton({required this.diameter});
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      width: diameter,
+      height: diameter,
+      decoration: BoxDecoration(
+        color: isDark ? tokens.cardSurface : Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(color: tokens.cardBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.08),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Icon(
+        Icons.play_circle_outline_rounded,
+        size: diameter * 0.5,
+        color: _kBubbleGold,
       ),
     );
   }
