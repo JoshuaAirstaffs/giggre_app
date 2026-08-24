@@ -62,7 +62,10 @@ class TutorialController extends ChangeNotifier {
     // the old widget's disposal running after the new one already mounted.
     if (_anchors[anchorId] == key) {
       _anchors.remove(anchorId);
-      notifyListeners();
+      // Called from TutorialAnchor.dispose(), which can fire mid-teardown of
+      // a whole subtree (e.g. a route pop) while the widget tree is locked —
+      // notifying synchronously here would throw, so defer to next frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) => notifyListeners());
     }
   }
 

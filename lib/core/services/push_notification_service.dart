@@ -25,7 +25,16 @@ class PushNotificationService {
     final messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
 
-    final token = await messaging.getToken();
+    // getToken() throws on iOS Simulator (no real APNs token is ever
+    // assigned there) — swallow so a Simulator run doesn't leave this an
+    // unhandled Future rejection, and so registration still completes
+    // enough to let logout's unregisterForUser proceed later.
+    String? token;
+    try {
+      token = await messaging.getToken();
+    } catch (e) {
+      debugPrint('[PushNotificationService] failed to get FCM token: $e');
+    }
     if (token != null) {
       await _saveToken(uid, token);
     }
@@ -72,7 +81,17 @@ class PushNotificationService {
     // launch/restore, where _registeredToken is still null) — otherwise the
     // token silently stays attached to the outgoing user's fcmTokens array
     // and they keep receiving that account's pushes on this device.
-    final token = _registeredToken ?? await FirebaseMessaging.instance.getToken();
+    String? token = _registeredToken;
+    if (token == null) {
+      try {
+        token = await FirebaseMessaging.instance.getToken();
+      } catch (e) {
+        // On iOS Simulator this always throws (no real APNs token exists),
+        // which otherwise propagates up through clearUser() and aborts
+        // logout before FirebaseAuth.signOut() ever runs.
+        debugPrint('[PushNotificationService] failed to fetch FCM token: $e');
+      }
+    }
     if (token != null) {
       try {
         await FirebaseFirestore.instance.collection('users').doc(uid).update({

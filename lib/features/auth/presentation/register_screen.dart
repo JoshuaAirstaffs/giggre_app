@@ -1,7 +1,10 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import '../../../main.dart';
 import '../../../utils/user_utils.dart';
 import 'dashboard_screen.dart';
@@ -331,24 +334,40 @@ class CompleteProfileScreen extends StatefulWidget {
   // Already-signed-in user (used by the Login screen's Google flow).
   final User? user;
 
-  // Pending Google credential — not yet signed in. Used by the Register
-  // screen's Google sign-up flow so the Firebase Auth account is only
-  // created once the user finishes entering their name/phone below.
+  // Pending Google/Apple credential — not yet signed in. Used by the
+  // Register screen's (and Login screen's) social sign-up flow so the
+  // Firebase Auth account is only created once the user finishes entering
+  // their name/phone below.
   final AuthCredential? pendingCredential;
   final String? pendingDisplayName;
   final String? pendingPhotoUrl;
 
+  // 'google' or 'apple' — which provider pendingCredential came from, so
+  // error messages, the stored signInMethod, and sign-out cleanup on abandon
+  // match the flow the user actually started.
+  final String pendingProvider;
+
   const CompleteProfileScreen({super.key, required this.user})
       : pendingCredential = null,
         pendingDisplayName = null,
-        pendingPhotoUrl = null;
+        pendingPhotoUrl = null,
+        pendingProvider = 'google';
 
   const CompleteProfileScreen.pendingGoogleAccount({
     super.key,
     required this.pendingCredential,
     this.pendingDisplayName,
     this.pendingPhotoUrl,
-  }) : user = null;
+  }) : user = null,
+       pendingProvider = 'google';
+
+  const CompleteProfileScreen.pendingAppleAccount({
+    super.key,
+    required this.pendingCredential,
+    this.pendingDisplayName,
+  }) : user = null,
+       pendingPhotoUrl = null,
+       pendingProvider = 'apple';
 
   @override
   State<CompleteProfileScreen> createState() => _CompleteProfileScreenState();
@@ -364,6 +383,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
 
   static const _blue = Color(0xFF1B6CA8);
   static const _yellow = Color(0xFFF5A623);
+
+  String get _providerLabel => widget.pendingProvider == 'apple' ? 'Apple' : 'Google';
 
   @override
   void initState() {
@@ -497,7 +518,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         switch (e.code) {
           case 'account-exists-with-different-credential':
             message =
-                'This email is linked to a Google account. Log in with Google instead.';
+                'This email is already linked to a different sign-in method. Log in with that method instead.';
             break;
           case 'network-request-failed':
             message = 'No internet connection. Check your connection and try again.';
@@ -509,7 +530,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
             message = 'Too many attempts. Please try again later.';
             break;
           default:
-            message = e.message ?? 'Google Sign-In failed. Please try again.';
+            message =
+                '[${e.code}] ${e.message ?? "$_providerLabel Sign-In failed. Please try again."}';
         }
         isCompletingRegistration.value = false;
         if (mounted) setState(() { _error = message; _isLoading = false; });
@@ -518,14 +540,14 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         isCompletingRegistration.value = false;
         if (mounted) {
           setState(() {
-            _error = 'Google Sign-In failed. Please try again.';
+            _error = '$_providerLabel Sign-In failed: $e';
             _isLoading = false;
           });
         }
         return;
       }
 
-      // This Google account may already be fully registered (e.g. the user
+      // This account may already be fully registered (e.g. the user
       // re-triggered sign-up on an existing account) — don't overwrite
       // their profile, just continue into the app.
       final existingDoc = await FirebaseFirestore.instance
@@ -567,7 +589,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         'createdAt'       : Timestamp.now(),
         'skills'          : [],
         'openGigsUnlocked': false,
-        'signInMethod'    : 'google',
+        'signInMethod'    : widget.user != null ? 'google' : widget.pendingProvider,
         'ratingAsWorker'  : 5.0,
         'ratingAsHost'    : 5.0,
         'ratingCount'     : 0,
@@ -670,7 +692,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
     // plugin cache still remembers it as "selected", so the next attempt
     // would silently reuse the same account instead of showing the picker
     // again. Clear it here so backing out always gives a clean retry.
-    if (widget.pendingCredential != null) {
+    if (widget.pendingCredential != null && widget.pendingProvider == 'google') {
       GoogleSignIn().signOut();
     }
     _nameController.dispose();
@@ -905,6 +927,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   bool isLoading = false;
   bool isGoogleLoading = false;
+  bool isAppleLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   String error = '';
@@ -960,6 +983,57 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
     } finally {
       if (mounted) setState(() => isGoogleLoading = false);
+    }
+  }
+
+  Future<void> signInWithApple() async {
+    setState(() {
+      isAppleLoading = true;
+      error = '';
+    });
+    try {
+      final rawNonce = generateNonce();
+      final appleCredential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+        nonce: sha256ofString(rawNonce),
+      );
+      final idToken = appleCredential.identityToken;
+      if (idToken == null) {
+        throw Exception('Failed to obtain Apple credentials. Please try again.');
+      }
+      final credential = OAuthProvider('apple.com').credential(
+        idToken: idToken,
+        rawNonce: rawNonce,
+        accessToken: appleCredential.authorizationCode,
+      );
+      final displayName = [appleCredential.givenName, appleCredential.familyName]
+          .where((s) => s != null && s.isNotEmpty)
+          .join(' ');
+      // Don't create the Firebase Auth account yet — same deferred pattern
+      // as Google above, so we never leave a half-registered account behind.
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CompleteProfileScreen.pendingAppleAccount(
+            pendingCredential: credential,
+            pendingDisplayName: displayName.isNotEmpty ? displayName : null,
+          ),
+        ),
+      );
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code != AuthorizationErrorCode.canceled && mounted) {
+        setState(() => error = 'Apple Sign-In failed. Please try again.');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => error = 'Apple Sign-In failed. Please try again.');
+      }
+    } finally {
+      if (mounted) setState(() => isAppleLoading = false);
     }
   }
 
@@ -1546,6 +1620,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 _SocialLogoRow(
                   onGoogleTap: signInWithGoogle,
                   isGoogleLoading: isGoogleLoading,
+                  onAppleTap: signInWithApple,
+                  isAppleLoading: isAppleLoading,
                 ),
 
                 const SizedBox(height: 24),
@@ -1640,37 +1716,78 @@ class _PasswordRequirementsChecklist extends StatelessWidget {
 class _SocialLogoRow extends StatelessWidget {
   final VoidCallback onGoogleTap;
   final bool isGoogleLoading;
+  final VoidCallback onAppleTap;
+  final bool isAppleLoading;
 
   const _SocialLogoRow({
     required this.onGoogleTap,
     required this.isGoogleLoading,
+    required this.onAppleTap,
+    required this.isAppleLoading,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 54,
-      child: OutlinedButton.icon(
-        onPressed: isGoogleLoading ? null : onGoogleTap,
-        icon: isGoogleLoading
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2))
-            : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
-        label: Text(
-          isGoogleLoading ? 'Signing in...' : 'Continue with Google',
-          style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: Colors.black87),
+    // Apple only offers a native Sign in with Apple flow on iOS/macOS —
+    // Android/web would need a separate Service ID + redirect URI we
+    // haven't configured, so the button is hidden there for now.
+    final showApple = !kIsWeb && (Platform.isIOS || Platform.isMacOS);
+    return Column(
+      children: [
+        SizedBox(
+          width: double.infinity,
+          height: 54,
+          child: OutlinedButton.icon(
+            onPressed: isGoogleLoading ? null : onGoogleTap,
+            icon: isGoogleLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
+            label: Text(
+              isGoogleLoading ? 'Signing in...' : 'Continue with Google',
+              style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: Colors.grey[400]!),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            ),
+          ),
         ),
-        style: OutlinedButton.styleFrom(
-          side: BorderSide(color: Colors.grey[400]!),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-        ),
-      ),
+        if (showApple) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 54,
+            child: ElevatedButton.icon(
+              onPressed: isAppleLoading ? null : onAppleTap,
+              icon: isAppleLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.apple, color: Colors.white, size: 22),
+              label: Text(
+                isAppleLoading ? 'Signing in...' : 'Continue with Apple',
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

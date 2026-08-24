@@ -59,14 +59,14 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCu8G-pI4L1N2Dam2fw9CbK05n_JcGdcMo',
-    appId: '1:770115931871:ios:6e268a217b93cbfb1de36a',
+    apiKey: 'AIzaSyAk_gIjll8iaRYVUszn_J_iM0nRwo6QQBk',
+    appId: '1:935744152330:ios:b297e9ee08f2d5b0ee10f3',
     messagingSenderId: '935744152330',
     projectId: 'giggre-prod',
     storageBucket: 'giggre-prod.firebasestorage.app',
     iosClientId:
-        '770115931871-4n5bcq4h4209ev8n7s28nb24jcuht4gc.apps.googleusercontent.com',
-    iosBundleId: 'com.example.giggreApp',
+        '935744152330-lps42fobq27ht4kmn9f0gagmeln4fnn7.apps.googleusercontent.com',
+    iosBundleId: 'com.giggre.mobile',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(

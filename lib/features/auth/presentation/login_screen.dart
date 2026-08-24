@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/profile_tab_theme.dart';
@@ -37,6 +38,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool isLoading         = false;
   bool isGoogleLoading   = false;
+  bool isAppleLoading    = false;
   bool _obscurePassword  = true;
   late String _error;
   bool _precached = false;
@@ -206,6 +208,87 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> signInWithApple() async {
+    setState(() { isAppleLoading = true; _error = ''; });
+    try {
+      UserCredential userCred;
+      if (kIsWeb) {
+        final provider = OAuthProvider('apple.com')
+          ..addScope('email')
+          ..addScope('name');
+        userCred = await FirebaseAuth.instance.signInWithPopup(provider);
+      } else {
+        final rawNonce = generateNonce();
+        final appleCredential = await SignInWithApple.getAppleIDCredential(
+          scopes: [
+            AppleIDAuthorizationScopes.email,
+            AppleIDAuthorizationScopes.fullName,
+          ],
+          nonce: sha256ofString(rawNonce),
+        );
+        final idToken = appleCredential.identityToken;
+        if (idToken == null) {
+          throw Exception('Failed to obtain Apple credentials. Please try again.');
+        }
+        final credential = OAuthProvider('apple.com').credential(
+          idToken: idToken,
+          rawNonce: rawNonce,
+          accessToken: appleCredential.authorizationCode,
+        );
+
+        // Apple only fills in email/name on the very first authorization for
+        // this app — on repeat sign-ins appleCredential.email is null, so
+        // fall back to decoding the identityToken's email claim (present on
+        // every sign-in) to still be able to tell new vs. existing accounts
+        // apart before creating a Firebase Auth user (mirrors the Google
+        // flow above).
+        final appleEmail =
+            appleCredential.email ?? emailFromAppleIdToken(idToken);
+        final displayName =
+            [appleCredential.givenName, appleCredential.familyName]
+                .where((s) => s != null && s.isNotEmpty)
+                .join(' ');
+
+        final existingQuery = appleEmail == null
+            ? null
+            : await FirebaseFirestore.instance
+                .collection('users')
+                .where('email', isEqualTo: appleEmail)
+                .limit(1)
+                .get();
+
+        if (existingQuery != null && existingQuery.docs.isEmpty) {
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CompleteProfileScreen.pendingAppleAccount(
+                  pendingCredential: credential,
+                  pendingDisplayName: displayName.isNotEmpty ? displayName : null,
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
+        userCred = await FirebaseAuth.instance.signInWithCredential(credential);
+      }
+      await _handlePostSignIn(userCred.user!);
+
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code != AuthorizationErrorCode.canceled && mounted) {
+        setState(() => _error = 'Apple Sign-In failed. Please try again.');
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) setState(() => _error = e.message ?? 'Apple Sign-In failed.');
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Apple Sign-In failed. Please try again.');
+    } finally {
+      if (mounted) setState(() => isAppleLoading = false);
+    }
+  }
+
   Future<void> _sendPasswordReset() async {
     final email = emailController.text.trim();
     if (email.isEmpty) {
@@ -283,9 +366,11 @@ class _LoginScreenState extends State<LoginScreen> {
               error: _error,
               isLoading: isLoading,
               isGoogleLoading: isGoogleLoading,
+              isAppleLoading: isAppleLoading,
               onLogin: () { SoundService.tap(); login(); },
               onForgotPassword: () { SoundService.tap(); _sendPasswordReset(); },
               onGoogleTap: signInWithGoogle,
+              onAppleTap: signInWithApple,
               onSignUp: () {
                 SoundService.tap();
                 Navigator.pushNamed(context, '/register');
@@ -446,9 +531,11 @@ class _LoginPanel extends StatelessWidget {
   final String error;
   final bool isLoading;
   final bool isGoogleLoading;
+  final bool isAppleLoading;
   final VoidCallback onLogin;
   final VoidCallback onForgotPassword;
   final VoidCallback onGoogleTap;
+  final VoidCallback onAppleTap;
   final VoidCallback onSignUp;
 
   const _LoginPanel({
@@ -460,9 +547,11 @@ class _LoginPanel extends StatelessWidget {
     required this.error,
     required this.isLoading,
     required this.isGoogleLoading,
+    required this.isAppleLoading,
     required this.onLogin,
     required this.onForgotPassword,
     required this.onGoogleTap,
+    required this.onAppleTap,
     required this.onSignUp,
   });
 
@@ -646,6 +735,8 @@ class _LoginPanel extends StatelessWidget {
               tokens: tokens,
               onGoogleTap:     onGoogleTap,
               isGoogleLoading: isGoogleLoading,
+              onAppleTap:      onAppleTap,
+              isAppleLoading:  isAppleLoading,
             ),
             const SizedBox(height: 20),
 
@@ -739,11 +830,15 @@ class _SocialLogoRow extends StatelessWidget {
   final ProfileTabTokens tokens;
   final VoidCallback onGoogleTap;
   final bool isGoogleLoading;
+  final VoidCallback onAppleTap;
+  final bool isAppleLoading;
 
   const _SocialLogoRow({
     required this.tokens,
     required this.onGoogleTap,
     required this.isGoogleLoading,
+    required this.onAppleTap,
+    required this.isAppleLoading,
   });
 
   Widget _comingSoonCircle(IconData icon) {
@@ -809,8 +904,6 @@ class _SocialLogoRow extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _comingSoonCircle(Icons.apple),
-            const SizedBox(width: 22),
             _comingSoonCircle(Icons.facebook),
           ],
         ),

@@ -16,6 +16,7 @@ class TutorialAnchor extends StatefulWidget {
 
 class _TutorialAnchorState extends State<TutorialAnchor> {
   final GlobalKey _key = GlobalKey();
+  TutorialController? _controller;
 
   @override
   void initState() {
@@ -24,8 +25,14 @@ class _TutorialAnchorState extends State<TutorialAnchor> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _controller = context.read<TutorialController>();
+  }
+
+  @override
   void dispose() {
-    context.read<TutorialController>().unregisterAnchor(widget.id, _key);
+    _controller?.unregisterAnchor(widget.id, _key);
     super.dispose();
   }
 

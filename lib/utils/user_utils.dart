@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
 
 // Matches Philippine (+63 / 09xx) and U.S. (+1 / 10-digit) numbers.
 final phoneRegex = RegExp(r'^(\+?63|0)9\d{9}$|^(\+?1)?[2-9]\d{2}[2-9]\d{6}$');
@@ -83,5 +85,30 @@ Future<String> generateUserId() async {
 
     if (existing.docs.isEmpty) return candidate;
     // Collision — retry (probability ≈ 1 in 17 million per attempt)
+  }
+}
+
+/// SHA-256 hash of the raw Apple Sign-In nonce (see sign_in_with_apple's own
+/// generateNonce()) — the hash goes to Apple/Firebase as replay protection,
+/// while the raw value is kept to prove we generated it (see signInWithApple
+/// in the login/register screens).
+String sha256ofString(String input) =>
+    sha256.convert(utf8.encode(input)).toString();
+
+/// Best-effort read of the `email` claim from an Apple identityToken JWT,
+/// without verifying its signature (Firebase re-verifies it server-side
+/// during signInWithCredential). AppleIDCredential.email is only populated
+/// on the very first authorization for an account, but the JWT carries the
+/// email claim on every sign-in — this is what makes it possible to check
+/// for an existing account on repeat Apple sign-ins.
+String? emailFromAppleIdToken(String idToken) {
+  try {
+    final parts = idToken.split('.');
+    if (parts.length != 3) return null;
+    final payload =
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+    return (jsonDecode(payload) as Map<String, dynamic>)['email'] as String?;
+  } catch (_) {
+    return null;
   }
 }

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -9,6 +10,7 @@ import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/screens/app_contents/privacy_policy.dart';
 import 'package:giggre_app/screens/app_contents/terms_and_conditions.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/profile_tab_theme.dart';
@@ -100,6 +102,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   bool isLoading = false;
   bool isGoogleLoading = false;
+  bool isAppleLoading = false;
   bool _obscurePassword = true;
   late String _error;
   bool _precached = false;
@@ -117,6 +120,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   bool _signupIsLoading = false;
   bool _signupIsGoogleLoading = false;
+  bool _signupIsAppleLoading = false;
   bool _signupObscurePassword = true;
   bool _signupObscureConfirmPassword = true;
   String _signupError = '';
@@ -315,6 +319,90 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     }
   }
 
+  Future<void> signInWithApple() async {
+    setState(() {
+      isAppleLoading = true;
+      _error = '';
+    });
+    try {
+      UserCredential userCred;
+      if (kIsWeb) {
+        final provider = OAuthProvider('apple.com')
+          ..addScope('email')
+          ..addScope('name');
+        userCred = await FirebaseAuth.instance.signInWithPopup(provider);
+      } else {
+        final rawNonce = generateNonce();
+        final appleCredential = await SignInWithApple.getAppleIDCredential(
+          scopes: [
+            AppleIDAuthorizationScopes.email,
+            AppleIDAuthorizationScopes.fullName,
+          ],
+          nonce: sha256ofString(rawNonce),
+        );
+        final idToken = appleCredential.identityToken;
+        if (idToken == null) {
+          throw Exception('Failed to obtain Apple credentials. Please try again.');
+        }
+        final credential = OAuthProvider('apple.com').credential(
+          idToken: idToken,
+          rawNonce: rawNonce,
+          accessToken: appleCredential.authorizationCode,
+        );
+
+        // Apple only fills in email/name on the very first authorization for
+        // this app — on repeat sign-ins appleCredential.email is null, so
+        // fall back to decoding the identityToken's email claim (present on
+        // every sign-in) to still be able to tell new vs. existing accounts
+        // apart before creating a Firebase Auth user (mirrors the Google
+        // flow above).
+        final appleEmail =
+            appleCredential.email ?? emailFromAppleIdToken(idToken);
+        final displayName =
+            [appleCredential.givenName, appleCredential.familyName]
+                .where((s) => s != null && s.isNotEmpty)
+                .join(' ');
+
+        final existingQuery = appleEmail == null
+            ? null
+            : await FirebaseFirestore.instance
+                .collection('users')
+                .where('email', isEqualTo: appleEmail)
+                .limit(1)
+                .get();
+
+        if (existingQuery != null && existingQuery.docs.isEmpty) {
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CompleteProfileScreen.pendingAppleAccount(
+                  pendingCredential: credential,
+                  pendingDisplayName: displayName.isNotEmpty ? displayName : null,
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
+        userCred = await FirebaseAuth.instance.signInWithCredential(credential);
+      }
+      await _handlePostSignIn(userCred.user!);
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code != AuthorizationErrorCode.canceled && mounted) {
+        setState(() => _error = 'Apple Sign-In failed. Please try again.');
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) setState(() => _error = e.message ?? 'Apple Sign-In failed.');
+    } catch (e) {
+      if (mounted)
+        setState(() => _error = 'Apple Sign-In failed. Please try again.');
+    } finally {
+      if (mounted) setState(() => isAppleLoading = false);
+    }
+  }
+
   Future<void> _sendPasswordReset() async {
     final email = emailController.text.trim();
     if (email.isEmpty) {
@@ -403,6 +491,62 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       }
     } finally {
       if (mounted) setState(() => _signupIsGoogleLoading = false);
+    }
+  }
+
+  Future<void> _signupSignInWithApple() async {
+    setState(() {
+      _signupIsAppleLoading = true;
+      _signupError = '';
+    });
+    try {
+      final rawNonce = generateNonce();
+      final appleCredential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+        nonce: sha256ofString(rawNonce),
+      );
+      final idToken = appleCredential.identityToken;
+      if (idToken == null) {
+        throw Exception('Failed to obtain Apple credentials. Please try again.');
+      }
+      final credential = OAuthProvider('apple.com').credential(
+        idToken: idToken,
+        rawNonce: rawNonce,
+        accessToken: appleCredential.authorizationCode,
+      );
+      final displayName =
+          [appleCredential.givenName, appleCredential.familyName]
+              .where((s) => s != null && s.isNotEmpty)
+              .join(' ');
+      // Don't create the Firebase Auth account yet — same deferred pattern
+      // as Google above, so we never leave a half-registered account behind.
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CompleteProfileScreen.pendingAppleAccount(
+            pendingCredential: credential,
+            pendingDisplayName: displayName.isNotEmpty ? displayName : null,
+          ),
+        ),
+      );
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code != AuthorizationErrorCode.canceled && mounted) {
+        setState(
+          () => _signupError = 'Apple Sign-In failed. Please try again.',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => _signupError = 'Apple Sign-In failed. Please try again.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _signupIsAppleLoading = false);
     }
   }
 
@@ -871,11 +1015,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                                   error: _signupError,
                                   isLoading: _signupIsLoading,
                                   isGoogleLoading: _signupIsGoogleLoading,
+                                  isAppleLoading: _signupIsAppleLoading,
                                   onCreateAccount: () {
                                     SoundService.tap();
                                     _register();
                                   },
                                   onGoogleTap: _signupSignInWithGoogle,
+                                  onAppleTap: _signupSignInWithApple,
                                   onLogin: () {
                                     SoundService.tap();
                                     _goToLogin();
@@ -893,6 +1039,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                                   error: _error,
                                   isLoading: isLoading,
                                   isGoogleLoading: isGoogleLoading,
+                                  isAppleLoading: isAppleLoading,
                                   onLogin: () {
                                     SoundService.tap();
                                     login();
@@ -902,6 +1049,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                                     _sendPasswordReset();
                                   },
                                   onGoogleTap: signInWithGoogle,
+                                  onAppleTap: signInWithApple,
                                   onSignUp: () {
                                     SoundService.tap();
                                     _goToSignup();
@@ -1270,9 +1418,11 @@ class _LoginPanel extends StatelessWidget {
   final String error;
   final bool isLoading;
   final bool isGoogleLoading;
+  final bool isAppleLoading;
   final VoidCallback onLogin;
   final VoidCallback onForgotPassword;
   final VoidCallback onGoogleTap;
+  final VoidCallback onAppleTap;
   final VoidCallback onSignUp;
 
   const _LoginPanel({
@@ -1285,9 +1435,11 @@ class _LoginPanel extends StatelessWidget {
     required this.error,
     required this.isLoading,
     required this.isGoogleLoading,
+    required this.isAppleLoading,
     required this.onLogin,
     required this.onForgotPassword,
     required this.onGoogleTap,
+    required this.onAppleTap,
     required this.onSignUp,
   });
 
@@ -1466,6 +1618,8 @@ class _LoginPanel extends StatelessWidget {
             tokens: tokens,
             onGoogleTap: onGoogleTap,
             isGoogleLoading: isGoogleLoading,
+            onAppleTap: onAppleTap,
+            isAppleLoading: isAppleLoading,
           ),
           const SizedBox(height: 20),
 
@@ -1516,8 +1670,10 @@ class _SignupPanel extends StatelessWidget {
   final String error;
   final bool isLoading;
   final bool isGoogleLoading;
+  final bool isAppleLoading;
   final VoidCallback onCreateAccount;
   final VoidCallback onGoogleTap;
+  final VoidCallback onAppleTap;
   final VoidCallback onLogin;
 
   const _SignupPanel({
@@ -1538,8 +1694,10 @@ class _SignupPanel extends StatelessWidget {
     required this.error,
     required this.isLoading,
     required this.isGoogleLoading,
+    required this.isAppleLoading,
     required this.onCreateAccount,
     required this.onGoogleTap,
+    required this.onAppleTap,
     required this.onLogin,
   });
 
@@ -1753,6 +1911,8 @@ class _SignupPanel extends StatelessWidget {
             tokens: tokens,
             onGoogleTap: onGoogleTap,
             isGoogleLoading: isGoogleLoading,
+            onAppleTap: onAppleTap,
+            isAppleLoading: isAppleLoading,
           ),
           const SizedBox(height: 20),
 
@@ -2282,40 +2442,83 @@ class _SocialLogoRow extends StatelessWidget {
   final ProfileTabTokens tokens;
   final VoidCallback onGoogleTap;
   final bool isGoogleLoading;
+  final VoidCallback onAppleTap;
+  final bool isAppleLoading;
 
   const _SocialLogoRow({
     required this.tokens,
     required this.onGoogleTap,
     required this.isGoogleLoading,
+    required this.onAppleTap,
+    required this.isAppleLoading,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 52,
-      child: OutlinedButton.icon(
-        onPressed: isGoogleLoading ? null : onGoogleTap,
-        icon: isGoogleLoading
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
-        label: Text(
-          isGoogleLoading ? 'Signing in...' : 'Continue with Google',
-          style: TextStyle(
-            fontSize: 14.5,
-            fontWeight: FontWeight.w700,
-            color: tokens.textPrimary,
+    // Apple only offers a native Sign in with Apple flow on iOS/macOS —
+    // Android/web would need a separate Service ID + redirect URI we
+    // haven't configured, so the button is hidden there for now.
+    final showApple = !kIsWeb && (Platform.isIOS || Platform.isMacOS);
+    return Column(
+      children: [
+        SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: OutlinedButton.icon(
+            onPressed: isGoogleLoading ? null : onGoogleTap,
+            icon: isGoogleLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
+            label: Text(
+              isGoogleLoading ? 'Signing in...' : 'Continue with Google',
+              style: TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w700,
+                color: tokens.textPrimary,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: tokens.cardBorder),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            ),
           ),
         ),
-        style: OutlinedButton.styleFrom(
-          side: BorderSide(color: tokens.cardBorder),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        ),
-      ),
+        if (showApple) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton.icon(
+              onPressed: isAppleLoading ? null : onAppleTap,
+              icon: isAppleLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.apple, color: Colors.white, size: 22),
+              label: Text(
+                isAppleLoading ? 'Signing in...' : 'Continue with Apple',
+                style: const TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

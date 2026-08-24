@@ -1,5 +1,6 @@
 # Miscellaneous
 
+bootdevices.md
 *.class
 *.log
 *.pyc
@@ -66,3 +67,5 @@ app.*.map.json
 # Node modules
 node_modules/
 functions/node_modules/
+# Widget Preview related
+.widget_preview/
