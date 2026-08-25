@@ -123,6 +123,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   bool _signupIsAppleLoading = false;
   bool _signupObscurePassword = true;
   bool _signupObscureConfirmPassword = true;
+  bool _agreedToTerms = false;
   String _signupError = '';
 
   void _navigateByRole(String? role) {
@@ -658,6 +659,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       setState(() => _signupError = 'All fields are required');
       return;
     }
+    if (!_agreedToTerms) {
+      setState(
+        () => _signupError =
+            'Please agree to the Terms & Conditions and Privacy Policy to continue.',
+      );
+      return;
+    }
     if (!isPasswordStrong(password)) {
       setState(
         () => _signupError =
@@ -731,6 +739,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         'phone': fullPhone,
         'balance': 0,
         'createdAt': Timestamp.now(),
+        'termsAccepted': true,
+        'termsAcceptedAt': Timestamp.now(),
         'skills': [],
         'openGigsUnlocked': false,
         'signInMethod': 'email',
@@ -1012,6 +1022,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                                     () => _signupObscureConfirmPassword =
                                         !_signupObscureConfirmPassword,
                                   ),
+                                  agreedToTerms: _agreedToTerms,
+                                  onAgreedToTermsChanged: (v) =>
+                                      setState(() => _agreedToTerms = v),
                                   error: _signupError,
                                   isLoading: _signupIsLoading,
                                   isGoogleLoading: _signupIsGoogleLoading,
@@ -1667,6 +1680,8 @@ class _SignupPanel extends StatelessWidget {
   final VoidCallback onToggleObscure;
   final bool obscureConfirmPassword;
   final VoidCallback onToggleObscureConfirm;
+  final bool agreedToTerms;
+  final ValueChanged<bool> onAgreedToTermsChanged;
   final String error;
   final bool isLoading;
   final bool isGoogleLoading;
@@ -1691,6 +1706,8 @@ class _SignupPanel extends StatelessWidget {
     required this.onToggleObscure,
     required this.obscureConfirmPassword,
     required this.onToggleObscureConfirm,
+    required this.agreedToTerms,
+    required this.onAgreedToTermsChanged,
     required this.error,
     required this.isLoading,
     required this.isGoogleLoading,
@@ -1706,7 +1723,7 @@ class _SignupPanel extends StatelessWidget {
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
 
     return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + keyboardInset),
+      padding: EdgeInsets.fromLTRB(20, 0, 20, 48 + keyboardInset),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1863,6 +1880,13 @@ class _SignupPanel extends StatelessWidget {
             const SizedBox(height: 14),
           ],
 
+          // ─── TERMS & CONDITIONS ───
+          _ConsentLine(
+            agreed: agreedToTerms,
+            onChanged: onAgreedToTermsChanged,
+          ),
+          const SizedBox(height: 14),
+
           // ─── CREATE ACCOUNT BUTTON ───
           SizedBox(
             height: 52,
@@ -1913,7 +1937,6 @@ class _SignupPanel extends StatelessWidget {
               ),
             ),
           ),
-          const _ConsentLine(),
           const SizedBox(height: 16),
 
           // ─── LOG IN ───
@@ -2066,7 +2089,10 @@ class _ReferralField extends StatelessWidget {
 }
 
 class _ConsentLine extends StatefulWidget {
-  const _ConsentLine();
+  final bool agreed;
+  final ValueChanged<bool> onChanged;
+
+  const _ConsentLine({required this.agreed, required this.onChanged});
 
   @override
   State<_ConsentLine> createState() => _ConsentLineState();
@@ -2105,24 +2131,43 @@ class _ConsentLineState extends State<_ConsentLine> {
       color: _kMuted2,
       decoration: TextDecoration.underline,
     );
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: RichText(
-        textAlign: TextAlign.center,
-        text: TextSpan(
-          style: const TextStyle(fontSize: 9.5, color: _kMuted2),
-          children: [
-            const TextSpan(text: "By signing up you agree to Giggre's "),
-            TextSpan(text: 'Terms', style: linkStyle, recognizer: _termsTap),
-            const TextSpan(text: ' & '),
-            TextSpan(
-              text: 'Privacy Policy',
-              style: linkStyle,
-              recognizer: _privacyTap,
-            ),
-          ],
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: 22,
+          height: 22,
+          child: Checkbox(
+            value: widget.agreed,
+            onChanged: (v) => widget.onChanged(v ?? false),
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
         ),
-      ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: RichText(
+            text: TextSpan(
+              style: const TextStyle(fontSize: 9.5, color: _kMuted2),
+              children: [
+                const TextSpan(text: "I have read and agree to Giggre's "),
+                TextSpan(
+                  text: 'Terms & Conditions',
+                  style: linkStyle,
+                  recognizer: _termsTap,
+                ),
+                const TextSpan(text: ' and '),
+                TextSpan(
+                  text: 'Privacy Policy',
+                  style: linkStyle,
+                  recognizer: _privacyTap,
+                ),
+                const TextSpan(text: '.'),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

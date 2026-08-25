@@ -1,8 +1,11 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:giggre_app/screens/app_contents/privacy_policy.dart';
+import 'package:giggre_app/screens/app_contents/terms_and_conditions.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import '../../../main.dart';
@@ -379,7 +382,10 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
   final _referralCodeController = TextEditingController();
   _Country _selectedCountry = _kDefaultCountry;
   bool _isLoading = false;
+  bool _agreedToTerms = false;
   String _error = '';
+  late final TapGestureRecognizer _termsTap;
+  late final TapGestureRecognizer _privacyTap;
 
   static const _blue = Color(0xFF1B6CA8);
   static const _yellow = Color(0xFFF5A623);
@@ -389,6 +395,16 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
   @override
   void initState() {
     super.initState();
+    _termsTap = TapGestureRecognizer()
+      ..onTap = () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => TermsAndConditions()),
+      );
+    _privacyTap = TapGestureRecognizer()
+      ..onTap = () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => PrivacyPolicy()),
+      );
     _nameController.text = widget.user?.displayName ?? widget.pendingDisplayName ?? '';
   }
 
@@ -471,6 +487,13 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
 
     if (name.isEmpty || phone.isEmpty) {
       setState(() => _error = 'Name and phone number are required.');
+      return;
+    }
+    if (!_agreedToTerms) {
+      setState(
+        () => _error =
+            'Please agree to the Terms & Conditions and Privacy Policy to continue.',
+      );
       return;
     }
 
@@ -587,6 +610,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         'photoUrl'        : authUser.photoURL ?? widget.pendingPhotoUrl ?? '',
         'balance'         : 0,
         'createdAt'       : Timestamp.now(),
+        'termsAccepted'   : true,
+        'termsAcceptedAt' : Timestamp.now(),
         'skills'          : [],
         'openGigsUnlocked': false,
         'signInMethod'    : widget.user != null ? 'google' : widget.pendingProvider,
@@ -698,6 +723,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
     _nameController.dispose();
     _phoneController.dispose();
     _referralCodeController.dispose();
+    _termsTap.dispose();
+    _privacyTap.dispose();
     super.dispose();
   }
 
@@ -846,6 +873,56 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                   ),
                 ),
 
+                const SizedBox(height: 16),
+
+                // ─── TERMS & CONDITIONS ───
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: Checkbox(
+                        value: _agreedToTerms,
+                        onChanged: (v) =>
+                            setState(() => _agreedToTerms = v ?? false),
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: RichText(
+                        text: TextSpan(
+                          style: TextStyle(fontSize: 9.5, color: Colors.grey[500]),
+                          children: [
+                            const TextSpan(
+                              text: "I have read and agree to Giggre's ",
+                            ),
+                            TextSpan(
+                              text: 'Terms & Conditions',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                decoration: TextDecoration.underline,
+                              ),
+                              recognizer: _termsTap,
+                            ),
+                            const TextSpan(text: ' and '),
+                            TextSpan(
+                              text: 'Privacy Policy',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                decoration: TextDecoration.underline,
+                              ),
+                              recognizer: _privacyTap,
+                            ),
+                            const TextSpan(text: '.'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 16),
 
                 if (_error.isNotEmpty) ...[

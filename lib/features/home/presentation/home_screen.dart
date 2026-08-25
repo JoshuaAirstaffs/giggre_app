@@ -710,7 +710,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isVerified = context.watch<CurrentUserProvider>().isVerified;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
 
     return Scaffold(
@@ -786,33 +785,7 @@ class _HomeScreenState extends State<HomeScreen> {
         titleSpacing: 20,
         title: GestureDetector(
           onTap: _openGiggreMenu,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Gold bolt logo
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: kGold.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Center(
-                  child: Icon(Icons.bolt_rounded, color: kGold, size: 22),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                'Giggre',
-                style: TextStyle(
-                  color: onSurface,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 20,
-                  letterSpacing: -0.3,
-                ),
-              ),
-            ],
-          ),
+          child: Image.asset('assets/images/logo.png', height: 32),
         ),
         actions: [
           _IconSquareButton(icon: Icons.person_rounded, onTap: _openProfile),

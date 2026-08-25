@@ -10,6 +10,22 @@ import 'package:giggre_app/features/call/video_call_screen.dart';
 import 'package:giggre_app/main.dart' show navigatorKey;
 import 'package:giggre_app/screens/chat/chat.dart';
 
+// Support auto-replies are authored as HTML (rendered properly inside the
+// conversation via flutter_html) — this list preview is a single-line
+// ellipsis snippet, so tags are stripped rather than rendered.
+String _stripHtml(String input) {
+  return input
+      .replaceAll(RegExp(r'<[^>]*>'), ' ')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
 class HomeChat extends StatefulWidget {
   // False when hosted as the Chat tab root inside WorkerShell — suppresses
   // the auto back arrow since there's no route to pop within the tab.
@@ -307,7 +323,8 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               final date =
                   rawDate != null ? (rawDate as Timestamp).toDate() : null;
               final sender = data['lastMessageSender'] as String? ?? '';
-              final lastMessage = data['lastMessage'] as String? ?? '';
+              final lastMessage =
+                  _stripHtml(data['lastMessage'] as String? ?? '');
               final displayMessage =
                   sender.isNotEmpty ? '$sender: $lastMessage' : lastMessage;
 
@@ -919,7 +936,8 @@ class _SupportTabState extends State<_SupportTab> {
           final date =
               rawDate != null ? (rawDate as Timestamp).toDate() : null;
           final sender = room['lastMessageSender'] as String? ?? '';
-          final lastMessage = room['lastMessage'] as String? ?? '';
+          final lastMessage =
+              _stripHtml(room['lastMessage'] as String? ?? '');
           final displayMessage =
               sender.isNotEmpty ? '$sender: $lastMessage' : lastMessage;
 
@@ -1096,7 +1114,7 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final backgroundColor = isDarkMode ? Colors.grey[900] : Colors.white;
+    final backgroundColor = isDarkMode ? kCard : Colors.white;
 
     return StreamBuilder<bool>(
       stream: _unreadStream,
