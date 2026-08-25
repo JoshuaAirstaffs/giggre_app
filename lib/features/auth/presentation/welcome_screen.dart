@@ -2460,7 +2460,7 @@ class _SocialLogoRow extends StatelessWidget {
     // haven't configured, so the button is hidden there for now.
     final showApple = !kIsWeb && (Platform.isIOS || Platform.isMacOS);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final appleBg = isDark ? Colors.black : Colors.white;
+    final appleBg = isDark ? Colors.transparent : Colors.white;
     final appleFg = isDark ? Colors.white : Colors.black;
     return Row(
       children: [

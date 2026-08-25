@@ -888,7 +888,7 @@ class _SocialLogoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final appleBg = isDark ? Colors.black : Colors.white;
+    final appleBg = isDark ? Colors.transparent : Colors.white;
     final appleFg = isDark ? Colors.white : Colors.black;
     return Column(
       children: [
