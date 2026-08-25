@@ -458,7 +458,7 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
     _lastLng = null;
     _callSubscription?.cancel();
     _callSubscription = null;
-    _stopRingtone();
+    await _stopRingtone();
     _audioPlayer.dispose(); // ← clean up
     notifyListeners();
     if (previousUid != null) {

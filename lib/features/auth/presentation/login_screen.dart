@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -878,27 +880,67 @@ class _SocialLogoRow extends StatelessWidget {
     );
   }
 
+  // Apple only offers a native Sign in with Apple flow on iOS/macOS —
+  // Android/web would need a separate Service ID + redirect URI we
+  // haven't configured, so the button is hidden there for now.
+  bool get _showApple => !kIsWeb && (Platform.isIOS || Platform.isMacOS);
+
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final appleBg = isDark ? Colors.black : Colors.white;
+    final appleFg = isDark ? Colors.white : Colors.black;
     return Column(
       children: [
-        SizedBox(
-          width: double.infinity,
-          height: 52,
-          child: OutlinedButton.icon(
-            onPressed: isGoogleLoading ? null : onGoogleTap,
-            icon: isGoogleLoading
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
-            label: Text(
-              isGoogleLoading ? 'Signing in...' : 'Continue with Google',
-              style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: tokens.textPrimary),
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 52,
+                child: OutlinedButton.icon(
+                  onPressed: isGoogleLoading ? null : onGoogleTap,
+                  icon: isGoogleLoading
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
+                  label: Text(
+                    'Google',
+                    style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: tokens.textPrimary),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: tokens.cardBorder),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                  ),
+                ),
+              ),
             ),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: tokens.cardBorder),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-            ),
-          ),
+            if (_showApple) ...[
+              const SizedBox(width: 12),
+              Expanded(
+                child: SizedBox(
+                  height: 52,
+                  child: ElevatedButton.icon(
+                    onPressed: isAppleLoading ? null : onAppleTap,
+                    icon: isAppleLoading
+                        ? SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: appleFg))
+                        : Icon(Icons.apple, color: appleFg, size: 22),
+                    label: Text(
+                      'Apple',
+                      style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: appleFg),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: appleBg,
+                      elevation: 0,
+                      side: BorderSide(color: tokens.cardBorder),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
         const SizedBox(height: 14),
         Row(

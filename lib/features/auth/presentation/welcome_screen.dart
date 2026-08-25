@@ -1474,6 +1474,32 @@ class _LoginPanel extends StatelessWidget {
           ),
           const SizedBox(height: 22),
 
+          // ─── SOCIAL LOGO ROW ───
+          _SocialLogoRow(
+            tokens: tokens,
+            onGoogleTap: onGoogleTap,
+            isGoogleLoading: isGoogleLoading,
+            onAppleTap: onAppleTap,
+            isAppleLoading: isAppleLoading,
+          ),
+          const SizedBox(height: 16),
+
+          // ─── DIVIDER ───
+          Row(
+            children: [
+              Expanded(child: Divider(color: tokens.divider)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'or continue with',
+                  style: TextStyle(color: tokens.textMuted, fontSize: 12),
+                ),
+              ),
+              Expanded(child: Divider(color: tokens.divider)),
+            ],
+          ),
+          const SizedBox(height: 22),
+
           // ─── EMAIL ───
           _AuthField(
             tokens: tokens,
@@ -1595,33 +1621,7 @@ class _LoginPanel extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 6),
-
-          // ─── DIVIDER ───
-          Row(
-            children: [
-              Expanded(child: Divider(color: tokens.divider)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  'or continue with',
-                  style: TextStyle(color: tokens.textMuted, fontSize: 12),
-                ),
-              ),
-              Expanded(child: Divider(color: tokens.divider)),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // ─── SOCIAL LOGO ROW ───
-          _SocialLogoRow(
-            tokens: tokens,
-            onGoogleTap: onGoogleTap,
-            isGoogleLoading: isGoogleLoading,
-            onAppleTap: onAppleTap,
-            isAppleLoading: isAppleLoading,
-          ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
 
           // ─── SIGN UP ───
           Row(
@@ -1725,6 +1725,32 @@ class _SignupPanel extends StatelessWidget {
             'Join Giggre and start earning today!',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 11.5, color: tokens.textMuted),
+          ),
+          const SizedBox(height: 20),
+
+          // ─── SOCIAL LOGO ROW ───
+          _SocialLogoRow(
+            tokens: tokens,
+            onGoogleTap: onGoogleTap,
+            isGoogleLoading: isGoogleLoading,
+            onAppleTap: onAppleTap,
+            isAppleLoading: isAppleLoading,
+          ),
+          const SizedBox(height: 16),
+
+          // ─── DIVIDER ───
+          Row(
+            children: [
+              Expanded(child: Divider(color: tokens.divider)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'or sign up with',
+                  style: TextStyle(color: tokens.textMuted, fontSize: 12),
+                ),
+              ),
+              Expanded(child: Divider(color: tokens.divider)),
+            ],
           ),
           const SizedBox(height: 20),
 
@@ -1889,32 +1915,6 @@ class _SignupPanel extends StatelessWidget {
           ),
           const _ConsentLine(),
           const SizedBox(height: 16),
-
-          // ─── DIVIDER ───
-          Row(
-            children: [
-              Expanded(child: Divider(color: tokens.divider)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  'or sign up with',
-                  style: TextStyle(color: tokens.textMuted, fontSize: 12),
-                ),
-              ),
-              Expanded(child: Divider(color: tokens.divider)),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // ─── SOCIAL LOGO ROW ───
-          _SocialLogoRow(
-            tokens: tokens,
-            onGoogleTap: onGoogleTap,
-            isGoogleLoading: isGoogleLoading,
-            onAppleTap: onAppleTap,
-            isAppleLoading: isAppleLoading,
-          ),
-          const SizedBox(height: 20),
 
           // ─── LOG IN ───
           Row(
@@ -2459,61 +2459,66 @@ class _SocialLogoRow extends StatelessWidget {
     // Android/web would need a separate Service ID + redirect URI we
     // haven't configured, so the button is hidden there for now.
     final showApple = !kIsWeb && (Platform.isIOS || Platform.isMacOS);
-    return Column(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final appleBg = isDark ? Colors.black : Colors.white;
+    final appleFg = isDark ? Colors.white : Colors.black;
+    return Row(
       children: [
-        SizedBox(
-          width: double.infinity,
-          height: 52,
-          child: OutlinedButton.icon(
-            onPressed: isGoogleLoading ? null : onGoogleTap,
-            icon: isGoogleLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
-            label: Text(
-              isGoogleLoading ? 'Signing in...' : 'Continue with Google',
-              style: TextStyle(
-                fontSize: 14.5,
-                fontWeight: FontWeight.w700,
-                color: tokens.textPrimary,
+        Expanded(
+          child: SizedBox(
+            height: 52,
+            child: OutlinedButton.icon(
+              onPressed: isGoogleLoading ? null : onGoogleTap,
+              icon: isGoogleLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
+              label: Text(
+                'Google',
+                style: TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                  color: tokens.textPrimary,
+                ),
               ),
-            ),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: tokens.cardBorder),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: tokens.cardBorder),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              ),
             ),
           ),
         ),
         if (showApple) ...[
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              onPressed: isAppleLoading ? null : onAppleTap,
-              icon: isAppleLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.apple, color: Colors.white, size: 22),
-              label: Text(
-                isAppleLoading ? 'Signing in...' : 'Continue with Apple',
-                style: const TextStyle(
-                  fontSize: 14.5,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
+          const SizedBox(width: 12),
+          Expanded(
+            child: SizedBox(
+              height: 52,
+              child: ElevatedButton.icon(
+                onPressed: isAppleLoading ? null : onAppleTap,
+                icon: isAppleLoading
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: appleFg),
+                      )
+                    : Icon(Icons.apple, color: appleFg, size: 22),
+                label: Text(
+                  'Apple',
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    color: appleFg,
+                  ),
                 ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.black,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: appleBg,
+                  elevation: 0,
+                  side: BorderSide(color: tokens.cardBorder),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                ),
               ),
             ),
           ),

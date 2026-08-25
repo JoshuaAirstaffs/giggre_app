@@ -168,7 +168,7 @@ class _SendMessageTab extends StatelessWidget {
                   Expanded(
                     child: _CopyContainer(
                       title: 'Website',
-                      value: 'https://app.giggre.com/',
+                      value: 'https://giggre.com/',
                       icon: Icons.language,
                     ),
                   ),
