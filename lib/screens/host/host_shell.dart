@@ -209,7 +209,8 @@ class _HostShellState extends State<HostShell>
   // action — can proceed without waiting for either.
   void _requireVerified(VoidCallback onVerified) {
     final provider = context.read<CurrentUserProvider>();
-    if (provider.isVerified == 'verified') {
+    if (provider.isVerified == 'verified' ||
+        provider.allowGigAccessForUnverified) {
       onVerified();
       return;
     }

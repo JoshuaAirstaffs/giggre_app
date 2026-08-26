@@ -87,7 +87,10 @@ class AvailabilityCard extends StatelessWidget {
             child: Switch(
               value: isOnline,
               onChanged: (v) {
-                if (isVerified == 'verified') {
+                final allowUnverified = context
+                    .read<CurrentUserProvider>()
+                    .allowGigAccessForUnverified;
+                if (isVerified == 'verified' || allowUnverified) {
                   onChanged(v);
                 } else {
                   onVerificationRequired();
@@ -200,8 +203,10 @@ class WorkPreferencesCard extends StatelessWidget {
     required this.onVerificationRequired,
   });
 
-  void _guarded(ValueChanged<bool> onChanged, bool value) {
-    if (isVerified == 'verified') {
+  void _guarded(BuildContext context, ValueChanged<bool> onChanged, bool value) {
+    final allowUnverified =
+        context.read<CurrentUserProvider>().allowGigAccessForUnverified;
+    if (isVerified == 'verified' || allowUnverified) {
       onChanged(value);
     } else {
       onVerificationRequired();
@@ -226,7 +231,7 @@ class WorkPreferencesCard extends StatelessWidget {
               description: 'Get instant offers while online',
               value: seekingQuickGigs,
               activeColor: const Color(0xFF2BB673),
-              onChanged: (v) => _guarded(onQuickGigsChanged, v),
+              onChanged: (v) => _guarded(context, onQuickGigsChanged, v),
             ),
           ),
           Divider(height: 1, color: dividerColor),
@@ -235,7 +240,7 @@ class WorkPreferencesCard extends StatelessWidget {
             description: 'Auto-book gigs matching your skills',
             value: autoAccept,
             activeColor: kGold,
-            onChanged: (v) => _guarded(onAutoAcceptChanged, v),
+            onChanged: (v) => _guarded(context, onAutoAcceptChanged, v),
           ),
         ],
       ),

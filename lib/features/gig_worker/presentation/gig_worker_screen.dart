@@ -1845,7 +1845,16 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                         bottom: 0,
                         child: DispatchOfferCard(
                           gig: _dispatchedGig!,
-                          onAccept: () => _acceptDispatch(_dispatchedGig!),
+                          onAccept: () {
+                            if (_isVerified == 'verified' ||
+                                context
+                                    .read<CurrentUserProvider>()
+                                    .allowGigAccessForUnverified) {
+                              _acceptDispatch(_dispatchedGig!);
+                            } else {
+                              _showVerificationModal(context);
+                            }
+                          },
                           onDecline: () => _declineDispatch(_dispatchedGig!),
                         ),
                       ),
@@ -1858,8 +1867,16 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                           gig: _pendingOfferedGig!,
                           description: _pendingOfferedGigDesc,
                           skillRequired: _pendingOfferedGigSkill,
-                          onAccept: () =>
-                              _acceptOfferedGig(_pendingOfferedGig!),
+                          onAccept: () {
+                            if (_isVerified == 'verified' ||
+                                context
+                                    .read<CurrentUserProvider>()
+                                    .allowGigAccessForUnverified) {
+                              _acceptOfferedGig(_pendingOfferedGig!);
+                            } else {
+                              _showVerificationModal(context);
+                            }
+                          },
                           onDecline: () =>
                               _declineOfferedGig(_pendingOfferedGig!),
                           // Dismiss locally only — leaves the offer's

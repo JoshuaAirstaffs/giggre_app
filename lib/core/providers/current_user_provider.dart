@@ -17,6 +17,7 @@ import '../services/push_notification_service.dart';
 class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   CurrentUserProvider() {
     WidgetsBinding.instance.addObserver(this);
+    _listenToGigVisibilityRules();
   }
 
   String? _currentEmail;
@@ -24,7 +25,9 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   String? _uid;
   String? _userId;
   String? _isVerified;
+  bool _allowGigAccessForUnverified = false;
   StreamSubscription? _callSubscription;
+  StreamSubscription? _gigVisibilityRulesSubscription;
 
   final _audioPlayer = AudioPlayer(); // ← new
 
@@ -54,6 +57,7 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   String? get uid => _uid;
   String? get userId => _userId;
   String? get isVerified => _isVerified;
+  bool get allowGigAccessForUnverified => _allowGigAccessForUnverified;
   bool get isLoggedIn => _uid != null;
   String get currencyCode => _currencyCode;
   double? get lastLat => _lastLat;
@@ -555,6 +559,7 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _gigVisibilityRulesSubscription?.cancel();
     super.dispose();
   }
 
@@ -593,6 +598,29 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _stopRingtone() async {
     await _audioPlayer.stop();
+  }
+
+  // ── Gig visibility rules (remote feature flag) ────────────────────────────
+
+  // Admin-controlled kill switch: while true, the verification gates on
+  // going online, the work-preference toggles, applying to a gig, and
+  // posting a gig (see host_shell.dart/gig_map_section.dart/
+  // dashboard_summary_card.dart) are bypassed entirely — used to let
+  // unverified users through during a rollout or an admin backlog, without
+  // a build. Live listener (not a one-time fetch) so a toggle takes effect
+  // for already-open screens immediately, the same as _MaintenanceGate.
+  void _listenToGigVisibilityRules() {
+    _gigVisibilityRulesSubscription = FirebaseFirestore.instance
+        .collection('general_config')
+        .doc('gig_visibility_rules')
+        .snapshots()
+        .listen((snap) {
+          final value = snap.data()?['allowGigAccessForUnverified'] == true;
+          if (value != _allowGigAccessForUnverified) {
+            _allowGigAccessForUnverified = value;
+            notifyListeners();
+          }
+        });
   }
 
   // ── Incoming call listener ────────────────────────────────────────────────

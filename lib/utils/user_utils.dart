@@ -64,6 +64,17 @@ final List<PasswordRequirement> passwordRequirements = [
 bool isPasswordStrong(String password) =>
     passwordRequirements.every((r) => r.isMet(password));
 
+/// Accounts created before email/phone verification existed have no
+/// `emailVerified`/`phoneVerified` field in Firestore at all — treat that
+/// absence (or an explicit `true`) as already verified so those users aren't
+/// retroactively locked out. Only an explicit `false` (set at signup, until
+/// the user completes that step) requires the verification screen.
+bool needsEmailVerification(Map<String, dynamic>? data) =>
+    data?['emailVerified'] == false;
+
+bool needsPhoneVerification(Map<String, dynamic>? data) =>
+    data?['phoneVerified'] == false;
+
 /// Generates a unique user ID: 3 random uppercase letters + 6 random digits
 /// (e.g. "XKP482931"). Retries automatically on the rare collision.
 Future<String> generateUserId() async {

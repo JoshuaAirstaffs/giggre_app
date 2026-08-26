@@ -2774,7 +2774,11 @@ class _GigMapSectionState extends State<GigMapSection> {
                     trailing: TextButton(
                       onPressed: canApply
                           ? () {
-                              if (widget.isVerified != 'verified') {
+                              final allowUnverified = context
+                                  .read<CurrentUserProvider>()
+                                  .allowGigAccessForUnverified;
+                              if (widget.isVerified != 'verified' &&
+                                  !allowUnverified) {
                                 Navigator.pop(ctx);
                                 showAccountNotVerifiedModal(context);
                                 return;

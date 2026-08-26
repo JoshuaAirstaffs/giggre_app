@@ -12,6 +12,8 @@ import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' as ll;
+import 'package:provider/provider.dart';
+import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/services/gms_availability.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:giggre_app/features/chat/gig_chat_action.dart';
@@ -2425,6 +2427,39 @@ Future<int> _fetchWorkerCompletedCount(String workerId) async {
   return snaps.fold<int>(0, (total, snap) => total + snap.docs.length);
 }
 
+// Verified applicants/assigned workers get a plain "Verified" badge. A
+// non-verified one who still got through only did so because
+// general_config/gig_visibility_rules.allowGigAccessForUnverified was on
+// (see gig_map_section.dart's apply gate and quick_gig_matching_service.dart's
+// candidate query) — labeled "Provisional" rather than a bare "Unverified" so
+// the host reads it as an intentional, admin-controlled override rather than
+// a bug letting anyone through. If the flag has since been turned back off,
+// there's no cover story left, so it falls back to the plain "Unverified"
+// warning. Shared by _ApplicantTile (open-gig applicant list) and
+// _WorkerProfileCard (the assigned-worker card shown once any gig — quick,
+// open, or offered — has an accepted worker, since quick gigs never go
+// through an applicant list at all).
+Widget _verificationBadge(BuildContext context, String isVerified) {
+  final allowUnverified =
+      context.watch<CurrentUserProvider>().allowGigAccessForUnverified;
+  final (label, color) = isVerified == 'verified'
+      ? ('Verified', const Color(0xFF10B981))
+      : allowUnverified
+      ? ('Provisional', kAmber)
+      : ('Unverified', Colors.redAccent);
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w700),
+    ),
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Worker profile card — photo/initials avatar, rating, completed gigs
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2449,6 +2484,7 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
   double _rating = 5.0;
   int _ratingCount = 0;
   int _completedGigs = 0;
+  String _isVerified = 'unverified';
   bool _loading = true;
 
   @override
@@ -2483,6 +2519,7 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
         _rating = (data?['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
         _ratingCount = (data?['ratingCount'] as num?)?.toInt() ?? 0;
         _completedGigs = completed;
+        _isVerified = data?['isVerified'] as String? ?? 'unverified';
         _loading = false;
       });
     } catch (e) {
@@ -2513,6 +2550,10 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
+              if (!_loading) ...[
+                const SizedBox(height: 2),
+                _verificationBadge(context, _isVerified),
+              ],
               const SizedBox(height: 2),
               if (_loading)
                 const SizedBox(
@@ -2644,6 +2685,7 @@ class _ApplicantTileState extends State<_ApplicantTile> {
   double _rating = 5.0;
   int _ratingCount = 0;
   int _completedGigs = 0;
+  String _isVerified = 'unverified';
   bool _loading = true;
 
   @override
@@ -2674,6 +2716,7 @@ class _ApplicantTileState extends State<_ApplicantTile> {
         _rating = (data?['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
         _ratingCount = (data?['ratingCount'] as num?)?.toInt() ?? 0;
         _completedGigs = completed;
+        _isVerified = data?['isVerified'] as String? ?? 'unverified';
         _loading = false;
       });
     } catch (e) {
@@ -2715,6 +2758,10 @@ class _ApplicantTileState extends State<_ApplicantTile> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+                if (!_loading) ...[
+                  const SizedBox(height: 3),
+                  _verificationBadge(context, _isVerified),
+                ],
                 const SizedBox(height: 3),
                 if (_loading)
                   SizedBox(
