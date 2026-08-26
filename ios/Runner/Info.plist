@@ -4,6 +4,8 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera is used to take your profile photo or scan payment QR codes</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Giggre needs microphone access for voice and video calls.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Giggre needs access to your photo library to set your profile picture.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>

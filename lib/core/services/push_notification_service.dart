@@ -25,17 +25,9 @@ class PushNotificationService {
     final messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
 
-    // getToken() throws on iOS Simulator (no real APNs token is ever
-    // assigned there) — swallow so a Simulator run doesn't leave this an
-    // unhandled Future rejection, and so registration still completes
-    // enough to let logout's unregisterForUser proceed later.
-    String? token;
-    try {
-      token = await messaging.getToken();
-    } catch (e) {
-      debugPrint('[PushNotificationService] failed to get FCM token: $e');
-    }
+    final token = await _getTokenWithRetry(messaging);
     if (token != null) {
+      debugPrint('[PushNotificationService] got FCM token on initial request');
       await _saveToken(uid, token);
     }
     _registeredUid = uid;
@@ -44,9 +36,34 @@ class PushNotificationService {
     messaging.onTokenRefresh.listen((newToken) async {
       final currentUid = _registeredUid;
       if (currentUid == null) return;
+      debugPrint('[PushNotificationService] got FCM token via onTokenRefresh');
       await _saveToken(currentUid, newToken);
       _registeredToken = newToken;
     });
+  }
+
+  // iOS registers with APNs asynchronously after requestPermission()
+  // returns, so getToken() can lose that race and throw apns-token-not-set
+  // on a cold start — retry before giving up (up to ~30s: a first-time APNs
+  // handshake can take longer than a couple seconds). Also throws on iOS
+  // Simulator (no real APNs token is ever assigned there), which exhausts
+  // these retries and falls through to the null/logged-failure case below —
+  // registerForUser's onTokenRefresh listener stays armed regardless, so a
+  // token that arrives later still gets saved.
+  Future<String?> _getTokenWithRetry(FirebaseMessaging messaging) async {
+    const maxAttempts = 10;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await messaging.getToken();
+      } catch (e) {
+        if (attempt == maxAttempts) {
+          debugPrint('[PushNotificationService] failed to get FCM token: $e');
+          return null;
+        }
+        await Future.delayed(const Duration(seconds: 3));
+      }
+    }
+    return null;
   }
 
   Future<void> _saveToken(String uid, String token) async {
@@ -119,6 +136,9 @@ class PushNotificationService {
 
   Future<void> _showForeground(RemoteMessage message) async {
     final notification = message.notification;
+    debugPrint(
+      '[PushNotificationService] received: ${notification?.title} / ${notification?.body}',
+    );
     if (notification == null) return;
     final channelId = message.data['channelId'] as String? ?? 'gig_chat_v2';
 
