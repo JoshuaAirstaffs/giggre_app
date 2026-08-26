@@ -10,9 +10,6 @@ import 'package:provider/provider.dart';
 import 'features/auth/presentation/login_screen.dart';
 import 'features/auth/presentation/register_screen.dart';
 import 'features/auth/presentation/welcome_screen.dart';
-import 'features/auth/presentation/email_verification_screen.dart';
-import 'features/auth/presentation/phone_verification_screen.dart';
-import 'utils/user_utils.dart';
 import 'core/widgets/main_navigation.dart';
 import 'core/widgets/app_update_checker.dart';
 import 'core/theme/theme_provider.dart';
@@ -114,11 +111,6 @@ class _AuthGateState extends State<AuthGate> {
   // finished (no Firestore profile yet, or no phone on file) — e.g. the app
   // was closed or lost connection right after Google sign-in completed.
   bool _needsProfile = false;
-  // True when the profile is complete but the user hasn't finished email
-  // and/or phone verification yet (e.g. they closed the app mid-flow) —
-  // _verificationData carries the doc fields the resumed screen needs.
-  bool _needsVerification = false;
-  Map<String, dynamic>? _verificationData;
   late final Stream<User?> _authStream;
 
   @override
@@ -243,17 +235,6 @@ class _AuthGateState extends State<AuthGate> {
         }
         if (!mounted) return;
 
-        if (needsEmailVerification(data) || needsPhoneVerification(data)) {
-          if (mounted) {
-            setState(() {
-              _needsVerification = true;
-              _verificationData = data;
-              _restoredForUid = user.uid;
-            });
-          }
-          return;
-        }
-
         final provider = context.read<CurrentUserProvider>();
         provider.setCurrentUserInfo(
           user.email,
@@ -266,8 +247,6 @@ class _AuthGateState extends State<AuthGate> {
         if (mounted) {
           setState(() {
             _needsProfile = false;
-            _needsVerification = false;
-            _verificationData = null;
             _restoredForUid = user.uid;
           });
         }
@@ -316,7 +295,7 @@ class _AuthGateState extends State<AuthGate> {
         // No Firebase user — signed out. Reset all gate state and go to login.
         if (!snapshot.hasData && !provider.isLoggedIn) {
           if (_pendingDeletion || _restoredForUid != null || _restoreError ||
-              _needsProfile || _needsVerification) {
+              _needsProfile) {
             WidgetsBinding.instance.addPostFrameCallback(
               (_) => setState(() {
                 _pendingDeletion = false;
@@ -324,8 +303,6 @@ class _AuthGateState extends State<AuthGate> {
                 _restoredForUid = null;
                 _restoreError = false;
                 _needsProfile = false;
-                _needsVerification = false;
-                _verificationData = null;
               }),
             );
           }
@@ -348,17 +325,6 @@ class _AuthGateState extends State<AuthGate> {
         // them to finish it instead of the Dashboard or Login screen.
         if (_needsProfile && _restoredForUid == FirebaseAuth.instance.currentUser?.uid) {
           return CompleteProfileScreen(user: snapshot.data ?? FirebaseAuth.instance.currentUser!);
-        }
-
-        // Profile is complete but email/phone verification was never
-        // finished (e.g. the app was closed mid-flow) — resume that step.
-        if (_needsVerification && _restoredForUid == FirebaseAuth.instance.currentUser?.uid) {
-          final data = _verificationData!;
-          final phone = data['phone'] as String? ?? '';
-          if (needsEmailVerification(data)) {
-            return EmailVerificationScreen(phone: phone);
-          }
-          return PhoneVerificationScreen(phone: phone);
         }
 
         // Trust currentUser (synchronous, already restored by native SDK on
