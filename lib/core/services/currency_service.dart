@@ -48,16 +48,21 @@ class CurrencyService {
   // Called once per session on login. Detects the device's current country and
   // updates Firestore if the currency has changed (e.g. user moved countries).
   // Falls back to the stored value when detection is unavailable, or 'USD' on
-  // first use with no stored value.
+  // first use with no stored value. [onDetectionFailed] fires only when
+  // there's no stored value to fall back on either — i.e. a brand new
+  // account silently stuck on the 'USD' default with no way to know why —
+  // so the caller can surface that and offer a manual retry.
   static Future<String> initForUser(
     String uid,
     Map<String, dynamic> userDoc, {
     void Function(double lat, double lng)? onPosition,
+    void Function()? onDetectionFailed,
   }) async {
     final existing = userDoc['currencyCode'] as String?;
     final detected = await detectCurrency(onPosition: onPosition);
 
     if (detected == null) {
+      if (existing == null) onDetectionFailed?.call();
       return existing ?? 'USD';
     }
 

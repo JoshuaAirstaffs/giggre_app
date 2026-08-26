@@ -12,7 +12,7 @@ import '../../features/gig_worker/presentation/gig_worker_screen.dart';
 import '../../features/home/presentation/profile_tab.dart';
 import '../chat/home_chat.dart';
 import '../host/host_shell.dart';
-import 'saved_placeholder.dart';
+import '../../features/gig_worker/presentation/saved_screen.dart';
 
 const _kNavActive = Color(0xFF2B6FB5);
 const _kNavInactive = Color(0xFF9AA5B5);
@@ -158,8 +158,6 @@ class _WorkerShellState extends State<WorkerShell> {
         );
   }
 
-  void _goToHome() => setState(() => _index = 0);
-
   Future<void> _performLogout() async {
     if (!mounted) return;
     // Navigating to WelcomeScreen tears down every route above it (including
@@ -195,7 +193,7 @@ class _WorkerShellState extends State<WorkerShell> {
           MaterialPageRoute(builder: (_) => const HostShell()),
         ),
       ),
-      SavedPlaceholder(onGoToDashboard: _goToHome),
+      SavedScreen(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
       const HomeChat(showBackButton: false),
       Scaffold(
         body: ProfileTab(

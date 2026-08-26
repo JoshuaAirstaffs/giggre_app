@@ -378,11 +378,10 @@ class _ToolchestSheetState extends State<ToolchestSheet>
           )
         else ...[
           ..._skillsXP.entries.map(
-            (e) => _SkillChip(label: e.key, level: e.value, isDark: isDark),
+            (e) => _SkillChip(label: e.key, isDark: isDark),
           ),
           ...approvedPending.map(
-            (name) => _SkillChip(
-                label: name, level: 0, isDark: isDark, isApproved: true),
+            (name) => _SkillChip(label: name, isDark: isDark, isApproved: true),
           ),
         ],
       ],
@@ -1114,13 +1113,11 @@ class _MetaTag extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _SkillChip extends StatelessWidget {
   final String label;
-  final int level;
   final bool isDark;
   final bool isApproved;
 
   const _SkillChip({
     required this.label,
-    required this.level,
     required this.isDark,
     this.isApproved = false,
   });
@@ -1184,24 +1181,6 @@ class _SkillChip extends StatelessWidget {
                     ),
                   ),
                 ],
-              ),
-            )
-          else
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: kAmber.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: kAmber.withValues(alpha: 0.4)),
-              ),
-              child: Text(
-                'Lvl $level',
-                style: const TextStyle(
-                  color: kAmber,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
               ),
             ),
         ],

@@ -73,6 +73,1137 @@ class GigMarkerData {
   int get openSlots => (workerSlots - filledSlotCount).clamp(0, workerSlots);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Shared with the Saved tab (saved_screen.dart) so a bookmarked gig's detail
+//  sheet is pixel-for-pixel the same one shown from this map/list.
+// ─────────────────────────────────────────────────────────────────────────────
+Color cardAccentForType(String type) {
+  switch (type) {
+    case 'open':
+      return const Color(0xFF2B6FB5);
+    case 'offered':
+      return const Color(0xFF8B6FD8);
+    default:
+      return const Color(0xFFF0A830);
+  }
+}
+
+String gigTypeLabel(String type) {
+  switch (type) {
+    case 'open':
+      return 'Open';
+    case 'offered':
+      return 'Offered';
+    default:
+      return 'Quick';
+  }
+}
+
+String formatGigDistance(double meters) {
+  if (meters < 1000) return '${meters.round()} m';
+  return '${(meters / 1000).toStringAsFixed(1)} km';
+}
+
+// Same field the host's own profile screen reads
+// (gig_host_profile_screen.dart) — one doc read, shown on the gig sheet's
+// host row. Gracefully returns null (hidden) on any failure.
+Future<double?> fetchHostRating(String hostId) async {
+  if (hostId.isEmpty) return null;
+  try {
+    final doc =
+        await FirebaseFirestore.instance.collection('users').doc(hostId).get();
+    final rating = (doc.data()?['ratingAsHost'] as num?)?.toDouble();
+    return rating;
+  } catch (_) {
+    return null;
+  }
+}
+
+GigMarkerData? gigMarkerFromDoc(
+  String id,
+  Map<String, dynamic> data,
+  String type, {
+  String workerUid = '',
+}) {
+  final geo = data['location'] as GeoPoint?;
+  if (geo == null) return null;
+  final applicants = List<dynamic>.from(data['applicants'] ?? []);
+  final hasApplied =
+      type == 'open' &&
+      workerUid.isNotEmpty &&
+      applicants.any(
+        (a) => (a as Map<String, dynamic>)['workerId'] == workerUid,
+      );
+  return GigMarkerData(
+    id: id,
+    title: data['title'] as String? ?? 'Untitled Gig',
+    gigType: type,
+    budget: (data['budget'] as num?)?.toDouble() ?? 0,
+    status: data['status'] as String? ?? '',
+    hostName: data['hostName'] as String? ?? '',
+    address: data['address'] as String? ?? '',
+    position: LatLng(geo.latitude, geo.longitude),
+    assignedWorkerId: data['assignedWorkerId'] as String?,
+    experienceLevel: data['experienceLevel'] as String? ?? '',
+    requiredSkills: List<String>.from(data['requiredSkills'] ?? []),
+    hostId: data['hostId'] as String? ?? '',
+    hasApplied: hasApplied,
+    scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
+    currencyCode: (data['currencyCode'] as String?) ?? 'USD',
+    createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+    applicantCount: type == 'open' ? applicants.length : 0,
+    workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
+    filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
+  );
+}
+
+const _kSharedMarkerSheetRouteName = 'gig_marker_sheet';
+
+void openMarkerSheet(
+  BuildContext context,
+  WidgetBuilder builder, {
+  bool isScrollControlled = false,
+}) {
+  Navigator.of(
+    context,
+  ).popUntil((route) => route.settings.name != _kSharedMarkerSheetRouteName);
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: isScrollControlled,
+    routeSettings: const RouteSettings(name: _kSharedMarkerSheetRouteName),
+    builder: builder,
+  );
+}
+
+Future<void> showDifferentCountryDialog(BuildContext context) {
+  return showDialog<void>(
+    context: context,
+    builder: (dCtx) {
+      final isDark = Theme.of(dCtx).brightness == Brightness.dark;
+      return AlertDialog(
+        backgroundColor: Theme.of(dCtx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.redAccent.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.public_off_rounded,
+                color: Colors.redAccent,
+                size: 34,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'This gig is out of reach',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Theme.of(dCtx).colorScheme.onSurface,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "It's in a different country from your current location, so it isn't reachable.",
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(dCtx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2B6FB5),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                ),
+                child: const Text(
+                  'Got it',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+const kFarGigThresholdKm = 50.0;
+
+Future<void> applyToOpenGig(
+  BuildContext context,
+  String uid,
+  String workerName,
+  GigMarkerData gig, {
+  LatLng? myLocation,
+  String? myCountryCode,
+  Map<String, String?> countryCodeCache = const {},
+}) async {
+  final myLoc = myLocation;
+  if (myLoc != null) {
+    final myCountry =
+        myCountryCode ??
+        await countryCodeFromCoordinates(myLoc.latitude, myLoc.longitude);
+    final gigCountryKey =
+        '${(gig.position.latitude * 100).round()},${(gig.position.longitude * 100).round()}';
+    final gigCountry =
+        countryCodeCache[gigCountryKey] ??
+        await countryCodeFromCoordinates(
+          gig.position.latitude,
+          gig.position.longitude,
+        );
+    if (myCountry != null && gigCountry != null && myCountry != gigCountry) {
+      if (!context.mounted) return;
+      await showDifferentCountryDialog(context);
+      return;
+    }
+  }
+  if (myLoc != null) {
+    final distKm =
+        Geolocator.distanceBetween(
+          myLoc.latitude,
+          myLoc.longitude,
+          gig.position.latitude,
+          gig.position.longitude,
+        ) /
+        1000;
+    if (distKm >= kFarGigThresholdKm) {
+      if (!context.mounted) return;
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (dCtx) {
+          final isDark = Theme.of(dCtx).brightness == Brightness.dark;
+          return AlertDialog(
+            backgroundColor: Theme.of(dCtx).cardColor,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: kAmber.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.social_distance_rounded,
+                    color: kAmber,
+                    size: 34,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'This gig is quite far from you.',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(dCtx).colorScheme.onSurface,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'It\'s about ${distKm.round()} km from your current location. Make sure you\'re able to travel there before you take it.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                    height: 1.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 22),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(dCtx, false),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: kSub,
+                          side: BorderSide(color: Theme.of(dCtx).dividerColor),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                        ),
+                        child: const Text(
+                          'Go back',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(dCtx, true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kAmber,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                        ),
+                        child: const Text(
+                          'Take Gig Anyway',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+      );
+      if (proceed != true || !context.mounted) return;
+    }
+  }
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collection('open_gigs')
+        .doc(gig.id)
+        .get();
+
+    if (!snap.exists) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This gig no longer exists.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+      return;
+    }
+    final currentStatus = snap.data()?['status'] as String? ?? '';
+    final workerSlots = (snap.data()?['workerSlots'] as num?)?.toInt() ?? 1;
+    final filledSlotCount =
+        (snap.data()?['filledSlotCount'] as num?)?.toInt() ?? 0;
+    final stillAcceptingApplicants = workerSlots > 1
+        ? (currentStatus == 'open' || currentStatus == 'partially_filled') &&
+              filledSlotCount < workerSlots
+        : currentStatus == 'open';
+    if (!stillAcceptingApplicants) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This gig is no longer available.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    final existing = List<dynamic>.from(snap.data()?['applicants'] ?? []);
+    final alreadyApplied = existing.any(
+      (a) => (a as Map<String, dynamic>)['workerId'] == uid,
+    );
+    if (alreadyApplied) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You\'ve already put in for this gig.'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (await workerHasPendingCancellation(uid)) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Your cancellation request hasn't been approved by the admin yet.",
+            ),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (await workerHasActiveGig(uid)) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'You need to finish your current gig before taking another one.',
+            ),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    await FirebaseFirestore.instance.collection('open_gigs').doc(gig.id).update({
+      'applicants': FieldValue.arrayUnion([
+        {'workerId': uid, 'workerName': workerName},
+      ]),
+    });
+
+    unawaited(
+      FirebaseFirestore.instance.collection('notifications').add({
+        'userId': gig.hostId,
+        'category': 'new_applicant',
+        'message': '$workerName applied to your gig "${gig.title}"',
+        'workerName': workerName,
+        'workerId': uid,
+        'gigId': gig.id,
+        'gigTitle': gig.title,
+        'createdAt': FieldValue.serverTimestamp(),
+      }),
+    );
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Application submitted! Waiting for host selection.'),
+          backgroundColor: Color(0xFF22C55E),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  } catch (e) {
+    debugPrint('[GigMap] apply to open gig error: $e');
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't submit your application. Please try again."),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+}
+
+// Withdraws this worker's pending application — only valid while they're
+// still in the gig's `applicants` array (i.e. not yet selected; once a host
+// picks them, the host side moves them into the `workers` subcollection and
+// removes them from `applicants`, so this naturally stops applying then).
+Future<void> cancelGigApplication(
+  BuildContext context,
+  String uid,
+  GigMarkerData gig,
+) async {
+  try {
+    final gigRef = FirebaseFirestore.instance.collection('open_gigs').doc(gig.id);
+    final snap = await gigRef.get();
+    final applicants = List<dynamic>.from(snap.data()?['applicants'] ?? []);
+    final mine = applicants.firstWhere(
+      (a) => (a as Map<String, dynamic>)['workerId'] == uid,
+      orElse: () => null,
+    );
+    if (mine == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'This application is no longer pending — it may have already been accepted.',
+            ),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+    await gigRef.update({
+      'applicants': FieldValue.arrayRemove([mine]),
+    });
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Application withdrawn.'),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  } catch (e) {
+    debugPrint('[GigMap] cancel application error: $e');
+  }
+}
+
+void showFullGigDetailSheet(
+  BuildContext context, {
+  required GigMarkerData gig,
+  required String uid,
+  required String workerName,
+  required String isVerified,
+  required List<String> workerSkills,
+  required Set<String> bookmarkedGigIds,
+  required void Function(String gigId, String gigType)? onToggleBookmark,
+  required LatLng? myLocation,
+  String? myCountryCode,
+  Map<String, String?> countryCodeCache = const {},
+  ValueChanged<GigMarkerData>? onOfferedGigAccepted,
+  bool fromList = false,
+  VoidCallback? onSeeOnMap,
+}) {
+    final accent = cardAccentForType(gig.gigType);
+    final statusLabel = gigTypeLabel(gig.gigType);
+    // Multi-worker gigs move to 'partially_filled' once at least one slot is
+    // taken but keep accepting applicants until every slot is — mirrors
+    // applyToOpenGig's own stillAcceptingApplicants check below, so this
+    // stays in sync with what actually happens when Apply is tapped.
+    final isActive = gig.gigType == 'offered'
+        ? gig.status == 'offered'
+        : gig.isMultiWorker
+            ? (gig.status == 'open' || gig.status == 'partially_filled') &&
+                gig.openSlots > 0
+            : gig.status == 'open';
+
+    List<String> missingSkills() {
+      if (gig.gigType != 'open' || gig.requiredSkills.isEmpty) return [];
+      return gig.requiredSkills
+          .where(
+            (s) => !workerSkills.any(
+              (ws) => ws.toLowerCase().trim() == s.toLowerCase().trim(),
+            ),
+          )
+          .toList();
+    }
+
+    String timeAgo(DateTime dt) {
+      final diff = DateTime.now().difference(dt);
+      if (diff.inMinutes < 1) return 'just now';
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24) return '${diff.inHours}h ago';
+      if (diff.inDays < 7) return '${diff.inDays}d ago';
+      return DateFormat('MMM d').format(dt);
+    }
+
+    // Collapses immediate consecutive duplicate comma-separated parts (e.g.
+    // "Foo St, Foo St, City" -> "Foo St, City") — display only.
+    String dedupAddress(String address) {
+      final parts = address
+          .split(',')
+          .map((p) => p.trim())
+          .where((p) => p.isNotEmpty)
+          .toList();
+      final deduped = <String>[];
+      for (final p in parts) {
+        if (deduped.isEmpty || deduped.last.toLowerCase() != p.toLowerCase()) {
+          deduped.add(p);
+        }
+      }
+      return deduped.join(', ');
+    }
+
+    final missing = missingSkills();
+    final canApply = missing.isEmpty;
+    final isAppliedPending = gig.gigType == 'open' && gig.hasApplied;
+    final canTapApply = canApply && !isAppliedPending && isActive;
+
+    final distanceM = myLocation != null
+        ? Geolocator.distanceBetween(
+            myLocation!.latitude,
+            myLocation!.longitude,
+            gig.position.latitude,
+            gig.position.longitude,
+          )
+        : null;
+    final locationLabel = distanceM != null
+        ? 'LOCATION · ${formatGigDistance(distanceM).toUpperCase()}'
+        : 'LOCATION';
+
+    openMarkerSheet(context, (ctx) {
+      final isDark = Theme.of(ctx).brightness == Brightness.dark;
+      final onSurface = Theme.of(ctx).colorScheme.onSurface;
+      final neutralSurface = _neutralSurface(isDark);
+      return ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(ctx).height * 0.9,
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Theme.of(ctx).cardColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              bottom: 16 + MediaQuery.paddingOf(ctx).bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 14),
+                  child: Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark ? kBorder : const Color(0xFFD5DCE6),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                ),
+                // Title row
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        gig.title,
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+
+                      children: [
+                        Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            color: accent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          statusLabel,
+                          style: TextStyle(
+                            color: accent,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (onToggleBookmark != null)
+                      IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        icon: Icon(
+                          bookmarkedGigIds.contains(gig.id)
+                              ? Icons.bookmark_rounded
+                              : Icons.bookmark_outline_rounded,
+                          color: kGold,
+                          size: 22,
+                        ),
+                        onPressed: () =>
+                            onToggleBookmark!(gig.id, gig.gigType),
+                      ),
+                      ],
+
+                    ),
+                    
+                  ],
+                ),
+                const SizedBox(height: 4),
+                if (gig.createdAt != null)
+                  Text(
+                    gig.applicantCount > 0
+                        ? 'Posted ${timeAgo(gig.createdAt!)} · ${gig.applicantCount} ${gig.applicantCount == 1 ? 'applicant' : 'applicants'} so far'
+                        : 'Posted ${timeAgo(gig.createdAt!)}',
+                    style: const TextStyle(color: kSub, fontSize: 11),
+                  ),
+                const SizedBox(height: 16),
+                // Host row (display only)
+                Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: kBlue.withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        gig.hostName.isNotEmpty
+                            ? gig.hostName[0].toUpperCase()
+                            : '?',
+                        style: const TextStyle(
+                          color: kBlue,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            gig.hostName.isNotEmpty ? gig.hostName : '—',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: onSurface,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          FutureBuilder<double?>(
+                            future: fetchHostRating(gig.hostId),
+                            builder: (context, snap) {
+                              final rating = snap.data;
+                              if (rating == null) {
+                                return const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: RichText(
+                                  text: TextSpan(
+                                    style: const TextStyle(
+                                      color: kSub,
+                                      fontSize: 10.5,
+                                    ),
+                                    children: [
+                                      const TextSpan(
+                                        text: '★ ',
+                                        style: TextStyle(
+                                          color: Color(0xFFF0A830),
+                                        ),
+                                      ),
+                                      TextSpan(
+                                        text:
+                                            '${rating.toStringAsFixed(1)} host rating',
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Divider(
+                  height: 0,
+                  thickness: 1,
+                  color: Theme.of(ctx).dividerColor,
+                ),
+                const SizedBox(height: 14),
+                // Info grid
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _InfoGridCell(
+                        icon: Icons.attach_money_rounded,
+                        label: 'PAY',
+                        child: RichText(
+                          text: TextSpan(
+                            children: [
+                              TextSpan(
+                                text: CurrencyFormatter.format(
+                                  gig.budget,
+                                  gig.currencyCode,
+                                ),
+                                style: const TextStyle(
+                                  color: Color(0xFF2B6FB5),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const TextSpan(
+                                text: ' / day',
+                                style: TextStyle(color: kSub, fontSize: 10),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _InfoGridCell(
+                        icon: Icons.calendar_today_rounded,
+                        label: 'SCHEDULE',
+                        child: Text(
+                          gig.scheduledDate != null
+                              ? DateFormat(
+                                  'EEE, MMM d · h:mm a',
+                                ).format(gig.scheduledDate!)
+                              : '—',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (gig.isMultiWorker) ...[
+                  const SizedBox(height: 12),
+                  _InfoGridCell(
+                    icon: Icons.groups_rounded,
+                    label: 'WORKERS NEEDED',
+                    child: RichText(
+                      text: TextSpan(
+                        style: const TextStyle(
+                          color: Color(0xFF2E9E6B),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        children: [
+                          TextSpan(
+                            text:
+                                '${gig.openSlots} of ${gig.workerSlots} spots open',
+                          ),
+                          TextSpan(
+                            text: ' · each worker paid independently',
+                            style: TextStyle(
+                              color: kSub.withValues(alpha: 0.9),
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _InfoGridCell(
+                        icon: Icons.location_on_outlined,
+                        label: locationLabel,
+                        child: Text(
+                          gig.address.isNotEmpty
+                              ? dedupAddress(gig.address)
+                              : '—',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _InfoGridCell(
+                        icon: Icons.bar_chart_rounded,
+                        label: 'EXPERIENCE',
+                        value: gig.experienceLevel.isNotEmpty
+                            ? gig.experienceLevel
+                            : '—',
+                      ),
+                    ),
+                  ],
+                ),
+                if (gig.requiredSkills.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  const Text(
+                    'SKILLS NEEDED',
+                    style: TextStyle(
+                      color: kSub,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: gig.requiredSkills.map((s) {
+                      final has = workerSkills.any(
+                        (ws) =>
+                            ws.toLowerCase().trim() == s.toLowerCase().trim(),
+                      );
+                      return Container(
+                        height: 28,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: has
+                              ? const Color(0xFF2E9E6B).withValues(alpha: 0.12)
+                              : neutralSurface,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(
+                          s,
+                          style: TextStyle(
+                            color: has ? const Color(0xFF2E9E6B) : kSub,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  if (isActive && missing.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: Colors.red.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.info_outline_rounded,
+                            color: Colors.red,
+                            size: 15,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Missing ${missing.length == 1 ? 'skill' : 'skills'}: ${missing.join(', ')}',
+                              style: const TextStyle(
+                                color: Colors.red,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+                const SizedBox(height: 18),
+                // See on map row
+                if (onSeeOnMap != null)
+                GestureDetector(
+                  onTap: () {
+                    // Pop the sheet first — onSeeOnMap may itself push a new
+                    // route (Saved tab's fullscreen map), and popping after
+                    // would immediately dismiss that instead of this sheet.
+                    Navigator.pop(ctx);
+                    onSeeOnMap();
+                  },
+                  child: Container(
+                    height: 44,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: neutralSurface,
+                      border: Border.all(color: Theme.of(ctx).dividerColor),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.map_outlined, size: 18, color: kSub),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'See this gig on the map',
+                            style: TextStyle(
+                              color: kSub,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          size: 18,
+                          color: kSub,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (isActive) ...[
+                // Apply / Withdraw button
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: canTapApply
+                          ? const LinearGradient(
+                              colors: [Color(0xFF2B6FB5), Color(0xFF1F4D80)],
+                            )
+                          : null,
+                      color: canTapApply
+                          ? null
+                          : isAppliedPending
+                          ? Colors.redAccent.withValues(alpha: 0.08)
+                          : neutralSurface,
+                      border: isAppliedPending
+                          ? Border.all(
+                              color: Colors.redAccent.withValues(alpha: 0.4),
+                            )
+                          : null,
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(15),
+                        onTap: canTapApply
+                            ? () {
+                                if (isVerified != 'verified') {
+                                  showAccountNotVerifiedModal(context);
+                                  return;
+                                }
+                                Navigator.pop(ctx);
+                                if (gig.gigType == 'open') {
+                                  applyToOpenGig(
+                                    context,
+                                    uid,
+                                    workerName,
+                                    gig,
+                                    myLocation: myLocation,
+                                    myCountryCode: myCountryCode,
+                                    countryCodeCache: countryCodeCache,
+                                  );
+                                } else if (gig.gigType == 'offered') {
+                                  onOfferedGigAccepted?.call(gig);
+                                }
+                              }
+                            : isAppliedPending
+                            ? () async {
+                                final confirm = await showDialog<bool>(
+                                  context: ctx,
+                                  builder: (dCtx) => AlertDialog(
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(18),
+                                    ),
+                                    title: const Text('Withdraw?'),
+                                    content: const Text(
+                                      'You can take it again later if this gig is still open.',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dCtx, false),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dCtx, true),
+                                        child: const Text(
+                                          'Withdraw',
+                                          style: TextStyle(
+                                            color: Colors.redAccent,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirm == true && ctx.mounted) {
+                                  Navigator.pop(ctx);
+                                  cancelGigApplication(context, uid, gig);
+                                }
+                              }
+                            : null,
+                        child: Center(
+                          child: Text(
+                            isAppliedPending
+                                ? 'Withdraw'
+                                : gig.gigType == 'offered'
+                                ? "I'm In"
+                                : 'Take Gig',
+                            style: TextStyle(
+                              color: canTapApply
+                                  ? Colors.white
+                                  : isAppliedPending
+                                  ? Colors.redAccent
+                                  : kSub,
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (gig.gigType == 'open' && !isAppliedPending) ...[
+                  const SizedBox(height: 10),
+                  const Text(
+                    "You can pass anytime before you're selected",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: kSub, fontSize: 10.5),
+                  ),
+                ],
+              ] else
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: neutralSurface,
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: Center(
+                    child: Text(
+                      'This gig is no longer available',
+                      style: TextStyle(
+                        color: kSub,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }, isScrollControlled: true);
+  }
+
 enum _SkillFilter { all, mySkills, specific }
 
 enum _GigViewMode { map, list }
@@ -127,6 +1258,12 @@ class GigMapSection extends StatefulWidget {
   final String isVerified;
   final List<String> workerSkills;
   final bool fullScreen;
+  final Set<String> bookmarkedGigIds;
+  final void Function(String gigId, String gigType)? onToggleBookmark;
+  // External request (e.g. from the Saved tab) to jump the map to a gig's
+  // location. Non-null value = "go here"; consumed and reset to null once
+  // handled.
+  final ValueNotifier<LatLng?>? externalFocusRequest;
 
   const GigMapSection({
     super.key,
@@ -139,6 +1276,9 @@ class GigMapSection extends StatefulWidget {
     required this.isVerified,
     this.workerSkills = const [],
     this.fullScreen = false,
+    this.bookmarkedGigIds = const {},
+    this.onToggleBookmark,
+    this.externalFocusRequest,
   });
 
   @override
@@ -371,6 +1511,29 @@ class _GigMapSectionState extends State<GigMapSection> {
     _startOpenSub(db);
     _startOfferedSub(db);
     _initMap();
+    widget.externalFocusRequest?.addListener(_handleExternalFocusRequest);
+    // Home may already be mounted (IndexedStack keeps tabs alive) when the
+    // Saved tab fires a request, so check for one waiting right away too.
+    _handleExternalFocusRequest();
+  }
+
+  void _handleExternalFocusRequest() {
+    final target = widget.externalFocusRequest?.value;
+    if (target == null) return;
+    _setViewMode(_GigViewMode.map);
+    if (_useGoogleMaps) {
+      final controller = _googleMapController;
+      if (controller != null) {
+        controller.animateCamera(CameraUpdate.newLatLngZoom(target, 19.0));
+      } else {
+        _pendingCameraTarget = target;
+      }
+    } else if (_osmMapReady) {
+      _osmController.move(ll.LatLng(target.latitude, target.longitude), 19.0);
+    } else {
+      _pendingCameraTarget = target;
+    }
+    widget.externalFocusRequest!.value = null;
   }
 
   void _onProviderLocationChanged() {
@@ -590,7 +1753,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                 .where((d) => (d.data()['hostId'] as String?) != widget.uid)
                 .map(
                   (d) =>
-                      _toMarker(d.id, d.data(), 'open', workerUid: widget.uid),
+                      gigMarkerFromDoc(d.id, d.data(), 'open', workerUid: widget.uid),
                 )
                 .whereType<GigMarkerData>()
                 .toList();
@@ -616,7 +1779,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         .listen(
           (s) {
             final all = s.docs
-                .map((d) => _toMarker(d.id, d.data(), 'offered'))
+                .map((d) => gigMarkerFromDoc(d.id, d.data(), 'offered'))
                 .whereType<GigMarkerData>()
                 .toList();
             setState(() {
@@ -1035,50 +2198,13 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   void dispose() {
     _userProvider.removeListener(_onProviderLocationChanged);
+    widget.externalFocusRequest?.removeListener(_handleExternalFocusRequest);
     _googleMapController?.dispose();
     _osmController.dispose();
     _openSub.cancel();
     _offeredSub.cancel();
     _searchController.dispose();
     super.dispose();
-  }
-
-  GigMarkerData? _toMarker(
-    String id,
-    Map<String, dynamic> data,
-    String type, {
-    String workerUid = '',
-  }) {
-    final geo = data['location'] as GeoPoint?;
-    if (geo == null) return null;
-    final applicants = List<dynamic>.from(data['applicants'] ?? []);
-    final hasApplied =
-        type == 'open' &&
-        workerUid.isNotEmpty &&
-        applicants.any(
-          (a) => (a as Map<String, dynamic>)['workerId'] == workerUid,
-        );
-    return GigMarkerData(
-      id: id,
-      title: data['title'] as String? ?? 'Untitled Gig',
-      gigType: type,
-      budget: (data['budget'] as num?)?.toDouble() ?? 0,
-      status: data['status'] as String? ?? '',
-      hostName: data['hostName'] as String? ?? '',
-      address: data['address'] as String? ?? '',
-      position: LatLng(geo.latitude, geo.longitude),
-      assignedWorkerId: data['assignedWorkerId'] as String?,
-      experienceLevel: data['experienceLevel'] as String? ?? '',
-      requiredSkills: List<String>.from(data['requiredSkills'] ?? []),
-      hostId: data['hostId'] as String? ?? '',
-      hasApplied: hasApplied,
-      scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
-      currencyCode: (data['currencyCode'] as String?) ?? 'USD',
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
-      applicantCount: type == 'open' ? applicants.length : 0,
-      workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
-      filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
-    );
   }
 
   List<GigMarkerData> get _unfilteredGigs => [..._openGigs, ..._offeredGigs];
@@ -1352,12 +2478,20 @@ class _GigMapSectionState extends State<GigMapSection> {
     return fm.FlutterMap(
       mapController: _osmController,
       options: fm.MapOptions(
-        initialCenter: _myLocation != null
-            ? _toLL(_myLocation!)
-            : const ll.LatLng(14.5995, 120.9842),
-        initialZoom: _zoom,
+        initialCenter: _pendingCameraTarget != null
+            ? _toLL(_pendingCameraTarget!)
+            : _myLocation != null
+                ? _toLL(_myLocation!)
+                : const ll.LatLng(14.5995, 120.9842),
+        initialZoom: _pendingCameraTarget != null ? 19.0 : _zoom,
         onMapReady: () {
-          if (mounted) setState(() => _osmMapReady = true);
+          if (!mounted) return;
+          setState(() => _osmMapReady = true);
+          final pending = _pendingCameraTarget;
+          if (pending != null) {
+            _osmController.move(_toLL(pending), 19.0);
+            _pendingCameraTarget = null;
+          }
         },
         onPositionChanged: (camera, _) {
           final newZoom = camera.zoom;
@@ -1382,574 +2516,50 @@ class _GigMapSectionState extends State<GigMapSection> {
     GigMarkerData gig, {
     bool fromList = false,
   }) {
-    final accent = _cardAccentForType(gig.gigType);
-    final statusLabel = _typeLabel(gig.gigType);
+    showFullGigDetailSheet(
+      context,
+      gig: gig,
+      uid: widget.uid,
+      workerName: widget.workerName,
+      isVerified: widget.isVerified,
+      workerSkills: widget.workerSkills,
+      bookmarkedGigIds: widget.bookmarkedGigIds,
+      onToggleBookmark: widget.onToggleBookmark,
+      myLocation: _myLocation,
+      myCountryCode: _myCountryCode,
+      countryCodeCache: _countryCodeCache,
+      onOfferedGigAccepted: widget.onOfferedGigAccepted,
+      fromList: fromList,
+      onSeeOnMap: fromList ? () => _openFullScreenMap(context, focus: gig.position) : null,
+    );
+  }
 
-    List<String> missingSkills() {
-      if (gig.gigType != 'open' || gig.requiredSkills.isEmpty) return [];
-      return gig.requiredSkills
-          .where(
-            (s) => !widget.workerSkills.any(
-              (ws) => ws.toLowerCase().trim() == s.toLowerCase().trim(),
-            ),
-          )
-          .toList();
-    }
-
-    String timeAgo(DateTime dt) {
-      final diff = DateTime.now().difference(dt);
-      if (diff.inMinutes < 1) return 'just now';
-      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-      if (diff.inHours < 24) return '${diff.inHours}h ago';
-      if (diff.inDays < 7) return '${diff.inDays}d ago';
-      return DateFormat('MMM d').format(dt);
-    }
-
-    // Collapses immediate consecutive duplicate comma-separated parts (e.g.
-    // "Foo St, Foo St, City" -> "Foo St, City") — display only.
-    String dedupAddress(String address) {
-      final parts = address
-          .split(',')
-          .map((p) => p.trim())
-          .where((p) => p.isNotEmpty)
-          .toList();
-      final deduped = <String>[];
-      for (final p in parts) {
-        if (deduped.isEmpty || deduped.last.toLowerCase() != p.toLowerCase()) {
-          deduped.add(p);
-        }
-      }
-      return deduped.join(', ');
-    }
-
-    final missing = missingSkills();
-    final canApply = missing.isEmpty;
-    final isAppliedPending = gig.gigType == 'open' && gig.hasApplied;
-    final canTapApply = canApply && !isAppliedPending;
-
-    final distanceM = _myLocation != null
-        ? Geolocator.distanceBetween(
-            _myLocation!.latitude,
-            _myLocation!.longitude,
-            gig.position.latitude,
-            gig.position.longitude,
-          )
-        : null;
-    final locationLabel = distanceM != null
-        ? 'LOCATION · ${_fmtDistance(distanceM).toUpperCase()}'
-        : 'LOCATION';
-
-    _openMarkerSheet(context, (ctx) {
-      final isDark = Theme.of(ctx).brightness == Brightness.dark;
-      final onSurface = Theme.of(ctx).colorScheme.onSurface;
-      final neutralSurface = _neutralSurface(isDark);
-      return ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(ctx).height * 0.9,
-        ),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Theme.of(ctx).cardColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          child: SingleChildScrollView(
-            padding: EdgeInsets.only(
-              left: 20,
-              right: 20,
-              bottom: 16 + MediaQuery.paddingOf(ctx).bottom,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 10, bottom: 14),
-                  child: Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: isDark ? kBorder : const Color(0xFFD5DCE6),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                ),
-                // Title row
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        gig.title,
-                        style: TextStyle(
-                          color: onSurface,
-                          fontSize: 19,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.4,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            color: accent,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          statusLabel,
-                          style: TextStyle(
-                            color: accent,
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                if (gig.createdAt != null)
-                  Text(
-                    gig.applicantCount > 0
-                        ? 'Posted ${timeAgo(gig.createdAt!)} · ${gig.applicantCount} ${gig.applicantCount == 1 ? 'applicant' : 'applicants'} so far'
-                        : 'Posted ${timeAgo(gig.createdAt!)}',
-                    style: const TextStyle(color: kSub, fontSize: 11),
-                  ),
-                const SizedBox(height: 16),
-                // Host row (display only)
-                Row(
-                  children: [
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: kBlue.withValues(alpha: 0.12),
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        gig.hostName.isNotEmpty
-                            ? gig.hostName[0].toUpperCase()
-                            : '?',
-                        style: const TextStyle(
-                          color: kBlue,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            gig.hostName.isNotEmpty ? gig.hostName : '—',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: onSurface,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          FutureBuilder<double?>(
-                            future: _fetchHostRating(gig.hostId),
-                            builder: (context, snap) {
-                              final rating = snap.data;
-                              if (rating == null) {
-                                return const SizedBox.shrink();
-                              }
-                              return Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: RichText(
-                                  text: TextSpan(
-                                    style: const TextStyle(
-                                      color: kSub,
-                                      fontSize: 10.5,
-                                    ),
-                                    children: [
-                                      const TextSpan(
-                                        text: '★ ',
-                                        style: TextStyle(
-                                          color: Color(0xFFF0A830),
-                                        ),
-                                      ),
-                                      TextSpan(
-                                        text:
-                                            '${rating.toStringAsFixed(1)} host rating',
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Divider(
-                  height: 0,
-                  thickness: 1,
-                  color: Theme.of(ctx).dividerColor,
-                ),
-                const SizedBox(height: 14),
-                // Info grid
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: _InfoGridCell(
-                        label: 'PAY',
-                        child: RichText(
-                          text: TextSpan(
-                            children: [
-                              TextSpan(
-                                text: CurrencyFormatter.format(
-                                  gig.budget,
-                                  gig.currencyCode,
-                                ),
-                                style: const TextStyle(
-                                  color: Color(0xFF2B6FB5),
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const TextSpan(
-                                text: ' / day',
-                                style: TextStyle(color: kSub, fontSize: 10),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _InfoGridCell(
-                        icon: Icons.calendar_today_rounded,
-                        label: 'SCHEDULE',
-                        child: Text(
-                          gig.scheduledDate != null
-                              ? DateFormat(
-                                  'EEE, MMM d · h:mm a',
-                                ).format(gig.scheduledDate!)
-                              : '—',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (gig.isMultiWorker) ...[
-                  const SizedBox(height: 12),
-                  _InfoGridCell(
-                    icon: Icons.groups_rounded,
-                    label: 'WORKERS NEEDED',
-                    child: RichText(
-                      text: TextSpan(
-                        style: const TextStyle(
-                          color: Color(0xFF2E9E6B),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        children: [
-                          TextSpan(
-                            text:
-                                '${gig.openSlots} of ${gig.workerSlots} spots open',
-                          ),
-                          TextSpan(
-                            text: ' · each worker paid independently',
-                            style: TextStyle(
-                              color: kSub.withValues(alpha: 0.9),
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: _InfoGridCell(
-                        icon: Icons.location_on_outlined,
-                        label: locationLabel,
-                        child: Text(
-                          gig.address.isNotEmpty
-                              ? dedupAddress(gig.address)
-                              : '—',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _InfoGridCell(
-                        icon: Icons.bar_chart_rounded,
-                        label: 'EXPERIENCE',
-                        value: gig.experienceLevel.isNotEmpty
-                            ? gig.experienceLevel
-                            : '—',
-                      ),
-                    ),
-                  ],
-                ),
-                if (gig.requiredSkills.isNotEmpty) ...[
-                  const SizedBox(height: 18),
-                  const Text(
-                    'SKILLS NEEDED',
-                    style: TextStyle(
-                      color: kSub,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: gig.requiredSkills.map((s) {
-                      final has = widget.workerSkills.any(
-                        (ws) =>
-                            ws.toLowerCase().trim() == s.toLowerCase().trim(),
-                      );
-                      return Container(
-                        height: 28,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: has
-                              ? const Color(0xFF2E9E6B).withValues(alpha: 0.12)
-                              : neutralSurface,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Text(
-                          s,
-                          style: TextStyle(
-                            color: has ? const Color(0xFF2E9E6B) : kSub,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  if (missing.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.07),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: Colors.red.withValues(alpha: 0.25),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.info_outline_rounded,
-                            color: Colors.red,
-                            size: 15,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Missing ${missing.length == 1 ? 'skill' : 'skills'}: ${missing.join(', ')}',
-                              style: const TextStyle(
-                                color: Colors.red,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-                const SizedBox(height: 18),
-                // See on map row
-                GestureDetector(
-                  onTap: () {
-                    if (fromList) {
-                      _pendingCameraTarget = gig.position;
-                      _setViewMode(_GigViewMode.map);
-                    }
-                    Navigator.pop(ctx);
-                  },
-                  child: Container(
-                    height: 44,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: neutralSurface,
-                      border: Border.all(color: Theme.of(ctx).dividerColor),
-                      borderRadius: BorderRadius.circular(13),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.map_outlined, size: 18, color: kSub),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'See this gig on the map',
-                            style: TextStyle(
-                              color: kSub,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          size: 18,
-                          color: kSub,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                // Apply / Withdraw button
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: canTapApply
-                          ? const LinearGradient(
-                              colors: [Color(0xFF2B6FB5), Color(0xFF1F4D80)],
-                            )
-                          : null,
-                      color: canTapApply
-                          ? null
-                          : isAppliedPending
-                          ? Colors.redAccent.withValues(alpha: 0.08)
-                          : neutralSurface,
-                      border: isAppliedPending
-                          ? Border.all(
-                              color: Colors.redAccent.withValues(alpha: 0.4),
-                            )
-                          : null,
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(15),
-                        onTap: canTapApply
-                            ? () {
-                                if (widget.isVerified != 'verified') {
-                                  showAccountNotVerifiedModal(context);
-                                  return;
-                                }
-                                Navigator.pop(ctx);
-                                if (gig.gigType == 'open') {
-                                  _applyToOpenGig(gig);
-                                } else if (gig.gigType == 'offered') {
-                                  widget.onOfferedGigAccepted?.call(gig);
-                                }
-                              }
-                            : isAppliedPending
-                            ? () async {
-                                final confirm = await showDialog<bool>(
-                                  context: ctx,
-                                  builder: (dCtx) => AlertDialog(
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(18),
-                                    ),
-                                    title: const Text('Pass?'),
-                                    content: const Text(
-                                      'You can take it again later if this gig is still open.',
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(dCtx, false),
-                                        child: const Text('Cancel'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(dCtx, true),
-                                        child: const Text(
-                                          'Pass',
-                                          style: TextStyle(
-                                            color: Colors.redAccent,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                                if (confirm == true && ctx.mounted) {
-                                  Navigator.pop(ctx);
-                                  _cancelApplication(gig);
-                                }
-                              }
-                            : null,
-                        child: Center(
-                          child: Text(
-                            isAppliedPending
-                                ? 'Pass'
-                                : gig.gigType == 'offered'
-                                ? "I'm In"
-                                : 'Take Gig',
-                            style: TextStyle(
-                              color: canTapApply
-                                  ? Colors.white
-                                  : isAppliedPending
-                                  ? Colors.redAccent
-                                  : kSub,
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                if (gig.gigType == 'open' && !isAppliedPending) ...[
-                  const SizedBox(height: 10),
-                  const Text(
-                    "You can pass anytime before you're selected",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: kSub, fontSize: 10.5),
-                  ),
-                ],
-              ],
-            ),
+  // Same fullscreen map the "expand" button opens, optionally pre-focused on
+  // one gig's location — used by that button and by the list sheet's "See
+  // this gig on the map" row.
+  void _openFullScreenMap(BuildContext context, {LatLng? focus}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => Scaffold(
+          body: GigMapSection(
+            fullScreen: true,
+            uid: widget.uid,
+            workerName: widget.workerName,
+            seekingQuickGigs: widget.seekingQuickGigs,
+            onQuickGigStarted: widget.onQuickGigStarted,
+            onOpenGigApplied: widget.onOpenGigApplied,
+            onOfferedGigAccepted: widget.onOfferedGigAccepted,
+            isVerified: widget.isVerified,
+            workerSkills: widget.workerSkills,
+            bookmarkedGigIds: widget.bookmarkedGigIds,
+            onToggleBookmark: widget.onToggleBookmark,
+            externalFocusRequest: focus != null ? ValueNotifier(focus) : null,
           ),
         ),
-      );
-    }, isScrollControlled: true);
+      ),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2852,25 +3462,7 @@ class _GigMapSectionState extends State<GigMapSection> {
           bottom: 12,
           left: 12,
           child: GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                fullscreenDialog: true,
-                builder: (_) => Scaffold(
-                  body: GigMapSection(
-                    fullScreen: true,
-                    uid: widget.uid,
-                    workerName: widget.workerName,
-                    seekingQuickGigs: widget.seekingQuickGigs,
-                    onQuickGigStarted: widget.onQuickGigStarted,
-                    onOpenGigApplied: widget.onOpenGigApplied,
-                    onOfferedGigAccepted: widget.onOfferedGigAccepted,
-                    isVerified: widget.isVerified,
-                    workerSkills: widget.workerSkills,
-                  ),
-                ),
-              ),
-            ),
+            onTap: () => _openFullScreenMap(context),
             child: Container(
               width: 38,
               height: 38,
@@ -2915,27 +3507,6 @@ class _GigMapSectionState extends State<GigMapSection> {
     );
   }
 
-  Color _cardAccentForType(String type) {
-    switch (type) {
-      case 'open':
-        return _kOpenDot;
-      case 'offered':
-        return _kOfferedDot;
-      default:
-        return _kQuickDot;
-    }
-  }
-
-  String _typeLabel(String type) {
-    switch (type) {
-      case 'open':
-        return 'Open';
-      case 'offered':
-        return 'Offered';
-      default:
-        return 'Quick';
-    }
-  }
 
   Widget _buildListMode(BuildContext context) {
     final gigs = _allGigs;
@@ -3007,10 +3578,10 @@ class _GigMapSectionState extends State<GigMapSection> {
               for (final gig in filtered.take(_visibleListCount)) ...[
                 _GigListCard(
                   gig: gig,
-                  accentColor: _cardAccentForType(gig.gigType),
-                  typeLabel: _typeLabel(gig.gigType),
+                  accentColor: cardAccentForType(gig.gigType),
+                  typeLabel: gigTypeLabel(gig.gigType),
                   distanceLabel: _myLocation != null
-                      ? _fmtDistance(
+                      ? formatGigDistance(
                           Geolocator.distanceBetween(
                             _myLocation!.latitude,
                             _myLocation!.longitude,
@@ -3019,6 +3590,10 @@ class _GigMapSectionState extends State<GigMapSection> {
                           ),
                         )
                       : null,
+                  isBookmarked: widget.bookmarkedGigIds.contains(gig.id),
+                  onToggleBookmark: widget.onToggleBookmark == null
+                      ? null
+                      : () => widget.onToggleBookmark!(gig.id, gig.gigType),
                   onTap: () => _showGigSheet(context, gig, fromList: true),
                 ),
                 const SizedBox(height: 10),
@@ -3106,15 +3681,26 @@ class _GigMapSectionState extends State<GigMapSection> {
                   },
                   onMapCreated: (c) {
                     _googleMapController = c;
-                    if (_myLocation != null) {
-                      c.animateCamera(
-                        CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
-                      );
+                    final pending = _pendingCameraTarget;
+                    final target = pending ?? _myLocation;
+                    if (target != null) {
+                      // See _buildMapBlock's onMapCreated — a pending target
+                      // means "See this gig on the map" opened this screen,
+                      // so zoom in past the clustering grid to land on its
+                      // own pin rather than a cluster.
+                      final zoom = pending != null ? 19.0 : 14.0;
+                      c.animateCamera(CameraUpdate.newLatLngZoom(target, zoom));
+                      if (pending != null) setState(() => _zoom = zoom);
                     }
+                    _pendingCameraTarget = null;
                   },
                   initialCameraPosition: CameraPosition(
-                    target: _myLocation ?? const LatLng(14.5995, 120.9842),
-                    zoom: _myLocation != null ? 14.0 : 12.0,
+                    target: _pendingCameraTarget ??
+                        _myLocation ??
+                        const LatLng(14.5995, 120.9842),
+                    zoom: _pendingCameraTarget != null
+                        ? 19.0
+                        : (_myLocation != null ? 14.0 : 12.0),
                   ),
                   myLocationEnabled: false,
                   myLocationButtonEnabled: false,
@@ -3395,6 +3981,8 @@ class _GigListCard extends StatelessWidget {
   final String typeLabel;
   final String? distanceLabel;
   final VoidCallback onTap;
+  final bool isBookmarked;
+  final VoidCallback? onToggleBookmark;
 
   const _GigListCard({
     required this.gig,
@@ -3402,6 +3990,8 @@ class _GigListCard extends StatelessWidget {
     required this.typeLabel,
     required this.onTap,
     this.distanceLabel,
+    this.isBookmarked = false,
+    this.onToggleBookmark,
   });
 
   // Addresses are stored as full "street, barangay/municipality, province"
@@ -3500,7 +4090,7 @@ class _GigListCard extends StatelessWidget {
                       ),
                     ),
                   ],
-                ),
+                )
               ],
             ),
             const SizedBox(height: 4),

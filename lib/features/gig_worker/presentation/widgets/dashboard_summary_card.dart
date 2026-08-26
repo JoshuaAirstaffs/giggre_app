@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/widgets/earnings_breakdown_dialog.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,15 +118,20 @@ class EarningsSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final entries = totalByCurrency.isEmpty
-        ? [MapEntry(context.watch<CurrentUserProvider>().currencyCode, 0.0)]
-        : (totalByCurrency.entries.toList()
-            ..sort((a, b) => a.key.compareTo(b.key)));
-    final primary = entries.first;
-    final weeklyAmount = weeklyByCurrency[primary.key] ?? 0;
+    final defaultCurrencyCode = context.watch<CurrentUserProvider>().currencyCode;
+    // Lead with whatever's in the worker's own current currency (matches the
+    // Profile tab's "Total earned" tile), falling back to the
+    // alphabetically-first one if they haven't earned in it yet.
+    final sortedCodes = totalByCurrency.keys.toList()..sort();
+    final primaryCode = totalByCurrency.containsKey(defaultCurrencyCode)
+        ? defaultCurrencyCode
+        : (sortedCodes.isNotEmpty ? sortedCodes.first : defaultCurrencyCode);
+    final primaryTotal = totalByCurrency[primaryCode] ?? 0;
+    final weeklyAmount = weeklyByCurrency[primaryCode] ?? 0;
     final subtitle =
         '$completedGigs gigs completed · '
-        '${CurrencyFormatter.format(weeklyAmount, primary.key)} this week';
+        '${CurrencyFormatter.format(weeklyAmount, primaryCode)} this week';
+    final hasOtherCurrencies = totalByCurrency.length > 1;
 
     return Container(
       decoration: BoxDecoration(
@@ -146,25 +152,30 @@ class EarningsSummaryCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            CurrencyFormatter.format(primary.value, primary.key),
-            style: TextStyle(
-              color: onSurface,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
+          GestureDetector(
+            onTap: hasOtherCurrencies
+                ? () => showEarningsBreakdownDialog(context, totalByCurrency)
+                : null,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  CurrencyFormatter.format(primaryTotal, primaryCode),
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (hasOtherCurrencies) ...[
+                  const SizedBox(width: 5),
+                  Icon(Icons.info_outline_rounded, size: 16, color: kSub),
+                ],
+              ],
             ),
           ),
           const SizedBox(height: 4),
           Text(subtitle, style: const TextStyle(color: kSub, fontSize: 12)),
-          if (entries.length > 1)
-            for (final e in entries.skip(1))
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  '+ ${CurrencyFormatter.format(e.value, e.key)}',
-                  style: const TextStyle(color: kSub, fontSize: 12),
-                ),
-              ),
         ],
       ),
     );

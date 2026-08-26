@@ -199,7 +199,7 @@ class _DemoQuickGigOfferCardState extends State<DemoQuickGigOfferCard>
                     ),
                   ),
                   child: const Text(
-                    'Pass',
+                    'Withdraw',
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                 ),

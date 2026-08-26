@@ -135,7 +135,7 @@ class MockGigApplyScene extends StatelessWidget {
                   ),
                   child: Center(
                     child: Text(
-                      applied ? 'Pass' : 'Take Gig',
+                      applied ? 'Withdraw' : 'Take Gig',
                       style: TextStyle(
                         color: skillMatches && !applied
                             ? Colors.white

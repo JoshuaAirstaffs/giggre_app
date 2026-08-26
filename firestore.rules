@@ -46,6 +46,11 @@ service cloud.firestore {
         allow read, write: if isUser(uid);
       }
 
+      // ─── Saved Gigs ─────────────────────────────────────────────
+      match /savedGigs/{gigId} {
+        allow read, write: if isUser(uid);
+      }
+
       // ─── Referrals List ──────────────────────────────────────
       // Owner and admins can read; any authenticated user can write
       // (needed so a new user's registration can write to the referrer's sub-collection)

@@ -39,7 +39,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _userName = '';
   String _photoUrl = '';
   String? _selectedRole;
@@ -58,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadUser();
     _fetchUpdates();
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -71,6 +72,17 @@ class _HomeScreenState extends State<HomeScreen> {
         (_) => _checkInternet(),
       );
     });
+  }
+
+  // The device's radios can go quiet while the screen is off, so the stale
+  // "no internet" state from right before a lock can otherwise linger for up
+  // to the full 30s timer period after the user turns the screen back on —
+  // recheck immediately on resume instead of waiting for that tick.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkInternet();
+    }
   }
 
   Future<void> _initLocationServiceListener() async {
@@ -98,6 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _internetCheckTimer?.cancel();
     _locationServiceSub?.cancel();
     super.dispose();

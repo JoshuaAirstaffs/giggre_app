@@ -340,7 +340,7 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                   child: const Text(
-                    'Pass',
+                    'Withdraw',
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                 ),

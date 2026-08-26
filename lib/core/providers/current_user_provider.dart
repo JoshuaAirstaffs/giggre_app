@@ -93,11 +93,122 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       uid,
       userDoc,
       onPosition: setLastLocation,
+      onDetectionFailed: () => _showLocationDetectionFailedDialog(uid),
     );
     if (code != _currencyCode) {
       _currencyCode = code;
       notifyListeners();
     }
+  }
+
+  // Shown only when a brand-new account has no stored currencyCode to fall
+  // back on and GPS detection also failed — otherwise they'd be silently
+  // stuck on the 'USD' default with no indication why or way to fix it.
+  void _showLocationDetectionFailedDialog(String uid) {
+    final context = navigatorKey?.currentContext;
+    if (context == null) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dCtx) {
+        var retrying = false;
+        var stillFailed = false;
+        return StatefulBuilder(
+          builder: (dCtx, setDialogState) => AlertDialog(
+            backgroundColor: Theme.of(dCtx).cardColor,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            icon: Container(
+              width: 52,
+              height: 52,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFEDED),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.location_off_rounded,
+                color: Colors.redAccent,
+                size: 28,
+              ),
+            ),
+            title: Text(
+              "Couldn't detect your location",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Theme.of(dCtx).colorScheme.onSurface,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "We couldn't detect your location, so pricing defaults to USD for now. Check that location access is allowed for the app, then reload.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey, fontSize: 14, height: 1.5),
+                ),
+                if (stillFailed) ...[
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Still no luck — please check your location settings.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.redAccent,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actions: [
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: retrying
+                      ? null
+                      : () async {
+                          setDialogState(() {
+                            retrying = true;
+                            stillFailed = false;
+                          });
+                          final ok = await _refreshCurrencyCode();
+                          if (!dCtx.mounted) return;
+                          if (ok) {
+                            Navigator.of(dCtx).pop();
+                          } else {
+                            setDialogState(() {
+                              retrying = false;
+                              stillFailed = true;
+                            });
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: retrying
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Reload'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   // Re-detects location on every foreground resume so a user who travels
@@ -109,22 +220,27 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) _refreshCurrencyCode();
   }
 
-  Future<void> _refreshCurrencyCode() async {
-    if (_uid == null || _currencyRefreshing) return;
+  // Returns whether GPS detection itself succeeded this call (not whether it
+  // changed anything) — the manual "Reload" retry in
+  // _showLocationDetectionFailedDialog uses that to know whether to close
+  // the dialog or let the user try again.
+  Future<bool> _refreshCurrencyCode() async {
+    if (_uid == null || _currencyRefreshing) return false;
     _currencyRefreshing = true;
     try {
       final detected = await CurrencyService.detectCurrency(
         onPosition: setLastLocation,
       );
-      if (detected == null || detected == _currencyCode || _uid == null) {
-        return;
+      if (detected == null || _uid == null) return false;
+      if (detected != _currencyCode) {
+        _currencyCode = detected;
+        notifyListeners();
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(_uid)
+            .update({'currencyCode': detected});
       }
-      _currencyCode = detected;
-      notifyListeners();
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_uid)
-          .update({'currencyCode': detected});
+      return true;
     } finally {
       _currencyRefreshing = false;
     }

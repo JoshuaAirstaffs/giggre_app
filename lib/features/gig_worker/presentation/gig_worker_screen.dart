@@ -70,6 +70,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   String _phone = '';
   String _photoUrl = '';
   List<String> _skills = [];
+  Set<String> _bookmarkedGigIds = {};
   double _ratingAsWorker = 5.0;
   int _ratingCount = 0;
   String _memberSince = '';
@@ -123,6 +124,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   // worker's pending offer lives on their own `workers/{uid}` doc at
   // status:'offered' rather than the gig doc's `workerId`/status.
   StreamSubscription? _multiWorkerOfferedGigSub;
+  StreamSubscription? _bookmarksSub;
   StreamSubscription? _profileSub;
 
   // Decline suspension
@@ -143,6 +145,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     if (uid != null) {
       _activeGigBarStream = watchActiveWorkerGig(uid);
       _pendingCancellationStream = watchPendingCancellation(uid);
+      _listenToBookmarks(uid);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -160,6 +163,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _multiWorkerAssignSub?.cancel();
     _multiWorkerDispatchSub?.cancel();
     _multiWorkerOfferedGigSub?.cancel();
+    _bookmarksSub?.cancel();
     _suspensionTimer?.cancel();
     _setOnlineStatus(false);
     WidgetsBinding.instance.removeObserver(this);
@@ -188,6 +192,37 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         'isOnline': online,
       });
     } catch (_) {}
+  }
+
+  void _listenToBookmarks(String uid) {
+    _bookmarksSub?.cancel();
+    _bookmarksSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('savedGigs')
+        .snapshots()
+        .listen((snapshot) {
+          final ids = snapshot.docs.map((doc) => doc.id).toSet();
+          if (mounted) setState(() => _bookmarkedGigIds = ids);
+        });
+  }
+
+  Future<void> _toggleSavedGig(String gigId, String gigType) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final ref = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('savedGigs')
+        .doc(gigId);
+    if (_bookmarkedGigIds.contains(gigId)) {
+      await ref.delete();
+    } else {
+      await ref.set({
+        'gigType': gigType,
+        'savedAt': FieldValue.serverTimestamp(),
+      });
+    }
   }
 
   void _listenToProfile() {
@@ -1794,6 +1829,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 onOfferedGigAccepted: _acceptOfferedGig,
                                 isVerified: _isVerified,
                                 workerSkills: _skills,
+                                bookmarkedGigIds: _bookmarkedGigIds,
+                                onToggleBookmark: _toggleSavedGig,
                               ),
                               const SizedBox(height: 16),
                             ]),

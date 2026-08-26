@@ -9,6 +9,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
+import 'package:giggre_app/core/services/earnings_service.dart';
 import 'package:giggre_app/services/delete_acc_service.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
@@ -17,6 +18,7 @@ import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/profile_tab_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/widgets/earnings_breakdown_dialog.dart';
 import '../../gig_worker/presentation/gig_history_screen.dart';
 import '../../gig_worker/presentation/worker_ratings_screen.dart';
 import '../../gig_worker/presentation/worker_settings_screen.dart';
@@ -230,8 +232,14 @@ class _ProfileTabState extends State<ProfileTab> {
 
           final earningsMap = data['earnings'] as Map<String, dynamic>? ?? {};
           final totalMap = earningsMap['total'] as Map<String, dynamic>? ?? {};
-          final weeklyMap =
-              earningsMap['weekly'] as Map<String, dynamic>? ?? {};
+          // The stored 'weekly' bucket only resets the next time a gig
+          // completes (see EarningsService.incrementInTransaction), so once
+          // a week passes with no new gig it's still holding last week's
+          // numbers — only trust it when its stamped week matches today's.
+          final storedWeek = earningsMap['currentWeek'] as String? ?? '';
+          final weeklyMap = storedWeek == EarningsService.currentWeekLabel()
+              ? earningsMap['weekly'] as Map<String, dynamic>? ?? {}
+              : <String, dynamic>{};
 
           final earningsByCode = <String, double>{};
           totalMap.forEach(
@@ -753,6 +761,12 @@ class _ProfileTabState extends State<ProfileTab> {
     }
   }
 
+  // "Total earned" only shows one currency at a time (see build()) — this
+  // lists every currency the worker has earned in, for when there's more
+  // than one and the info icon next to the total is tapped.
+  void _showEarningsBreakdown() =>
+      showEarningsBreakdownDialog(context, _earningsByCode);
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -767,9 +781,25 @@ class _ProfileTabState extends State<ProfileTab> {
     }
 
     final defaultCurrencyCode = context.watch<CurrentUserProvider>().currencyCode;
-    final totalStr = _formatByCode(_earningsByCode, defaultCurrencyCode);
     final weeklyStr = _formatByCode(_weeklyByCode, defaultCurrencyCode);
     final spentStr = _formatByCode(_spentByCurrency, defaultCurrencyCode);
+
+    // "Total earned" is a single tight stat column (one line, ellipsized) —
+    // joining every currency into one string (old _formatByCode behavior)
+    // just got truncated the moment a worker had earned in a second
+    // currency. Lead with whatever's in the worker's own current currency
+    // (falls back to the alphabetically-first one if they haven't earned in
+    // it yet); a small info icon next to it opens the full breakdown rather
+    // than a "+N" label people had no context for.
+    final earningsCodes = _earningsByCode.keys.toList()..sort();
+    final primaryEarningsCode = _earningsByCode.containsKey(defaultCurrencyCode)
+        ? defaultCurrencyCode
+        : (earningsCodes.isNotEmpty ? earningsCodes.first : defaultCurrencyCode);
+    final totalStr = CurrencyFormatter.format(
+      _earningsByCode[primaryEarningsCode] ?? 0,
+      primaryEarningsCode,
+    );
+    final hasOtherCurrencies = _earningsByCode.length > 1;
 
     final workerColumns = <_StatColumn>[
       if (_workerRatingCount > 0)
@@ -779,7 +809,13 @@ class _ProfileTabState extends State<ProfileTab> {
           valueColor: goldText,
         ),
       _StatColumn(value: '$_completedGigsWorker', label: 'Gigs done'),
-      _StatColumn(value: totalStr, label: 'Total earned', valueColor: kBlue),
+      _StatColumn(
+        value: totalStr,
+        label: 'Total earned',
+        valueColor: kBlue,
+        hasMore: hasOtherCurrencies,
+        onTap: hasOtherCurrencies ? _showEarningsBreakdown : null,
+      ),
     ];
 
     final hostColumns = <_StatColumn>[
@@ -1558,11 +1594,17 @@ class _StatColumn {
   final String value;
   final String label;
   final Color? valueColor;
+  // When set, shows a small info icon next to the value and makes the whole
+  // column tappable — e.g. "Total earned" opening its per-currency breakdown.
+  final VoidCallback? onTap;
+  final bool hasMore;
 
   const _StatColumn({
     required this.value,
     required this.label,
     this.valueColor,
+    this.onTap,
+    this.hasMore = false,
   });
 }
 
@@ -1596,31 +1638,51 @@ class _StatsCard extends StatelessWidget {
                 if (i > 0)
                   Container(width: 1, height: 34, color: tokens.divider),
                 Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        columns[i].value,
-                        style: TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w800,
-                          color: columns[i].valueColor ?? tokens.textPrimary,
+                  child: GestureDetector(
+                    onTap: columns[i].onTap,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                columns[i].value,
+                                style: TextStyle(
+                                  fontSize: 19,
+                                  fontWeight: FontWeight.w800,
+                                  color:
+                                      columns[i].valueColor ?? tokens.textPrimary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (columns[i].hasMore) ...[
+                              const SizedBox(width: 3),
+                              Icon(
+                                Icons.info_outline_rounded,
+                                size: 13,
+                                color: columns[i].valueColor ?? tokens.textPrimary,
+                              ),
+                            ],
+                          ],
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        columns[i].label,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: tokens.textSecondary,
+                        const SizedBox(height: 3),
+                        Text(
+                          columns[i].label,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: tokens.textSecondary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ],
