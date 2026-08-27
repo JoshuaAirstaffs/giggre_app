@@ -692,11 +692,8 @@ void showFullGigDetailSheet(
                     ),
                     const SizedBox(width: 8),
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-
-                      children: [
-                        Row(
                       mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Container(
                           width: 7,
@@ -715,26 +712,22 @@ void showFullGigDetailSheet(
                             fontWeight: FontWeight.w700,
                           ),
                         ),
+                        if (onToggleBookmark != null)
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: Icon(
+                              bookmarkedGigIds.contains(gig.id)
+                                  ? Icons.bookmark_rounded
+                                  : Icons.bookmark_outline_rounded,
+                              color: kGold,
+                              size: 22,
+                            ),
+                            onPressed: () =>
+                                onToggleBookmark!(gig.id, gig.gigType),
+                          ),
                       ],
                     ),
-                    if (onToggleBookmark != null)
-                      IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        icon: Icon(
-                          bookmarkedGigIds.contains(gig.id)
-                              ? Icons.bookmark_rounded
-                              : Icons.bookmark_outline_rounded,
-                          color: kGold,
-                          size: 22,
-                        ),
-                        onPressed: () =>
-                            onToggleBookmark!(gig.id, gig.gigType),
-                      ),
-                      ],
-
-                    ),
-                    
                   ],
                 ),
                 const SizedBox(height: 4),

@@ -506,7 +506,7 @@ class _SavedScreenState extends State<SavedScreen> {
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
-                              _fmtScheduleGrid(data['schedule'] as Timestamp? ??
+                              _fmtScheduleGrid(data['scheduledDate'] as Timestamp? ??
                                   Timestamp.now()),
                               style: TextStyle(
                                 color: onSurface.withValues(alpha: 0.5),

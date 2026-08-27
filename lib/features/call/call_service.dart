@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'agora_token_service.dart';
 
 Future<void> initiateCall({
   required BuildContext context,
   required String targetUserId,
   required String channelName,
-  required String token,
   required bool isVideo,
   required void Function(bool) setLoading,
   required Widget Function(String channelName, String token) buildScreen,
@@ -39,6 +39,11 @@ Future<void> initiateCall({
       }
       return;
     }
+
+    // One token generated for uid 0 ("any uid") covers both ends of the
+    // call — see AgoraTokenService and the callee's own joinChannel(uid: 0)
+    // in voice_call_screen.dart/video_call_screen.dart.
+    final token = await AgoraTokenService.generateToken(channelName);
 
     final batch = firestore.batch();
 

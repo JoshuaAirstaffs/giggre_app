@@ -15,14 +15,12 @@ class CallUserAction extends StatefulWidget {
     required this.targetUserId,
     required this.targetUserName,
     required this.callType,
-    this.token = '',
     this.iconColor,
   });
 
   final String targetUserId;
   final String targetUserName;
   final CallType callType;
-  final String token;
   // Overrides the default icon color (purple for video, kBlue for voice).
   // Null preserves today's look everywhere this widget is already used.
   final Color? iconColor;
@@ -81,7 +79,6 @@ class _CallUserActionState extends State<CallUserAction>
       context: context,
       targetUserId: widget.targetUserId,
       channelName: _channelName,
-      token: widget.token,
       isVideo: _isVideo,
       setLoading: (v) {
         if (mounted) setState(() => _isCalling = v);
