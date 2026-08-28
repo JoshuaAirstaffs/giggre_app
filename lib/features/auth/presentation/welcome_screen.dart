@@ -111,6 +111,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   // ── Signup state (unchanged from the original RegisterScreen) ──────────
   final _signupNameController = TextEditingController();
+  final _signupAgeController = TextEditingController();
   final _signupPhoneController = TextEditingController();
   final _signupEmailController = TextEditingController();
   final _signupPasswordController = TextEditingController();
@@ -125,6 +126,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   bool _signupObscureConfirmPassword = true;
   bool _agreedToTerms = false;
   String _signupError = '';
+  String _signupAgeError = '';
 
   void _navigateByRole(String? role) {
     if (role == 'gigworker') {
@@ -648,17 +650,34 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final password = _signupPasswordController.text.trim();
     final confirmPassword = _signupConfirmPasswordController.text.trim();
     final name = _signupNameController.text.trim();
+    final ageText = _signupAgeController.text.trim();
     final phone = _signupPhoneController.text.trim();
     final referralCode = _signupReferralController.text.trim().toUpperCase();
+
+    setState(() => _signupAgeError = '');
 
     if (email.isEmpty ||
         password.isEmpty ||
         confirmPassword.isEmpty ||
         name.isEmpty ||
-        phone.isEmpty) {
+        phone.isEmpty ||
+        ageText.isEmpty) {
       setState(() => _signupError = 'All fields are required');
       return;
     }
+
+    final age = int.tryParse(ageText);
+    if (age == null) {
+      setState(() => _signupAgeError = 'Enter a valid age');
+      return;
+    }
+    if (age < 18) {
+      setState(
+        () => _signupAgeError = 'You must be at least 18 years old to register',
+      );
+      return;
+    }
+
     if (!_agreedToTerms) {
       setState(
         () => _signupError =
@@ -736,6 +755,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         'userId': userId,
         'email': email,
         'name': name,
+        'age': age,
         'phone': fullPhone,
         'balance': 0,
         'createdAt': Timestamp.now(),
@@ -898,6 +918,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     emailController.dispose();
     passwordController.dispose();
     _signupNameController.dispose();
+    _signupAgeController.dispose();
     _signupPhoneController.dispose();
     _signupEmailController.dispose();
     _signupPasswordController.dispose();
@@ -913,7 +934,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final isPanelOpen = !isWelcome;
     final bottomSafe = MediaQuery.of(context).padding.bottom;
     final panelHeight =
-        (_panelState == _PanelState.signup ? 706.0 : 560.0) + bottomSafe;
+        (_panelState == _PanelState.signup ? 766.0 : 560.0) + bottomSafe;
 
     return PopScope(
       canPop: isWelcome,
@@ -1002,6 +1023,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                                   key: const ValueKey('signup'),
                                   tokens: tokens,
                                   nameController: _signupNameController,
+                                  ageController: _signupAgeController,
+                                  ageError: _signupAgeError,
                                   phoneController: _signupPhoneController,
                                   emailController: _signupEmailController,
                                   passwordController: _signupPasswordController,
@@ -1669,6 +1692,8 @@ class _LoginPanel extends StatelessWidget {
 class _SignupPanel extends StatelessWidget {
   final ProfileTabTokens tokens;
   final TextEditingController nameController;
+  final TextEditingController ageController;
+  final String ageError;
   final TextEditingController phoneController;
   final TextEditingController emailController;
   final TextEditingController passwordController;
@@ -1695,6 +1720,8 @@ class _SignupPanel extends StatelessWidget {
     super.key,
     required this.tokens,
     required this.nameController,
+    required this.ageController,
+    required this.ageError,
     required this.phoneController,
     required this.emailController,
     required this.passwordController,
@@ -1778,6 +1805,15 @@ class _SignupPanel extends StatelessWidget {
             controller: nameController,
             hintText: 'Full Name',
             icon: Icons.person_outline,
+          ),
+          const SizedBox(height: 12),
+          _AuthField(
+            tokens: tokens,
+            controller: ageController,
+            hintText: 'Age',
+            icon: Icons.cake_outlined,
+            keyboardType: TextInputType.number,
+            errorText: ageError.isNotEmpty ? ageError : null,
           ),
           const SizedBox(height: 12),
           _SignupPhoneRow(
@@ -2433,6 +2469,7 @@ class _AuthField extends StatelessWidget {
   final TextInputType? keyboardType;
   final bool obscureText;
   final Widget? suffixIcon;
+  final String? errorText;
 
   const _AuthField({
     required this.tokens,
@@ -2442,41 +2479,44 @@ class _AuthField extends StatelessWidget {
     this.keyboardType,
     this.obscureText = false,
     this.suffixIcon,
+    this.errorText,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: TextField(
-        controller: controller,
-        keyboardType: keyboardType,
-        obscureText: obscureText,
-        style: TextStyle(fontSize: 14, color: tokens.textPrimary),
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: hintText,
-          hintStyle: TextStyle(color: tokens.textMuted, fontSize: 14),
-          prefixIcon: Icon(icon, color: tokens.textMuted, size: 19),
-          suffixIcon: suffixIcon,
-          filled: true,
-          fillColor: tokens.insetBg,
-          contentPadding: const EdgeInsets.symmetric(vertical: 14),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: tokens.cardBorder, width: 1),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: tokens.cardBorder, width: 1),
-          ),
-          focusedBorder: const OutlineInputBorder(
-            borderRadius: BorderRadius.all(Radius.circular(14)),
-            borderSide: BorderSide(color: _kBlueAccent, width: 1.4),
-          ),
+    final field = TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      style: TextStyle(fontSize: 14, color: tokens.textPrimary),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: hintText,
+        hintStyle: TextStyle(color: tokens.textMuted, fontSize: 14),
+        prefixIcon: Icon(icon, color: tokens.textMuted, size: 19),
+        suffixIcon: suffixIcon,
+        errorText: errorText,
+        filled: true,
+        fillColor: tokens.insetBg,
+        contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: tokens.cardBorder, width: 1),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: tokens.cardBorder, width: 1),
+        ),
+        focusedBorder: const OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(14)),
+          borderSide: BorderSide(color: _kBlueAccent, width: 1.4),
         ),
       ),
     );
+    // Fixed height keeps uniform field sizing, but that clips the errorText
+    // this field can now show — only let it size naturally while an error
+    // is actually displayed.
+    return errorText != null ? field : SizedBox(height: 48, child: field);
   }
 }
 
