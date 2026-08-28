@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -153,7 +152,7 @@ class _LoginScreenState extends State<LoginScreen> {
         final provider = GoogleAuthProvider();
         userCred = await FirebaseAuth.instance.signInWithPopup(provider);
       } else {
-        final googleSignIn = GoogleSignIn(serverClientId: googleServerClientId);
+        final googleSignIn = buildGoogleSignIn();
         // Force the account picker to reappear every attempt — signIn() alone
         // silently re-returns whatever account was picked last time (e.g. an
         // unregistered account chosen by mistake), even across app restarts.

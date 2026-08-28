@@ -1018,7 +1018,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       error = '';
     });
     try {
-      final googleSignIn = GoogleSignIn(serverClientId: googleServerClientId);
+      final googleSignIn = buildGoogleSignIn();
       // Force the account picker to reappear every attempt — signIn() alone
       // silently re-returns whatever account was picked last time (e.g. an
       // unregistered account chosen by mistake), even across app restarts.

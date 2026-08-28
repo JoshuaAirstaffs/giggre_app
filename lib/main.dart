@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
 import 'package:giggre_app/screens/maintenance_screen.dart';
@@ -29,6 +33,20 @@ const String flavor = String.fromEnvironment('FLAVOR', defaultValue: 'dev');
 final String googleServerClientId = flavor == 'prod'
     ? '935744152330-8d6f8pjehgouqmrnrnj0k2vlf0rutclj.apps.googleusercontent.com'
     : '770115931871-jivlg6kqm5it9n07co1kjhf3vkjj3on3.apps.googleusercontent.com';
+
+// iOS-native OAuth client used as GoogleSignIn's clientId. GoogleService-Info.plist
+// isn't bundled into the Runner target (that would hardcode prod config into dev
+// builds), so the native SDK has no client ID to read on iOS unless we pass one
+// explicitly here — omitting it crashes Google Sign-In on iOS.
+final String googleIosClientId = flavor == 'prod'
+    ? '935744152330-lps42fobq27ht4kmn9f0gagmeln4fnn7.apps.googleusercontent.com'
+    : '770115931871-42as1vtljgj07rurcakgkv9c5i8qgfco.apps.googleusercontent.com';
+
+// dart:io isn't available on web, so Platform.isIOS must stay behind a !kIsWeb guard.
+GoogleSignIn buildGoogleSignIn() => GoogleSignIn(
+      clientId: (!kIsWeb && Platform.isIOS) ? googleIosClientId : null,
+      serverClientId: kIsWeb ? null : googleServerClientId,
+    );
 
 // Set by a signup flow between creating the Firebase Auth account and
 // finishing the Firestore profile write. _MaintenanceGate's auth-state

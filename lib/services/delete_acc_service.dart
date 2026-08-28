@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -496,13 +498,16 @@ class DeleteAccountService {
   static Future<bool> _reAuthWithGoogle(
       BuildContext context, User user) async {
     try {
-      final clientId = googleServerClientId;
       final googleSignIn = GoogleSignIn(
-        // clientId required by google_sign_in_web to init the OAuth flow.
+        // clientId required by google_sign_in_web to init the OAuth flow, and
+        // on iOS since GoogleService-Info.plist isn't bundled into the Runner
+        // target, so the native SDK has no client ID to read otherwise.
         // serverClientId required on Android/iOS to get an idToken in the response.
         // This must match the Web OAuth 2.0 client ID in Firebase Console.
-        clientId: kIsWeb ? clientId : null,
-        serverClientId: kIsWeb ? null : clientId,
+        clientId: kIsWeb
+            ? googleServerClientId
+            : (Platform.isIOS ? googleIosClientId : null),
+        serverClientId: kIsWeb ? null : googleServerClientId,
       );
 
       // Sign out first to force fresh account selection and new tokens —
