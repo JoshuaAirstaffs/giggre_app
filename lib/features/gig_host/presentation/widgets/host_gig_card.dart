@@ -209,11 +209,10 @@ class _HostGigCardState extends State<HostGigCard> {
       return;
     }
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => GigDetailSheet(gigId: docId, gigType: gigType),
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => GigDetailSheet(gigId: docId, gigType: gigType),
+      ),
     );
   }
 

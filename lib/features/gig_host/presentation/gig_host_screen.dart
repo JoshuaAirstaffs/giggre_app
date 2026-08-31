@@ -842,11 +842,11 @@ class _ApplicantWaitingCardState extends State<_ApplicantWaitingCard> {
             height: 30,
             child: ElevatedButton(
               onPressed: () {
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (_) => GigDetailSheet(gigId: gigId, gigType: 'open'),
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        GigDetailSheet(gigId: gigId, gigType: 'open'),
+                  ),
                 );
               },
               style: ElevatedButton.styleFrom(

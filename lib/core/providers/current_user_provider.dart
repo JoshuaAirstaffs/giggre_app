@@ -458,11 +458,10 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       final gigId = data['gigId'] as String? ?? '';
       if (gigId.isEmpty) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        showModalBottomSheet(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor: Colors.transparent,
-          builder: (_) => GigDetailSheet(gigId: gigId, gigType: 'open'),
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => GigDetailSheet(gigId: gigId, gigType: 'open'),
+          ),
         );
       });
       return;
