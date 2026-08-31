@@ -932,9 +932,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
     final isWelcome = _panelState == _PanelState.welcome;
     final isPanelOpen = !isWelcome;
-    final bottomSafe = MediaQuery.of(context).padding.bottom;
-    final panelHeight =
+    final media = MediaQuery.of(context);
+    final bottomSafe = media.padding.bottom;
+    final keyboardInset = media.viewInsets.bottom;
+    final desiredPanelHeight =
         (_panelState == _PanelState.signup ? 766.0 : 560.0) + bottomSafe;
+    final maxPanelHeight =
+        media.size.height - media.padding.top - keyboardInset - 16;
+    final panelHeight = min(desiredPanelHeight, maxPanelHeight);
 
     return PopScope(
       canPop: isWelcome,
@@ -972,128 +977,131 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             // rebuilds) and animates height when swapping between the two.
             Align(
               alignment: Alignment.bottomCenter,
-              child: AnimatedSlide(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOutCubic,
-                offset: isWelcome ? const Offset(0, 1) : Offset.zero,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
+              child: Padding(
+                padding: EdgeInsets.only(bottom: keyboardInset),
+                child: AnimatedSlide(
+                  duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOutCubic,
-                  width: double.infinity,
-                  height: panelHeight,
-                  decoration: BoxDecoration(
-                    color: tokens.cardSurface,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(28),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color.fromRGBO(11, 22, 38, 0.12),
-                        offset: const Offset(0, -14),
-                        blurRadius: 36,
+                  offset: isWelcome ? const Offset(0, 1) : Offset.zero,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOutCubic,
+                    width: double.infinity,
+                    height: panelHeight,
+                    decoration: BoxDecoration(
+                      color: tokens.cardSurface,
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(28),
                       ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onVerticalDragEnd: (details) {
-                          final velocity = details.primaryVelocity ?? 0;
-                          if (velocity > 250) _goToWelcome();
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          alignment: Alignment.center,
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color.fromRGBO(11, 22, 38, 0.12),
+                          offset: const Offset(0, -14),
+                          blurRadius: 36,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onVerticalDragEnd: (details) {
+                            final velocity = details.primaryVelocity ?? 0;
+                            if (velocity > 250) _goToWelcome();
+                          },
                           child: Container(
-                            width: 36,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: tokens.cardBorder,
-                              borderRadius: BorderRadius.circular(2),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            alignment: Alignment.center,
+                            child: Container(
+                              width: 36,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: tokens.cardBorder,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      Expanded(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 180),
-                          child: _panelState == _PanelState.signup
-                              ? _SignupPanel(
-                                  key: const ValueKey('signup'),
-                                  tokens: tokens,
-                                  nameController: _signupNameController,
-                                  ageController: _signupAgeController,
-                                  ageError: _signupAgeError,
-                                  phoneController: _signupPhoneController,
-                                  emailController: _signupEmailController,
-                                  passwordController: _signupPasswordController,
-                                  confirmPasswordController:
-                                      _signupConfirmPasswordController,
-                                  referralController: _signupReferralController,
-                                  selectedCountry: _selectedCountry,
-                                  onCountryChanged: (c) =>
-                                      setState(() => _selectedCountry = c),
-                                  obscurePassword: _signupObscurePassword,
-                                  onToggleObscure: () => setState(
-                                    () => _signupObscurePassword =
-                                        !_signupObscurePassword,
+                        Expanded(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 180),
+                            child: _panelState == _PanelState.signup
+                                ? _SignupPanel(
+                                    key: const ValueKey('signup'),
+                                    tokens: tokens,
+                                    nameController: _signupNameController,
+                                    ageController: _signupAgeController,
+                                    ageError: _signupAgeError,
+                                    phoneController: _signupPhoneController,
+                                    emailController: _signupEmailController,
+                                    passwordController: _signupPasswordController,
+                                    confirmPasswordController:
+                                        _signupConfirmPasswordController,
+                                    referralController: _signupReferralController,
+                                    selectedCountry: _selectedCountry,
+                                    onCountryChanged: (c) =>
+                                        setState(() => _selectedCountry = c),
+                                    obscurePassword: _signupObscurePassword,
+                                    onToggleObscure: () => setState(
+                                      () => _signupObscurePassword =
+                                          !_signupObscurePassword,
+                                    ),
+                                    obscureConfirmPassword:
+                                        _signupObscureConfirmPassword,
+                                    onToggleObscureConfirm: () => setState(
+                                      () => _signupObscureConfirmPassword =
+                                          !_signupObscureConfirmPassword,
+                                    ),
+                                    agreedToTerms: _agreedToTerms,
+                                    onAgreedToTermsChanged: (v) =>
+                                        setState(() => _agreedToTerms = v),
+                                    error: _signupError,
+                                    isLoading: _signupIsLoading,
+                                    isGoogleLoading: _signupIsGoogleLoading,
+                                    isAppleLoading: _signupIsAppleLoading,
+                                    onCreateAccount: () {
+                                      SoundService.tap();
+                                      _register();
+                                    },
+                                    onGoogleTap: _signupSignInWithGoogle,
+                                    onAppleTap: _signupSignInWithApple,
+                                    onLogin: () {
+                                      SoundService.tap();
+                                      _goToLogin();
+                                    },
+                                  )
+                                : _LoginPanel(
+                                    key: const ValueKey('login'),
+                                    tokens: tokens,
+                                    emailController: emailController,
+                                    passwordController: passwordController,
+                                    obscurePassword: _obscurePassword,
+                                    onToggleObscure: () => setState(
+                                      () => _obscurePassword = !_obscurePassword,
+                                    ),
+                                    error: _error,
+                                    isLoading: isLoading,
+                                    isGoogleLoading: isGoogleLoading,
+                                    isAppleLoading: isAppleLoading,
+                                    onLogin: () {
+                                      SoundService.tap();
+                                      login();
+                                    },
+                                    onForgotPassword: () {
+                                      SoundService.tap();
+                                      _sendPasswordReset();
+                                    },
+                                    onGoogleTap: signInWithGoogle,
+                                    onAppleTap: signInWithApple,
+                                    onSignUp: () {
+                                      SoundService.tap();
+                                      _goToSignup();
+                                    },
                                   ),
-                                  obscureConfirmPassword:
-                                      _signupObscureConfirmPassword,
-                                  onToggleObscureConfirm: () => setState(
-                                    () => _signupObscureConfirmPassword =
-                                        !_signupObscureConfirmPassword,
-                                  ),
-                                  agreedToTerms: _agreedToTerms,
-                                  onAgreedToTermsChanged: (v) =>
-                                      setState(() => _agreedToTerms = v),
-                                  error: _signupError,
-                                  isLoading: _signupIsLoading,
-                                  isGoogleLoading: _signupIsGoogleLoading,
-                                  isAppleLoading: _signupIsAppleLoading,
-                                  onCreateAccount: () {
-                                    SoundService.tap();
-                                    _register();
-                                  },
-                                  onGoogleTap: _signupSignInWithGoogle,
-                                  onAppleTap: _signupSignInWithApple,
-                                  onLogin: () {
-                                    SoundService.tap();
-                                    _goToLogin();
-                                  },
-                                )
-                              : _LoginPanel(
-                                  key: const ValueKey('login'),
-                                  tokens: tokens,
-                                  emailController: emailController,
-                                  passwordController: passwordController,
-                                  obscurePassword: _obscurePassword,
-                                  onToggleObscure: () => setState(
-                                    () => _obscurePassword = !_obscurePassword,
-                                  ),
-                                  error: _error,
-                                  isLoading: isLoading,
-                                  isGoogleLoading: isGoogleLoading,
-                                  isAppleLoading: isAppleLoading,
-                                  onLogin: () {
-                                    SoundService.tap();
-                                    login();
-                                  },
-                                  onForgotPassword: () {
-                                    SoundService.tap();
-                                    _sendPasswordReset();
-                                  },
-                                  onGoogleTap: signInWithGoogle,
-                                  onAppleTap: signInWithApple,
-                                  onSignUp: () {
-                                    SoundService.tap();
-                                    _goToSignup();
-                                  },
-                                ),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1482,11 +1490,10 @@ class _LoginPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
     final signupGold = isDark ? _kGold : _kSignupGoldLight;
 
     return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + keyboardInset),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1747,10 +1754,8 @@ class _SignupPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-
     return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(20, 0, 20, 48 + keyboardInset),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 48),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
