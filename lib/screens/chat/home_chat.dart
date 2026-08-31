@@ -258,11 +258,13 @@ class _GigChatsTabState extends State<_GigChatsTab> {
   @override
   void initState() {
     super.initState();
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    _stream = FirebaseFirestore.instance
-        .collection('chat_rooms')
-        .where('participants', arrayContains: uid)
-        .snapshots();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    _stream = uid == null
+        ? const Stream.empty()
+        : FirebaseFirestore.instance
+            .collection('chat_rooms')
+            .where('participants', arrayContains: uid)
+            .snapshots();
   }
 
   @override

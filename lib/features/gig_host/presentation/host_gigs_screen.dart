@@ -28,7 +28,7 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
   String _statusFilter = 'all';
   List<Map<String, dynamic>> _quick = [], _open = [], _offered = [];
   bool _loading = true;
-  late StreamSubscription _quickSub, _openSub, _offeredSub;
+  StreamSubscription? _quickSub, _openSub, _offeredSub;
 
   static const _pageSize = 5;
   int _visibleCount = _pageSize;
@@ -45,9 +45,14 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.uid.isEmpty) {
+      _loading = false;
+      return;
+    }
     final db = FirebaseFirestore.instance;
 
     void onErr(Object e) {
+      if (FirebaseAuth.instance.currentUser == null) return;
       debugPrint('[HostGigsScreen] stream error: $e');
       if (mounted) setState(() => _loading = false);
     }
@@ -109,9 +114,9 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
 
   @override
   void dispose() {
-    _quickSub.cancel();
-    _openSub.cancel();
-    _offeredSub.cancel();
+    _quickSub?.cancel();
+    _openSub?.cancel();
+    _offeredSub?.cancel();
     super.dispose();
   }
 

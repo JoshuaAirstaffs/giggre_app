@@ -1610,12 +1610,18 @@ class _GigMapSectionState extends State<GigMapSection> {
           );
         }
         _resolveMyCountry(quickLoc);
-        if (_useGoogleMaps) {
-          _googleMapController?.animateCamera(
-            CameraUpdate.newLatLngZoom(quickLoc, 14.0),
-          );
-        } else if (_osmMapReady) {
-          _osmController.move(ll.LatLng(quickLoc.latitude, quickLoc.longitude), 14.0);
+        // The view mode can switch (e.g. saved preference loads as 'list')
+        // while this await was pending, tearing down the GoogleMap widget —
+        // animating its controller afterwards throws, which the catch below
+        // would otherwise misreport as a location failure.
+        if (_viewMode == _GigViewMode.map) {
+          if (_useGoogleMaps) {
+            _googleMapController?.animateCamera(
+              CameraUpdate.newLatLngZoom(quickLoc, 14.0),
+            );
+          } else if (_osmMapReady) {
+            _osmController.move(ll.LatLng(quickLoc.latitude, quickLoc.longitude), 14.0);
+          }
         }
       }
 
@@ -1634,12 +1640,15 @@ class _GigMapSectionState extends State<GigMapSection> {
         loc.longitude,
       );
       _resolveMyCountry(loc);
-      if (_useGoogleMaps) {
-        _googleMapController?.animateCamera(
-          CameraUpdate.newLatLngZoom(loc, 14.0),
-        );
-      } else if (_osmMapReady) {
-        _osmController.move(ll.LatLng(loc.latitude, loc.longitude), 14.0);
+      // Same view-mode race as the last-known-position branch above.
+      if (_viewMode == _GigViewMode.map) {
+        if (_useGoogleMaps) {
+          _googleMapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(loc, 14.0),
+          );
+        } else if (_osmMapReady) {
+          _osmController.move(ll.LatLng(loc.latitude, loc.longitude), 14.0);
+        }
       }
     } catch (_) {
       if (mounted) {
