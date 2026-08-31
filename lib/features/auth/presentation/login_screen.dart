@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -349,6 +350,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
+    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
     return Scaffold(
       backgroundColor: tokens.screenBg,
       resizeToAvoidBottomInset: false,
@@ -357,25 +359,28 @@ class _LoginScreenState extends State<LoginScreen> {
           Positioned.fill(child: _IconMarquee(tokens: tokens)),
           Align(
             alignment: Alignment.bottomCenter,
-            child: _LoginPanel(
-              tokens: tokens,
-              emailController: emailController,
-              passwordController: passwordController,
-              obscurePassword: _obscurePassword,
-              onToggleObscure: () =>
-                  setState(() => _obscurePassword = !_obscurePassword),
-              error: _error,
-              isLoading: isLoading,
-              isGoogleLoading: isGoogleLoading,
-              isAppleLoading: isAppleLoading,
-              onLogin: () { SoundService.tap(); login(); },
-              onForgotPassword: () { SoundService.tap(); _sendPasswordReset(); },
-              onGoogleTap: signInWithGoogle,
-              onAppleTap: signInWithApple,
-              onSignUp: () {
-                SoundService.tap();
-                Navigator.pushNamed(context, '/register');
-              },
+            child: Padding(
+              padding: EdgeInsets.only(bottom: keyboardInset),
+              child: _LoginPanel(
+                tokens: tokens,
+                emailController: emailController,
+                passwordController: passwordController,
+                obscurePassword: _obscurePassword,
+                onToggleObscure: () =>
+                    setState(() => _obscurePassword = !_obscurePassword),
+                error: _error,
+                isLoading: isLoading,
+                isGoogleLoading: isGoogleLoading,
+                isAppleLoading: isAppleLoading,
+                onLogin: () { SoundService.tap(); login(); },
+                onForgotPassword: () { SoundService.tap(); _sendPasswordReset(); },
+                onGoogleTap: signInWithGoogle,
+                onAppleTap: signInWithApple,
+                onSignUp: () {
+                  SoundService.tap();
+                  Navigator.pushNamed(context, '/register');
+                },
+              ),
             ),
           ),
         ],
@@ -559,13 +564,16 @@ class _LoginPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bottomSafe = MediaQuery.of(context).padding.bottom;
-    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    final media = MediaQuery.of(context);
+    final bottomSafe = media.padding.bottom;
+    final keyboardInset = media.viewInsets.bottom;
+    final maxPanelHeight = media.size.height - media.padding.top - keyboardInset - 16;
+    final panelHeight = math.min(500 + bottomSafe, maxPanelHeight);
     final signupGold = isDark ? _kGold : _kSignupGoldLight;
 
     return Container(
       width: double.infinity,
-      height: 500 + bottomSafe,
+      height: panelHeight,
       decoration: BoxDecoration(
         color: tokens.cardSurface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
@@ -578,7 +586,7 @@ class _LoginPanel extends StatelessWidget {
         ],
       ),
       child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + keyboardInset),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

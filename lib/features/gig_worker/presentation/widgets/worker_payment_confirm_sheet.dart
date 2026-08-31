@@ -186,244 +186,254 @@ class _WorkerPaymentConfirmSheetState
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final dividerColor = Theme.of(context).dividerColor;
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: dividerColor),
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Drag handle ───────────────────────────────────────────────
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white24 : Colors.black12,
-                  borderRadius: BorderRadius.circular(2),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: dividerColor),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Drag handle ───────────────────────────────────────────────
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black12,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 22),
+              const SizedBox(height: 22),
 
-            // ── Header ────────────────────────────────────────────────────
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: green.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
+              // ── Header ────────────────────────────────────────────────────
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: green.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.verified_rounded,
+                        color: green, size: 24),
                   ),
-                  child: const Icon(Icons.verified_rounded,
-                      color: green, size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Confirm Payment',
-                        style: TextStyle(
-                          color: onSurface,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Confirm Payment',
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
+                        Text(
+                          'Verify payment from ${widget.hostName}',
+                          style: const TextStyle(color: kSub, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, color: kSub),
+                    onPressed: () => Navigator.pop(context),
+                    tooltip: 'Close',
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 18),
+
+              // ── Amount banner ─────────────────────────────────────────────
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: green.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: green.withValues(alpha: 0.25)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.payments_rounded, color: green, size: 22),
+                    const SizedBox(width: 10),
+                    Text(
+                      CurrencyFormatter.format(widget.budget, widget.currencyCode),
+                      style: const TextStyle(
+                        color: green,
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
                       ),
-                      Text(
-                        'Verify payment from ${widget.hostName}',
-                        style: const TextStyle(color: kSub, fontSize: 12),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Cash Payment',
+                      style: TextStyle(color: kSub, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // ── 6-digit code input ────────────────────────────────────────
+              Row(
+                children: [
+                  Text(
+                    'Enter Payment Code',
+                    style: TextStyle(
+                      color: onSurface,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: _scanQrCode,
+                    icon: const Icon(Icons.qr_code_scanner_rounded,
+                        size: 18, color: green),
+                    label: const Text('Scan QR',
+                        style: TextStyle(color: green, fontSize: 13)),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Scan the QR code or manually enter the 6-digit code from the host.',
+                style: TextStyle(
+                  color: kSub.withValues(alpha: 0.8),
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _codeController,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 30,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 12,
+                  fontFamily: 'monospace',
+                ),
+                decoration: InputDecoration(
+                  hintText: '• • • • • •',
+                  hintStyle: TextStyle(
+                    color: kSub.withValues(alpha: 0.35),
+                    fontSize: 24,
+                    letterSpacing: 10,
+                  ),
+                  counterText: '',
+                  filled: true,
+                  fillColor: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.black.withValues(alpha: 0.03),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide:
+                        BorderSide(color: green.withValues(alpha: 0.3)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: dividerColor),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: green, width: 1.5),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 18),
+                ),
+                onChanged: (_) {
+                  if (_errorMsg != null) setState(() => _errorMsg = null);
+                },
+              ),
+
+              // ── Error message ─────────────────────────────────────────────
+              if (_errorMsg != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: Colors.redAccent.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline_rounded,
+                          color: Colors.redAccent, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMsg!,
+                          style: const TextStyle(
+                              color: Colors.redAccent, fontSize: 12),
+                        ),
                       ),
                     ],
                   ),
                 ),
               ],
-            ),
 
-            const SizedBox(height: 18),
+              const SizedBox(height: 22),
 
-            // ── Amount banner ─────────────────────────────────────────────
-            Container(
-              width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                color: green.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: green.withValues(alpha: 0.25)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.payments_rounded, color: green, size: 22),
-                  const SizedBox(width: 10),
-                  Text(
-                    CurrencyFormatter.format(widget.budget, widget.currencyCode),
-                    style: const TextStyle(
-                      color: green,
-                      fontSize: 26,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'Cash Payment',
-                    style: TextStyle(color: kSub, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // ── 6-digit code input ────────────────────────────────────────
-            Row(
-              children: [
-                Text(
-                  'Enter Payment Code',
-                  style: TextStyle(
-                    color: onSurface,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: _scanQrCode,
-                  icon: const Icon(Icons.qr_code_scanner_rounded,
-                      size: 18, color: green),
-                  label: const Text('Scan QR',
-                      style: TextStyle(color: green, fontSize: 13)),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Scan the QR code or manually enter the 6-digit code from the host.',
-              style: TextStyle(
-                color: kSub.withValues(alpha: 0.8),
-                fontSize: 12,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _codeController,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: onSurface,
-                fontSize: 30,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 12,
-                fontFamily: 'monospace',
-              ),
-              decoration: InputDecoration(
-                hintText: '• • • • • •',
-                hintStyle: TextStyle(
-                  color: kSub.withValues(alpha: 0.35),
-                  fontSize: 24,
-                  letterSpacing: 10,
-                ),
-                counterText: '',
-                filled: true,
-                fillColor: isDark
-                    ? Colors.white.withValues(alpha: 0.05)
-                    : Colors.black.withValues(alpha: 0.03),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide:
-                      BorderSide(color: green.withValues(alpha: 0.3)),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: dividerColor),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: green, width: 1.5),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 18),
-              ),
-              onChanged: (_) {
-                if (_errorMsg != null) setState(() => _errorMsg = null);
-              },
-            ),
-
-            // ── Error message ─────────────────────────────────────────────
-            if (_errorMsg != null) ...[
-              const SizedBox(height: 12),
-              Container(
+              // ── Confirm button ────────────────────────────────────────────
+              SizedBox(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.redAccent.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: Colors.redAccent.withValues(alpha: 0.3)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.error_outline_rounded,
-                        color: Colors.redAccent, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _errorMsg!,
-                        style: const TextStyle(
-                            color: Colors.redAccent, fontSize: 12),
-                      ),
-                    ),
-                  ],
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _processing
+                      ? null
+                      : () => _confirm(_codeController.text),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: green,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: green.withValues(alpha: 0.4),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: _processing
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2.5),
+                        )
+                      : const Text(
+                          'Confirm Payment Received',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
                 ),
               ),
             ],
-
-            const SizedBox(height: 22),
-
-            // ── Confirm button ────────────────────────────────────────────
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton(
-                onPressed: _processing
-                    ? null
-                    : () => _confirm(_codeController.text),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: green,
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: green.withValues(alpha: 0.4),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                ),
-                child: _processing
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2.5),
-                      )
-                    : const Text(
-                        'Confirm Payment Received',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
