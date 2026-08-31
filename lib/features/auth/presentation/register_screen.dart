@@ -378,12 +378,14 @@ class CompleteProfileScreen extends StatefulWidget {
 
 class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
   final _nameController = TextEditingController();
+  final _ageController = TextEditingController();
   final _phoneController = TextEditingController();
   final _referralCodeController = TextEditingController();
   _Country _selectedCountry = _kDefaultCountry;
   bool _isLoading = false;
   bool _agreedToTerms = false;
   String _error = '';
+  String _ageError = '';
   late final TapGestureRecognizer _termsTap;
   late final TapGestureRecognizer _privacyTap;
 
@@ -482,13 +484,27 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
 
   Future<void> _saveProfile() async {
     final name = _nameController.text.trim();
+    final ageText = _ageController.text.trim();
     final phone = _phoneController.text.trim();
     final referralCode = _referralCodeController.text.trim().toUpperCase();
 
-    if (name.isEmpty || phone.isEmpty) {
-      setState(() => _error = 'Name and phone number are required.');
+    setState(() => _ageError = '');
+
+    if (name.isEmpty || phone.isEmpty || ageText.isEmpty) {
+      setState(() => _error = 'Name, age, and phone number are required.');
       return;
     }
+
+    final age = int.tryParse(ageText);
+    if (age == null) {
+      setState(() => _ageError = 'Enter a valid age');
+      return;
+    }
+    if (age < 18) {
+      setState(() => _ageError = 'You must be at least 18 years old to register');
+      return;
+    }
+
     if (!_agreedToTerms) {
       setState(
         () => _error =
@@ -606,6 +622,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         'userId'          : userId,
         'email'           : authUser.email ?? '',
         'name'            : name,
+        'age'             : age,
         'phone'           : fullPhone,
         'photoUrl'        : authUser.photoURL ?? widget.pendingPhotoUrl ?? '',
         'balance'         : 0,
@@ -721,6 +738,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       GoogleSignIn().signOut();
     }
     _nameController.dispose();
+    _ageController.dispose();
     _phoneController.dispose();
     _referralCodeController.dispose();
     _termsTap.dispose();
@@ -832,6 +850,18 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                           hint: 'Full Name',
                           icon: Icons.person_outline,
                           isDark: isDark,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _ageController,
+                        keyboardType: TextInputType.number,
+                        decoration: _inputDecoration(
+                          hint: 'Age',
+                          icon: Icons.cake_outlined,
+                          isDark: isDark,
+                        ).copyWith(
+                          errorText: _ageError.isNotEmpty ? _ageError : null,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -998,6 +1028,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _nameController = TextEditingController();
+  final _ageController = TextEditingController();
   final _phoneController = TextEditingController();
   final _referralCode = TextEditingController();
   _Country _selectedCountry = _kDefaultCountry;
@@ -1008,6 +1039,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   String error = '';
+  String _ageError = '';
 
   static const _blue = Color(0xFF1B6CA8);
   static const _yellow = Color(0xFFF5A623);
@@ -1192,17 +1224,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final password = _passwordController.text.trim();
     final confirmPassword = _confirmPasswordController.text.trim();
     final name = _nameController.text.trim();
+    final ageText = _ageController.text.trim();
     final phone = _phoneController.text.trim();
     final referralCode = _referralCode.text.trim().toUpperCase();
+
+    setState(() => _ageError = '');
 
     if (email.isEmpty ||
         password.isEmpty ||
         confirmPassword.isEmpty ||
         name.isEmpty ||
-        phone.isEmpty) {
+        phone.isEmpty ||
+        ageText.isEmpty) {
       setState(() => error = 'All fields are required');
       return;
     }
+
+    final age = int.tryParse(ageText);
+    if (age == null) {
+      setState(() => _ageError = 'Enter a valid age');
+      return;
+    }
+    if (age < 18) {
+      setState(() => _ageError = 'You must be at least 18 years old to register');
+      return;
+    }
+
     if (!isPasswordStrong(password)) {
       setState(
         () => error =
@@ -1266,6 +1313,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'userId'          : userId,
         'email'           : email,
         'name'            : name,
+        'age'             : age,
         'phone'           : fullPhone,
         'balance'         : 0,
         'createdAt'       : Timestamp.now(),
@@ -1394,6 +1442,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     _nameController.dispose();
+    _ageController.dispose();
     _phoneController.dispose();
     _referralCode.dispose();
     super.dispose();
@@ -1519,6 +1568,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         icon: Icons.person_outline,
                         capitalization: TextCapitalization.words,
                         isDark: isDark,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _ageController,
+                        keyboardType: TextInputType.number,
+                        decoration: _inputDecoration(
+                          hint: 'Age',
+                          icon: Icons.cake_outlined,
+                          isDark: isDark,
+                        ).copyWith(
+                          errorText: _ageError.isNotEmpty ? _ageError : null,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       _PhoneField(
