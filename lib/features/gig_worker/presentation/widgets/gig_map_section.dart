@@ -13,6 +13,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/entrance_animation.dart';
 import '../../../../core/theme/map_style.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
@@ -110,8 +111,10 @@ String formatGigDistance(double meters) {
 Future<double?> fetchHostRating(String hostId) async {
   if (hostId.isEmpty) return null;
   try {
-    final doc =
-        await FirebaseFirestore.instance.collection('users').doc(hostId).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(hostId)
+        .get();
     final rating = (doc.data()?['ratingAsHost'] as num?)?.toDouble();
     return rating;
   } catch (_) {
@@ -467,11 +470,13 @@ Future<void> applyToOpenGig(
       return;
     }
 
-    await FirebaseFirestore.instance.collection('open_gigs').doc(gig.id).update({
-      'applicants': FieldValue.arrayUnion([
-        {'workerId': uid, 'workerName': workerName},
-      ]),
-    });
+    await FirebaseFirestore.instance.collection('open_gigs').doc(gig.id).update(
+      {
+        'applicants': FieldValue.arrayUnion([
+          {'workerId': uid, 'workerName': workerName},
+        ]),
+      },
+    );
 
     unawaited(
       FirebaseFirestore.instance.collection('notifications').add({
@@ -518,7 +523,9 @@ Future<void> cancelGigApplication(
   GigMarkerData gig,
 ) async {
   try {
-    final gigRef = FirebaseFirestore.instance.collection('open_gigs').doc(gig.id);
+    final gigRef = FirebaseFirestore.instance
+        .collection('open_gigs')
+        .doc(gig.id);
     final snap = await gigRef.get();
     final applicants = List<dynamic>.from(snap.data()?['applicants'] ?? []);
     final mine = applicants.firstWhere(
@@ -572,448 +579,456 @@ void showFullGigDetailSheet(
   bool fromList = false,
   VoidCallback? onSeeOnMap,
 }) {
-    final accent = cardAccentForType(gig.gigType);
-    final statusLabel = gigTypeLabel(gig.gigType);
-    // Multi-worker gigs move to 'partially_filled' once at least one slot is
-    // taken but keep accepting applicants until every slot is — mirrors
-    // applyToOpenGig's own stillAcceptingApplicants check below, so this
-    // stays in sync with what actually happens when Apply is tapped.
-    final isActive = gig.gigType == 'offered'
-        ? gig.status == 'offered'
-        : gig.isMultiWorker
-            ? (gig.status == 'open' || gig.status == 'partially_filled') &&
-                gig.openSlots > 0
-            : gig.status == 'open';
+  final accent = cardAccentForType(gig.gigType);
+  final statusLabel = gigTypeLabel(gig.gigType);
+  // Multi-worker gigs move to 'partially_filled' once at least one slot is
+  // taken but keep accepting applicants until every slot is — mirrors
+  // applyToOpenGig's own stillAcceptingApplicants check below, so this
+  // stays in sync with what actually happens when Apply is tapped.
+  final isActive = gig.gigType == 'offered'
+      ? gig.status == 'offered'
+      : gig.isMultiWorker
+      ? (gig.status == 'open' || gig.status == 'partially_filled') &&
+            gig.openSlots > 0
+      : gig.status == 'open';
 
-    List<String> missingSkills() {
-      if (gig.gigType != 'open' || gig.requiredSkills.isEmpty) return [];
-      return gig.requiredSkills
-          .where(
-            (s) => !workerSkills.any(
-              (ws) => ws.toLowerCase().trim() == s.toLowerCase().trim(),
-            ),
-          )
-          .toList();
-    }
-
-    String timeAgo(DateTime dt) {
-      final diff = DateTime.now().difference(dt);
-      if (diff.inMinutes < 1) return 'just now';
-      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-      if (diff.inHours < 24) return '${diff.inHours}h ago';
-      if (diff.inDays < 7) return '${diff.inDays}d ago';
-      return DateFormat('MMM d').format(dt);
-    }
-
-    // Collapses immediate consecutive duplicate comma-separated parts (e.g.
-    // "Foo St, Foo St, City" -> "Foo St, City") — display only.
-    String dedupAddress(String address) {
-      final parts = address
-          .split(',')
-          .map((p) => p.trim())
-          .where((p) => p.isNotEmpty)
-          .toList();
-      final deduped = <String>[];
-      for (final p in parts) {
-        if (deduped.isEmpty || deduped.last.toLowerCase() != p.toLowerCase()) {
-          deduped.add(p);
-        }
-      }
-      return deduped.join(', ');
-    }
-
-    final missing = missingSkills();
-    final canApply = missing.isEmpty;
-    final isAppliedPending = gig.gigType == 'open' && gig.hasApplied;
-    final canTapApply = canApply && !isAppliedPending && isActive;
-
-    final distanceM = myLocation != null
-        ? Geolocator.distanceBetween(
-            myLocation!.latitude,
-            myLocation!.longitude,
-            gig.position.latitude,
-            gig.position.longitude,
-          )
-        : null;
-    final locationLabel = distanceM != null
-        ? 'LOCATION · ${formatGigDistance(distanceM).toUpperCase()}'
-        : 'LOCATION';
-
-    openMarkerSheet(context, (ctx) {
-      final isDark = Theme.of(ctx).brightness == Brightness.dark;
-      final onSurface = Theme.of(ctx).colorScheme.onSurface;
-      final neutralSurface = _neutralSurface(isDark);
-      return ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(ctx).height * 0.9,
-        ),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Theme.of(ctx).cardColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+  List<String> missingSkills() {
+    if (gig.gigType != 'open' || gig.requiredSkills.isEmpty) return [];
+    return gig.requiredSkills
+        .where(
+          (s) => !workerSkills.any(
+            (ws) => ws.toLowerCase().trim() == s.toLowerCase().trim(),
           ),
-          child: SingleChildScrollView(
-            padding: EdgeInsets.only(
-              left: 20,
-              right: 20,
-              bottom: 16 + MediaQuery.paddingOf(ctx).bottom,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 10, bottom: 14),
-                  child: Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: isDark ? kBorder : const Color(0xFFD5DCE6),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+        )
+        .toList();
+  }
+
+  String timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return DateFormat('MMM d').format(dt);
+  }
+
+  // Collapses immediate consecutive duplicate comma-separated parts (e.g.
+  // "Foo St, Foo St, City" -> "Foo St, City") — display only.
+  String dedupAddress(String address) {
+    final parts = address
+        .split(',')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+    final deduped = <String>[];
+    for (final p in parts) {
+      if (deduped.isEmpty || deduped.last.toLowerCase() != p.toLowerCase()) {
+        deduped.add(p);
+      }
+    }
+    return deduped.join(', ');
+  }
+
+  final missing = missingSkills();
+  final canApply = missing.isEmpty;
+  final isAppliedPending = gig.gigType == 'open' && gig.hasApplied;
+  final canTapApply = canApply && !isAppliedPending && isActive;
+
+  final distanceM = myLocation != null
+      ? Geolocator.distanceBetween(
+          myLocation!.latitude,
+          myLocation!.longitude,
+          gig.position.latitude,
+          gig.position.longitude,
+        )
+      : null;
+  final locationLabel = distanceM != null
+      ? 'LOCATION · ${formatGigDistance(distanceM).toUpperCase()}'
+      : 'LOCATION';
+
+  openMarkerSheet(context, (ctx) {
+    final isDark = Theme.of(ctx).brightness == Brightness.dark;
+    final onSurface = Theme.of(ctx).colorScheme.onSurface;
+    final neutralSurface = _neutralSurface(isDark);
+    // This builder runs outside the calling screen's widget tree (it's a
+    // showModalBottomSheet route), so the screen's own setState from
+    // onToggleBookmark's Firestore round-trip never reaches back here —
+    // track it locally so the icon inside this sheet flips instantly.
+    bool isSaved = bookmarkedGigIds.contains(gig.id);
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(ctx).height * 0.9,
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(ctx).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            bottom: 16 + MediaQuery.paddingOf(ctx).bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 14),
+                child: Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? kBorder : const Color(0xFFD5DCE6),
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
-                // Title row
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        gig.title,
-                        style: TextStyle(
-                          color: onSurface,
-                          fontSize: 19,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.4,
-                        ),
+              ),
+              // Title row
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      gig.title,
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.4,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            color: accent,
-                            shape: BoxShape.circle,
-                          ),
+                  ),
+                  const SizedBox(width: 8),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: accent,
+                          shape: BoxShape.circle,
                         ),
-                        const SizedBox(width: 5),
-                        Text(
-                          statusLabel,
-                          style: TextStyle(
-                            color: accent,
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                          ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        statusLabel,
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
                         ),
-                        if (onToggleBookmark != null)
-                          IconButton(
+                      ),
+                      if (onToggleBookmark != null)
+                        StatefulBuilder(
+                          builder: (sbCtx, setIconState) => IconButton(
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
                             icon: Icon(
-                              bookmarkedGigIds.contains(gig.id)
+                              isSaved
                                   ? Icons.bookmark_rounded
                                   : Icons.bookmark_outline_rounded,
                               color: kGold,
                               size: 22,
                             ),
-                            onPressed: () =>
-                                onToggleBookmark!(gig.id, gig.gigType),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                if (gig.createdAt != null)
-                  Text(
-                    gig.applicantCount > 0
-                        ? 'Posted ${timeAgo(gig.createdAt!)} · ${gig.applicantCount} ${gig.applicantCount == 1 ? 'applicant' : 'applicants'} so far'
-                        : 'Posted ${timeAgo(gig.createdAt!)}',
-                    style: const TextStyle(color: kSub, fontSize: 11),
-                  ),
-                const SizedBox(height: 16),
-                // Host row (display only)
-                Row(
-                  children: [
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: kBlue.withValues(alpha: 0.12),
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        gig.hostName.isNotEmpty
-                            ? gig.hostName[0].toUpperCase()
-                            : '?',
-                        style: const TextStyle(
-                          color: kBlue,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            gig.hostName.isNotEmpty ? gig.hostName : '—',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: onSurface,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          FutureBuilder<double?>(
-                            future: fetchHostRating(gig.hostId),
-                            builder: (context, snap) {
-                              final rating = snap.data;
-                              if (rating == null) {
-                                return const SizedBox.shrink();
-                              }
-                              return Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: RichText(
-                                  text: TextSpan(
-                                    style: const TextStyle(
-                                      color: kSub,
-                                      fontSize: 10.5,
-                                    ),
-                                    children: [
-                                      const TextSpan(
-                                        text: '★ ',
-                                        style: TextStyle(
-                                          color: Color(0xFFF0A830),
-                                        ),
-                                      ),
-                                      TextSpan(
-                                        text:
-                                            '${rating.toStringAsFixed(1)} host rating',
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
+                            onPressed: () {
+                              setIconState(() => isSaved = !isSaved);
+                              onToggleBookmark!(gig.id, gig.gigType);
                             },
                           ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Divider(
-                  height: 0,
-                  thickness: 1,
-                  color: Theme.of(ctx).dividerColor,
-                ),
-                const SizedBox(height: 14),
-                // Info grid
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: _InfoGridCell(
-                        icon: Icons.attach_money_rounded,
-                        label: 'PAY',
-                        child: RichText(
-                          text: TextSpan(
-                            children: [
-                              TextSpan(
-                                text: CurrencyFormatter.format(
-                                  gig.budget,
-                                  gig.currencyCode,
-                                ),
-                                style: const TextStyle(
-                                  color: Color(0xFF2B6FB5),
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const TextSpan(
-                                text: ' / day',
-                                style: TextStyle(color: kSub, fontSize: 10),
-                              ),
-                            ],
-                          ),
                         ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              if (gig.createdAt != null)
+                Text(
+                  gig.applicantCount > 0
+                      ? 'Posted ${timeAgo(gig.createdAt!)} · ${gig.applicantCount} ${gig.applicantCount == 1 ? 'applicant' : 'applicants'} so far'
+                      : 'Posted ${timeAgo(gig.createdAt!)}',
+                  style: const TextStyle(color: kSub, fontSize: 11),
+                ),
+              const SizedBox(height: 16),
+              // Host row (display only)
+              Row(
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: kBlue.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      gig.hostName.isNotEmpty
+                          ? gig.hostName[0].toUpperCase()
+                          : '?',
+                      style: const TextStyle(
+                        color: kBlue,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _InfoGridCell(
-                        icon: Icons.calendar_today_rounded,
-                        label: 'SCHEDULE',
-                        child: Text(
-                          gig.scheduledDate != null
-                              ? DateFormat(
-                                  'EEE, MMM d · h:mm a',
-                                ).format(gig.scheduledDate!)
-                              : '—',
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          gig.hostName.isNotEmpty ? gig.hostName : '—',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
+                            color: onSurface,
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
+                        FutureBuilder<double?>(
+                          future: fetchHostRating(gig.hostId),
+                          builder: (context, snap) {
+                            final rating = snap.data;
+                            if (rating == null) {
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: RichText(
+                                text: TextSpan(
+                                  style: const TextStyle(
+                                    color: kSub,
+                                    fontSize: 10.5,
+                                  ),
+                                  children: [
+                                    const TextSpan(
+                                      text: '★ ',
+                                      style: TextStyle(
+                                        color: Color(0xFFF0A830),
+                                      ),
+                                    ),
+                                    TextSpan(
+                                      text:
+                                          '${rating.toStringAsFixed(1)} host rating',
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Divider(
+                height: 0,
+                thickness: 1,
+                color: Theme.of(ctx).dividerColor,
+              ),
+              const SizedBox(height: 14),
+              // Info grid
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _InfoGridCell(
+                      icon: Icons.attach_money_rounded,
+                      label: 'PAY',
+                      child: RichText(
+                        text: TextSpan(
+                          children: [
+                            TextSpan(
+                              text: CurrencyFormatter.format(
+                                gig.budget,
+                                gig.currencyCode,
+                              ),
+                              style: const TextStyle(
+                                color: Color(0xFF2B6FB5),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const TextSpan(
+                              text: ' / day',
+                              style: TextStyle(color: kSub, fontSize: 10),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ],
-                ),
-                if (gig.isMultiWorker) ...[
-                  const SizedBox(height: 12),
-                  _InfoGridCell(
-                    icon: Icons.groups_rounded,
-                    label: 'WORKERS NEEDED',
-                    child: RichText(
-                      text: TextSpan(
-                        style: const TextStyle(
-                          color: Color(0xFF2E9E6B),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _InfoGridCell(
+                      icon: Icons.calendar_today_rounded,
+                      label: 'SCHEDULE',
+                      child: Text(
+                        gig.scheduledDate != null
+                            ? DateFormat(
+                                'EEE, MMM d · h:mm a',
+                              ).format(gig.scheduledDate!)
+                            : '—',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
                         ),
-                        children: [
-                          TextSpan(
-                            text:
-                                '${gig.openSlots} of ${gig.workerSlots} spots open',
-                          ),
-                          TextSpan(
-                            text: ' · each worker paid independently',
-                            style: TextStyle(
-                              color: kSub.withValues(alpha: 0.9),
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
                       ),
                     ),
                   ),
                 ],
+              ),
+              if (gig.isMultiWorker) ...[
                 const SizedBox(height: 12),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: _InfoGridCell(
-                        icon: Icons.location_on_outlined,
-                        label: locationLabel,
-                        child: Text(
-                          gig.address.isNotEmpty
-                              ? dedupAddress(gig.address)
-                              : '—',
+                _InfoGridCell(
+                  icon: Icons.groups_rounded,
+                  label: 'WORKERS NEEDED',
+                  child: RichText(
+                    text: TextSpan(
+                      style: const TextStyle(
+                        color: Color(0xFF2E9E6B),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      children: [
+                        TextSpan(
+                          text:
+                              '${gig.openSlots} of ${gig.workerSlots} spots open',
+                        ),
+                        TextSpan(
+                          text: ' · each worker paid independently',
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
+                            color: kSub.withValues(alpha: 0.9),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _InfoGridCell(
-                        icon: Icons.bar_chart_rounded,
-                        label: 'EXPERIENCE',
-                        value: gig.experienceLevel.isNotEmpty
-                            ? gig.experienceLevel
-                            : '—',
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-                if (gig.requiredSkills.isNotEmpty) ...[
-                  const SizedBox(height: 18),
-                  const Text(
-                    'SKILLS NEEDED',
-                    style: TextStyle(
-                      color: kSub,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.6,
+              ],
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _InfoGridCell(
+                      icon: Icons.location_on_outlined,
+                      label: locationLabel,
+                      child: Text(
+                        gig.address.isNotEmpty
+                            ? dedupAddress(gig.address)
+                            : '—',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: gig.requiredSkills.map((s) {
-                      final has = workerSkills.any(
-                        (ws) =>
-                            ws.toLowerCase().trim() == s.toLowerCase().trim(),
-                      );
-                      return Container(
-                        height: 28,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: has
-                              ? const Color(0xFF2E9E6B).withValues(alpha: 0.12)
-                              : neutralSurface,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Text(
-                          s,
-                          style: TextStyle(
-                            color: has ? const Color(0xFF2E9E6B) : kSub,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      );
-                    }).toList(),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _InfoGridCell(
+                      icon: Icons.bar_chart_rounded,
+                      label: 'EXPERIENCE',
+                      value: gig.experienceLevel.isNotEmpty
+                          ? gig.experienceLevel
+                          : '—',
+                    ),
                   ),
-                  if (isActive && missing.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
+                ],
+              ),
+              if (gig.requiredSkills.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const Text(
+                  'SKILLS NEEDED',
+                  style: TextStyle(
+                    color: kSub,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: gig.requiredSkills.map((s) {
+                    final has = workerSkills.any(
+                      (ws) => ws.toLowerCase().trim() == s.toLowerCase().trim(),
+                    );
+                    return Container(
+                      height: 28,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.07),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: Colors.red.withValues(alpha: 0.25),
+                        color: has
+                            ? const Color(0xFF2E9E6B).withValues(alpha: 0.12)
+                            : neutralSurface,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Text(
+                        s,
+                        style: TextStyle(
+                          color: has ? const Color(0xFF2E9E6B) : kSub,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.info_outline_rounded,
-                            color: Colors.red,
-                            size: 15,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Missing ${missing.length == 1 ? 'skill' : 'skills'}: ${missing.join(', ')}',
-                              style: const TextStyle(
-                                color: Colors.red,
-                                fontSize: 12,
-                              ),
+                    );
+                  }).toList(),
+                ),
+                if (isActive && missing.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.07),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: Colors.red.withValues(alpha: 0.25),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.info_outline_rounded,
+                          color: Colors.red,
+                          size: 15,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Missing ${missing.length == 1 ? 'skill' : 'skills'}: ${missing.join(', ')}',
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 12,
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ],
-                const SizedBox(height: 18),
-                // See on map row
-                if (onSeeOnMap != null)
+              ],
+              const SizedBox(height: 18),
+              // See on map row
+              if (onSeeOnMap != null)
                 GestureDetector(
                   onTap: () {
                     // Pop the sheet first — onSeeOnMap may itself push a new
@@ -1053,8 +1068,8 @@ void showFullGigDetailSheet(
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                if (isActive) ...[
+              const SizedBox(height: 16),
+              if (isActive) ...[
                 // Apply / Withdraw button
                 SizedBox(
                   width: double.infinity,
@@ -1189,13 +1204,13 @@ void showFullGigDetailSheet(
                     ),
                   ),
                 ),
-              ],
-            ),
+            ],
           ),
         ),
-      );
-    }, isScrollControlled: true);
-  }
+      ),
+    );
+  }, isScrollControlled: true);
+}
 
 enum _SkillFilter { all, mySkills, specific }
 
@@ -1488,7 +1503,8 @@ class _GigMapSectionState extends State<GigMapSection> {
     super.initState();
     _mapInteractive = widget.fullScreen;
     _userProvider = context.read<CurrentUserProvider>();
-    _myLocation = (_userProvider.lastLat != null && _userProvider.lastLng != null)
+    _myLocation =
+        (_userProvider.lastLat != null && _userProvider.lastLng != null)
         ? LatLng(_userProvider.lastLat!, _userProvider.lastLng!)
         : _lastKnownWorkerLocation;
     // Login/restore kicks off the GPS fetch that feeds the provider's cached
@@ -1539,7 +1555,9 @@ class _GigMapSectionState extends State<GigMapSection> {
     _lastKnownWorkerLocation = loc;
     _resolveMyCountry(loc);
     if (_useGoogleMaps) {
-      _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(loc, 14.0));
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(loc, 14.0),
+      );
     } else if (_osmMapReady) {
       _osmController.move(ll.LatLng(loc.latitude, loc.longitude), 14.0);
     }
@@ -1620,7 +1638,10 @@ class _GigMapSectionState extends State<GigMapSection> {
               CameraUpdate.newLatLngZoom(quickLoc, 14.0),
             );
           } else if (_osmMapReady) {
-            _osmController.move(ll.LatLng(quickLoc.latitude, quickLoc.longitude), 14.0);
+            _osmController.move(
+              ll.LatLng(quickLoc.latitude, quickLoc.longitude),
+              14.0,
+            );
           }
         }
       }
@@ -1754,8 +1775,12 @@ class _GigMapSectionState extends State<GigMapSection> {
             final all = s.docs
                 .where((d) => (d.data()['hostId'] as String?) != widget.uid)
                 .map(
-                  (d) =>
-                      gigMarkerFromDoc(d.id, d.data(), 'open', workerUid: widget.uid),
+                  (d) => gigMarkerFromDoc(
+                    d.id,
+                    d.data(),
+                    'open',
+                    workerUid: widget.uid,
+                  ),
                 )
                 .whereType<GigMarkerData>()
                 .toList();
@@ -1806,7 +1831,9 @@ class _GigMapSectionState extends State<GigMapSection> {
         final isDark = Theme.of(dCtx).brightness == Brightness.dark;
         return AlertDialog(
           backgroundColor: Theme.of(dCtx).cardColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2035,9 +2062,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                'This gig is no longer available.',
-              ),
+              content: Text('This gig is no longer available.'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -2130,7 +2155,9 @@ class _GigMapSectionState extends State<GigMapSection> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Couldn't submit your application. Please try again."),
+            content: Text(
+              "Couldn't submit your application. Please try again.",
+            ),
             backgroundColor: Colors.redAccent,
           ),
         );
@@ -2483,8 +2510,8 @@ class _GigMapSectionState extends State<GigMapSection> {
         initialCenter: _pendingCameraTarget != null
             ? _toLL(_pendingCameraTarget!)
             : _myLocation != null
-                ? _toLL(_myLocation!)
-                : const ll.LatLng(14.5995, 120.9842),
+            ? _toLL(_myLocation!)
+            : const ll.LatLng(14.5995, 120.9842),
         initialZoom: _pendingCameraTarget != null ? 19.0 : _zoom,
         onMapReady: () {
           if (!mounted) return;
@@ -2532,7 +2559,9 @@ class _GigMapSectionState extends State<GigMapSection> {
       countryCodeCache: _countryCodeCache,
       onOfferedGigAccepted: widget.onOfferedGigAccepted,
       fromList: fromList,
-      onSeeOnMap: fromList ? () => _openFullScreenMap(context, focus: gig.position) : null,
+      onSeeOnMap: fromList
+          ? () => _openFullScreenMap(context, focus: gig.position)
+          : null,
     );
   }
 
@@ -3244,9 +3273,16 @@ class _GigMapSectionState extends State<GigMapSection> {
         ),
         const SizedBox(height: 12),
         if (_viewMode == _GigViewMode.map)
-          _buildMapBlock(context)
+          EntranceAnimation(
+            key: const ValueKey('map-block'),
+            child: _buildMapBlock(context),
+          )
         else
-          _buildListMode(context),
+          EntranceAnimation(
+            key: const ValueKey('list-mode'),
+            type: EntranceAnimationType.fadeInSlideUp,
+            child: _buildListMode(context),
+          ),
       ],
     );
   }
@@ -3294,7 +3330,8 @@ class _GigMapSectionState extends State<GigMapSection> {
                       _pendingCameraTarget = null;
                     },
                     initialCameraPosition: CameraPosition(
-                      target: _pendingCameraTarget ??
+                      target:
+                          _pendingCameraTarget ??
                           _myLocation ??
                           const LatLng(14.5995, 120.9842),
                       zoom: _myLocation != null || _pendingCameraTarget != null
@@ -3513,7 +3550,6 @@ class _GigMapSectionState extends State<GigMapSection> {
     );
   }
 
-
   Widget _buildListMode(BuildContext context) {
     final gigs = _allGigs;
     final query = _searchQuery.trim().toLowerCase();
@@ -3581,26 +3617,41 @@ class _GigMapSectionState extends State<GigMapSection> {
         else ...[
           Column(
             children: [
-              for (final gig in filtered.take(_visibleListCount)) ...[
-                _GigListCard(
-                  gig: gig,
-                  accentColor: cardAccentForType(gig.gigType),
-                  typeLabel: gigTypeLabel(gig.gigType),
-                  distanceLabel: _myLocation != null
-                      ? formatGigDistance(
-                          Geolocator.distanceBetween(
-                            _myLocation!.latitude,
-                            _myLocation!.longitude,
-                            gig.position.latitude,
-                            gig.position.longitude,
+              for (final entry
+                  in filtered
+                      .take(_visibleListCount)
+                      .toList()
+                      .asMap()
+                      .entries) ...[
+                EntranceAnimation(
+                  type: EntranceAnimationType.fadeInSlideUp,
+                  delay: Duration(milliseconds: entry.key * 40),
+                  child: _GigListCard(
+                    gig: entry.value,
+                    accentColor: cardAccentForType(entry.value.gigType),
+                    typeLabel: gigTypeLabel(entry.value.gigType),
+                    distanceLabel: _myLocation != null
+                        ? formatGigDistance(
+                            Geolocator.distanceBetween(
+                              _myLocation!.latitude,
+                              _myLocation!.longitude,
+                              entry.value.position.latitude,
+                              entry.value.position.longitude,
+                            ),
+                          )
+                        : null,
+                    isBookmarked: widget.bookmarkedGigIds.contains(
+                      entry.value.id,
+                    ),
+                    onToggleBookmark: widget.onToggleBookmark == null
+                        ? null
+                        : () => widget.onToggleBookmark!(
+                            entry.value.id,
+                            entry.value.gigType,
                           ),
-                        )
-                      : null,
-                  isBookmarked: widget.bookmarkedGigIds.contains(gig.id),
-                  onToggleBookmark: widget.onToggleBookmark == null
-                      ? null
-                      : () => widget.onToggleBookmark!(gig.id, gig.gigType),
-                  onTap: () => _showGigSheet(context, gig, fromList: true),
+                    onTap: () =>
+                        _showGigSheet(context, entry.value, fromList: true),
+                  ),
                 ),
                 const SizedBox(height: 10),
               ],
@@ -3701,7 +3752,8 @@ class _GigMapSectionState extends State<GigMapSection> {
                     _pendingCameraTarget = null;
                   },
                   initialCameraPosition: CameraPosition(
-                    target: _pendingCameraTarget ??
+                    target:
+                        _pendingCameraTarget ??
                         _myLocation ??
                         const LatLng(14.5995, 120.9842),
                     zoom: _pendingCameraTarget != null
@@ -4096,7 +4148,7 @@ class _GigListCard extends StatelessWidget {
                       ),
                     ),
                   ],
-                )
+                ),
               ],
             ),
             const SizedBox(height: 4),

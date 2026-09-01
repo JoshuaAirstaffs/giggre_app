@@ -17,6 +17,7 @@ import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/map_style.dart';
 import '../../../core/widgets/account_not_verified_modal.dart';
+import '../../../core/widgets/entrance_animation.dart';
 import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
@@ -141,38 +142,47 @@ class _GigHostScreenState extends State<GigHostScreen> {
             sliver: SliverList(
               delegate: SliverChildListDelegate([
                 // ── Workers Near You ───────────────────────────
-                _WorkerMapSection(key: _workerMapKey, hostName: _userName),
+                EntranceAnimation(
+                  type: EntranceAnimationType.fadeInSlideUp,
+                  child: _WorkerMapSection(
+                    key: _workerMapKey,
+                    hostName: _userName,
+                  ),
+                ),
                 const SizedBox(height: 24),
 
                 // ── Your Gigs ──────────────────────────────────
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Your Gigs',
-                      style: TextStyle(
-                        color: onSurface,
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => HostGigsScreen(uid: uid),
-                        ),
-                      ),
-                      child: const Text(
-                        'See all',
+                EntranceAnimation(
+                  delay: const Duration(milliseconds: 80),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Your Gigs',
                         style: TextStyle(
-                          color: kGold,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                          color: onSurface,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
-                  ],
+                      GestureDetector(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => HostGigsScreen(uid: uid),
+                          ),
+                        ),
+                        child: const Text(
+                          'See all',
+                          style: TextStyle(
+                            color: kGold,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 12),
                 _GigPreviewList(uid: uid),
@@ -357,10 +367,7 @@ class _HostHeader extends StatelessWidget {
                               const SizedBox(width: 4),
                               IconButton(
                                 tooltip: 'Switch to Worker Mode',
-                                icon: const Icon(
-                                  Icons.sync_alt,
-                                  size: 19,
-                                ),
+                                icon: const Icon(Icons.sync_alt, size: 19),
                                 onPressed: onSwitchToWorker,
                                 style: IconButton.styleFrom(
                                   foregroundColor: Colors.white,
@@ -1158,7 +1165,15 @@ class _GigPreviewListState extends State<_GigPreviewList> {
 
     return Column(
       children: preview
-          .map((d) => HostGigCard(data: d, showActions: false))
+          .asMap()
+          .entries
+          .map(
+            (entry) => EntranceAnimation(
+              type: EntranceAnimationType.fadeInSlideUp,
+              delay: Duration(milliseconds: entry.key * 40),
+              child: HostGigCard(data: entry.value, showActions: false),
+            ),
+          )
           .toList(),
     );
   }
@@ -1280,7 +1295,8 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   void initState() {
     super.initState();
     _userProvider = context.read<CurrentUserProvider>();
-    _myLocation = (_userProvider.lastLat != null && _userProvider.lastLng != null)
+    _myLocation =
+        (_userProvider.lastLat != null && _userProvider.lastLng != null)
         ? LatLng(_userProvider.lastLat!, _userProvider.lastLng!)
         : _lastKnownHostLocation;
     // Login/restore kicks off the GPS fetch that feeds the provider's cached
@@ -1307,7 +1323,9 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     _lastKnownHostLocation = loc;
     _fullScreenTick.value++;
     if (_useGoogleMaps) {
-      _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(loc, 14.0));
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(loc, 14.0),
+      );
       _fullScreenGoogleMapController?.animateCamera(
         CameraUpdate.newLatLngZoom(loc, 14.0),
       );
@@ -2691,7 +2709,8 @@ class _TemplatesSheet extends StatelessWidget {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => PostOpenGigScreen(hostName: hostName, template: t),
+              builder: (_) =>
+                  PostOpenGigScreen(hostName: hostName, template: t),
             ),
           );
           break;
@@ -2708,7 +2727,8 @@ class _TemplatesSheet extends StatelessWidget {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => PostQuickGigScreen(hostName: hostName, template: t),
+              builder: (_) =>
+                  PostQuickGigScreen(hostName: hostName, template: t),
             ),
           );
       }

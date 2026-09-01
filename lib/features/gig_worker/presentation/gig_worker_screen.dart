@@ -8,6 +8,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/widgets/account_not_verified_modal.dart';
+import '../../../core/widgets/entrance_animation.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/worker_active_gig.dart';
@@ -215,13 +216,39 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         .doc(uid)
         .collection('savedGigs')
         .doc(gigId);
-    if (_bookmarkedGigIds.contains(gigId)) {
-      await ref.delete();
-    } else {
-      await ref.set({
-        'gigType': gigType,
-        'savedAt': FieldValue.serverTimestamp(),
-      });
+    final wasSaved = _bookmarkedGigIds.contains(gigId);
+    // Flip locally before the write resolves — _listenToBookmarks' snapshot
+    // round-trip would otherwise leave the icon unchanged for a beat after
+    // every tap. Reverted below if the write actually fails.
+    setState(() {
+      _bookmarkedGigIds = Set.of(_bookmarkedGigIds);
+      if (wasSaved) {
+        _bookmarkedGigIds.remove(gigId);
+      } else {
+        _bookmarkedGigIds.add(gigId);
+      }
+    });
+    try {
+      if (wasSaved) {
+        await ref.delete();
+      } else {
+        await ref.set({
+          'gigType': gigType,
+          'savedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      debugPrint('[GigWorkerScreen] toggle saved gig error: $e');
+      if (mounted) {
+        setState(() {
+          _bookmarkedGigIds = Set.of(_bookmarkedGigIds);
+          if (wasSaved) {
+            _bookmarkedGigIds.add(gigId);
+          } else {
+            _bookmarkedGigIds.remove(gigId);
+          }
+        });
+      }
     }
   }
 
@@ -1754,15 +1781,18 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
                                   ),
-                                  child: AvailabilityCard(
-                                    isOnline: _availableForGigs,
-                                    onChanged: (v) {
-                                      setState(() => _availableForGigs = v);
-                                      _setToggle('availableForGigs', v);
-                                    },
-                                    isVerified: _isVerified,
-                                    onVerificationRequired: () =>
-                                        _showVerificationModal(context),
+                                  child: EntranceAnimation(
+                                    type: EntranceAnimationType.fadeInSlideUp,
+                                    child: AvailabilityCard(
+                                      isOnline: _availableForGigs,
+                                      onChanged: (v) {
+                                        setState(() => _availableForGigs = v);
+                                        _setToggle('availableForGigs', v);
+                                      },
+                                      isVerified: _isVerified,
+                                      onVerificationRequired: () =>
+                                          _showVerificationModal(context),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1797,40 +1827,50 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                               ),
 
                               // ── Earnings ───────────────────────────────────
-                              EarningsSummaryCard(
-                                totalByCurrency: _earningsByCode,
-                                weeklyByCurrency: _weeklyByCode,
-                                completedGigs: _completedGigs,
+                              EntranceAnimation(
+                                type: EntranceAnimationType.fadeInSlideUp,
+                                child: EarningsSummaryCard(
+                                  totalByCurrency: _earningsByCode,
+                                  weeklyByCurrency: _weeklyByCode,
+                                  completedGigs: _completedGigs,
+                                ),
                               ),
                               const SizedBox(height: 16),
 
                               // ── Work preferences ──────────────────────────
-                              WorkPreferencesCard(
-                                seekingQuickGigs: _seekingQuickGigs,
-                                onQuickGigsChanged: _toggleQuickGigs,
-                                autoAccept: _autoAccept,
-                                onAutoAcceptChanged: (v) {
-                                  setState(() => _autoAccept = v);
-                                  _setToggle('autoAccept', v);
-                                },
-                                isVerified: _isVerified,
-                                onVerificationRequired: () =>
-                                    _showVerificationModal(context),
+                              EntranceAnimation(
+                                type: EntranceAnimationType.fadeInSlideUp,
+                                delay: const Duration(milliseconds: 80),
+                                child: WorkPreferencesCard(
+                                  seekingQuickGigs: _seekingQuickGigs,
+                                  onQuickGigsChanged: _toggleQuickGigs,
+                                  autoAccept: _autoAccept,
+                                  onAutoAcceptChanged: (v) {
+                                    setState(() => _autoAccept = v);
+                                    _setToggle('autoAccept', v);
+                                  },
+                                  isVerified: _isVerified,
+                                  onVerificationRequired: () =>
+                                      _showVerificationModal(context),
+                                ),
                               ),
                               const SizedBox(height: 20),
 
                               // ── Gig Map ───────────────────────────────────
-                              GigMapSection(
-                                uid: uid,
-                                workerName: _name,
-                                seekingQuickGigs: _seekingQuickGigs,
-                                onQuickGigStarted: _onQuickGigStarted,
-                                onOpenGigApplied: _onOpenGigApplied,
-                                onOfferedGigAccepted: _acceptOfferedGig,
-                                isVerified: _isVerified,
-                                workerSkills: _skills,
-                                bookmarkedGigIds: _bookmarkedGigIds,
-                                onToggleBookmark: _toggleSavedGig,
+                              EntranceAnimation(
+                                delay: const Duration(milliseconds: 160),
+                                child: GigMapSection(
+                                  uid: uid,
+                                  workerName: _name,
+                                  seekingQuickGigs: _seekingQuickGigs,
+                                  onQuickGigStarted: _onQuickGigStarted,
+                                  onOpenGigApplied: _onOpenGigApplied,
+                                  onOfferedGigAccepted: _acceptOfferedGig,
+                                  isVerified: _isVerified,
+                                  workerSkills: _skills,
+                                  bookmarkedGigIds: _bookmarkedGigIds,
+                                  onToggleBookmark: _toggleSavedGig,
+                                ),
                               ),
                               const SizedBox(height: 16),
                             ]),

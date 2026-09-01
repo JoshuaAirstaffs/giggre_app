@@ -20,6 +20,7 @@ import 'package:carousel_slider/carousel_slider.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
+import 'package:giggre_app/core/widgets/entrance_animation.dart';
 import 'package:giggre_app/screens/app_contents/about_giggre.dart';
 import 'package:giggre_app/screens/giggre-updates.dart';
 import '../../../core/theme/app_colors.dart';
@@ -853,42 +854,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── 2. Profile strip ──────────────────────────
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 26,
-                  backgroundColor: kGold.withValues(alpha: 0.15),
-                  backgroundImage: _photoUrl.isNotEmpty
-                      ? CachedNetworkImageProvider(_photoUrl)
-                      : null,
-                  child: _photoUrl.isEmpty
-                      ? const Icon(Icons.person_rounded, color: kGold, size: 28)
-                      : null,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        firstName.isNotEmpty
-                            ? 'Hey, $firstName 👋'
-                            : 'Welcome back 👋',
-                        style: TextStyle(
-                          color: onSurface,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      const Text(
-                        'Choose a mode to get started',
-                        style: TextStyle(color: kSub, fontSize: 13),
-                      ),
-                    ],
+            EntranceAnimation(
+              type: EntranceAnimationType.fadeInSlideUp,
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundColor: kGold.withValues(alpha: 0.15),
+                    backgroundImage: _photoUrl.isNotEmpty
+                        ? CachedNetworkImageProvider(_photoUrl)
+                        : null,
+                    child: _photoUrl.isEmpty
+                        ? const Icon(
+                            Icons.person_rounded,
+                            color: kGold,
+                            size: 28,
+                          )
+                        : null,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          firstName.isNotEmpty
+                              ? 'Hey, $firstName 👋'
+                              : 'Welcome back 👋',
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        const Text(
+                          'Choose a mode to get started',
+                          style: TextStyle(color: kSub, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
 
             // ── Update banner (preserved) ─────────────────
@@ -1013,76 +1021,89 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 20),
 
             // ── 3. Image carousel ─────────────────────────
-            _TestimonialCarousel(key: ValueKey(_carouselRefreshKey)),
+            EntranceAnimation(
+              type: EntranceAnimationType.fadeInSlideUp,
+              delay: const Duration(milliseconds: 80),
+              child: _TestimonialCarousel(key: ValueKey(_carouselRefreshKey)),
+            ),
 
             const SizedBox(height: 24),
 
             // ── 4. Role segmented control ─────────────────
-            _RoleSegmentedControl(
-              selectedRole: _selectedRole,
-              onSelect: _selectRole,
+            EntranceAnimation(
+              type: EntranceAnimationType.fadeInSlideUp,
+              delay: const Duration(milliseconds: 160),
+              child: _RoleSegmentedControl(
+                selectedRole: _selectedRole,
+                onSelect: _selectRole,
+              ),
             ),
 
             // ── 5. Gold continue button ───────────────────
             if (_selectedRole != null) ...[
               const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: _saving
-                      ? null
-                      : () {
-                          if (_selectedRole == 'host') {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const HostShell(),
-                              ),
-                            );
-                          } else {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const WorkerShell(),
-                              ),
-                            );
-                          }
-                        },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _selectedRole == 'worker' ? kBlue : kGold,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+              EntranceAnimation(
+                type: EntranceAnimationType.fadeInSlideUp,
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: _saving
+                        ? null
+                        : () {
+                            if (_selectedRole == 'host') {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const HostShell(),
+                                ),
+                              );
+                            } else {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const WorkerShell(),
+                                ),
+                              );
+                            }
+                          },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _selectedRole == 'worker'
+                          ? kBlue
+                          : kGold,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
-                  ),
-                  child: _saving
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _selectedRole == 'worker'
-                                  ? 'Continue as Gig Worker'
-                                  : 'Continue as Gig Host',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
+                    child: _saving
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
                             ),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.arrow_forward_rounded, size: 20),
-                          ],
-                        ),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _selectedRole == 'worker'
+                                    ? 'Continue as Gig Worker'
+                                    : 'Continue as Gig Host',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Icon(Icons.arrow_forward_rounded, size: 20),
+                            ],
+                          ),
+                  ),
                 ),
               ),
             ],
@@ -1090,45 +1111,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 28),
 
             // ── 6. Giggre Updates section ─────────────────
-            Row(
-              children: [
-                Text(
-                  'Giggre Updates',
-                  style: TextStyle(
-                    color: onSurface,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => GiggreUpdates()),
-                  ),
-                  child: const Text(
-                    'See all',
+            EntranceAnimation(
+              delay: const Duration(milliseconds: 240),
+              child: Row(
+                children: [
+                  Text(
+                    'Giggre Updates',
                     style: TextStyle(
-                      color: kGold,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
+                      color: onSurface,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                ),
-              ],
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => GiggreUpdates()),
+                    ),
+                    child: const Text(
+                      'See all',
+                      style: TextStyle(
+                        color: kGold,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 14),
 
-            ..._updates
-                .take(3)
-                .map(
-                  (update) => Padding(
+            ..._updates.take(3).toList().asMap().entries.map(
+                  (entry) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: UpdateCard(
-                      title: update['title'] as String,
-                      date: update['dateCreated'] as DateTime,
-                      category: update['category'] as String,
-                      description: update['body'] as String,
+                    child: EntranceAnimation(
+                      type: EntranceAnimationType.fadeInSlideUp,
+                      delay: Duration(milliseconds: 280 + entry.key * 60),
+                      child: UpdateCard(
+                        title: entry.value['title'] as String,
+                        date: entry.value['dateCreated'] as DateTime,
+                        category: entry.value['category'] as String,
+                        description: entry.value['body'] as String,
+                      ),
                     ),
                   ),
                 ),
@@ -1136,44 +1162,51 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 16),
 
             // ── Footer ────────────────────────────────────
-            Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Theme.of(context).dividerColor),
-              ),
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Image.asset('assets/images/logo.png', width: 94, height: 64),
-                  const Text(
-                    'The fastest way to find gigs or get help near you.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12, color: kSub),
-                  ),
-                  const SizedBox(height: 8),
-                  const Divider(),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    spacing: 16,
-                    runSpacing: 8,
-                    children: [
-                      _FooterLink('About', AboutGiggre()),
-                      _FooterLink('Terms', TermsAndConditions()),
-                      _FooterLink('Privacy', PrivacyPolicy()),
-                      _FooterLink('Help', HelpFaq()),
-                      _FooterLink('Contact Us', ContactUs()),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'Copyright © $currentYear Giggre. All rights reserved.',
-                    style: const TextStyle(fontSize: 12, color: kSub),
-                  ),
-                ],
+            EntranceAnimation(
+              delay: const Duration(milliseconds: 320),
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Theme.of(context).dividerColor),
+                ),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Image.asset(
+                      'assets/images/logo.png',
+                      width: 94,
+                      height: 64,
+                    ),
+                    const Text(
+                      'The fastest way to find gigs or get help near you.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: kSub),
+                    ),
+                    const SizedBox(height: 8),
+                    const Divider(),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 16,
+                      runSpacing: 8,
+                      children: [
+                        _FooterLink('About', AboutGiggre()),
+                        _FooterLink('Terms', TermsAndConditions()),
+                        _FooterLink('Privacy', PrivacyPolicy()),
+                        _FooterLink('Help', HelpFaq()),
+                        _FooterLink('Contact Us', ContactUs()),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Copyright © $currentYear Giggre. All rights reserved.',
+                      style: const TextStyle(fontSize: 12, color: kSub),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
