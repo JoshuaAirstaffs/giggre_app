@@ -10,6 +10,7 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/profile_tab_theme.dart';
+import '../../../core/widgets/entrance_animation.dart';
 import '../../../utils/user_utils.dart';
 import 'register_screen.dart';
 import '../../../services/sound_service.dart';
@@ -35,17 +36,17 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final emailController    = TextEditingController();
+  final emailController = TextEditingController();
   final passwordController = TextEditingController();
 
-  bool isLoading         = false;
-  bool isGoogleLoading   = false;
-  bool isAppleLoading    = false;
-  bool _obscurePassword  = true;
+  bool isLoading = false;
+  bool isGoogleLoading = false;
+  bool isAppleLoading = false;
+  bool _obscurePassword = true;
   late String _error;
   bool _precached = false;
 
-  static const _blue   = Color(0xFF1B6CA8);
+  static const _blue = Color(0xFF1B6CA8);
 
   void _navigateByRole(String? role) {
     if (role == 'gigworker') {
@@ -58,14 +59,17 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handlePostSignIn(User user) async {
-    final userRef = FirebaseFirestore.instance.collection('users').doc(user.uid);
+    final userRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid);
     final userDoc = await userRef.get();
 
     if (!mounted) return;
 
     final data = userDoc.data();
 
-    final bool needsProfile = !userDoc.exists ||
+    final bool needsProfile =
+        !userDoc.exists ||
         (data?['phone'] == null || (data?['phone'] as String).isEmpty);
 
     if (needsProfile) {
@@ -87,7 +91,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> login() async {
-    final email    = emailController.text.trim();
+    final email = emailController.text.trim();
     final password = passwordController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
@@ -95,16 +99,20 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    setState(() { isLoading = true; _error = ''; });
+    setState(() {
+      isLoading = true;
+      _error = '';
+    });
 
     try {
       final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: email, password: password,
+        email: email,
+        password: password,
       );
 
-      final uid     = cred.user!.uid;
+      final uid = cred.user!.uid;
       final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
-      final doc     = await userRef.get();
+      final doc = await userRef.get();
 
       if (doc.exists && needsNewUserId(doc.data()?['userId'] as String?)) {
         final newId = await generateUserId();
@@ -124,29 +132,48 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       provider.initCurrencyCode(uid, docData);
       _navigateByRole(docData['role']);
-
     } on FirebaseAuthException catch (e) {
       String message;
       switch (e.code) {
-        case 'user-not-found':         message = 'No account found with this email.'; break;
-        case 'wrong-password':         message = 'Incorrect password. Please try again.'; break;
-        case 'invalid-credential':     message = 'Invalid email or password.'; break;
-        case 'user-disabled':          message = 'This account has been disabled. Contact support for help.'; break;
-        case 'too-many-requests':      message = 'Too many failed attempts. Please try again later.'; break;
-        case 'network-request-failed': message = 'No internet connection. Check your connection and try again.'; break;
-        case 'invalid-email':          message = 'Please enter a valid email address.'; break;
-        default:                       message = e.message ?? 'Login failed. Please try again.';
+        case 'user-not-found':
+          message = 'No account found with this email.';
+          break;
+        case 'wrong-password':
+          message = 'Incorrect password. Please try again.';
+          break;
+        case 'invalid-credential':
+          message = 'Invalid email or password.';
+          break;
+        case 'user-disabled':
+          message = 'This account has been disabled. Contact support for help.';
+          break;
+        case 'too-many-requests':
+          message = 'Too many failed attempts. Please try again later.';
+          break;
+        case 'network-request-failed':
+          message =
+              'No internet connection. Check your connection and try again.';
+          break;
+        case 'invalid-email':
+          message = 'Please enter a valid email address.';
+          break;
+        default:
+          message = e.message ?? 'Login failed. Please try again.';
       }
       if (mounted) setState(() => _error = message);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Something went wrong. Please try again.');
+      if (mounted)
+        setState(() => _error = 'Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
   }
 
   Future<void> signInWithGoogle() async {
-    setState(() { isGoogleLoading = true; _error = ''; });
+    setState(() {
+      isGoogleLoading = true;
+      _error = '';
+    });
     try {
       UserCredential userCred;
       if (kIsWeb) {
@@ -159,16 +186,21 @@ class _LoginScreenState extends State<LoginScreen> {
         // unregistered account chosen by mistake), even across app restarts.
         await googleSignIn.signOut();
         final googleUser = await googleSignIn.signIn();
-        if (googleUser == null) { setState(() => isGoogleLoading = false); return; }
+        if (googleUser == null) {
+          setState(() => isGoogleLoading = false);
+          return;
+        }
         final googleAuth = await googleUser.authentication;
-        final idToken     = googleAuth.idToken;
+        final idToken = googleAuth.idToken;
         final accessToken = googleAuth.accessToken;
         if (idToken == null && accessToken == null) {
-          throw Exception('Failed to obtain Google credentials. Please try again.');
+          throw Exception(
+            'Failed to obtain Google credentials. Please try again.',
+          );
         }
         final credential = GoogleAuthProvider.credential(
           accessToken: accessToken,
-          idToken:     idToken,
+          idToken: idToken,
         );
 
         // Check whether this email already has an account *before* touching
@@ -200,18 +232,26 @@ class _LoginScreenState extends State<LoginScreen> {
         userCred = await FirebaseAuth.instance.signInWithCredential(credential);
       }
       await _handlePostSignIn(userCred.user!);
-
     } on FirebaseAuthException catch (e) {
-      if (mounted) setState(() => _error = e.message ?? 'Google Sign-In failed.');
+      debugPrint(
+        '[GoogleSignIn] FirebaseAuthException: ${e.code} ${e.message}',
+      );
+      if (mounted)
+        setState(() => _error = e.message ?? 'Google Sign-In failed.');
     } catch (e) {
-      if (mounted) setState(() => _error = 'Google Sign-In failed. Please try again.');
+      debugPrint('[GoogleSignIn] error: $e');
+      if (mounted)
+        setState(() => _error = 'Google Sign-In failed. Please try again.');
     } finally {
       if (mounted) setState(() => isGoogleLoading = false);
     }
   }
 
   Future<void> signInWithApple() async {
-    setState(() { isAppleLoading = true; _error = ''; });
+    setState(() {
+      isAppleLoading = true;
+      _error = '';
+    });
     try {
       UserCredential userCred;
       if (kIsWeb) {
@@ -230,7 +270,9 @@ class _LoginScreenState extends State<LoginScreen> {
         );
         final idToken = appleCredential.identityToken;
         if (idToken == null) {
-          throw Exception('Failed to obtain Apple credentials. Please try again.');
+          throw Exception(
+            'Failed to obtain Apple credentials. Please try again.',
+          );
         }
         final credential = OAuthProvider('apple.com').credential(
           idToken: idToken,
@@ -246,18 +288,18 @@ class _LoginScreenState extends State<LoginScreen> {
         // flow above).
         final appleEmail =
             appleCredential.email ?? emailFromAppleIdToken(idToken);
-        final displayName =
-            [appleCredential.givenName, appleCredential.familyName]
-                .where((s) => s != null && s.isNotEmpty)
-                .join(' ');
+        final displayName = [
+          appleCredential.givenName,
+          appleCredential.familyName,
+        ].where((s) => s != null && s.isNotEmpty).join(' ');
 
         final existingQuery = appleEmail == null
             ? null
             : await FirebaseFirestore.instance
-                .collection('users')
-                .where('email', isEqualTo: appleEmail)
-                .limit(1)
-                .get();
+                  .collection('users')
+                  .where('email', isEqualTo: appleEmail)
+                  .limit(1)
+                  .get();
 
         if (existingQuery != null && existingQuery.docs.isEmpty) {
           if (mounted) {
@@ -266,7 +308,9 @@ class _LoginScreenState extends State<LoginScreen> {
               MaterialPageRoute(
                 builder: (_) => CompleteProfileScreen.pendingAppleAccount(
                   pendingCredential: credential,
-                  pendingDisplayName: displayName.isNotEmpty ? displayName : null,
+                  pendingDisplayName: displayName.isNotEmpty
+                      ? displayName
+                      : null,
                 ),
               ),
             );
@@ -277,15 +321,16 @@ class _LoginScreenState extends State<LoginScreen> {
         userCred = await FirebaseAuth.instance.signInWithCredential(credential);
       }
       await _handlePostSignIn(userCred.user!);
-
     } on SignInWithAppleAuthorizationException catch (e) {
       if (e.code != AuthorizationErrorCode.canceled && mounted) {
         setState(() => _error = 'Apple Sign-In failed. Please try again.');
       }
     } on FirebaseAuthException catch (e) {
-      if (mounted) setState(() => _error = e.message ?? 'Apple Sign-In failed.');
+      if (mounted)
+        setState(() => _error = e.message ?? 'Apple Sign-In failed.');
     } catch (e) {
-      if (mounted) setState(() => _error = 'Apple Sign-In failed. Please try again.');
+      if (mounted)
+        setState(() => _error = 'Apple Sign-In failed. Please try again.');
     } finally {
       if (mounted) setState(() => isAppleLoading = false);
     }
@@ -302,20 +347,27 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Row(children: [
-              Icon(Icons.check_circle_outline, color: Colors.white),
-              SizedBox(width: 10),
-              Expanded(child: Text('Password reset email sent! Check your inbox.')),
-            ]),
+            content: const Row(
+              children: [
+                Icon(Icons.check_circle_outline, color: Colors.white),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text('Password reset email sent! Check your inbox.'),
+                ),
+              ],
+            ),
             backgroundColor: _blue,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
             duration: const Duration(seconds: 4),
           ),
         );
       }
     } on FirebaseAuthException catch (e) {
-      if (mounted) setState(() => _error = e.message ?? 'Failed to send reset email.');
+      if (mounted)
+        setState(() => _error = e.message ?? 'Failed to send reset email.');
     }
   }
 
@@ -372,8 +424,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 isLoading: isLoading,
                 isGoogleLoading: isGoogleLoading,
                 isAppleLoading: isAppleLoading,
-                onLogin: () { SoundService.tap(); login(); },
-                onForgotPassword: () { SoundService.tap(); _sendPasswordReset(); },
+                onLogin: () {
+                  SoundService.tap();
+                  login();
+                },
+                onForgotPassword: () {
+                  SoundService.tap();
+                  _sendPasswordReset();
+                },
                 onGoogleTap: signInWithGoogle,
                 onAppleTap: signInWithApple,
                 onSignUp: () {
@@ -471,9 +529,10 @@ class _MarqueeRowState extends State<_MarqueeRow>
   void initState() {
     super.initState();
     _scrollCtrl = ScrollController(initialScrollOffset: widget.initialOffset);
-    _ticker = AnimationController(vsync: this, duration: const Duration(seconds: 1))
-      ..addListener(_onTick)
-      ..repeat();
+    _ticker =
+        AnimationController(vsync: this, duration: const Duration(seconds: 1))
+          ..addListener(_onTick)
+          ..repeat();
   }
 
   void _onTick() {
@@ -567,7 +626,8 @@ class _LoginPanel extends StatelessWidget {
     final media = MediaQuery.of(context);
     final bottomSafe = media.padding.bottom;
     final keyboardInset = media.viewInsets.bottom;
-    final maxPanelHeight = media.size.height - media.padding.top - keyboardInset - 16;
+    final maxPanelHeight =
+        media.size.height - media.padding.top - keyboardInset - 16;
     final panelHeight = math.min(500 + bottomSafe, maxPanelHeight);
     final signupGold = isDark ? _kGold : _kSignupGoldLight;
 
@@ -591,184 +651,228 @@ class _LoginPanel extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Image.asset('assets/images/logo.png', height: 34),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Welcome back!',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w800,
-                color: tokens.textPrimary,
+            EntranceAnimation(
+              type: EntranceAnimationType.fadeInSlideUp,
+              child: Column(
+                children: [
+                  Center(
+                    child: Image.asset('assets/images/logo.png', height: 34),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Welcome back!',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      color: tokens.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Find your next gig, or get trusted help nearby.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 11.5, color: tokens.textMuted),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Find your next gig, or get trusted help nearby.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11.5, color: tokens.textMuted),
             ),
             const SizedBox(height: 22),
 
-            // ─── EMAIL ───
-            _AuthField(
-              tokens: tokens,
-              controller: emailController,
-              hintText: 'Email Address',
-              icon: Icons.email_outlined,
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 12),
-
-            // ─── PASSWORD ───
-            _AuthField(
-              tokens: tokens,
-              controller: passwordController,
-              hintText: 'Password',
-              icon: Icons.lock_outline,
-              obscureText: obscurePassword,
-              suffixIcon: IconButton(
-                icon: Icon(
-                  obscurePassword ? Icons.visibility_off : Icons.visibility,
-                  color: tokens.textMuted,
-                  size: 20,
-                ),
-                onPressed: onToggleObscure,
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // ─── ERROR ───
-            if (error.isNotEmpty) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red[200]!),
-                ),
-                child: Row(children: [
-                  const Icon(Icons.error_outline, color: Colors.red, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(error, style: const TextStyle(color: Colors.red, fontSize: 13))),
-                ]),
-              ),
-              const SizedBox(height: 14),
-            ],
-
-            // ─── LOGIN BUTTON ───
-            SizedBox(
-              height: 52,
-              child: ElevatedButton(
-                onPressed: isLoading ? null : onLogin,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _kGold,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: EdgeInsets.zero,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
+            EntranceAnimation(
+              type: EntranceAnimationType.fadeInSlideUp,
+              delay: const Duration(milliseconds: 100),
+              child: Column(
+                children: [
+                  // ─── EMAIL ───
+                  _AuthField(
+                    tokens: tokens,
+                    controller: emailController,
+                    hintText: 'Email Address',
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
                   ),
-                ).copyWith(
-                  backgroundColor: WidgetStateProperty.all(Colors.transparent),
-                  shadowColor: WidgetStateProperty.all(Colors.transparent),
-                ),
-                child: Ink(
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [_kGold, _kGoldDeep],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+                  const SizedBox(height: 12),
+
+                  // ─── PASSWORD ───
+                  _AuthField(
+                    tokens: tokens,
+                    controller: passwordController,
+                    hintText: 'Password',
+                    icon: Icons.lock_outline,
+                    obscureText: obscurePassword,
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscurePassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                        color: tokens.textMuted,
+                        size: 20,
+                      ),
+                      onPressed: onToggleObscure,
                     ),
-                    borderRadius: BorderRadius.circular(15),
                   ),
-                  child: Container(
-                    alignment: Alignment.center,
-                    child: isLoading
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.4,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text(
-                            'Log In',
-                            style: TextStyle(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
+                  const SizedBox(height: 14),
+
+                  // ─── ERROR ───
+                  if (error.isNotEmpty) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red[200]!),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.error_outline,
+                            color: Colors.red,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              error,
+                              style: const TextStyle(
+                                color: Colors.red,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
 
-            // ─── FORGOT PASSWORD ───
-            Center(
-              child: TextButton(
-                onPressed: onForgotPassword,
-                child: const Text(
-                  'Forgot password?',
-                  style: TextStyle(
-                    color: _kBlueAccent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-
-            // ─── DIVIDER ───
-            Row(children: [
-              Expanded(child: Divider(color: tokens.divider)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  'or continue with',
-                  style: TextStyle(color: tokens.textMuted, fontSize: 12),
-                ),
-              ),
-              Expanded(child: Divider(color: tokens.divider)),
-            ]),
-            const SizedBox(height: 16),
-
-            // ─── SOCIAL LOGO ROW ───
-            _SocialLogoRow(
-              tokens: tokens,
-              onGoogleTap:     onGoogleTap,
-              isGoogleLoading: isGoogleLoading,
-              onAppleTap:      onAppleTap,
-              isAppleLoading:  isAppleLoading,
-            ),
-            const SizedBox(height: 20),
-
-            // ─── SIGN UP ───
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  "Don't have an account? ",
-                  style: TextStyle(color: tokens.textMuted, fontSize: 12.5),
-                ),
-                GestureDetector(
-                  onTap: onSignUp,
-                  child: Text(
-                    'Sign up',
-                    style: TextStyle(
-                      color: signupGold,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12.5,
+                  // ─── LOGIN BUTTON ───
+                  SizedBox(
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: isLoading ? null : onLogin,
+                      style:
+                          ElevatedButton.styleFrom(
+                            backgroundColor: _kGold,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: EdgeInsets.zero,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                          ).copyWith(
+                            backgroundColor: WidgetStateProperty.all(
+                              Colors.transparent,
+                            ),
+                            shadowColor: WidgetStateProperty.all(
+                              Colors.transparent,
+                            ),
+                          ),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [_kGold, _kGoldDeep],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: Container(
+                          alignment: Alignment.center,
+                          child: isLoading
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.4,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text(
+                                  'Log In',
+                                  style: TextStyle(
+                                    fontSize: 14.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 10),
+
+                  // ─── FORGOT PASSWORD ───
+                  Center(
+                    child: TextButton(
+                      onPressed: onForgotPassword,
+                      child: const Text(
+                        'Forgot password?',
+                        style: TextStyle(
+                          color: _kBlueAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+
+                  // ─── DIVIDER ───
+                  Row(
+                    children: [
+                      Expanded(child: Divider(color: tokens.divider)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text(
+                          'or continue with',
+                          style: TextStyle(
+                            color: tokens.textMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      Expanded(child: Divider(color: tokens.divider)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // ─── SOCIAL LOGO ROW ───
+                  _SocialLogoRow(
+                    tokens: tokens,
+                    onGoogleTap: onGoogleTap,
+                    isGoogleLoading: isGoogleLoading,
+                    onAppleTap: onAppleTap,
+                    isAppleLoading: isAppleLoading,
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ─── SIGN UP ───
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        "Don't have an account? ",
+                        style: TextStyle(
+                          color: tokens.textMuted,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: onSignUp,
+                        child: Text(
+                          'Sign up',
+                          style: TextStyle(
+                            color: signupGold,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -862,7 +966,9 @@ class _SocialLogoRow extends StatelessWidget {
             shape: BoxShape.circle,
             color: tokens.insetBg,
           ),
-          child: Center(child: Icon(icon, size: 20, color: tokens.textSecondary)),
+          child: Center(
+            child: Icon(icon, size: 20, color: tokens.textSecondary),
+          ),
         ),
         Positioned(
           top: -4,
@@ -907,15 +1013,29 @@ class _SocialLogoRow extends StatelessWidget {
                 child: OutlinedButton.icon(
                   onPressed: isGoogleLoading ? null : onGoogleTap,
                   icon: isGoogleLoading
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Image.asset(
+                          'assets/images/g-logo.png',
+                          width: 22,
+                          height: 22,
+                        ),
                   label: Text(
                     'Google',
-                    style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: tokens.textPrimary),
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                      color: tokens.textPrimary,
+                    ),
                   ),
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(color: tokens.cardBorder),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
                   ),
                 ),
               ),
@@ -931,17 +1051,27 @@ class _SocialLogoRow extends StatelessWidget {
                         ? SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: appleFg))
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: appleFg,
+                            ),
+                          )
                         : Icon(Icons.apple, color: appleFg, size: 22),
                     label: Text(
                       'Apple',
-                      style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: appleFg),
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: appleFg,
+                      ),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: appleBg,
                       elevation: 0,
                       side: BorderSide(color: tokens.cardBorder),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(15),
+                      ),
                     ),
                   ),
                 ),
@@ -952,9 +1082,7 @@ class _SocialLogoRow extends StatelessWidget {
         const SizedBox(height: 14),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _comingSoonCircle(Icons.facebook),
-          ],
+          children: [_comingSoonCircle(Icons.facebook)],
         ),
       ],
     );

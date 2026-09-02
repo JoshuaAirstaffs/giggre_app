@@ -19,6 +19,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/profile_tab_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/earnings_breakdown_dialog.dart';
+import '../../../core/widgets/entrance_animation.dart';
 import '../../gig_worker/presentation/gig_history_screen.dart';
 import '../../gig_worker/presentation/worker_ratings_screen.dart';
 import '../../gig_worker/presentation/worker_settings_screen.dart';
@@ -117,12 +118,17 @@ class ProfileTab extends StatefulWidget {
   // Callers that push ProfileTab as a standalone screen should pass false.
   final bool isTabRoot;
 
+  // Bumped by the parent shell each time this tab is switched to, so its
+  // entrance animations can replay instead of only ever playing once.
+  final int animationGeneration;
+
   const ProfileTab({
     super.key,
     required this.initialRole,
     this.onSwitchRole,
     this.onLogout,
     this.isTabRoot = true,
+    this.animationGeneration = 0,
   });
 
   @override
@@ -780,7 +786,9 @@ class _ProfileTabState extends State<ProfileTab> {
       );
     }
 
-    final defaultCurrencyCode = context.watch<CurrentUserProvider>().currencyCode;
+    final defaultCurrencyCode = context
+        .watch<CurrentUserProvider>()
+        .currencyCode;
     final weeklyStr = _formatByCode(_weeklyByCode, defaultCurrencyCode);
     final spentStr = _formatByCode(_spentByCurrency, defaultCurrencyCode);
 
@@ -794,7 +802,9 @@ class _ProfileTabState extends State<ProfileTab> {
     final earningsCodes = _earningsByCode.keys.toList()..sort();
     final primaryEarningsCode = _earningsByCode.containsKey(defaultCurrencyCode)
         ? defaultCurrencyCode
-        : (earningsCodes.isNotEmpty ? earningsCodes.first : defaultCurrencyCode);
+        : (earningsCodes.isNotEmpty
+              ? earningsCodes.first
+              : defaultCurrencyCode);
     final totalStr = CurrencyFormatter.format(
       _earningsByCode[primaryEarningsCode] ?? 0,
       primaryEarningsCode,
@@ -875,237 +885,261 @@ class _ProfileTabState extends State<ProfileTab> {
               const SizedBox(height: 16),
 
               // ── Profile Header Card ──────────────────────────────────────
-              _ProfileCard(
-                name: _name,
-                email: _email,
-                phone: _phone,
-                bio: _bio,
-                photoUrl: _photoUrl,
-                createdAt: _createdAt,
-                isVerified: _isVerified,
-                tokens: tokens,
-                onEdit: _showEditProfile,
+              EntranceAnimation(
+                key: ValueKey('profile-card-${widget.animationGeneration}'),
+                type: EntranceAnimationType.fadeInSlideUp,
+                child: _ProfileCard(
+                  name: _name,
+                  email: _email,
+                  phone: _phone,
+                  bio: _bio,
+                  photoUrl: _photoUrl,
+                  createdAt: _createdAt,
+                  isVerified: _isVerified,
+                  tokens: tokens,
+                  onEdit: _showEditProfile,
+                ),
               ),
               const SizedBox(height: 16),
 
               // ── Role Stats Toggle ─────────────────────────────────────────
-              _RoleToggle(
-                selected: _viewRole,
-                onChanged: _setViewRole,
-                tokens: tokens,
+              EntranceAnimation(
+                key: ValueKey('role-toggle-${widget.animationGeneration}'),
+                type: EntranceAnimationType.fadeInSlideUp,
+                delay: const Duration(milliseconds: 60),
+                child: _RoleToggle(
+                  selected: _viewRole,
+                  onChanged: _setViewRole,
+                  tokens: tokens,
+                ),
               ),
               const SizedBox(height: 16),
 
               // ── Role-specific Stats ──────────────────────────────────────
-              if (_viewRole == 'worker')
-                _StatsCard(
-                  columns: workerColumns,
-                  footnote: '$weeklyStr earned this week',
-                  tokens: tokens,
-                )
-              else
-                _StatsCard(
-                  columns: hostColumns,
-                  footnote:
-                      '$_activeGigs active · ${_completionRate.toStringAsFixed(0)}% completion · $spentStr spent',
-                  tokens: tokens,
-                ),
+              EntranceAnimation(
+                key: ValueKey('stats-${widget.animationGeneration}'),
+                type: EntranceAnimationType.fadeInSlideUp,
+                delay: const Duration(milliseconds: 120),
+                child: _viewRole == 'worker'
+                    ? _StatsCard(
+                        columns: workerColumns,
+                        footnote: '$weeklyStr earned this week',
+                        tokens: tokens,
+                      )
+                    : _StatsCard(
+                        columns: hostColumns,
+                        footnote:
+                            '$_activeGigs active · ${_completionRate.toStringAsFixed(0)}% completion · $spentStr spent',
+                        tokens: tokens,
+                      ),
+              ),
               const SizedBox(height: 20),
 
               // ── Account actions ──────────────────────────────────────────
               _SectionHeader(label: 'Account', tokens: tokens),
               const SizedBox(height: 10),
-              _ActionCard(
-                tokens: tokens,
-                children: _viewRole == 'worker'
-                    ? [
-                        _ActionRow(
-                          icon: Icons.construction_rounded,
-                          iconColor: kGold,
-                          label: 'My Toolchest',
-                          badge: _skills.isNotEmpty
-                              ? '${_skills.length}'
-                              : null,
-                          badgeColor: kGold,
-                          tokens: tokens,
-                          onTap: () => ToolchestSheet.show(context, _uid),
-                        ),
-                        _ActionDivider(tokens: tokens),
-                        _ActionRow(
-                          icon: Icons.history_rounded,
-                          iconColor: kBlue,
-                          label: 'Gig History',
-                          tokens: tokens,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GigHistoryScreen(),
+              EntranceAnimation(
+                key: ValueKey('account-${widget.animationGeneration}'),
+                type: EntranceAnimationType.fadeInSlideUp,
+                delay: const Duration(milliseconds: 180),
+                child: _ActionCard(
+                  tokens: tokens,
+                  children: _viewRole == 'worker'
+                      ? [
+                          _ActionRow(
+                            icon: Icons.construction_rounded,
+                            iconColor: kGold,
+                            label: 'My Toolchest',
+                            badge: _skills.isNotEmpty
+                                ? '${_skills.length}'
+                                : null,
+                            badgeColor: kGold,
+                            tokens: tokens,
+                            onTap: () => ToolchestSheet.show(context, _uid),
+                          ),
+                          _ActionDivider(tokens: tokens),
+                          _ActionRow(
+                            icon: Icons.history_rounded,
+                            iconColor: kBlue,
+                            label: 'Gig History',
+                            tokens: tokens,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const GigHistoryScreen(),
+                              ),
                             ),
                           ),
-                        ),
-                        _ActionDivider(tokens: tokens),
-                        _ActionRow(
-                          icon: Icons.star_outline_rounded,
-                          iconColor: kGold,
-                          label: 'Ratings & Reviews',
-                          tokens: tokens,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const WorkerRatingsScreen(),
+                          _ActionDivider(tokens: tokens),
+                          _ActionRow(
+                            icon: Icons.star_outline_rounded,
+                            iconColor: kGold,
+                            label: 'Ratings & Reviews',
+                            tokens: tokens,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const WorkerRatingsScreen(),
+                              ),
                             ),
                           ),
-                        ),
-                      ]
-                    : [
-                        _ActionRow(
-                          icon: Icons.history_rounded,
-                          iconColor: kBlue,
-                          label: 'Gig History',
-                          tokens: tokens,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => HostGigsScreen(uid: _uid),
+                        ]
+                      : [
+                          _ActionRow(
+                            icon: Icons.history_rounded,
+                            iconColor: kBlue,
+                            label: 'Gig History',
+                            tokens: tokens,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => HostGigsScreen(uid: _uid),
+                              ),
                             ),
                           ),
-                        ),
-                        _ActionDivider(tokens: tokens),
-                        _ActionRow(
-                          icon: Icons.favorite_outline_rounded,
-                          iconColor: const Color(0xFFEC4899),
-                          label: 'Favorite Workers',
-                          tokens: tokens,
-                          onTap: () => showModalBottomSheet(
-                            context: context,
-                            isScrollControlled: true,
-                            backgroundColor: Colors.transparent,
-                            builder: (_) => FavoriteWorkersSheet(hostId: _uid),
-                          ),
-                        ),
-                        _ActionDivider(tokens: tokens),
-                        _ActionRow(
-                          icon: Icons.star_outline_rounded,
-                          iconColor: kGold,
-                          label: 'Ratings Given',
-                          tokens: tokens,
-                          onTap: () => showModalBottomSheet(
-                            context: context,
-                            isScrollControlled: true,
-                            backgroundColor: Colors.transparent,
-                            builder: (_) => const RatingsGivenSheet(),
-                          ),
-                        ),
-                        _ActionDivider(tokens: tokens),
-                        _ActionRow(
-                          icon: Icons.receipt_long_outlined,
-                          iconColor: const Color(0xFF10B981),
-                          label: 'Payment History',
-                          tokens: tokens,
-                          onTap: () {
-                            final completed =
-                                [
-                                      ..._quickGigsDocs,
-                                      ..._openGigsDocs,
-                                      ..._offeredGigsDocs,
-                                    ]
-                                    .where(
-                                      (g) =>
-                                          (g['status'] as String?) ==
-                                          'completed',
-                                    )
-                                    .toList();
-                            PaymentHistorySheet.show(
+                          _ActionDivider(tokens: tokens),
+                          _ActionRow(
+                            icon: Icons.favorite_outline_rounded,
+                            iconColor: const Color(0xFFEC4899),
+                            label: 'Favorite Workers',
+                            tokens: tokens,
+                            onTap: () => showModalBottomSheet(
                               context: context,
-                              completedGigs: completed,
-                            );
-                          },
-                        ),
-                      ],
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) =>
+                                  FavoriteWorkersSheet(hostId: _uid),
+                            ),
+                          ),
+                          _ActionDivider(tokens: tokens),
+                          _ActionRow(
+                            icon: Icons.star_outline_rounded,
+                            iconColor: kGold,
+                            label: 'Ratings Given',
+                            tokens: tokens,
+                            onTap: () => showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => const RatingsGivenSheet(),
+                            ),
+                          ),
+                          _ActionDivider(tokens: tokens),
+                          _ActionRow(
+                            icon: Icons.receipt_long_outlined,
+                            iconColor: const Color(0xFF10B981),
+                            label: 'Payment History',
+                            tokens: tokens,
+                            onTap: () {
+                              final completed =
+                                  [
+                                        ..._quickGigsDocs,
+                                        ..._openGigsDocs,
+                                        ..._offeredGigsDocs,
+                                      ]
+                                      .where(
+                                        (g) =>
+                                            (g['status'] as String?) ==
+                                            'completed',
+                                      )
+                                      .toList();
+                              PaymentHistorySheet.show(
+                                context: context,
+                                completedGigs: completed,
+                              );
+                            },
+                          ),
+                        ],
+                ),
               ),
               const SizedBox(height: 16),
 
               // ── Settings ─────────────────────────────────────────────────
               _SectionHeader(label: 'Settings', tokens: tokens),
               const SizedBox(height: 10),
-              _ActionCard(
-                tokens: tokens,
-                children: [
-                  _ActionRow(
-                    icon: Icons.play_circle_outline_rounded,
-                    iconColor: kGold,
-                    label: 'Watch Demo',
-                    tokens: tokens,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const TutorialDemoHubScreen(),
+              EntranceAnimation(
+                key: ValueKey('settings-${widget.animationGeneration}'),
+                type: EntranceAnimationType.fadeInSlideUp,
+                delay: const Duration(milliseconds: 240),
+                child: _ActionCard(
+                  tokens: tokens,
+                  children: [
+                    _ActionRow(
+                      icon: Icons.play_circle_outline_rounded,
+                      iconColor: kGold,
+                      label: 'Watch Demo',
+                      tokens: tokens,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const TutorialDemoHubScreen(),
+                        ),
                       ),
                     ),
-                  ),
-                  _ActionDivider(tokens: tokens),
-                  _ActionRow(
-                    icon: Icons.notifications_outlined,
-                    iconColor: kBlue,
-                    label: 'Notifications',
-                    tokens: tokens,
-                    onTap: () => _viewRole == 'worker'
-                        ? WorkerNotificationsSheet.show(context)
-                        : host_notif.NotificationsSheet.show(context),
-                  ),
-                  _ActionDivider(tokens: tokens),
-                  _ActionRow(
-                    icon: Icons.description_rounded,
-                    iconColor: _kPurple,
-                    label: 'My Documents',
-                    tokens: tokens,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MyDocumentsScreen(userId: _uid),
+                    _ActionDivider(tokens: tokens),
+                    _ActionRow(
+                      icon: Icons.notifications_outlined,
+                      iconColor: kBlue,
+                      label: 'Notifications',
+                      tokens: tokens,
+                      onTap: () => _viewRole == 'worker'
+                          ? WorkerNotificationsSheet.show(context)
+                          : host_notif.NotificationsSheet.show(context),
+                    ),
+                    _ActionDivider(tokens: tokens),
+                    _ActionRow(
+                      icon: Icons.description_rounded,
+                      iconColor: _kPurple,
+                      label: 'My Documents',
+                      tokens: tokens,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => MyDocumentsScreen(userId: _uid),
+                        ),
                       ),
                     ),
-                  ),
-                  _ActionDivider(tokens: tokens),
-                  _ActionRow(
-                    icon: Icons.shield_outlined,
-                    iconColor: _kGreen,
-                    label: 'Verification',
-                    badge: _kBadgeLabels[_isVerified],
-                    badgeColor: _kBadgeColors[_isVerified],
-                    tokens: tokens,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const VerificationScreen(),
+                    _ActionDivider(tokens: tokens),
+                    _ActionRow(
+                      icon: Icons.shield_outlined,
+                      iconColor: _kGreen,
+                      label: 'Verification',
+                      badge: _kBadgeLabels[_isVerified],
+                      badgeColor: _kBadgeColors[_isVerified],
+                      tokens: tokens,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const VerificationScreen(),
+                        ),
                       ),
                     ),
-                  ),
-                  _ActionDivider(tokens: tokens),
-                  _ActionRow(
-                    icon: Icons.card_giftcard,
-                    iconColor: _kPurple,
-                    label: 'My Referrals',
-                    tokens: tokens,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => MyReferralScreen()),
-                    ),
-                  ),
-                  _ActionDivider(tokens: tokens),
-                  _ActionRow(
-                    icon: Icons.settings_outlined,
-                    iconColor: tokens.textSecondary,
-                    label: 'Settings',
-                    tokens: tokens,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const WorkerSettingsScreen(),
+                    _ActionDivider(tokens: tokens),
+                    _ActionRow(
+                      icon: Icons.card_giftcard,
+                      iconColor: _kPurple,
+                      label: 'My Referrals',
+                      tokens: tokens,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => MyReferralScreen()),
                       ),
                     ),
-                  ),
-                ],
+                    _ActionDivider(tokens: tokens),
+                    _ActionRow(
+                      icon: Icons.settings_outlined,
+                      iconColor: tokens.textSecondary,
+                      label: 'Settings',
+                      tokens: tokens,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const WorkerSettingsScreen(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 16),
 
@@ -1654,7 +1688,8 @@ class _StatsCard extends StatelessWidget {
                                   fontSize: 19,
                                   fontWeight: FontWeight.w800,
                                   color:
-                                      columns[i].valueColor ?? tokens.textPrimary,
+                                      columns[i].valueColor ??
+                                      tokens.textPrimary,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -1665,7 +1700,8 @@ class _StatsCard extends StatelessWidget {
                               Icon(
                                 Icons.info_outline_rounded,
                                 size: 13,
-                                color: columns[i].valueColor ?? tokens.textPrimary,
+                                color:
+                                    columns[i].valueColor ?? tokens.textPrimary,
                               ),
                             ],
                           ],

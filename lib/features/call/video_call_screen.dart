@@ -198,8 +198,11 @@ class _VideoCallScreenState extends State<VideoCallScreen>
 
     _callTimer?.cancel();
     _outgoingCallSub?.cancel();
+    // Stop only — disposal happens once, in dispose() below, which always
+    // runs right after this via the Navigator.pop() further down. Disposing
+    // here too would make dispose()'s call throw on the already-torn-down
+    // player.
     await _stopRingback();
-    await _ringbackPlayer.dispose();
     await _engine?.leaveChannel();
     await _engine?.release();
 

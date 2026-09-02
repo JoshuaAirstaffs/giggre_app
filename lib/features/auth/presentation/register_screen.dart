@@ -1087,6 +1087,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
       );
     } catch (e) {
+      debugPrint('[GoogleSignIn] register error: $e');
       if (mounted) {
         setState(() => error = 'Google Sign-In failed. Please try again.');
       }

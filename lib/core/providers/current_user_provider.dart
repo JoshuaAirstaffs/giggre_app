@@ -559,6 +559,7 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _gigVisibilityRulesSubscription?.cancel();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -578,8 +579,11 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
     _lastLng = null;
     _callSubscription?.cancel();
     _callSubscription = null;
+    // _audioPlayer is a permanent, app-lifetime instance reused across
+    // logins (this provider is created once at app root and never rebuilt)
+    // — stop it, but don't dispose it here, or the next login's ringtone
+    // handling would throw trying to reuse an already-disposed player.
     await _stopRingtone();
-    _audioPlayer.dispose(); // ← clean up
     notifyListeners();
     if (previousUid != null) {
       await _pushService.unregisterForUser(previousUid);

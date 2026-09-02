@@ -44,6 +44,13 @@ class HostShell extends StatefulWidget {
 class _HostShellState extends State<HostShell>
     with SingleTickerProviderStateMixin {
   int _tabIndex = 0;
+
+  // Bumped each time the Home / Profile tab is switched to, so those
+  // screens' entrance animations replay instead of only ever playing once
+  // (they stay mounted the whole time via IndexedStack below).
+  int _homeVisitGen = 0;
+  int _profileVisitGen = 0;
+
   bool _dialOpen = false;
   late final AnimationController _dialCtrl = AnimationController(
     vsync: this,
@@ -182,7 +189,8 @@ class _HostShellState extends State<HostShell>
       // tutorial — the anchors exist as soon as the overlay mounts, but
       // spotlighting them mid-animation would chase a moving target.
       _dialCtrl.forward().then((_) {
-        if (mounted) context.read<TutorialController>().startIfNeeded(gigTypesFlow);
+        if (mounted)
+          context.read<TutorialController>().startIfNeeded(gigTypesFlow);
       });
     } else {
       _dialCtrl.reverse();
@@ -197,7 +205,11 @@ class _HostShellState extends State<HostShell>
 
   void _selectTab(int i) {
     if (_dialOpen) _closeDial();
-    setState(() => _tabIndex = i);
+    setState(() {
+      _tabIndex = i;
+      if (i == 0) _homeVisitGen++;
+      if (i == 3) _profileVisitGen++;
+    });
   }
 
   // CurrentUserProvider.isVerified is only populated at login/restore (or a
@@ -303,6 +315,7 @@ class _HostShellState extends State<HostShell>
           context,
           MaterialPageRoute(builder: (_) => const WorkerShell()),
         ),
+        animationGeneration: _homeVisitGen,
       ),
       HostGigsScreen(uid: uid, isTabRoot: true),
       const HomeChat(showBackButton: false),
@@ -315,6 +328,7 @@ class _HostShellState extends State<HostShell>
             MaterialPageRoute(builder: (_) => const WorkerShell()),
           ),
           onLogout: _performLogout,
+          animationGeneration: _profileVisitGen,
         ),
       ),
     ];

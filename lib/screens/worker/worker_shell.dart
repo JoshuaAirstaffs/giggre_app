@@ -34,6 +34,20 @@ class WorkerShell extends StatefulWidget {
 class _WorkerShellState extends State<WorkerShell> {
   int _index = 0;
 
+  // Bumped each time the Home / Profile tab is switched to, so those
+  // screens' entrance animations replay instead of only ever playing once
+  // (they stay mounted the whole time via IndexedStack below).
+  int _homeVisitGen = 0;
+  int _profileVisitGen = 0;
+
+  void _selectTab(int i) {
+    setState(() {
+      _index = i;
+      if (i == 0) _homeVisitGen++;
+      if (i == 3) _profileVisitGen++;
+    });
+  }
+
   bool _hasUnreadSupport = false;
   bool _hasUnreadGig = false;
   StreamSubscription? _supportRoomsSub;
@@ -192,6 +206,7 @@ class _WorkerShellState extends State<WorkerShell> {
           context,
           MaterialPageRoute(builder: (_) => const HostShell()),
         ),
+        animationGeneration: _homeVisitGen,
       ),
       SavedScreen(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
       const HomeChat(showBackButton: false),
@@ -204,6 +219,7 @@ class _WorkerShellState extends State<WorkerShell> {
             MaterialPageRoute(builder: (_) => const HostShell()),
           ),
           onLogout: _performLogout,
+          animationGeneration: _profileVisitGen,
         ),
       ),
     ];
@@ -213,7 +229,7 @@ class _WorkerShellState extends State<WorkerShell> {
       bottomNavigationBar: _WorkerBottomNavBar(
         currentIndex: _index,
         hasUnreadChat: _hasUnreadSupport || _hasUnreadGig,
-        onTap: (i) => setState(() => _index = i),
+        onTap: _selectTab,
       ),
     );
   }

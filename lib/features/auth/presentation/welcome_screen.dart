@@ -311,9 +311,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       }
       await _handlePostSignIn(userCred.user!);
     } on FirebaseAuthException catch (e) {
+      debugPrint('[GoogleSignIn] FirebaseAuthException: ${e.code} ${e.message}');
       if (mounted)
         setState(() => _error = e.message ?? 'Google Sign-In failed.');
     } catch (e) {
+      debugPrint('[GoogleSignIn] error: $e');
       if (mounted)
         setState(() => _error = 'Google Sign-In failed. Please try again.');
     } finally {
@@ -486,6 +488,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         ),
       );
     } catch (e) {
+      debugPrint('[GoogleSignIn] signup error: $e');
       if (mounted) {
         setState(
           () => _signupError = 'Google Sign-In failed. Please try again.',

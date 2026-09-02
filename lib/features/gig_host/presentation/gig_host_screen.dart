@@ -56,10 +56,15 @@ class GigHostScreen extends StatefulWidget {
   final bool isTabRoot;
   final VoidCallback? onSwitchToWorker;
 
+  // Bumped by HostShell each time this tab is switched to, so its entrance
+  // animations can replay instead of only ever playing once.
+  final int animationGeneration;
+
   const GigHostScreen({
     super.key,
     this.isTabRoot = false,
     this.onSwitchToWorker,
+    this.animationGeneration = 0,
   });
 
   @override
@@ -153,6 +158,7 @@ class _GigHostScreenState extends State<GigHostScreen> {
 
                 // ── Your Gigs ──────────────────────────────────
                 EntranceAnimation(
+                  key: ValueKey('your-gigs-${widget.animationGeneration}'),
                   delay: const Duration(milliseconds: 80),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -185,7 +191,10 @@ class _GigHostScreenState extends State<GigHostScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                _GigPreviewList(uid: uid),
+                _GigPreviewList(
+                  uid: uid,
+                  animationGeneration: widget.animationGeneration,
+                ),
               ]),
             ),
           ),
@@ -1018,7 +1027,8 @@ class _GigTypeCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _GigPreviewList extends StatefulWidget {
   final String uid;
-  const _GigPreviewList({required this.uid});
+  final int animationGeneration;
+  const _GigPreviewList({required this.uid, this.animationGeneration = 0});
 
   @override
   State<_GigPreviewList> createState() => _GigPreviewListState();
@@ -1169,6 +1179,9 @@ class _GigPreviewListState extends State<_GigPreviewList> {
           .entries
           .map(
             (entry) => EntranceAnimation(
+              key: ValueKey(
+                'gig-preview-${entry.key}-${widget.animationGeneration}',
+              ),
               type: EntranceAnimationType.fadeInSlideUp,
               delay: Duration(milliseconds: entry.key * 40),
               child: HostGigCard(data: entry.value, showActions: false),

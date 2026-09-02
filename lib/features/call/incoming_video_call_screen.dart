@@ -80,7 +80,6 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
 
   Future<void> _stopRingtone() async {
     await _audioPlayer.stop();
-    await _audioPlayer.dispose();
   }
 
   @override

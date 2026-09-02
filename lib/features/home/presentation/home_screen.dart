@@ -701,11 +701,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   final GlobalKey<RefreshIndicatorState> _refreshKey =
       GlobalKey<RefreshIndicatorState>();
-  int _carouselRefreshKey = 0;
+  int _refreshGeneration = 0;
 
   Future<void> _refreshAll() async {
     await Future.wait([_loadUser(), _fetchUpdates()]);
-    if (mounted) setState(() => _carouselRefreshKey++);
+    if (mounted) setState(() => _refreshGeneration++);
   }
 
   void _openGiggreMenu() {
@@ -855,6 +855,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             // ── 2. Profile strip ──────────────────────────
             EntranceAnimation(
+              key: ValueKey('profile-$_refreshGeneration'),
               type: EntranceAnimationType.fadeInSlideUp,
               child: Row(
                 children: [
@@ -1022,15 +1023,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
             // ── 3. Image carousel ─────────────────────────
             EntranceAnimation(
+              key: ValueKey('carousel-$_refreshGeneration'),
               type: EntranceAnimationType.fadeInSlideUp,
               delay: const Duration(milliseconds: 80),
-              child: _TestimonialCarousel(key: ValueKey(_carouselRefreshKey)),
+              child: _TestimonialCarousel(key: ValueKey(_refreshGeneration)),
             ),
 
             const SizedBox(height: 24),
 
             // ── 4. Role segmented control ─────────────────
             EntranceAnimation(
+              key: ValueKey('role-$_refreshGeneration'),
               type: EntranceAnimationType.fadeInSlideUp,
               delay: const Duration(milliseconds: 160),
               child: _RoleSegmentedControl(
@@ -1043,6 +1046,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (_selectedRole != null) ...[
               const SizedBox(height: 16),
               EntranceAnimation(
+                key: ValueKey('continue-$_refreshGeneration'),
                 type: EntranceAnimationType.fadeInSlideUp,
                 child: SizedBox(
                   width: double.infinity,
@@ -1112,6 +1116,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
             // ── 6. Giggre Updates section ─────────────────
             EntranceAnimation(
+              key: ValueKey('updates-header-$_refreshGeneration'),
               delay: const Duration(milliseconds: 240),
               child: Row(
                 children: [
@@ -1143,10 +1148,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             const SizedBox(height: 14),
 
-            ..._updates.take(3).toList().asMap().entries.map(
+            ..._updates
+                .take(3)
+                .toList()
+                .asMap()
+                .entries
+                .map(
                   (entry) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: EntranceAnimation(
+                      key: ValueKey('update-${entry.key}-$_refreshGeneration'),
                       type: EntranceAnimationType.fadeInSlideUp,
                       delay: Duration(milliseconds: 280 + entry.key * 60),
                       child: UpdateCard(
@@ -1163,6 +1174,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
             // ── Footer ────────────────────────────────────
             EntranceAnimation(
+              key: ValueKey('footer-$_refreshGeneration'),
               delay: const Duration(milliseconds: 320),
               child: Container(
                 width: double.infinity,

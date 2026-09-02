@@ -44,11 +44,16 @@ class GigWorkerScreen extends StatefulWidget {
   final bool isTabRoot;
   final VoidCallback? onSwitchToHost;
 
+  // Bumped by WorkerShell each time this tab is switched to, so its entrance
+  // animations can replay instead of only ever playing once.
+  final int animationGeneration;
+
   const GigWorkerScreen({
     super.key,
     this.restoreActiveGigOnEntry = false,
     this.isTabRoot = false,
     this.onSwitchToHost,
+    this.animationGeneration = 0,
   });
 
   @override
@@ -1782,6 +1787,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                     horizontal: 16,
                                   ),
                                   child: EntranceAnimation(
+                                    key: ValueKey(
+                                      'availability-${widget.animationGeneration}',
+                                    ),
                                     type: EntranceAnimationType.fadeInSlideUp,
                                     child: AvailabilityCard(
                                       isOnline: _availableForGigs,
@@ -1828,6 +1836,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
                               // ── Earnings ───────────────────────────────────
                               EntranceAnimation(
+                                key: ValueKey(
+                                  'earnings-${widget.animationGeneration}',
+                                ),
                                 type: EntranceAnimationType.fadeInSlideUp,
                                 child: EarningsSummaryCard(
                                   totalByCurrency: _earningsByCode,
@@ -1839,6 +1850,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
                               // ── Work preferences ──────────────────────────
                               EntranceAnimation(
+                                key: ValueKey(
+                                  'work-prefs-${widget.animationGeneration}',
+                                ),
                                 type: EntranceAnimationType.fadeInSlideUp,
                                 delay: const Duration(milliseconds: 80),
                                 child: WorkPreferencesCard(
