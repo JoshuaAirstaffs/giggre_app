@@ -586,7 +586,16 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
     await _stopRingtone();
     notifyListeners();
     if (previousUid != null) {
-      await _pushService.unregisterForUser(previousUid);
+      // A failure here (network blip, expired token mid-request, Firestore
+      // rules hiccup) must not block the rest of logout — every call site
+      // awaits clearUser() with no try/catch of its own, so an uncaught
+      // exception here would silently abort signOut() and the navigation
+      // back to WelcomeScreen right where the app stood.
+      try {
+        await _pushService.unregisterForUser(previousUid);
+      } catch (e) {
+        debugPrint('[CurrentUserProvider] unregisterForUser failed: $e');
+      }
     }
   }
 
