@@ -1,19 +1,18 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
+import '../../../core/services/sign_out_service.dart';
 import '../../../core/widgets/account_not_verified_modal.dart';
 import '../../../core/widgets/entrance_animation.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/worker_active_gig.dart';
 import '../../gig_host/services/quick_gig_matching_service.dart';
-import '../../auth/presentation/welcome_screen.dart';
 import '../../../screens/host/host_shell.dart';
 import '../../home/presentation/profile_tab.dart';
 import '../../tutorial/controller/tutorial_controller.dart';
@@ -1661,27 +1660,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _dispatchSub?.cancel();
     _offeredGigSub?.cancel();
     if (!mounted) return;
-    // Navigating to WelcomeScreen tears down every route above it (including
-    // AuthGate), so the app looks fully logged out immediately — if that
-    // happened before signOut() actually completed and the app got killed
-    // right then, Firebase's persisted native session survives untouched
-    // and silently restores this same account on next launch. Await the
-    // whole sign-out chain first so nothing ever looks logged out before it
-    // truly is.
-    await context.read<CurrentUserProvider>().clearUser();
-    // Throws when the current session isn't a Google sign-in (e.g. email/
-    // password) — there's nothing to disconnect, so swallow it rather than
-    // letting it abort the sign-out chain below.
-    try {
-      await GoogleSignIn().disconnect();
-    } catch (_) {}
-    await FirebaseAuth.instance.signOut();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const WelcomeScreen()),
-        (_) => false,
-      );
-    }
+    await performSignOut(context);
   }
 
   String _monthName(int m) {

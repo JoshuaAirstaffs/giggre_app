@@ -2,13 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/providers/current_user_provider.dart';
+import '../../core/services/sign_out_service.dart';
 import '../../core/widgets/account_not_verified_modal.dart';
-import '../../features/auth/presentation/welcome_screen.dart';
 import '../../features/gig_host/presentation/gig_host_screen.dart';
 import '../../features/gig_host/presentation/host_gigs_screen.dart';
 import '../../features/gig_host/presentation/post_quick_gig_screen.dart';
@@ -279,27 +278,7 @@ class _HostShellState extends State<HostShell>
 
   Future<void> _performLogout() async {
     if (!mounted) return;
-    // Navigating to WelcomeScreen tears down every route above it (including
-    // AuthGate), so the app looks fully logged out immediately — if that
-    // happened before signOut() actually completed and the app got killed
-    // right then, Firebase's persisted native session survives untouched
-    // and silently restores this same account on next launch. Await the
-    // whole sign-out chain first so nothing ever looks logged out before it
-    // truly is.
-    await context.read<CurrentUserProvider>().clearUser();
-    // Throws when the current session isn't a Google sign-in (e.g. email/
-    // password) — there's nothing to disconnect, so swallow it rather than
-    // letting it abort the sign-out chain below.
-    try {
-      await GoogleSignIn().disconnect();
-    } catch (_) {}
-    await FirebaseAuth.instance.signOut();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const WelcomeScreen()),
-        (route) => false,
-      );
-    }
+    await performSignOut(context);
   }
 
   @override

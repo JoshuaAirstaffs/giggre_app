@@ -8,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:giggre_app/core/services/sign_out_service.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
 import 'package:giggre_app/screens/maintenance_screen.dart';
 import 'package:provider/provider.dart';
@@ -447,11 +448,9 @@ class _PendingDeletionScreen extends StatelessWidget {
               const SizedBox(height: 12),
               TextButton(
                 onPressed: () async {
-                  final uid = FirebaseAuth.instance.currentUser?.uid;
-                  if (uid != null) {
-                    await CurrentUserProvider.unregisterPushForUid(uid);
-                  }
-                  await FirebaseAuth.instance.signOut();
+                  // No navigation: AuthGate renders this screen, so it also
+                  // decides what replaces it once the auth state clears.
+                  await signOutAndCleanup(context.read<CurrentUserProvider>());
                 },
                 child: const Text(
                   'Log Out',
@@ -513,11 +512,9 @@ class _RestoreErrorScreen extends StatelessWidget {
               const SizedBox(height: 12),
               TextButton(
                 onPressed: () async {
-                  final uid = FirebaseAuth.instance.currentUser?.uid;
-                  if (uid != null) {
-                    await CurrentUserProvider.unregisterPushForUid(uid);
-                  }
-                  await FirebaseAuth.instance.signOut();
+                  // No navigation: AuthGate renders this screen, so it also
+                  // decides what replaces it once the auth state clears.
+                  await signOutAndCleanup(context.read<CurrentUserProvider>());
                 },
                 child: const Text(
                   'Log Out',

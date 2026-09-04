@@ -552,13 +552,29 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   // provider (e.g. the pendingDeletion/restoreError screens in main.dart) —
   // clearUser() can't help there since _uid is still null, so those call
   // sites pass FirebaseAuth's uid directly instead.
+  //
+  // Bounded here rather than at the call sites so every sign-out path gets the
+  // timeout: a Firestore write's future doesn't complete until the server acks
+  // it, so on a dropped or captive-portal connection this would hang forever
+  // and the logout button would look dead. Losing the token removal is
+  // recoverable — _saveToken() reclaims a stale token from the previous owner
+  // on the next login.
   static Future<void> unregisterPushForUid(String uid) =>
-      _pushService.unregisterForUser(uid);
+      _pushService
+          .unregisterForUser(uid)
+          .timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => debugPrint(
+              '[CurrentUserProvider] push unregister timed out; '
+              'continuing sign-out',
+            ),
+          );
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _gigVisibilityRulesSubscription?.cancel();
+    _callSubscription?.cancel();
     _audioPlayer.dispose();
     super.dispose();
   }
@@ -579,11 +595,17 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
     _lastLng = null;
     _callSubscription?.cancel();
     _callSubscription = null;
-    // _audioPlayer is a permanent, app-lifetime instance reused across
-    // logins (this provider is created once at app root and never rebuilt)
-    // — stop it, but don't dispose it here, or the next login's ringtone
-    // handling would throw trying to reuse an already-disposed player.
-    await _stopRingtone();
+    // Never dispose _audioPlayer here: this provider is app-scoped (created
+    // above AuthGate in main.dart) and outlives any single session, so a
+    // disposed player would still be the one a later login rings on — and
+    // the next logout's stop() would throw "Player has ... already been
+    // disposed", aborting this method before signOut() ever runs. Stop only;
+    // the real dispose happens in dispose().
+    try {
+      await _stopRingtone();
+    } catch (e) {
+      debugPrint('[CurrentUserProvider] failed to stop ringtone: $e');
+    }
     notifyListeners();
     if (previousUid != null) {
       // A failure here (network blip, expired token mid-request, Firestore
