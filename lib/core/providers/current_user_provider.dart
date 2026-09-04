@@ -407,6 +407,19 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
         sound: testSound,
       ),
     );
+    // The Cloud Function's onIncomingCall trigger targets this channel id —
+    // without creating it here, Android silently drops the push entirely
+    // (undocumented-to-users but confirmed FCM behavior for a notification
+    // referencing a channel that doesn't exist on the device).
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'incoming_call_v1',
+        'Incoming Calls',
+        description: 'Notifications for incoming voice/video calls',
+        importance: Importance.max,
+        sound: gigSound,
+      ),
+    );
 
     // Every ID this app has ever created under a previous name, now
     // superseded — Android never deletes channels on its own, so without

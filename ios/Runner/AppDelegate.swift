@@ -47,4 +47,17 @@ import UserNotifications
     // else is showing this notification, so always present it here.
     completionHandler([.banner, .list, .badge, .sound])
   }
+
+  // Same problem as willPresent above, for taps instead of display: claiming
+  // this delegate means nothing forwards a notification tap (body or an
+  // action button) to flutter_local_notifications/firebase_messaging unless
+  // we do it explicitly. Forward to super so Flutter's plugin-registrant
+  // chain still gets a chance to run its own handlers.
+  override func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    super.userNotificationCenter(center, didReceive: response, withCompletionHandler: completionHandler)
+  }
 }
