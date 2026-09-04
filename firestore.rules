@@ -384,6 +384,15 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // Read by every signed-in user at startup (CurrentUserProvider's
+    // _listenToGigVisibilityRules) to check allowGigAccessForUnverified —
+    // needs the same non-admin read access as maintenance above, or that
+    // listener hits permission-denied for every regular user.
+    match /general_config/gig_visibility_rules {
+      allow read: if isAuth();
+      allow write: if isSuperAdmin();
+    }
+
     match /general_config/{docId} {
       allow read: if isAdmin();
       allow write: if isSuperAdmin();
