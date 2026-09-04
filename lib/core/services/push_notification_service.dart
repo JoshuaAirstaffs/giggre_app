@@ -25,6 +25,40 @@ class PushNotificationService {
     final messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
 
+    // TEMP DEBUG — remove once the push notification investigation is done.
+    // Writes to Firestore (not just debugPrint) so this is checkable via the
+    // Firebase Console on a TestFlight install, where there's no attached
+    // console to read logs from.
+    {
+      String? apnsToken;
+      String? fcmToken;
+      String? debugError;
+      try {
+        apnsToken = await messaging.getAPNSToken();
+        debugPrint('🍎 APNs TOKEN: $apnsToken');
+      } catch (e) {
+        debugError = 'apns: $e';
+        debugPrint('🍎 APNs token check failed: $e');
+      }
+      try {
+        fcmToken = await messaging.getToken();
+        debugPrint('🔥 FCM TOKEN: $fcmToken');
+      } catch (e) {
+        debugError = '${debugError ?? ''} fcm: $e';
+        debugPrint('🔥 FCM token check failed: $e');
+      }
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(uid).update({
+          'debugApnsToken': apnsToken,
+          'debugFcmToken': fcmToken,
+          'debugTokenError': debugError,
+          'debugTokenCheckedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        debugPrint('Failed to write debug tokens to Firestore: $e');
+      }
+    }
+
     final token = await _getTokenWithRetry(messaging);
     if (token != null) {
       debugPrint('[PushNotificationService] got FCM token on initial request');
