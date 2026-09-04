@@ -12,6 +12,7 @@ class IncomingVideoCallScreen extends StatefulWidget {
   final String callerRole;
   final String channelName;
   final String token;
+  final int timeoutSeconds;
 
   const IncomingVideoCallScreen({
     super.key,
@@ -20,6 +21,7 @@ class IncomingVideoCallScreen extends StatefulWidget {
     this.callerRole = 'Gig worker',
     required this.channelName,
     required this.token,
+    this.timeoutSeconds = 30,
   });
 
   @override
@@ -33,6 +35,9 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
   late final Animation<double> _pulseAnimation;
   final AudioPlayer _audioPlayer = AudioPlayer();
   StreamSubscription<DocumentSnapshot>? _callSub;
+  Timer? _timeoutTimer;
+  int _secondsLeft = 30;
+  bool _isHandled = false;
 
   static const _bg = Color(0xFF121212);
   static const _purple = Color(0xFF7C4DFF);
@@ -40,6 +45,7 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
   @override
   void initState() {
     super.initState();
+    _secondsLeft = widget.timeoutSeconds;
 
     _pulseController = AnimationController(
       vsync: this,
@@ -50,8 +56,23 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
+    _startTimeout();
     _startRingtone();
     _listenForCancellation();
+  }
+
+  void _startTimeout() {
+    _timeoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _secondsLeft--);
+      if (_secondsLeft <= 0) {
+        timer.cancel();
+        _declineCall();
+      }
+    });
   }
 
   // Dismiss automatically if the caller hangs up before answer
@@ -65,7 +86,9 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
         .snapshots()
         .listen((snap) {
       final incomingCall = snap.data()?['incomingCall'];
-      if (incomingCall == null && mounted) {
+      if (incomingCall == null && mounted && !_isHandled) {
+        _isHandled = true;
+        _timeoutTimer?.cancel();
         _callSub?.cancel();
         _audioPlayer.stop();
         Navigator.pop(context);
@@ -84,6 +107,7 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
 
   @override
   void dispose() {
+    _timeoutTimer?.cancel();
     _callSub?.cancel();
     _pulseController.dispose();
     _audioPlayer.stop();
@@ -98,6 +122,9 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
   }
 
   Future<void> _acceptCall() async {
+    if (_isHandled) return;
+    _isHandled = true;
+    _timeoutTimer?.cancel();
     _callSub?.cancel();
     await _stopRingtone();
 
@@ -128,11 +155,17 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
   }
 
   Future<void> _declineCall() async {
+    if (_isHandled) return;
+    _isHandled = true;
+    _timeoutTimer?.cancel();
     _callSub?.cancel();
     await _stopRingtone();
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+    if (uid == null) {
+      if (mounted) Navigator.pop(context);
+      return;
+    }
 
     final firestore = FirebaseFirestore.instance;
     final batch = firestore.batch();
@@ -170,7 +203,24 @@ class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
               ),
             ),
 
-            const SizedBox(height: 48),
+            const SizedBox(height: 8),
+
+            if (_secondsLeft <= 5)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.timer_off_outlined,
+                      size: 13, color: Colors.redAccent),
+                  const SizedBox(width: 4),
+                  Text(
+                    'No response — declining in $_secondsLeft s',
+                    style: const TextStyle(
+                        fontSize: 12, color: Colors.redAccent),
+                  ),
+                ],
+              ),
+
+            const SizedBox(height: 40),
 
             AnimatedBuilder(
               animation: _pulseAnimation,

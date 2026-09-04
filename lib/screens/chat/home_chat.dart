@@ -324,11 +324,6 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               final rawDate = data['lastMessageAt'] ?? data['createdAt'];
               final date =
                   rawDate != null ? (rawDate as Timestamp).toDate() : null;
-              final sender = data['lastMessageSender'] as String? ?? '';
-              final lastMessage =
-                  _stripHtml(data['lastMessage'] as String? ?? '');
-              final displayMessage =
-                  sender.isNotEmpty ? '$sender: $lastMessage' : lastMessage;
 
               final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
               final participants =
@@ -346,6 +341,18 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               final peerDisplayName = (createdByUid.isNotEmpty && uid != createdByUid)
                   ? (createdByName.isNotEmpty ? createdByName : sendTo)
                   : sendTo;
+
+              // Gig chats are stored as plain text (never HTML), and the room
+              // doc is shared by both participants — 'You' is only correct
+              // from the sender's own point of view, so the label is derived
+              // here from who actually sent it rather than trusted verbatim.
+              final senderId = data['lastMessageSenderId'] as String? ?? '';
+              final sender = senderId.isEmpty
+                  ? ''
+                  : (senderId == uid ? 'You' : peerDisplayName);
+              final lastMessage = data['lastMessage'] as String? ?? '';
+              final displayMessage =
+                  sender.isNotEmpty ? '$sender: $lastMessage' : lastMessage;
 
               return _ChatHomeItem(
                 roomId: docs[i].id,

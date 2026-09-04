@@ -404,6 +404,7 @@ class _ChatState extends State<Chat> {
               'status': 'open',
               'lastMessage': '',
               'lastMessageSender': '',
+              'lastMessageSenderId': '',
               'lastMessageAt': FieldValue.serverTimestamp(),
               'createdAt': FieldValue.serverTimestamp(),
             });
@@ -429,6 +430,11 @@ class _ChatState extends State<Chat> {
           .update({
             'lastMessage': text,
             'lastMessageSender': 'You',
+            // Gig chats are shared between two real participants — 'You' above
+            // is only correct from the sender's own point of view. Gig Chats
+            // tab derives the display label from this uid instead (correctly
+            // showing the peer's name when they're not the one who sent it).
+            'lastMessageSenderId': uid,
             'lastMessageAt': FieldValue.serverTimestamp(),
           });
 

@@ -24,7 +24,11 @@ class VoiceCallScreen extends StatefulWidget {
 
 class _VoiceCallScreenState extends State<VoiceCallScreen>
     with SingleTickerProviderStateMixin {
-  late final RtcEngine _engine;
+  // Nullable — _endCall() can run (e.g. the user taps End) before _initAgora's
+  // await Permission.microphone.request() resolves and assigns this, so a
+  // non-nullable `late` field would throw LateInitializationError there and
+  // leave the call screen permanently stuck (see _isEnding in _endCall).
+  RtcEngine? _engine;
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
 
@@ -120,11 +124,15 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
   Future<void> _initAgora() async {
     await Permission.microphone.request();
+    // The call may already have been ended (e.g. the user tapped End) while
+    // this permission prompt was up — don't spin up an engine and join a
+    // channel for a screen that's already gone.
+    if (!mounted || _isEnding) return;
 
     _engine = createAgoraRtcEngine();
-    await _engine.initialize(const RtcEngineContext(appId: _appId));
+    await _engine!.initialize(const RtcEngineContext(appId: _appId));
 
-    _engine.registerEventHandler(RtcEngineEventHandler(
+    _engine!.registerEventHandler(RtcEngineEventHandler(
       onJoinChannelSuccess: (connection, elapsed) {
         if (mounted) {
           setState(() => _isConnecting = false);
@@ -149,9 +157,9 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
       onError: (err, msg) => debugPrint('Agora error: $err - $msg'),
     ));
 
-    await _engine.enableAudio();
-    await _engine.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
-    await _engine.joinChannel(
+    await _engine!.enableAudio();
+    await _engine!.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
+    await _engine!.joinChannel(
       token: widget.token,
       channelId: widget.channelName,
       uid: 0,
@@ -179,12 +187,12 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
 
   Future<void> _toggleMute() async {
     setState(() => _isMuted = !_isMuted);
-    await _engine.muteLocalAudioStream(_isMuted);
+    await _engine?.muteLocalAudioStream(_isMuted);
   }
 
   Future<void> _toggleSpeaker() async {
     setState(() => _isSpeakerOn = !_isSpeakerOn);
-    await _engine.setEnableSpeakerphone(_isSpeakerOn);
+    await _engine?.setEnableSpeakerphone(_isSpeakerOn);
   }
 
   Future<void> _endCall() async {
@@ -199,13 +207,30 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     // here too would make dispose()'s call throw on the already-torn-down
     // player.
     await _stopRingback();
-    await _engine.leaveChannel();
-    await _engine.release();
+
+    // Each step is isolated with its own try/catch and timeout: a hung or
+    // throwing Agora/Firestore call must never stop the screen from closing
+    // (previously an uncaught error here — or a slow network on the
+    // Firestore cleanup below — left _isEnding permanently true, so the End
+    // button silently did nothing and the call looked stuck forever).
+    try {
+      await _engine?.leaveChannel().timeout(const Duration(seconds: 3));
+    } catch (_) {}
+    try {
+      await _engine?.release().timeout(const Duration(seconds: 3));
+    } catch (_) {}
+
+    if (mounted) Navigator.pop(context);
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
+    if (uid == null) return;
+    try {
       final firestore = FirebaseFirestore.instance;
-      final mySnap = await firestore.collection('users').doc(uid).get();
+      final mySnap = await firestore
+          .collection('users')
+          .doc(uid)
+          .get()
+          .timeout(const Duration(seconds: 5));
       final myData = mySnap.data();
       // Works for both caller (outgoingCall.targetId) and callee (incomingCall.callerId)
       final targetId = myData?['outgoingCall']?['targetId'] as String?
@@ -222,10 +247,10 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
           {'outgoingCall': FieldValue.delete(), 'incomingCall': FieldValue.delete()},
         );
       }
-      await batch.commit();
+      await batch.commit().timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // Best-effort signaling cleanup — the screen has already closed.
     }
-
-    if (mounted) Navigator.pop(context);
   }
 
   @override
@@ -235,8 +260,8 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
     _outgoingCallSub?.cancel();
     _pulseController.dispose();
     _ringbackPlayer.dispose();
-    _engine.leaveChannel();
-    _engine.release();
+    _engine?.leaveChannel();
+    _engine?.release();
     super.dispose();
   }
 

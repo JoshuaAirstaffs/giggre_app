@@ -9,11 +9,13 @@ import 'package:permission_handler/permission_handler.dart';
 class VideoCallScreen extends StatefulWidget {
   final String channelName;
   final String token;
+  final int timeoutSeconds;
 
   const VideoCallScreen({
     super.key,
     required this.channelName,
     required this.token,
+    this.timeoutSeconds = 30,
   });
 
   @override
@@ -37,6 +39,11 @@ class _VideoCallScreenState extends State<VideoCallScreen>
   int? _remoteUid;
   int _callSeconds = 0;
   Timer? _callTimer;
+
+  // Timeout — auto-end if no one answers
+  Timer? _timeoutTimer;
+  int _timeoutSecondsLeft = 30;
+
   StreamSubscription<DocumentSnapshot>? _outgoingCallSub;
 
   late final AnimationController _pulseController;
@@ -49,6 +56,8 @@ class _VideoCallScreenState extends State<VideoCallScreen>
   @override
   void initState() {
     super.initState();
+    _timeoutSecondsLeft = widget.timeoutSeconds;
+
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -60,6 +69,20 @@ class _VideoCallScreenState extends State<VideoCallScreen>
 
     _initAgora();
     _listenForDecline();
+  }
+
+  void _startNoAnswerTimeout() {
+    _timeoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _timeoutSecondsLeft--);
+      if (_timeoutSecondsLeft <= 0) {
+        timer.cancel();
+        _endCall();
+      }
+    });
   }
 
   // ── Listen for callee declining ────────────────────────────────────────────
@@ -100,6 +123,10 @@ class _VideoCallScreenState extends State<VideoCallScreen>
 
   Future<void> _initAgora() async {
     await [Permission.microphone, Permission.camera].request();
+    // The call may already have been ended (e.g. the user tapped End) while
+    // this permission prompt was up — don't spin up an engine and join a
+    // channel for a screen that's already gone.
+    if (!mounted || _isEnding) return;
 
     _engine = createAgoraRtcEngine();
     await _engine!.initialize(const RtcEngineContext(appId: _appId));
@@ -109,10 +136,14 @@ class _VideoCallScreenState extends State<VideoCallScreen>
         if (mounted) {
           setState(() => _isConnecting = false);
           _startRingback();
+          _startNoAnswerTimeout(); // start countdown once we're in the channel
         }
       },
       onUserJoined: (connection, remoteUid, elapsed) {
         if (mounted) {
+          // Someone answered — cancel timeout
+          _timeoutTimer?.cancel();
+          _timeoutTimer = null;
           _stopRingback();
           setState(() {
             _remoteUid = remoteUid;
@@ -197,19 +228,37 @@ class _VideoCallScreenState extends State<VideoCallScreen>
     _isEnding = true;
 
     _callTimer?.cancel();
+    _timeoutTimer?.cancel();
     _outgoingCallSub?.cancel();
     // Stop only — disposal happens once, in dispose() below, which always
     // runs right after this via the Navigator.pop() further down. Disposing
     // here too would make dispose()'s call throw on the already-torn-down
     // player.
     await _stopRingback();
-    await _engine?.leaveChannel();
-    await _engine?.release();
+
+    // Each step is isolated with its own try/catch and timeout: a hung or
+    // throwing Agora/Firestore call must never stop the screen from closing
+    // (previously an uncaught error here — or a slow network on the
+    // Firestore cleanup below — left _isEnding permanently true, so the End
+    // button silently did nothing and the call looked stuck forever).
+    try {
+      await _engine?.leaveChannel().timeout(const Duration(seconds: 3));
+    } catch (_) {}
+    try {
+      await _engine?.release().timeout(const Duration(seconds: 3));
+    } catch (_) {}
+
+    if (mounted) Navigator.pop(context);
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
+    if (uid == null) return;
+    try {
       final firestore = FirebaseFirestore.instance;
-      final mySnap = await firestore.collection('users').doc(uid).get();
+      final mySnap = await firestore
+          .collection('users')
+          .doc(uid)
+          .get()
+          .timeout(const Duration(seconds: 5));
       final myData = mySnap.data();
       // Works for both caller (outgoingCall.targetId) and callee (incomingCall.callerId)
       final targetId = myData?['outgoingCall']?['targetId'] as String?
@@ -226,15 +275,16 @@ class _VideoCallScreenState extends State<VideoCallScreen>
           {'outgoingCall': FieldValue.delete(), 'incomingCall': FieldValue.delete()},
         );
       }
-      await batch.commit();
+      await batch.commit().timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // Best-effort signaling cleanup — the screen has already closed.
     }
-
-    if (mounted) Navigator.pop(context);
   }
 
   @override
   void dispose() {
     _callTimer?.cancel();
+    _timeoutTimer?.cancel();
     _outgoingCallSub?.cancel();
     _pulseController.dispose();
     _ringbackPlayer.dispose();
@@ -253,6 +303,12 @@ class _VideoCallScreenState extends State<VideoCallScreen>
     if (_isConnecting) return Colors.white38;
     if (_remoteUserJoined) return const Color(0xFF66BB6A);
     return const Color(0xFFFFA726);
+  }
+
+  Color get _timeoutColor {
+    if (_timeoutSecondsLeft > 15) return Colors.white54;
+    if (_timeoutSecondsLeft > 8) return Colors.orange;
+    return Colors.redAccent;
   }
 
   Widget _buildRemotePlaceholder({bool cameraOff = false}) {
@@ -514,6 +570,27 @@ class _VideoCallScreenState extends State<VideoCallScreen>
                     ],
                   ),
                 ),
+
+                // ── No-answer timeout indicator ────────────────
+                if (!_remoteUserJoined &&
+                    !_isConnecting &&
+                    _timeoutTimer != null &&
+                    _timeoutSecondsLeft <= 5)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.timer_off_outlined,
+                            size: 13, color: _timeoutColor),
+                        const SizedBox(width: 4),
+                        Text(
+                          'No response — hanging up in $_timeoutSecondsLeft s',
+                          style: TextStyle(fontSize: 12, color: _timeoutColor),
+                        ),
+                      ],
+                    ),
+                  ),
 
                 const Spacer(),
 
