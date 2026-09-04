@@ -73,9 +73,9 @@ class _HomeChatState extends State<HomeChat>
         .where('isSupport', isEqualTo: true)
         .get()
         .then((roomsSnap) {
-      if (roomsSnap.docs.isEmpty) return;
+          if (roomsSnap.docs.isEmpty) return;
 
-      final Map<int, bool> roomUnread = {};
+          final Map<int, bool> roomUnread = {};
 
           for (int i = 0; i < roomsSnap.docs.length; i++) {
             final room = roomsSnap.docs[i];
@@ -126,10 +126,9 @@ class _HomeChatState extends State<HomeChat>
               final room = roomsSnap.docs[i];
               final participants =
                   (room.data()['participants'] as List<dynamic>?) ?? [];
-              final otherUid = participants.firstWhere(
-                (p) => p != uid,
-                orElse: () => '',
-              ) as String;
+              final otherUid =
+                  participants.firstWhere((p) => p != uid, orElse: () => '')
+                      as String;
 
               if (otherUid.isEmpty) continue;
 
@@ -254,6 +253,7 @@ class _GigChatsTab extends StatefulWidget {
 
 class _GigChatsTabState extends State<_GigChatsTab> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _userStream;
 
   @override
   void initState() {
@@ -262,111 +262,140 @@ class _GigChatsTabState extends State<_GigChatsTab> {
     _stream = uid == null
         ? const Stream.empty()
         : FirebaseFirestore.instance
-            .collection('chat_rooms')
-            .where('participants', arrayContains: uid)
-            .snapshots();
+              .collection('chat_rooms')
+              .where('participants', arrayContains: uid)
+              .snapshots();
+    _userStream = uid == null
+        ? const Stream.empty()
+        : FirebaseFirestore.instance.collection('users').doc(uid).snapshots();
   }
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _stream,
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _userStream,
+      builder: (context, userSnap) {
+        final blockedUsers =
+            (userSnap.data?.data()?['blockedUsers'] as List<dynamic>?) ?? [];
 
-        if (snap.hasError) {
-          debugPrint('GigChatsTab error: ${snap.error}');
-          return Center(
-            child: Text(
-              'Error loading chats:\n${snap.error}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.red, fontSize: 13),
-            ),
-          );
-        }
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _stream,
+          builder: (context, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-        final docs = List.of(snap.data?.docs ?? []);
-        docs.sort((a, b) {
-          final aTime = a.data()['lastMessageAt'] as Timestamp?;
-          final bTime = b.data()['lastMessageAt'] as Timestamp?;
-          if (aTime == null && bTime == null) return 0;
-          if (aTime == null) return 1;
-          if (bTime == null) return -1;
-          return bTime.compareTo(aTime);
-        });
-
-        if (docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.chat_bubble_outline_rounded,
-                    size: 48, color: Colors.grey),
-                const SizedBox(height: 12),
-                Text(
-                  'No gig chats yet',
-                  style: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+            if (snap.hasError) {
+              debugPrint('GigChatsTab error: ${snap.error}');
+              return Center(
+                child: Text(
+                  'Error loading chats:\n${snap.error}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.red, fontSize: 13),
                 ),
-              ],
-            ),
-          );
-        }
-
-        return RefreshIndicator(
-          onRefresh: () async => setState(() {}),
-          child: ListView.builder(
-            padding: const EdgeInsets.all(8),
-            itemCount: docs.length,
-            itemBuilder: (context, i) {
-              final data = docs[i].data();
-              final rawDate = data['lastMessageAt'] ?? data['createdAt'];
-              final date =
-                  rawDate != null ? (rawDate as Timestamp).toDate() : null;
-
-              final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-              final participants =
-                  (data['participants'] as List<dynamic>?) ?? [];
-              final peerUid = participants
-                  .firstWhere((p) => p != uid, orElse: () => '')
-                  as String;
-
-              // Resolve the correct display name for the peer.
-              // If the current user created the room, the peer is sendTo.
-              // If the current user is the receiver, the peer is createdByName.
-              final createdByUid = data['createdByUid'] as String? ?? '';
-              final createdByName = data['createdByName'] as String? ?? '';
-              final sendTo = data['sendTo'] as String? ?? 'Gig Chat';
-              final peerDisplayName = (createdByUid.isNotEmpty && uid != createdByUid)
-                  ? (createdByName.isNotEmpty ? createdByName : sendTo)
-                  : sendTo;
-
-              // Gig chats are stored as plain text (never HTML), and the room
-              // doc is shared by both participants — 'You' is only correct
-              // from the sender's own point of view, so the label is derived
-              // here from who actually sent it rather than trusted verbatim.
-              final senderId = data['lastMessageSenderId'] as String? ?? '';
-              final sender = senderId.isEmpty
-                  ? ''
-                  : (senderId == uid ? 'You' : peerDisplayName);
-              final lastMessage = data['lastMessage'] as String? ?? '';
-              final displayMessage =
-                  sender.isNotEmpty ? '$sender: $lastMessage' : lastMessage;
-
-              return _ChatHomeItem(
-                roomId: docs[i].id,
-                sendTo: peerDisplayName,
-                subject: data['subject'] as String? ?? 'Gig Chat',
-                message: displayMessage,
-                status: data['status'] as String? ?? 'open',
-                date: date,
-                isGigChat: true,
-                gigId: data['gigId'] as String? ?? '',
-                peerUid: peerUid,
               );
-            },
-          ),
+            }
+
+            final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+            final docs = List.of(snap.data?.docs ?? []).where((d) {
+              final participants =
+                  (d.data()['participants'] as List<dynamic>?) ?? [];
+              final peerUid = participants.firstWhere(
+                (p) => p != currentUid,
+                orElse: () => '',
+              );
+              return !blockedUsers.contains(peerUid);
+            }).toList();
+            docs.sort((a, b) {
+              final aTime = a.data()['lastMessageAt'] as Timestamp?;
+              final bTime = b.data()['lastMessageAt'] as Timestamp?;
+              if (aTime == null && bTime == null) return 0;
+              if (aTime == null) return 1;
+              if (bTime == null) return -1;
+              return bTime.compareTo(aTime);
+            });
+
+            if (docs.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.chat_bubble_outline_rounded,
+                      size: 48,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'No gig chats yet',
+                      style: TextStyle(
+                        color: Colors.grey.shade400,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return RefreshIndicator(
+              onRefresh: () async => setState(() {}),
+              child: ListView.builder(
+                padding: const EdgeInsets.all(8),
+                itemCount: docs.length,
+                itemBuilder: (context, i) {
+                  final data = docs[i].data();
+                  final rawDate = data['lastMessageAt'] ?? data['createdAt'];
+                  final date = rawDate != null
+                      ? (rawDate as Timestamp).toDate()
+                      : null;
+
+                  final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+                  final participants =
+                      (data['participants'] as List<dynamic>?) ?? [];
+                  final peerUid =
+                      participants.firstWhere((p) => p != uid, orElse: () => '')
+                          as String;
+
+                  // Resolve the correct display name for the peer.
+                  // If the current user created the room, the peer is sendTo.
+                  // If the current user is the receiver, the peer is createdByName.
+                  final createdByUid = data['createdByUid'] as String? ?? '';
+                  final createdByName = data['createdByName'] as String? ?? '';
+                  final sendTo = data['sendTo'] as String? ?? 'Gig Chat';
+                  final peerDisplayName =
+                      (createdByUid.isNotEmpty && uid != createdByUid)
+                      ? (createdByName.isNotEmpty ? createdByName : sendTo)
+                      : sendTo;
+
+                  // Gig chats are stored as plain text (never HTML), and the room
+                  // doc is shared by both participants — 'You' is only correct
+                  // from the sender's own point of view, so the label is derived
+                  // here from who actually sent it rather than trusted verbatim.
+                  final senderId = data['lastMessageSenderId'] as String? ?? '';
+                  final sender = senderId.isEmpty
+                      ? ''
+                      : (senderId == uid ? 'You' : peerDisplayName);
+                  final lastMessage = data['lastMessage'] as String? ?? '';
+                  final displayMessage = sender.isNotEmpty
+                      ? '$sender: $lastMessage'
+                      : lastMessage;
+
+                  return _ChatHomeItem(
+                    roomId: docs[i].id,
+                    sendTo: peerDisplayName,
+                    subject: data['subject'] as String? ?? 'Gig Chat',
+                    message: displayMessage,
+                    status: data['status'] as String? ?? 'open',
+                    date: date,
+                    isGigChat: true,
+                    gigId: data['gigId'] as String? ?? '',
+                    peerUid: peerUid,
+                  );
+                },
+              ),
+            );
+          },
         );
       },
     );
@@ -419,28 +448,28 @@ class _TestCallCardState extends State<_TestCallCard> {
 
       if (targetSnap.docs.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('User not found')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('User not found')));
         }
         return;
       }
 
       final targetDocId = targetSnap.docs.first.id;
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(targetDocId)
-          .set({
-        'incomingCall': {
-          'callerId': me.uid,
-          'callerName': myName,
-          'channelName': _channelName,
-          'token': _token,
-          'status': 'ringing',
-          'createdAt': FieldValue.serverTimestamp(),
+      await FirebaseFirestore.instance.collection('users').doc(targetDocId).set(
+        {
+          'incomingCall': {
+            'callerId': me.uid,
+            'callerName': myName,
+            'channelName': _channelName,
+            'token': _token,
+            'status': 'ringing',
+            'createdAt': FieldValue.serverTimestamp(),
+          },
         },
-      }, SetOptions(merge: true));
+        SetOptions(merge: true),
+      );
 
       if (!mounted) return;
 
@@ -449,31 +478,29 @@ class _TestCallCardState extends State<_TestCallCard> {
           .doc(targetDocId)
           .snapshots()
           .listen((snap) {
-        final incomingCall = snap.data()?['incomingCall'];
-        if (incomingCall == null) {
-          callStatusSub?.cancel();
-          final ctx = navigatorKey?.currentContext;
-          if (ctx != null && Navigator.canPop(ctx)) {
-            Navigator.pop(ctx);
-          }
-        }
-      });
+            final incomingCall = snap.data()?['incomingCall'];
+            if (incomingCall == null) {
+              callStatusSub?.cancel();
+              final ctx = navigatorKey?.currentContext;
+              if (ctx != null && Navigator.canPop(ctx)) {
+                Navigator.pop(ctx);
+              }
+            }
+          });
 
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => VoiceCallScreen(
-            channelName: _channelName,
-            token: _token,
-          ),
+          builder: (_) =>
+              VoiceCallScreen(channelName: _channelName, token: _token),
         ),
       );
     } catch (e) {
       debugPrint('Call error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to start call: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to start call: $e')));
       }
     } finally {
       callStatusSub?.cancel();
@@ -552,10 +579,7 @@ class _TestCallCardState extends State<_TestCallCard> {
                     ),
                     Text(
                       _targetUserId,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey[500],
-                      ),
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                     ),
                   ],
                 ),
@@ -651,29 +675,29 @@ class _TestVideoCallCardState extends State<_TestVideoCallCard> {
 
       if (targetSnap.docs.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('User not found')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('User not found')));
         }
         return;
       }
 
       final targetDocId = targetSnap.docs.first.id;
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(targetDocId)
-          .set({
-        'incomingCall': {
-          'callerId': me.uid,
-          'callerName': myName,
-          'channelName': _channelName,
-          'token': _token,
-          'status': 'ringing',
-          'isVideo': true,
-          'createdAt': FieldValue.serverTimestamp(),
+      await FirebaseFirestore.instance.collection('users').doc(targetDocId).set(
+        {
+          'incomingCall': {
+            'callerId': me.uid,
+            'callerName': myName,
+            'channelName': _channelName,
+            'token': _token,
+            'status': 'ringing',
+            'isVideo': true,
+            'createdAt': FieldValue.serverTimestamp(),
+          },
         },
-      }, SetOptions(merge: true));
+        SetOptions(merge: true),
+      );
 
       if (!mounted) return;
 
@@ -682,31 +706,29 @@ class _TestVideoCallCardState extends State<_TestVideoCallCard> {
           .doc(targetDocId)
           .snapshots()
           .listen((snap) {
-        final incomingCall = snap.data()?['incomingCall'];
-        if (incomingCall == null) {
-          callStatusSub?.cancel();
-          final ctx = navigatorKey?.currentContext;
-          if (ctx != null && Navigator.canPop(ctx)) {
-            Navigator.pop(ctx);
-          }
-        }
-      });
+            final incomingCall = snap.data()?['incomingCall'];
+            if (incomingCall == null) {
+              callStatusSub?.cancel();
+              final ctx = navigatorKey?.currentContext;
+              if (ctx != null && Navigator.canPop(ctx)) {
+                Navigator.pop(ctx);
+              }
+            }
+          });
 
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => VideoCallScreen(
-            channelName: _channelName,
-            token: _token,
-          ),
+          builder: (_) =>
+              VideoCallScreen(channelName: _channelName, token: _token),
         ),
       );
     } catch (e) {
       debugPrint('Video call error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to start call: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to start call: $e')));
       }
     } finally {
       callStatusSub?.cancel();
@@ -754,8 +776,11 @@ class _TestVideoCallCardState extends State<_TestVideoCallCard> {
                   color: Colors.purple.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.videocam_rounded,
-                    color: Colors.purple, size: 20),
+                child: const Icon(
+                  Icons.videocam_rounded,
+                  color: Colors.purple,
+                  size: 20,
+                ),
               ),
               const SizedBox(width: 10),
               const Text(
@@ -785,12 +810,13 @@ class _TestVideoCallCardState extends State<_TestVideoCallCard> {
                     Text(
                       _targetUserName,
                       style: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.bold),
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     Text(
                       _targetUserId,
-                      style:
-                          TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                     ),
                   ],
                 ),
@@ -885,8 +911,7 @@ class _SupportTabState extends State<_SupportTab> {
     try {
       var query = FirebaseFirestore.instance
           .collection('chat_rooms')
-          .where('userId',
-              isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+          .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
           .orderBy('lastMessageAt', descending: true)
           .limit(_limit);
 
@@ -896,8 +921,7 @@ class _SupportTabState extends State<_SupportTab> {
 
       if (snapshot.docs.isNotEmpty) {
         _lastDoc = snapshot.docs.last;
-        _rooms.addAll(
-            snapshot.docs.map((d) => {...d.data(), 'roomId': d.id}));
+        _rooms.addAll(snapshot.docs.map((d) => {...d.data(), 'roomId': d.id}));
       }
 
       if (snapshot.docs.length < _limit) _hasMore = false;
@@ -942,13 +966,12 @@ class _SupportTabState extends State<_SupportTab> {
 
           final room = _rooms[i];
           final rawDate = room['lastMessageAt'] ?? room['createdAt'];
-          final date =
-              rawDate != null ? (rawDate as Timestamp).toDate() : null;
+          final date = rawDate != null ? (rawDate as Timestamp).toDate() : null;
           final sender = room['lastMessageSender'] as String? ?? '';
-          final lastMessage =
-              _stripHtml(room['lastMessage'] as String? ?? '');
-          final displayMessage =
-              sender.isNotEmpty ? '$sender: $lastMessage' : lastMessage;
+          final lastMessage = _stripHtml(room['lastMessage'] as String? ?? '');
+          final displayMessage = sender.isNotEmpty
+              ? '$sender: $lastMessage'
+              : lastMessage;
 
           return _ChatHomeItem(
             roomId: room['roomId'] ?? '',
@@ -1020,24 +1043,26 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
 
   late final Stream<bool> _unreadStream = widget.isGigChat
       ? FirebaseFirestore.instance
-          .collection('chat_rooms')
-          .doc(widget.roomId)
-          .collection('messages')
-          .where('hasSeen', isEqualTo: false)
-          .where('senderId',
-              isNotEqualTo: FirebaseAuth.instance.currentUser?.uid ?? '')
-          .limit(1)
-          .snapshots()
-          .map((snap) => snap.docs.isNotEmpty)
+            .collection('chat_rooms')
+            .doc(widget.roomId)
+            .collection('messages')
+            .where('hasSeen', isEqualTo: false)
+            .where(
+              'senderId',
+              isNotEqualTo: FirebaseAuth.instance.currentUser?.uid ?? '',
+            )
+            .limit(1)
+            .snapshots()
+            .map((snap) => snap.docs.isNotEmpty)
       : FirebaseFirestore.instance
-          .collection('chat_rooms')
-          .doc(widget.roomId)
-          .collection('messages')
-          .where('isSupport', isEqualTo: true)
-          .where('hasSeen', isEqualTo: false)
-          .limit(1)
-          .snapshots()
-          .map((snap) => snap.docs.isNotEmpty);
+            .collection('chat_rooms')
+            .doc(widget.roomId)
+            .collection('messages')
+            .where('isSupport', isEqualTo: true)
+            .where('hasSeen', isEqualTo: false)
+            .limit(1)
+            .snapshots()
+            .map((snap) => snap.docs.isNotEmpty);
 
   Future<void> _markMessagesAsSeen() async {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -1108,17 +1133,27 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
 
   String _shortDate(DateTime dt) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[dt.month - 1]} ${dt.day}';
   }
 
   Color get _statusColor => switch (widget.status) {
-        'resolved' => Colors.green,
-        'in_progress' => Colors.orange,
-        _ => const Color(0xFFFBBF24),
-      };
+    'resolved' => Colors.green,
+    'in_progress' => Colors.orange,
+    _ => const Color(0xFFFBBF24),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -1145,16 +1180,20 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
                   widget.isGigChat
                       ? CircleAvatar(
                           radius: 20,
-                          backgroundColor:
-                              const Color(0xFF3B82F6).withValues(alpha: 0.15),
-                          backgroundImage: (_peerPhotoUrl != null &&
+                          backgroundColor: const Color(
+                            0xFF3B82F6,
+                          ).withValues(alpha: 0.15),
+                          backgroundImage:
+                              (_peerPhotoUrl != null &&
                                   _peerPhotoUrl!.isNotEmpty)
                               ? CachedNetworkImageProvider(_peerPhotoUrl!)
                               : null,
-                          child: (_peerPhotoUrl == null ||
-                                  _peerPhotoUrl!.isEmpty)
-                              ? const Icon(Icons.person_rounded,
-                                  color: Color(0xFF3B82F6))
+                          child:
+                              (_peerPhotoUrl == null || _peerPhotoUrl!.isEmpty)
+                              ? const Icon(
+                                  Icons.person_rounded,
+                                  color: Color(0xFF3B82F6),
+                                )
                               : null,
                         )
                       : Container(

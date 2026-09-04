@@ -109,6 +109,8 @@ class _ChatState extends State<Chat> {
   bool _isGigChat = false;
   String? _peerName;
   String? _peerPhotoUrl;
+  bool _isBlocked = false;
+  StreamSubscription<DocumentSnapshot>? _blockedSub;
   // True once the room doc exists in Firestore — false for lazy gig chats
   // until the first message is sent.
   bool _roomCreated = true;
@@ -136,6 +138,27 @@ class _ChatState extends State<Chat> {
       _listenAndMarkSeen();
     }
     _listenRoomStatus();
+    if (_isGigChat && params != null) _listenBlockedStatus(params.peerUid);
+  }
+
+  // Watches whether *I* have blocked the peer, to disable the composer and
+  // hide the call actions. The reverse (peer blocked me) isn't tracked here —
+  // that's enforced server-side and surfaces as a permission-denied error
+  // from _sendMessage instead.
+  void _listenBlockedStatus(String peerUid) {
+    final uid = _uid;
+    if (uid == null || peerUid.isEmpty) return;
+    _blockedSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) {
+          if (!mounted) return;
+          final blocked =
+              (snap.data()?['blockedUsers'] as List<dynamic>?) ?? [];
+          final isBlocked = blocked.contains(peerUid);
+          if (isBlocked != _isBlocked) setState(() => _isBlocked = isBlocked);
+        });
   }
 
   Future<void> _fetchPeerPhoto(String uid) async {
@@ -161,6 +184,7 @@ class _ChatState extends State<Chat> {
     _seenSub?.cancel();
     _gigSeenSub?.cancel();
     _roomSub?.cancel();
+    _blockedSub?.cancel();
     _msgController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -368,7 +392,7 @@ class _ChatState extends State<Chat> {
 
   // ── Send: optimistic UI ────────────────────────────────────────────────────
   Future<void> _sendMessage() async {
-    if (_isResolved) return;
+    if (_isResolved || _isBlocked) return;
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
 
@@ -454,6 +478,15 @@ class _ChatState extends State<Chat> {
       // Remove the optimistic message on failure
       if (mounted) {
         setState(() => _msgs.removeWhere((m) => m.pending && m.text == text));
+        // The peer having blocked *me* isn't tracked client-side — it only
+        // surfaces here, as the security rule rejecting the write.
+        if (e is FirebaseException && e.code == 'permission-denied') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('You can no longer message this user.'),
+            ),
+          );
+        }
       }
     }
   }
@@ -563,6 +596,394 @@ class _ChatState extends State<Chat> {
     }
   }
 
+  // ── Block / report ──────────────────────────────────────────────────────────
+  Future<bool?> _showBlockConfirmSheet({
+    required bool block,
+    required String peerName,
+  }) {
+    final accent = block ? Colors.redAccent : kBlue;
+    return showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final cardColor = Theme.of(ctx).cardColor;
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+          ),
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(
+              24,
+              12,
+              24,
+              MediaQuery.of(ctx).viewPadding.bottom + 24,
+            ),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Stack(
+                  alignment: Alignment.bottomRight,
+                  children: [
+                    CircleAvatar(
+                      radius: 36,
+                      backgroundColor: accent.withValues(alpha: 0.12),
+                      backgroundImage:
+                          (_peerPhotoUrl != null && _peerPhotoUrl!.isNotEmpty)
+                          ? CachedNetworkImageProvider(_peerPhotoUrl!)
+                          : null,
+                      child: (_peerPhotoUrl == null || _peerPhotoUrl!.isEmpty)
+                          ? Icon(Icons.person_rounded, color: accent, size: 34)
+                          : null,
+                    ),
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: accent,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: cardColor, width: 2.5),
+                      ),
+                      child: Icon(
+                        block ? Icons.block_rounded : Icons.lock_open_rounded,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  block ? 'Block $peerName?' : 'Unblock $peerName?',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Theme.of(ctx).colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  block
+                      ? 'Neither of you will be able to send messages to each other, and this conversation will disappear from your Gig Chats list. You can undo this anytime.'
+                      : 'You\'ll be able to message each other again, and this conversation will reappear in your Gig Chats list.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: kSub,
+                    height: 1.5,
+                    fontSize: 13.5,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accent,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: Text(
+                      block ? 'Block user' : 'Unblock user',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(color: kSub, fontSize: 15),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _toggleBlockUser() async {
+    final uid = _uid;
+    final peerUid = widget.gigChatParams?.peerUid;
+    if (uid == null || peerUid == null || peerUid.isEmpty) return;
+    final peerName = widget.gigChatParams?.peerName ?? 'this user';
+
+    final block = !_isBlocked;
+    final confirmed = await _showBlockConfirmSheet(
+      block: block,
+      peerName: peerName,
+    );
+    if (confirmed != true || !mounted) return;
+
+    await FirebaseFirestore.instance.collection('users').doc(uid).update({
+      'blockedUsers': block
+          ? FieldValue.arrayUnion([peerUid])
+          : FieldValue.arrayRemove([peerUid]),
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(block ? '$peerName blocked.' : '$peerName unblocked.'),
+        ),
+      );
+    }
+  }
+
+  static const _reportReasons = [
+    'Harassment or abuse',
+    'Spam',
+    'Inappropriate content',
+    'Scam or fraud',
+    'Other',
+  ];
+
+  Future<void> _reportUser() async {
+    final uid = _uid;
+    final peerUid = widget.gigChatParams?.peerUid;
+    if (uid == null || peerUid == null || peerUid.isEmpty) return;
+    final peerName = widget.gigChatParams?.peerName ?? 'this user';
+
+    String? selectedReason;
+    final detailsController = TextEditingController();
+
+    final submitted = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final cardColor = Theme.of(ctx).cardColor;
+          final onSurface = Theme.of(ctx).colorScheme.onSurface;
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom,
+            ),
+            child: Container(
+              width: double.infinity,
+              padding: EdgeInsets.fromLTRB(
+                24,
+                12,
+                24,
+                MediaQuery.of(ctx).viewPadding.bottom + 24,
+              ),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 20),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.flag_rounded,
+                            color: Colors.orange,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Report $peerName',
+                            style: TextStyle(
+                              color: onSurface,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 17,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Tell us what\'s wrong. Our team will review this conversation.',
+                      style: TextStyle(color: kSub, fontSize: 13, height: 1.4),
+                    ),
+                    const SizedBox(height: 16),
+                    for (final reason in _reportReasons)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () =>
+                              setSheetState(() => selectedReason = reason),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: selectedReason == reason
+                                  ? kBlue.withValues(alpha: 0.1)
+                                  : Colors.grey.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: selectedReason == reason
+                                    ? kBlue
+                                    : Colors.transparent,
+                                width: 1.2,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  selectedReason == reason
+                                      ? Icons.check_circle_rounded
+                                      : Icons.circle_outlined,
+                                  size: 18,
+                                  color: selectedReason == reason
+                                      ? kBlue
+                                      : kSub,
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  reason,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: onSurface,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: detailsController,
+                      maxLines: 3,
+                      style: TextStyle(fontSize: 14, color: onSurface),
+                      decoration: InputDecoration(
+                        hintText: 'Additional details (optional)',
+                        hintStyle: const TextStyle(color: kSub, fontSize: 13),
+                        filled: true,
+                        fillColor: Colors.grey.withValues(alpha: 0.06),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.all(12),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: selectedReason == null
+                            ? null
+                            : () => Navigator.pop(ctx, true),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.orange.shade700,
+                          disabledBackgroundColor: Colors.grey.withValues(
+                            alpha: 0.3,
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text(
+                          'Submit report',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(color: kSub, fontSize: 15),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    final details = detailsController.text.trim();
+    detailsController.dispose();
+    if (submitted != true || selectedReason == null || !mounted) return;
+
+    await FirebaseFirestore.instance.collection('reports').add({
+      'reporterId': uid,
+      'reportedUserId': peerUid,
+      'reportedUserName': widget.gigChatParams?.peerName ?? '',
+      'roomId': widget.roomId,
+      'reason': selectedReason,
+      'details': details,
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Report submitted. Our team will review it.'),
+        ),
+      );
+    }
+  }
+
   String _formatTime(DateTime dt) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -609,13 +1030,19 @@ class _ChatState extends State<Chat> {
             _isGigChat
                 ? CircleAvatar(
                     radius: 16,
-                    backgroundColor: const Color(0xFF3B82F6).withValues(alpha: 0.15),
-                    backgroundImage: (_peerPhotoUrl != null && _peerPhotoUrl!.isNotEmpty)
+                    backgroundColor: const Color(
+                      0xFF3B82F6,
+                    ).withValues(alpha: 0.15),
+                    backgroundImage:
+                        (_peerPhotoUrl != null && _peerPhotoUrl!.isNotEmpty)
                         ? CachedNetworkImageProvider(_peerPhotoUrl!)
                         : null,
                     child: (_peerPhotoUrl == null || _peerPhotoUrl!.isEmpty)
-                        ? const Icon(Icons.person_rounded,
-                            color: Color(0xFF3B82F6), size: 18)
+                        ? const Icon(
+                            Icons.person_rounded,
+                            color: Color(0xFF3B82F6),
+                            size: 18,
+                          )
                         : null,
                   )
                 : Container(
@@ -657,15 +1084,37 @@ class _ChatState extends State<Chat> {
         ),
         actions: (_isGigChat && widget.gigChatParams != null)
             ? [
-                CallUserAction(
-                  targetUserId: widget.gigChatParams!.peerUid,
-                  targetUserName: widget.gigChatParams!.peerName,
-                  callType: CallType.voice,
-                ),
-                CallUserAction(
-                  targetUserId: widget.gigChatParams!.peerUid,
-                  targetUserName: widget.gigChatParams!.peerName,
-                  callType: CallType.video,
+                if (!_isBlocked) ...[
+                  CallUserAction(
+                    targetUserId: widget.gigChatParams!.peerUid,
+                    targetUserName: widget.gigChatParams!.peerName,
+                    callType: CallType.voice,
+                  ),
+                  CallUserAction(
+                    targetUserId: widget.gigChatParams!.peerUid,
+                    targetUserName: widget.gigChatParams!.peerName,
+                    callType: CallType.video,
+                  ),
+                ],
+                PopupMenuButton<String>(
+                  icon: Icon(
+                    Icons.more_vert,
+                    color: onSurface.withValues(alpha: 0.7),
+                  ),
+                  onSelected: (value) {
+                    if (value == 'report') _reportUser();
+                    if (value == 'block') _toggleBlockUser();
+                  },
+                  itemBuilder: (ctx) => [
+                    const PopupMenuItem(
+                      value: 'report',
+                      child: Text('Report user'),
+                    ),
+                    PopupMenuItem(
+                      value: 'block',
+                      child: Text(_isBlocked ? 'Unblock user' : 'Block user'),
+                    ),
+                  ],
                 ),
                 const SizedBox(width: 8),
               ]
@@ -743,6 +1192,50 @@ class _ChatState extends State<Chat> {
                         fontSize: 13,
                         color: Colors.green.shade700,
                         fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (_isBlocked)
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.block_rounded,
+                      size: 16,
+                      color: Colors.red.shade400,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'You\'ve blocked this user.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.red.shade400,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    TextButton(
+                      onPressed: _toggleBlockUser,
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                      child: const Text(
+                        'Unblock',
+                        style: TextStyle(fontSize: 13),
                       ),
                     ),
                   ],
@@ -848,13 +1341,19 @@ class _MessageBubble extends StatelessWidget {
             isGigChat
                 ? CircleAvatar(
                     radius: 12,
-                    backgroundColor: const Color(0xFF3B82F6).withValues(alpha: 0.15),
-                    backgroundImage: (peerPhotoUrl != null && peerPhotoUrl!.isNotEmpty)
+                    backgroundColor: const Color(
+                      0xFF3B82F6,
+                    ).withValues(alpha: 0.15),
+                    backgroundImage:
+                        (peerPhotoUrl != null && peerPhotoUrl!.isNotEmpty)
                         ? CachedNetworkImageProvider(peerPhotoUrl!)
                         : null,
                     child: (peerPhotoUrl == null || peerPhotoUrl!.isEmpty)
-                        ? const Icon(Icons.person_rounded,
-                            color: Color(0xFF3B82F6), size: 14)
+                        ? const Icon(
+                            Icons.person_rounded,
+                            color: Color(0xFF3B82F6),
+                            size: 14,
+                          )
                         : null,
                   )
                 : Container(
@@ -988,9 +1487,7 @@ class _MessageBubble extends StatelessWidget {
                         ),
                       ),
                     if (msg.isMe &&
-                        (isGigChat
-                            ? msg.hasSeenByPeer
-                            : msg.hasSeenBySupport))
+                        (isGigChat ? msg.hasSeenByPeer : msg.hasSeenBySupport))
                       Icon(
                         Icons.done_all,
                         size: 12,

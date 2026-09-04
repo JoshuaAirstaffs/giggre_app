@@ -2,6 +2,7 @@ import Flutter
 import UIKit
 import GoogleMaps
 import UserNotifications
+import FirebaseMessaging
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -33,6 +34,30 @@ import UserNotifications
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+  }
+
+  // Same implicit-engine timing problem as registerForRemoteNotifications()
+  // above: FirebaseMessaging normally captures the APNs device token itself
+  // via its own observer on this exact callback, but that observer isn't
+  // guaranteed to be attached in time under the implicit-engine registration
+  // path. Without this, FCM can still hand back a registration token (its
+  // getToken() call doesn't strictly require the APNs token first), but with
+  // no APNs token ever set on Messaging.messaging(), FCM has nothing to
+  // deliver to and sends to that token silently fail. Forward it explicitly.
+  override func application(
+    _ application: UIApplication,
+    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+  ) {
+    Messaging.messaging().apnsToken = deviceToken
+    super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
+  }
+
+  override func application(
+    _ application: UIApplication,
+    didFailToRegisterForRemoteNotificationsWithError error: Error
+  ) {
+    print("APNs registration failed: \(error)")
+    super.application(application, didFailToRegisterForRemoteNotificationsWithError: error)
   }
 
   override func userNotificationCenter(

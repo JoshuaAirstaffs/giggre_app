@@ -27,6 +27,21 @@ service cloud.firestore {
       return isAdmin() && adminData().role == 'super_admin';
     }
 
+    // Gig chat rooms have a 2-uid `participants` array (support tickets use
+    // `userId` instead and are never blockable through this). True if the
+    // *other* participant has senderUid in their own blockedUsers list.
+    function isBlockedSender(roomId, senderUid) {
+      let room = get(/databases/$(database)/documents/chat_rooms/$(roomId)).data;
+      return room.keys().hasAny(['participants']) &&
+        room.participants.size() == 2 &&
+        (
+          (room.participants[0] == senderUid &&
+            senderUid in get(/databases/$(database)/documents/users/$(room.participants[1])).data.get('blockedUsers', [])) ||
+          (room.participants[1] == senderUid &&
+            senderUid in get(/databases/$(database)/documents/users/$(room.participants[0])).data.get('blockedUsers', []))
+        );
+    }
+
 //     function isApplicant() {
 //   // Worker is adding themselves to the applicants map/array
 //   // Adjust the field name to match your actual data shape
@@ -129,12 +144,28 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
-        allow read, write: if isAuth() && (
+        allow read, update, delete: if isAuth() && (
           get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.userId == request.auth.uid
           || request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.participants
           || isAdmin()
         );
+        // Same participant check as above, plus: reject if the recipient has
+        // blocked the sender (client-side blocking only hides/disables the
+        // composer — this is what actually stops a blocked user's messages).
+        allow create: if isAuth() && (
+          get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.userId == request.auth.uid
+          || request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.participants
+        ) && !isBlockedSender(roomId, request.auth.uid);
       }
+    }
+
+    // ─── User Reports ──────────────────────────────────────────
+    match /reports/{reportId} {
+      allow create: if isAuth() &&
+        request.resource.data.reporterId == request.auth.uid;
+      allow read: if isAuth() &&
+        (resource.data.reporterId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
     }
 
     // ─── Support Tickets ───────────────────────────────────────
