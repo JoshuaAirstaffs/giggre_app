@@ -1,4 +1,5 @@
 import * as admin from "firebase-admin";
+import * as logger from "firebase-functions/logger";
 
 export interface PushPayload {
   title: string;
@@ -17,7 +18,14 @@ export async function sendPushToUser(
 ): Promise<void> {
   const userSnap = await admin.firestore().collection("users").doc(uid).get();
   const tokens: string[] = userSnap.data()?.fcmTokens ?? [];
-  if (!tokens.length) return;
+  if (!tokens.length) {
+    logger.warn("push skipped: user has no registered fcmTokens", {
+      uid,
+      title: payload.title,
+      userDocExists: userSnap.exists,
+    });
+    return;
+  }
 
   const message: admin.messaging.MulticastMessage = {
     tokens,
@@ -43,6 +51,33 @@ export async function sendPushToUser(
   };
 
   const res = await admin.messaging().sendEachForMulticast(message);
+
+  if (res.failureCount) {
+    logger.error("push send failures", {
+      uid,
+      title: payload.title,
+      successCount: res.successCount,
+      failureCount: res.failureCount,
+      // Last 12 chars only — enough to correlate with a device, not the whole credential.
+      errors: res.responses.flatMap((r, i) =>
+        r.success
+          ? []
+          : [
+              {
+                code: r.error?.code,
+                message: r.error?.message,
+                token: `...${tokens[i].slice(-12)}`,
+              },
+            ]
+      ),
+    });
+  } else {
+    logger.info("push sent", {
+      uid,
+      title: payload.title,
+      deviceCount: res.successCount,
+    });
+  }
 
   const staleTokens: string[] = [];
   res.responses.forEach((r, i) => {
