@@ -37,7 +37,6 @@ export async function sendPushToUser(
       payload: {
         aps: {
           sound: "default",
-          contentAvailable: true,
         },
       },
     },
