@@ -94,9 +94,26 @@ service cloud.firestore {
 
     // ─── Admins ────────────────────────────────────────────────
     match /admins/{uid} {
-      allow read: if isAdmin();
-      allow create, update: if isSuperAdmin();
-      allow delete: if false;
+      // Existing admins can read the whole collection (admin management
+      // page). A signed-in user may also always check their own uid-keyed
+      // doc (existent or not — needed so a brand-new admin's first lookup
+      // resolves to "not found" instead of "permission denied"), or read
+      // their own still-pending invite by email so they can find and
+      // consume it on first sign-in.
+      allow read: if isAdmin() ||
+        uid == request.auth.uid ||
+        isOwnPendingInvite();
+
+      // Admin management (inviting/editing other admins) stays
+      // super-admin-only. The one exception is a user promoting
+      // themselves into their own uid-keyed doc, which is only allowed
+      // if it exactly mirrors an existing pending invite for their email.
+      allow create: if isSuperAdmin() || isValidSelfPromotion(uid);
+      allow update: if isSuperAdmin();
+
+      // Consuming (deleting) your own pending invite after promotion is
+      // allowed; everything else stays non-deletable.
+      allow delete: if isSuperAdmin() || isOwnPendingInvite();
     }
 
     // ─── Skills ────────────────────────────────────────────────
@@ -396,6 +413,59 @@ service cloud.firestore {
     match /general_config/{docId} {
       allow read: if isAdmin();
       allow write: if isSuperAdmin();
+    }
+
+    // ─── Account Delete Requests ────────────────────────────────
+    // Written by delete_acc_service.dart (create on request, update on
+    // cancel) and read back by main.dart/home_screen.dart to surface the
+    // live status on the pendingDeletion gate screen. Also written by the
+    // website's delete-account page, which tags its own docs with
+    // source: 'web' (the app's docs carry no source field at all — the
+    // field is optional so this stays backward-compatible with the app).
+    // Owner may only move their own request to 'cancelled' — everything
+    // else (approve/complete/edit) is admin-only via giggre-admin, so a
+    // user can't self-approve or forge other fields.
+    match /account_delete_requests/{requestId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow create: if isAuth() &&
+        request.resource.data.userId == request.auth.uid &&
+        (!('source' in request.resource.data) || request.resource.data.source == 'web');
+      allow update: if isAdmin() || (
+        isAuth() &&
+        resource.data.userId == request.auth.uid &&
+        resource.data.status in ['pending_deletion', 'approved'] &&
+        request.resource.data.status == 'cancelled'
+      );
+      allow delete: if isAdmin();
+    }
+    
+        // ─── Admin Notifications ────────────────────────────────────
+    // Centralized, permission-aware notification center for admins.
+    // Only written by Cloud Functions (Admin SDK bypasses these rules) —
+    // clients may only read notifications matching a permission they
+    // currently hold, and may only toggle their own key in `readBy`.
+    match /admin_notifications/{notifId} {
+      allow read: if isAdmin() && (
+        isSuperAdmin() || resource.data.requiredPermission in adminData().permissions
+      );
+      allow create: if false;
+      allow update: if isAdmin() && (
+        isSuperAdmin() || resource.data.requiredPermission in adminData().permissions
+      ) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']) &&
+        request.resource.data.readBy.diff(resource.data.readBy).affectedKeys().hasOnly([request.auth.uid]) &&
+        request.resource.data.readBy[request.auth.uid] == true;
+      allow delete: if false;
+    }
+
+    // ─── Mail (Firebase "Trigger Email" extension) ──────────────
+    // Written only by our Cloud Functions (Admin SDK, bypasses rules) and
+    // consumed only by the extension's own Cloud Function (same). No
+    // client ever needs to read or write this directly.
+    match /mail/{docId} {
+      allow read, write: if false;
     }
 
     // ─── Verification Requests ─────────────────────────────────
