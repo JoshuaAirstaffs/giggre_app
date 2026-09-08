@@ -5,9 +5,11 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:giggre_app/core/services/push_notification_service.dart';
 import 'package:giggre_app/core/services/sign_out_service.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
 import 'package:giggre_app/screens/maintenance_screen.dart';
@@ -45,9 +47,9 @@ final String googleIosClientId = flavor == 'prod'
 
 // dart:io isn't available on web, so Platform.isIOS must stay behind a !kIsWeb guard.
 GoogleSignIn buildGoogleSignIn() => GoogleSignIn(
-      clientId: (!kIsWeb && Platform.isIOS) ? googleIosClientId : null,
-      serverClientId: kIsWeb ? null : googleServerClientId,
-    );
+  clientId: (!kIsWeb && Platform.isIOS) ? googleIosClientId : null,
+  serverClientId: kIsWeb ? null : googleServerClientId,
+);
 
 // Set by a signup flow between creating the Firebase Auth account and
 // finishing the Firestore profile write. _MaintenanceGate's auth-state
@@ -86,6 +88,12 @@ void main() async {
       // which exception type this surfaces as natively.
       if (!e.toString().contains('duplicate-app')) rethrow;
     }
+    // Must be a top-level function, registered on every app start (not just
+    // first run) — this is what lets Android build the real incoming-call
+    // notification (Answer/Decline actions, non-dismissible) even when the
+    // app is fully killed, instead of auto-rendering a plain one from the
+    // bare push payload. See firebaseMessagingBackgroundHandler's own doc.
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     await CurrentUserProvider.initNotifications();
     FilePicker.platform;
     CurrentUserProvider.navigatorKey = navigatorKey;
@@ -98,7 +106,8 @@ void main() async {
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => CurrentUserProvider()),
         ChangeNotifierProvider(
-            create: (_) => TutorialController(TutorialService())),
+          create: (_) => TutorialController(TutorialService()),
+        ),
       ],
       child: GiggreApp(firebaseError: firebaseError),
     ),
@@ -313,7 +322,9 @@ class _AuthGateState extends State<AuthGate> {
 
         // No Firebase user — signed out. Reset all gate state and go to login.
         if (!snapshot.hasData && !provider.isLoggedIn) {
-          if (_pendingDeletion || _restoredForUid != null || _restoreError ||
+          if (_pendingDeletion ||
+              _restoredForUid != null ||
+              _restoreError ||
               _needsProfile) {
             WidgetsBinding.instance.addPostFrameCallback(
               (_) => setState(() {
@@ -342,8 +353,11 @@ class _AuthGateState extends State<AuthGate> {
 
         // Auth account exists but registration was never completed — send
         // them to finish it instead of the Dashboard or Login screen.
-        if (_needsProfile && _restoredForUid == FirebaseAuth.instance.currentUser?.uid) {
-          return CompleteProfileScreen(user: snapshot.data ?? FirebaseAuth.instance.currentUser!);
+        if (_needsProfile &&
+            _restoredForUid == FirebaseAuth.instance.currentUser?.uid) {
+          return CompleteProfileScreen(
+            user: snapshot.data ?? FirebaseAuth.instance.currentUser!,
+          );
         }
 
         // Trust currentUser (synchronous, already restored by native SDK on
@@ -352,7 +366,8 @@ class _AuthGateState extends State<AuthGate> {
         // which previously fell through to LoginScreen despite a valid
         // restored session. Also require _doRestore ran for this user so the
         // pendingDeletion check always runs before we open the home screen.
-        if (provider.isLoggedIn && _restoredForUid == FirebaseAuth.instance.currentUser?.uid) {
+        if (provider.isLoggedIn &&
+            _restoredForUid == FirebaseAuth.instance.currentUser?.uid) {
           return const MainNavigation();
         }
 
@@ -408,8 +423,13 @@ class _PendingDeletionScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               Text(
-                isApproved ? 'Account Deletion Approved' : 'Account Pending Deletion',
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                isApproved
+                    ? 'Account Deletion Approved'
+                    : 'Account Pending Deletion',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 12),

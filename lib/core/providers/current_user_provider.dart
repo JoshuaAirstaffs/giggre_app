@@ -85,7 +85,9 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   // persists to Firestore if it disagrees. No-op on subsequent calls within
   // the same session.
   Future<void> initCurrencyCode(
-      String uid, Map<String, dynamic> userDoc) async {
+    String uid,
+    Map<String, dynamic> userDoc,
+  ) async {
     if (_currencyInitialized) return;
     _currencyInitialized = true;
     final existing = userDoc['currencyCode'] as String?;
@@ -120,7 +122,9 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
         return StatefulBuilder(
           builder: (dCtx, setDialogState) => AlertDialog(
             backgroundColor: Theme.of(dCtx).cardColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             icon: Container(
               width: 52,
               height: 52,
@@ -148,7 +152,11 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
                 const Text(
                   "We couldn't detect your location, so pricing defaults to USD for now. Check that location access is allowed for the app, then reload.",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey, fontSize: 14, height: 1.5),
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 14,
+                    height: 1.5,
+                  ),
                 ),
                 if (stillFailed) ...[
                   const SizedBox(height: 10),
@@ -239,10 +247,9 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       if (detected != _currencyCode) {
         _currencyCode = detected;
         notifyListeners();
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(_uid)
-            .update({'currencyCode': detected});
+        await FirebaseFirestore.instance.collection('users').doc(_uid).update({
+          'currencyCode': detected,
+        });
       }
       return true;
     } finally {
@@ -323,7 +330,8 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       const AndroidNotificationChannel(
         'gig_offer_declined_v1',
         'Offer Declined',
-        description: 'Notifications when a worker declines a gig you offered them',
+        description:
+            'Notifications when a worker declines a gig you offered them',
         importance: Importance.max,
         sound: gigSound,
       ),
@@ -352,7 +360,8 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       const AndroidNotificationChannel(
         'nearby_gigs_v2',
         'Nearby Gigs',
-        description: 'Notifications when a new gig is posted within 10km of you',
+        description:
+            'Notifications when a new gig is posted within 10km of you',
         importance: Importance.max,
         sound: gigSound,
       ),
@@ -361,7 +370,8 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       const AndroidNotificationChannel(
         'verification_status_v1',
         'Verification Status',
-        description: 'Notifications when an admin approves or rejects your verification',
+        description:
+            'Notifications when an admin approves or rejects your verification',
         importance: Importance.max,
         sound: gigSound,
       ),
@@ -370,7 +380,8 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       const AndroidNotificationChannel(
         'skill_request_status_v1',
         'Skill Request Status',
-        description: 'Notifications when an admin approves or rejects a skill request',
+        description:
+            'Notifications when an admin approves or rejects a skill request',
         importance: Importance.max,
         sound: gigSound,
       ),
@@ -389,7 +400,8 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       const AndroidNotificationChannel(
         'gig_cancelled_by_host_v1',
         'Gig Cancelled',
-        description: 'Notifications when a host cancels a gig you were working on',
+        description:
+            'Notifications when a host cancels a gig you were working on',
         importance: Importance.max,
         sound: gigSound,
       ),
@@ -402,7 +414,8 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       const AndroidNotificationChannel(
         'tester_reminder_v3',
         'Testing Reminder',
-        description: 'Daily reminder for closed-testing testers (dev builds only)',
+        description:
+            'Daily reminder for closed-testing testers (dev builds only)',
         importance: Importance.high,
         sound: testSound,
       ),
@@ -411,13 +424,20 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
     // without creating it here, Android silently drops the push entirely
     // (undocumented-to-users but confirmed FCM behavior for a notification
     // referencing a channel that doesn't exist on the device).
+    // v2: uses the actual ringtone (incoming_call_sound) instead of gigSound —
+    // channels are locked to their sound at creation, so this needed a new
+    // channel id, not just changing v1's sound in place. Requires
+    // android/app/src/main/res/raw/incoming_call_sound.mp3.
+    const incomingCallSound = RawResourceAndroidNotificationSound(
+      'incoming_call_sound',
+    );
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
-        'incoming_call_v1',
+        'incoming_call_v2',
         'Incoming Calls',
         description: 'Notifications for incoming voice/video calls',
         importance: Importance.max,
-        sound: gigSound,
+        sound: incomingCallSound,
       ),
     );
 
@@ -441,6 +461,7 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       'nearby_gigs',
       'tester_reminder',
       'tester_reminder_v2',
+      'incoming_call_v1',
     ];
     for (final id in staleChannelIds) {
       await androidPlugin?.deleteNotificationChannel(id);
@@ -506,9 +527,12 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
         data['type'] == 'ticket_updated' ||
         data['type'] == 'tester_reminder' ||
         data['type'] == 'new_version' ||
-        data['type'] == 'nearby_gig') {
+        data['type'] == 'nearby_gig' ||
+        data['type'] == 'incoming_call') {
       // Tapping just brings the app to the foreground — the relevant screen's
-      // own Firestore listener surfaces the change.
+      // own Firestore listener surfaces the change. For incoming_call
+      // specifically, that's _listenToIncomingCall showing the full-screen
+      // ring UI with its own (already working) Answer/Decline buttons.
       return;
     }
 
@@ -572,16 +596,15 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   // and the logout button would look dead. Losing the token removal is
   // recoverable — _saveToken() reclaims a stale token from the previous owner
   // on the next login.
-  static Future<void> unregisterPushForUid(String uid) =>
-      _pushService
-          .unregisterForUser(uid)
-          .timeout(
-            const Duration(seconds: 5),
-            onTimeout: () => debugPrint(
-              '[CurrentUserProvider] push unregister timed out; '
-              'continuing sign-out',
-            ),
-          );
+  static Future<void> unregisterPushForUid(String uid) => _pushService
+      .unregisterForUser(uid)
+      .timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => debugPrint(
+          '[CurrentUserProvider] push unregister timed out; '
+          'continuing sign-out',
+        ),
+      );
 
   @override
   void dispose() {
@@ -695,9 +718,13 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
           final incomingCall = data['incomingCall'];
           debugPrint('📞 incomingCall: $incomingCall');
 
-          // Stop ringtone if call is gone or no longer ringing
+          // Stop ringtone and dismiss the notification if the call is gone or
+          // no longer ringing (declined, answered elsewhere, timed out, or
+          // the caller hung up) — otherwise it would sit there, ongoing and
+          // unswipeable on Android, for a call that's no longer happening.
           if (incomingCall == null || incomingCall['status'] != 'ringing') {
             _stopRingtone();
+            cancelIncomingCallNotification(_notifications);
             return;
           }
 

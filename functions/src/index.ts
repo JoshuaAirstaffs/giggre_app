@@ -8,7 +8,12 @@ import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import { RtcTokenBuilder, RtcRole } from "agora-token";
-import { sendPushToUser, broadcastToAllUsers } from "./push";
+import {
+  sendPushToUser,
+  sendIncomingCallPush,
+  sendCancelIncomingCallPush,
+  broadcastToAllUsers,
+} from "./push";
 
 admin.initializeApp();
 
@@ -1091,22 +1096,36 @@ export const onIncomingCall = onDocumentUpdated(
 
     const statusAfter = after.incomingCall?.status;
     const statusBefore = before?.incomingCall?.status;
-    if (statusAfter !== "ringing" || statusBefore === "ringing") return;
 
-    const call = after.incomingCall;
+    if (statusAfter === "ringing" && statusBefore !== "ringing") {
+      const call = after.incomingCall;
+      const isVideo = call.isVideo === true;
+      const icon = isVideo ? "📹" : "📞";
+      const callerName = call.callerName ?? "Someone";
 
-    await sendPushToUser(event.params.userId, {
-      title: call.callerName ?? "Incoming Call",
-      body: call.isVideo === true ? "Incoming video call" : "Incoming voice call",
-      channelId: "incoming_call_v1",
-      data: {
-        type: "incoming_call",
-        callerName: call.callerName ?? "",
-        callerId: call.callerId ?? "",
-        channelName: call.channelName ?? "",
-        token: call.token ?? "",
-        isVideo: call.isVideo === true ? "true" : "false",
-      },
-    });
+      await sendIncomingCallPush(event.params.userId, {
+        title: `${icon} ${callerName} wants to ${isVideo ? "video" : "voice"} call`,
+        body: "Tap to answer/decline the call",
+        androidChannelId: "incoming_call_v2",
+        iosSound: "incoming_call_sound.caf",
+        data: {
+          type: "incoming_call",
+          callerName: call.callerName ?? "",
+          callerId: call.callerId ?? "",
+          channelName: call.channelName ?? "",
+          token: call.token ?? "",
+          isVideo: isVideo ? "true" : "false",
+        },
+      });
+      return;
+    }
+
+    // Was ringing, now isn't (answered/declined/timed out, or incomingCall
+    // was deleted outright) — a killed device has nothing else to tell it to
+    // dismiss the notification sendIncomingCallPush showed it above, since
+    // it isn't running to see this same Firestore change any other way.
+    if (statusBefore === "ringing" && statusAfter !== "ringing") {
+      await sendCancelIncomingCallPush(event.params.userId);
+    }
   }
 );

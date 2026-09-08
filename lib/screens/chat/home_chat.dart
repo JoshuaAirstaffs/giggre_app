@@ -253,7 +253,6 @@ class _GigChatsTab extends StatefulWidget {
 
 class _GigChatsTabState extends State<_GigChatsTab> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
-  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _userStream;
 
   @override
   void initState() {
@@ -265,137 +264,117 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               .collection('chat_rooms')
               .where('participants', arrayContains: uid)
               .snapshots();
-    _userStream = uid == null
-        ? const Stream.empty()
-        : FirebaseFirestore.instance.collection('users').doc(uid).snapshots();
   }
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: _userStream,
-      builder: (context, userSnap) {
-        final blockedUsers =
-            (userSnap.data?.data()?['blockedUsers'] as List<dynamic>?) ?? [];
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _stream,
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _stream,
-          builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
+        if (snap.hasError) {
+          debugPrint('GigChatsTab error: ${snap.error}');
+          return Center(
+            child: Text(
+              'Error loading chats:\n${snap.error}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.red, fontSize: 13),
+            ),
+          );
+        }
 
-            if (snap.hasError) {
-              debugPrint('GigChatsTab error: ${snap.error}');
-              return Center(
-                child: Text(
-                  'Error loading chats:\n${snap.error}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.red, fontSize: 13),
+        // Blocking a peer no longer hides this room from the list — the
+        // conversation stays visible (with history), it's just no longer
+        // possible to send/receive messages in it. See Chat's _isBlocked.
+        final docs = List.of(snap.data?.docs ?? []);
+        docs.sort((a, b) {
+          final aTime = a.data()['lastMessageAt'] as Timestamp?;
+          final bTime = b.data()['lastMessageAt'] as Timestamp?;
+          if (aTime == null && bTime == null) return 0;
+          if (aTime == null) return 1;
+          if (bTime == null) return -1;
+          return bTime.compareTo(aTime);
+        });
+
+        if (docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.chat_bubble_outline_rounded,
+                  size: 48,
+                  color: Colors.grey,
                 ),
-              );
-            }
+                const SizedBox(height: 12),
+                Text(
+                  'No gig chats yet',
+                  style: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                ),
+              ],
+            ),
+          );
+        }
 
-            final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-            final docs = List.of(snap.data?.docs ?? []).where((d) {
+        return RefreshIndicator(
+          onRefresh: () async => setState(() {}),
+          child: ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: docs.length,
+            itemBuilder: (context, i) {
+              final data = docs[i].data();
+              final rawDate = data['lastMessageAt'] ?? data['createdAt'];
+              final date = rawDate != null
+                  ? (rawDate as Timestamp).toDate()
+                  : null;
+
+              final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
               final participants =
-                  (d.data()['participants'] as List<dynamic>?) ?? [];
-              final peerUid = participants.firstWhere(
-                (p) => p != currentUid,
-                orElse: () => '',
+                  (data['participants'] as List<dynamic>?) ?? [];
+              final peerUid =
+                  participants.firstWhere((p) => p != uid, orElse: () => '')
+                      as String;
+
+              // Resolve the correct display name for the peer.
+              // If the current user created the room, the peer is sendTo.
+              // If the current user is the receiver, the peer is createdByName.
+              final createdByUid = data['createdByUid'] as String? ?? '';
+              final createdByName = data['createdByName'] as String? ?? '';
+              final sendTo = data['sendTo'] as String? ?? 'Gig Chat';
+              final peerDisplayName =
+                  (createdByUid.isNotEmpty && uid != createdByUid)
+                  ? (createdByName.isNotEmpty ? createdByName : sendTo)
+                  : sendTo;
+
+              // Gig chats are stored as plain text (never HTML), and the room
+              // doc is shared by both participants — 'You' is only correct
+              // from the sender's own point of view, so the label is derived
+              // here from who actually sent it rather than trusted verbatim.
+              final senderId = data['lastMessageSenderId'] as String? ?? '';
+              final sender = senderId.isEmpty
+                  ? ''
+                  : (senderId == uid ? 'You' : peerDisplayName);
+              final lastMessage = data['lastMessage'] as String? ?? '';
+              final displayMessage = sender.isNotEmpty
+                  ? '$sender: $lastMessage'
+                  : lastMessage;
+
+              return _ChatHomeItem(
+                roomId: docs[i].id,
+                sendTo: peerDisplayName,
+                subject: data['subject'] as String? ?? 'Gig Chat',
+                message: displayMessage,
+                status: data['status'] as String? ?? 'open',
+                date: date,
+                isGigChat: true,
+                gigId: data['gigId'] as String? ?? '',
+                peerUid: peerUid,
               );
-              return !blockedUsers.contains(peerUid);
-            }).toList();
-            docs.sort((a, b) {
-              final aTime = a.data()['lastMessageAt'] as Timestamp?;
-              final bTime = b.data()['lastMessageAt'] as Timestamp?;
-              if (aTime == null && bTime == null) return 0;
-              if (aTime == null) return 1;
-              if (bTime == null) return -1;
-              return bTime.compareTo(aTime);
-            });
-
-            if (docs.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.chat_bubble_outline_rounded,
-                      size: 48,
-                      color: Colors.grey,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'No gig chats yet',
-                      style: TextStyle(
-                        color: Colors.grey.shade400,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            return RefreshIndicator(
-              onRefresh: () async => setState(() {}),
-              child: ListView.builder(
-                padding: const EdgeInsets.all(8),
-                itemCount: docs.length,
-                itemBuilder: (context, i) {
-                  final data = docs[i].data();
-                  final rawDate = data['lastMessageAt'] ?? data['createdAt'];
-                  final date = rawDate != null
-                      ? (rawDate as Timestamp).toDate()
-                      : null;
-
-                  final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-                  final participants =
-                      (data['participants'] as List<dynamic>?) ?? [];
-                  final peerUid =
-                      participants.firstWhere((p) => p != uid, orElse: () => '')
-                          as String;
-
-                  // Resolve the correct display name for the peer.
-                  // If the current user created the room, the peer is sendTo.
-                  // If the current user is the receiver, the peer is createdByName.
-                  final createdByUid = data['createdByUid'] as String? ?? '';
-                  final createdByName = data['createdByName'] as String? ?? '';
-                  final sendTo = data['sendTo'] as String? ?? 'Gig Chat';
-                  final peerDisplayName =
-                      (createdByUid.isNotEmpty && uid != createdByUid)
-                      ? (createdByName.isNotEmpty ? createdByName : sendTo)
-                      : sendTo;
-
-                  // Gig chats are stored as plain text (never HTML), and the room
-                  // doc is shared by both participants — 'You' is only correct
-                  // from the sender's own point of view, so the label is derived
-                  // here from who actually sent it rather than trusted verbatim.
-                  final senderId = data['lastMessageSenderId'] as String? ?? '';
-                  final sender = senderId.isEmpty
-                      ? ''
-                      : (senderId == uid ? 'You' : peerDisplayName);
-                  final lastMessage = data['lastMessage'] as String? ?? '';
-                  final displayMessage = sender.isNotEmpty
-                      ? '$sender: $lastMessage'
-                      : lastMessage;
-
-                  return _ChatHomeItem(
-                    roomId: docs[i].id,
-                    sendTo: peerDisplayName,
-                    subject: data['subject'] as String? ?? 'Gig Chat',
-                    message: displayMessage,
-                    status: data['status'] as String? ?? 'open',
-                    date: date,
-                    isGigChat: true,
-                    gigId: data['gigId'] as String? ?? '',
-                    peerUid: peerUid,
-                  );
-                },
-              ),
-            );
-          },
+            },
+          ),
         );
       },
     );

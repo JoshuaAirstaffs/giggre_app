@@ -18,7 +18,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
-
     <!-- Remove screen sharing since it's not used -->
     <uses-permission 
         android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" 
@@ -50,8 +49,8 @@
         </activity>
 
         <!-- Remove screen sharing service since it's not used -->
-        <service 
-            android:name="io.agora.rtc.ss.impl.ScreenSharingService" 
+        <service
+            android:name="io.agora.rtc.ss.impl.ScreenSharingService"
             tools:node="remove"/>
 
         <meta-data

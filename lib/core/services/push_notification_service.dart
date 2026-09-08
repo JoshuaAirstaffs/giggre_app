@@ -15,6 +15,16 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 class PushNotificationService {
   PushNotificationService(this._notifications, this._onTap);
 
+  // Fixed (not per-message-hash) so CurrentUserProvider's incoming-call
+  // Firestore listener can cancel this exact notification once the call is
+  // no longer ringing (declined/answered elsewhere/timed out/caller hung up).
+  static const incomingCallNotificationId = 999999;
+
+  // Fallback only — the real value normally arrives via the push's own
+  // `data['channelId']` (see sendIncomingCallPush), kept in sync manually
+  // with the channel CurrentUserProvider.initNotifications() creates.
+  static const incomingCallChannelId = 'incoming_call_v2';
+
   final FlutterLocalNotificationsPlugin _notifications;
   final void Function(Map<String, dynamic> data) _onTap;
 
@@ -169,6 +179,26 @@ class PushNotificationService {
   }
 
   Future<void> _showForeground(RemoteMessage message) async {
+    final type = message.data['type'];
+    // Silent — just tells us to dismiss the incoming-call notification
+    // (call answered/declined/timed out/caller hung up). In the foreground
+    // this is usually redundant with CurrentUserProvider's own Firestore
+    // listener already cancelling it, but cancel() is a harmless no-op if
+    // it's already gone, so handling it here too costs nothing.
+    if (type == 'cancel_incoming_call') {
+      await cancelIncomingCallNotification(_notifications);
+      return;
+    }
+
+    final isIncomingCall = type == 'incoming_call';
+    // The incoming-call push is Android data-only (see sendIncomingCallPush
+    // in functions/src/push.ts) so message.notification is null for it —
+    // title/body travel in `data` instead for this type specifically.
+    if (isIncomingCall) {
+      await showIncomingCallNotification(_notifications, message.data);
+      return;
+    }
+
     final notification = message.notification;
     debugPrint(
       '[PushNotificationService] received: ${notification?.title} / ${notification?.body}',
@@ -195,4 +225,77 @@ class PushNotificationService {
       payload: message.data.isNotEmpty ? jsonEncode(message.data) : null,
     );
   }
+}
+
+// Top-level (not a method) so both the running app's foreground handler and
+// the isolated background message handler below can call it identically —
+// a background isolate has no access to a PushNotificationService instance.
+Future<void> showIncomingCallNotification(
+  FlutterLocalNotificationsPlugin notifications,
+  Map<String, dynamic> data,
+) async {
+  final title = data['title'] as String? ?? 'Incoming Call';
+  final body = data['body'] as String? ?? 'Incoming call';
+  final channelId =
+      data['channelId'] as String? ??
+      PushNotificationService.incomingCallChannelId;
+
+  // Plain, swipeable, no action buttons — tapping the notification (or its
+  // body text telling the user to do so) just opens the app, and the
+  // already-working full-screen ring UI (its own Firestore listener) takes
+  // it from there with real Answer/Decline buttons. Action buttons directly
+  // on the notification were tried and dropped: tapping either one just
+  // opened the app anyway without reliably running the distinct
+  // accept/decline logic, so they added complexity without adding function.
+  await notifications.show(
+    PushNotificationService.incomingCallNotificationId,
+    title,
+    body,
+    NotificationDetails(
+      android: AndroidNotificationDetails(
+        channelId,
+        channelId,
+        importance: Importance.max,
+        priority: Priority.max,
+      ),
+      iOS: const DarwinNotificationDetails(
+        presentAlert: true,
+        presentSound: true,
+        sound: 'incoming_call_sound.caf',
+      ),
+    ),
+    payload: data.isNotEmpty ? jsonEncode(data) : null,
+  );
+}
+
+/// Dismisses whatever showIncomingCallNotification put up (call
+/// answered/declined/timed out/caller hung up, or the user already handled
+/// it via the notification's own actions).
+Future<void> cancelIncomingCallNotification(
+  FlutterLocalNotificationsPlugin notifications,
+) => notifications.cancel(PushNotificationService.incomingCallNotificationId);
+
+/// Registered via FirebaseMessaging.onBackgroundMessage in main() — Android
+/// invokes this in a separate, minimal background isolate (no access to the
+/// running app's state) when an incoming-call push arrives while the app is
+/// backgrounded or fully killed, because that push is sent data-only
+/// specifically so Android doesn't auto-render a plain, action-less
+/// notification instead (see sendIncomingCallPush in functions/src/push.ts).
+/// Must stay a top-level function annotated exactly like this — Firebase's
+/// plugin requires it to create the background isolate correctly.
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  final type = message.data['type'];
+  if (type == 'cancel_incoming_call') {
+    // A killed app has no other way to learn the call stopped ringing
+    // (answered/declined/timed out/caller hung up) and dismiss the
+    // notification shown below — see sendCancelIncomingCallPush's doc.
+    await cancelIncomingCallNotification(FlutterLocalNotificationsPlugin());
+    return;
+  }
+  if (type != 'incoming_call') return;
+  await showIncomingCallNotification(
+    FlutterLocalNotificationsPlugin(),
+    message.data,
+  );
 }

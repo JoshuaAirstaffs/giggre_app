@@ -109,8 +109,15 @@ class _ChatState extends State<Chat> {
   bool _isGigChat = false;
   String? _peerName;
   String? _peerPhotoUrl;
-  bool _isBlocked = false;
+  bool _isBlocked = false; // I blocked the peer
+  bool _isBlockedByPeer = false; // the peer blocked me
   StreamSubscription<DocumentSnapshot>? _blockedSub;
+  StreamSubscription<DocumentSnapshot>? _blockedByPeerSub;
+
+  // Either direction of block disables the composer and call actions — the
+  // peer's own block of me isn't something I can undo from here (unlike
+  // _isBlocked, which shows an Unblock option), it just needs to be reflected.
+  bool get _chatDisabled => _isBlocked || _isBlockedByPeer;
   // True once the room doc exists in Firestore — false for lazy gig chats
   // until the first message is sent.
   bool _roomCreated = true;
@@ -141,10 +148,10 @@ class _ChatState extends State<Chat> {
     if (_isGigChat && params != null) _listenBlockedStatus(params.peerUid);
   }
 
-  // Watches whether *I* have blocked the peer, to disable the composer and
-  // hide the call actions. The reverse (peer blocked me) isn't tracked here —
-  // that's enforced server-side and surfaces as a permission-denied error
-  // from _sendMessage instead.
+  // Watches both directions of blocking, to disable the composer and hide
+  // the call actions either way: whether *I* have blocked the peer (my own
+  // doc), and whether the peer has blocked *me* (their doc — readable per
+  // the public `allow read: if true` rule on users/{uid}).
   void _listenBlockedStatus(String peerUid) {
     final uid = _uid;
     if (uid == null || peerUid.isEmpty) return;
@@ -158,6 +165,20 @@ class _ChatState extends State<Chat> {
               (snap.data()?['blockedUsers'] as List<dynamic>?) ?? [];
           final isBlocked = blocked.contains(peerUid);
           if (isBlocked != _isBlocked) setState(() => _isBlocked = isBlocked);
+        });
+
+    _blockedByPeerSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(peerUid)
+        .snapshots()
+        .listen((snap) {
+          if (!mounted) return;
+          final blocked =
+              (snap.data()?['blockedUsers'] as List<dynamic>?) ?? [];
+          final isBlockedByPeer = blocked.contains(uid);
+          if (isBlockedByPeer != _isBlockedByPeer) {
+            setState(() => _isBlockedByPeer = isBlockedByPeer);
+          }
         });
   }
 
@@ -185,6 +206,7 @@ class _ChatState extends State<Chat> {
     _gigSeenSub?.cancel();
     _roomSub?.cancel();
     _blockedSub?.cancel();
+    _blockedByPeerSub?.cancel();
     _msgController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -392,7 +414,7 @@ class _ChatState extends State<Chat> {
 
   // ── Send: optimistic UI ────────────────────────────────────────────────────
   Future<void> _sendMessage() async {
-    if (_isResolved || _isBlocked) return;
+    if (_isResolved || _chatDisabled) return;
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
 
@@ -681,8 +703,8 @@ class _ChatState extends State<Chat> {
                 const SizedBox(height: 8),
                 Text(
                   block
-                      ? 'Neither of you will be able to send messages to each other, and this conversation will disappear from your Gig Chats list. You can undo this anytime.'
-                      : 'You\'ll be able to message each other again, and this conversation will reappear in your Gig Chats list.',
+                      ? 'Neither of you will be able to send messages to each other. You can undo this anytime.'
+                      : 'You\'ll be able to message each other again.',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: kSub,
@@ -846,7 +868,7 @@ class _ChatState extends State<Chat> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Tell us what\'s wrong. Our team will review this conversation.',
+                      'Tell us what\'s wrong. This will also block them immediately — our team will review the conversation separately.',
                       style: TextStyle(color: kSub, fontSize: 13, height: 1.4),
                     ),
                     const SizedBox(height: 16),
@@ -933,7 +955,7 @@ class _ChatState extends State<Chat> {
                           ),
                         ),
                         child: const Text(
-                          'Submit report',
+                          'Report & block',
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
@@ -971,14 +993,19 @@ class _ChatState extends State<Chat> {
       'roomId': widget.roomId,
       'reason': selectedReason,
       'details': details,
-      'status': 'pending',
       'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    // Reporting someone blocks them immediately — no need to wait on admin
+    // review for that part. Same write _toggleBlockUser does.
+    await FirebaseFirestore.instance.collection('users').doc(uid).update({
+      'blockedUsers': FieldValue.arrayUnion([peerUid]),
     });
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Report submitted. Our team will review it.'),
+        SnackBar(
+          content: Text('Report submitted and $peerName has been blocked.'),
         ),
       );
     }
@@ -1084,7 +1111,7 @@ class _ChatState extends State<Chat> {
         ),
         actions: (_isGigChat && widget.gigChatParams != null)
             ? [
-                if (!_isBlocked) ...[
+                if (!_chatDisabled) ...[
                   CallUserAction(
                     targetUserId: widget.gigChatParams!.peerUid,
                     targetUserName: widget.gigChatParams!.peerName,
@@ -1236,6 +1263,41 @@ class _ChatState extends State<Chat> {
                       child: const Text(
                         'Unblock',
                         style: TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (_isBlockedByPeer)
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.block_rounded,
+                      size: 16,
+                      color: Colors.red.shade400,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'This user has blocked you.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.red.shade400,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
