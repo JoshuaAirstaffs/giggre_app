@@ -201,6 +201,47 @@ class QuickGigMatchingService {
     ]);
   }
 
+  // ── Search liveness ────────────────────────────────────────────────────────
+  // `status` on its own can't say whether a search is running. A multi-worker
+  // gig sits at 'scanning' both while it's dispatching AND while its accepted
+  // workers are already on the job (GigDetailSheet's "Start New Search" puts a
+  // live gig straight back there), so the server-side sweep in
+  // functions/src/index.ts has no way to tell the two apart from `status`.
+  // These two fields carry that state explicitly.
+  //
+  // Only this service writes them: callers that kick off a search — the post
+  // screen, GigDetailSheet, the worker-cancel reopen — just call
+  // startAutoSearch, so there is exactly one owner of the deadline.
+  static Future<void> _markSearchRunning({
+    required DocumentReference<Map<String, dynamic>> gigRef,
+    required DateTime searchDeadline,
+  }) async {
+    try {
+      await gigRef.update({
+        'searchState': 'running',
+        'searchDeadlineAt': Timestamp.fromDate(searchDeadline),
+      });
+    } catch (e) {
+      debugPrint('[QuickGigMatching] could not mark search running: $e');
+    }
+  }
+
+  // Written from the `finally` of the two public entry points rather than at
+  // each loop's exit sites. Between them the loops terminate at a dozen
+  // points, and several are bare `return`s that write nothing at all (worker
+  // accepted, gig doc deleted, gig cancelled mid-offer) — a per-site approach
+  // would silently miss those and leave the gig looking like it's still
+  // searching forever.
+  static Future<void> _markSearchClosed(
+    DocumentReference<Map<String, dynamic>> gigRef,
+  ) async {
+    try {
+      await gigRef.update({'searchState': 'closed'});
+    } catch (e) {
+      debugPrint('[QuickGigMatching] could not mark search closed: $e');
+    }
+  }
+
   // ── Auto-search loop ────────────────────────────────────────────────────────
   /// Posts, dispatches, waits for response, retries with exclusion list.
   /// Marks gig as 'no_worker' after timeout or max attempts with no acceptance.
@@ -226,6 +267,7 @@ class QuickGigMatchingService {
         await _runMultiSlotSearch(gigId: gigId, gigLocation: gigLocation, gigRef: gigRef);
       }
     } finally {
+      await _markSearchClosed(gigRef);
       _activeSearches.remove(gigId);
     }
   }
@@ -273,6 +315,7 @@ class QuickGigMatchingService {
       }
 
       final searchDeadline = searchStartedAt.add(config.searchTimeout);
+      await _markSearchRunning(gigRef: gigRef, searchDeadline: searchDeadline);
 
       while (true) {
         // ── Global deadline — checked BEFORE dispatching ────────────────────
@@ -462,6 +505,7 @@ class QuickGigMatchingService {
       }
 
       final searchDeadline = searchStartedAt.add(config.searchTimeout);
+      await _markSearchRunning(gigRef: gigRef, searchDeadline: searchDeadline);
 
       while (true) {
         final gigSnap = await gigRef.get();
@@ -631,8 +675,8 @@ class QuickGigMatchingService {
   }) async {
     if (_activeSearches.contains(gigId)) return;
     _activeSearches.add(gigId);
+    final gigRef = FirebaseFirestore.instance.collection('quick_gigs').doc(gigId);
     try {
-      final gigRef = FirebaseFirestore.instance.collection('quick_gigs').doc(gigId);
       await _runBackfillSlotSearch(
         gigId: gigId,
         gigLocation: gigLocation,
@@ -640,6 +684,7 @@ class QuickGigMatchingService {
         cancelledWorkerId: cancelledWorkerId,
       );
     } finally {
+      await _markSearchClosed(gigRef);
       _activeSearches.remove(gigId);
     }
   }
@@ -660,6 +705,10 @@ class QuickGigMatchingService {
       await gigRef.update({
         'exclusionList': FieldValue.arrayUnion([cancelledWorkerId]),
       });
+      // A backfill runs its own fresh window rather than inheriting the
+      // original search's — searchStartedAt is left alone so the host-facing
+      // countdown keeps describing the initial search.
+      await _markSearchRunning(gigRef: gigRef, searchDeadline: searchDeadline);
 
       while (DateTime.now().isBefore(searchDeadline)) {
         final gigSnap = await gigRef.get();
