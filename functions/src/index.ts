@@ -623,6 +623,171 @@ export const checkExpiredGigSchedules = onSchedule(
   }
 );
 
+// ── Quick Gig search-timeout sweep (host side) ──────────────────────────────
+// QuickGigMatchingService.startAutoSearch (quick_gig_matching_service.dart)
+// runs entirely client-side, in the host's own app process — there is no
+// server-side matching loop. If the host's app dies mid-search, nothing is
+// left running to ever resolve the gig, so it can get stuck forever at
+// 'scanning' (still looking for a candidate) or 'in_progress' (an offer was
+// sent but the worker never responded). This sweep is the server-side
+// backstop that closes those out, mirroring checkExpiredGigSchedules above.
+//
+// The cutoff isn't just searchStartedAt + search_timeout_minutes: a client
+// that's still alive is allowed to let one last in-flight review window run
+// past that deadline before it writes no_worker itself (see the "Allows any
+// in-flight review window to complete" comment in the Dart matching
+// service), so this sweep adds review_window_seconds plus a small safety
+// margin on top to avoid racing a host app that's still legitimately
+// finishing up.
+const DEFAULT_SEARCH_TIMEOUT_MINUTES = 5;
+const DEFAULT_REVIEW_WINDOW_SECONDS = 30;
+const QUICK_GIG_EXPIRY_GRACE_MS = 60 * 1000;
+// Bounded so a backlog (or a bad deploy window) can't run the scheduled
+// function past its timeout — whatever's left is picked up 5 minutes later.
+const QUICK_GIG_SWEEP_BATCH_SIZE = 200;
+
+// `update` on a user doc that no longer exists (deleted account) throws
+// NOT_FOUND, which takes down the whole transaction — and, uncaught, the rest
+// of the sweep with it. A merged set always succeeds, so one dead account
+// can't wedge the backstop.
+function freeWorkerSlot(
+  tx: admin.firestore.Transaction,
+  db: admin.firestore.Firestore,
+  workerId: string
+): void {
+  tx.set(
+    db.collection("users").doc(workerId),
+    { slot: "AVAILABLE" },
+    { merge: true }
+  );
+}
+
+async function getQuickGigMatchingConfig(): Promise<{
+  searchTimeoutMinutes: number;
+  reviewWindowSeconds: number;
+}> {
+  const doc = await admin
+    .firestore()
+    .collection("quick_gig_config")
+    .doc("matching_engine")
+    .get();
+  const data = doc.data() ?? {};
+  return {
+    searchTimeoutMinutes:
+      (data.search_timeout_minutes as number | undefined) ??
+      DEFAULT_SEARCH_TIMEOUT_MINUTES,
+    reviewWindowSeconds:
+      (data.review_window_seconds as number | undefined) ??
+      DEFAULT_REVIEW_WINDOW_SECONDS,
+  };
+}
+
+export const checkExpiredQuickGigSearches = onSchedule(
+  "every 5 minutes",
+  async () => {
+    const db = admin.firestore();
+    const { searchTimeoutMinutes, reviewWindowSeconds } =
+      await getQuickGigMatchingConfig();
+
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() -
+        (searchTimeoutMinutes * 60 * 1000 +
+          reviewWindowSeconds * 1000 +
+          QUICK_GIG_EXPIRY_GRACE_MS)
+    );
+
+    // Two separate equality+range queries (one per status) rather than a
+    // single `in` filter — matches this file's existing style
+    // (checkExpiredGigSchedules) and keeps the required composite index simple.
+    for (const status of ["scanning", "in_progress"]) {
+      const stale = await db
+        .collection("quick_gigs")
+        .where("status", "==", status)
+        .where("searchStartedAt", "<=", cutoff)
+        .limit(QUICK_GIG_SWEEP_BATCH_SIZE)
+        .get();
+
+      for (const doc of stale.docs) {
+        // One unsweepable gig must not abort the run — every remaining doc
+        // here, and the whole second status pass, would otherwise be skipped
+        // on every invocation until someone cleaned it up by hand.
+        try {
+          await db.runTransaction(async (tx) => {
+            // ── Reads first (Firestore requires all reads before writes) ──
+            const snap = await tx.get(doc.ref);
+            const data = snap.data();
+            // Re-check inside the transaction — a worker's accept/decline
+            // landing at the same moment always wins over this timeout.
+            if (!data || data.status !== status) return;
+
+            const workerSlots = (data.workerSlots as number | undefined) ?? 1;
+            const filledSlotCount =
+              (data.filledSlotCount as number | undefined) ?? 0;
+
+            // A multi-worker gig keeps each dispatched candidate on their own
+            // workers/{workerId} doc and never writes assignedWorkerId, while
+            // the gig itself stays at 'scanning' the whole time (see the
+            // `if (filledSlotCount == 0)` write in _runMultiSlotSearch). The
+            // LOCKED candidate is therefore only reachable via the
+            // subcollection — reading assignedWorkerId would find nothing.
+            const pendingSlots =
+              workerSlots > 1
+                ? (
+                    await tx.get(
+                      doc.ref
+                        .collection("workers")
+                        .where("status", "==", "in_progress")
+                    )
+                  ).docs
+                : [];
+
+            // ── Writes ────────────────────────────────────────────────────
+            // A gig that already has workers on the job is not a failed
+            // search. 'scanning' alone doesn't mean nobody accepted: the
+            // host's "Start New Search" button (gig_detail_sheet.dart) puts
+            // an actively-worked multi-worker gig straight back to
+            // 'scanning', so writing no_worker here would strand workers
+            // mid-gig. Mirrors _endMultiSlotSearch's filled > 0 branch.
+            if (filledSlotCount > 0) {
+              tx.update(doc.ref, { status: "partially_filled" });
+            } else {
+              tx.update(doc.ref, {
+                status: "no_worker",
+                assignedWorkerId: admin.firestore.FieldValue.delete(),
+                assignedWorkerName: admin.firestore.FieldValue.delete(),
+              });
+            }
+
+            // Any candidate still at 'in_progress' was dispatched and never
+            // responded — their slot is LOCKED and needs freeing, or they sit
+            // unable to receive any future offer. Same cleanup the Dart loop
+            // does when a review window times out, minus the acceptanceRate
+            // penalty (this path only runs when the host's app died, so the
+            // worker isn't necessarily the one who went quiet).
+            for (const slot of pendingSlots) {
+              freeWorkerSlot(tx, db, slot.id);
+              tx.update(slot.ref, { status: "declined" });
+            }
+
+            // Legacy single-worker gigs keep the candidate on the gig doc.
+            if (status === "in_progress") {
+              const assignedWorkerId = data.assignedWorkerId as
+                | string
+                | undefined;
+              if (assignedWorkerId) freeWorkerSlot(tx, db, assignedWorkerId);
+            }
+          });
+        } catch (err) {
+          console.error(
+            `[checkExpiredQuickGigSearches] could not sweep ${doc.id}`,
+            err
+          );
+        }
+      }
+    }
+  }
+);
+
 // ── Auto-approve stale worker cancellation requests ─────────────────────────
 // A worker's cancellation request (WorkingUI._showCancelReasonDialog) sits at
 // status:'cancellation_requested' awaiting admin review. Leaving the worker
