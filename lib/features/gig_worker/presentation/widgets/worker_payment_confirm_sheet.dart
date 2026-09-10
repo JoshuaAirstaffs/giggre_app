@@ -155,11 +155,16 @@ class _WorkerPaymentConfirmSheetState
 
         if (gigSnap != null) {
           final gigData = gigSnap.data() ?? {};
+          // Only filledSlotCount workers ever accepted — a partially filled
+          // gig never reaches workerSlots, so gating on workerSlots leaves a
+          // fully-worked, fully-paid gig stuck at 'partially_filled' forever.
           final slots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
+          final filled = (gigData['filledSlotCount'] as num?)?.toInt() ?? 0;
+          final target = filled > 0 && filled < slots ? filled : slots;
           final completed = ((gigData['slotsCompleted'] as num?)?.toInt() ?? 0) + 1;
           tx.update(gigRef, {
             'slotsCompleted': completed,
-            if (completed >= slots) 'status': 'completed',
+            if (completed >= target) 'status': 'completed',
           });
         }
       });

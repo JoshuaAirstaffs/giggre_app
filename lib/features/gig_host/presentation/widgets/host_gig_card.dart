@@ -62,6 +62,13 @@ _StatusMeta _statusMeta(String status) {
     case 'working':
     case 'assigned':
       return const _StatusMeta('Underway', _kProgressColor);
+    // Multi-worker fill states — the gig is live and being worked. Without
+    // these they fall through to `default`, rendering in _kMutedColor, the
+    // same grey as Cancelled and Completed.
+    case 'partially_filled':
+      return const _StatusMeta('Partly Staffed', _kProgressColor);
+    case 'filled':
+      return const _StatusMeta('Fully Staffed', _kProgressColor);
     case 'task_complete':
     case 'payment':
       return const _StatusMeta('All Done', _kWrapUpColor);

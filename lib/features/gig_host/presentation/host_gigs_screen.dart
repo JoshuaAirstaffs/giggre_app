@@ -35,6 +35,11 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
 
   static const _activeStatuses = [
     'in_progress',
+    // Multi-worker gigs sit at these coarse fill states while their workers
+    // are en route or on the job — per-worker step detail lives in the
+    // `workers` subcollection, not on the gig doc.
+    'partially_filled',
+    'filled',
     'navigating',
     'arrived',
     'working',
