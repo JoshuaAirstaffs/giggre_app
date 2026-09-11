@@ -316,6 +316,13 @@ service cloud.firestore {
       // 'open' to 'partially_filled' — see acceptingMoreSlots in
       // gig_detail_sheet.dart / _applyToOpenGig in gig_map_section.dart.
       resource.data.status == 'partially_filled' ||
+      // Multi-worker gigs: a worker confirming payment (QR/code entry in
+      // worker_payment_confirm_sheet.dart) bumps slotsCompleted/status on
+      // the parent doc directly — identify them by having their own slot
+      // doc, since workerId/assignedWorkerId stay unset for multi-worker
+      // gigs. Missing this (unlike quick_gigs/offered_gigs, which already
+      // have it) is why payment confirmation fails with 2+ worker slots.
+      exists(/databases/$(database)/documents/open_gigs/$(gigId)/workers/$(request.auth.uid)) ||
       isAdmin()
     );
 

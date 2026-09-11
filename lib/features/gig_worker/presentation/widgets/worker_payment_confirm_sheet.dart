@@ -67,8 +67,7 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
       _WorkerPaymentConfirmSheetState();
 }
 
-class _WorkerPaymentConfirmSheetState
-    extends State<WorkerPaymentConfirmSheet> {
+class _WorkerPaymentConfirmSheetState extends State<WorkerPaymentConfirmSheet> {
   final _codeController = TextEditingController();
   bool _processing = false;
   String? _errorMsg;
@@ -108,8 +107,9 @@ class _WorkerPaymentConfirmSheetState
       final db = FirebaseFirestore.instance;
       final gigRef = db.collection(widget.gigCollection).doc(widget.gigId);
       final slotId = widget.slotWorkerId;
-      final targetRef =
-          slotId == null ? gigRef : gigRef.collection('workers').doc(slotId);
+      final targetRef = slotId == null
+          ? gigRef
+          : gigRef.collection('workers').doc(slotId);
 
       // Validate the payment code before opening a transaction.
       final snap = await targetRef.get();
@@ -175,7 +175,12 @@ class _WorkerPaymentConfirmSheetState
       } else if (mounted) {
         Navigator.pop(context);
       }
-    } catch (_) {
+    } catch (e) {
+      // Was `catch (_)`, discarding the exception entirely — the generic
+      // message below is still what the user sees, but this exact bug
+      // (payment confirmation silently permission-denied for 2+ worker
+      // slots on open_gigs) was invisible in production logs because of it.
+      debugPrint('[WorkerPaymentConfirmSheet] confirm failed: $e');
       setState(() {
         _processing = false;
         _errorMsg = 'Something went wrong. Please try again.';
@@ -229,8 +234,11 @@ class _WorkerPaymentConfirmSheetState
                       color: green.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.verified_rounded,
-                        color: green, size: 24),
+                    child: const Icon(
+                      Icons.verified_rounded,
+                      color: green,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -265,8 +273,10 @@ class _WorkerPaymentConfirmSheetState
               // ── Amount banner ─────────────────────────────────────────────
               Container(
                 width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
                 decoration: BoxDecoration(
                   color: green.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(14),
@@ -277,7 +287,10 @@ class _WorkerPaymentConfirmSheetState
                     const Icon(Icons.payments_rounded, color: green, size: 22),
                     const SizedBox(width: 10),
                     Text(
-                      CurrencyFormatter.format(widget.budget, widget.currencyCode),
+                      CurrencyFormatter.format(
+                        widget.budget,
+                        widget.currencyCode,
+                      ),
                       style: const TextStyle(
                         color: green,
                         fontSize: 26,
@@ -309,13 +322,20 @@ class _WorkerPaymentConfirmSheetState
                   const Spacer(),
                   TextButton.icon(
                     onPressed: _scanQrCode,
-                    icon: const Icon(Icons.qr_code_scanner_rounded,
-                        size: 18, color: green),
-                    label: const Text('Scan QR',
-                        style: TextStyle(color: green, fontSize: 13)),
+                    icon: const Icon(
+                      Icons.qr_code_scanner_rounded,
+                      size: 18,
+                      color: green,
+                    ),
+                    label: const Text(
+                      'Scan QR',
+                      style: TextStyle(color: green, fontSize: 13),
+                    ),
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ),
@@ -356,8 +376,7 @@ class _WorkerPaymentConfirmSheetState
                       : Colors.black.withValues(alpha: 0.03),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide:
-                        BorderSide(color: green.withValues(alpha: 0.3)),
+                    borderSide: BorderSide(color: green.withValues(alpha: 0.3)),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
@@ -368,7 +387,9 @@ class _WorkerPaymentConfirmSheetState
                     borderSide: const BorderSide(color: green, width: 1.5),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 18),
+                    horizontal: 16,
+                    vertical: 18,
+                  ),
                 ),
                 onChanged: (_) {
                   if (_errorMsg != null) setState(() => _errorMsg = null);
@@ -381,23 +402,31 @@ class _WorkerPaymentConfirmSheetState
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.redAccent.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                        color: Colors.redAccent.withValues(alpha: 0.3)),
+                      color: Colors.redAccent.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline_rounded,
-                          color: Colors.redAccent, size: 16),
+                      const Icon(
+                        Icons.error_outline_rounded,
+                        color: Colors.redAccent,
+                        size: 16,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMsg!,
                           style: const TextStyle(
-                              color: Colors.redAccent, fontSize: 12),
+                            color: Colors.redAccent,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
                     ],
@@ -421,19 +450,24 @@ class _WorkerPaymentConfirmSheetState
                     disabledBackgroundColor: green.withValues(alpha: 0.4),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                   ),
                   child: _processing
                       ? const SizedBox(
                           width: 22,
                           height: 22,
                           child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2.5),
+                            color: Colors.white,
+                            strokeWidth: 2.5,
+                          ),
                         )
                       : const Text(
                           'Confirm Payment Received',
                           style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold),
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                 ),
               ),
@@ -484,10 +518,15 @@ class _QrScannerScreenState extends State<_QrScannerScreen> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: const Text('Scan Payment QR Code',
-            style: TextStyle(color: Colors.white, fontSize: 16)),
+        title: const Text(
+          'Scan Payment QR Code',
+          style: TextStyle(color: Colors.white, fontSize: 16),
+        ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.white,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
@@ -518,7 +557,10 @@ class _QrScannerScreenState extends State<_QrScannerScreen> {
             right: 0,
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(20),
