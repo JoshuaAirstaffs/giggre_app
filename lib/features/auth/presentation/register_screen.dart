@@ -508,7 +508,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
     if (!_agreedToTerms) {
       setState(
         () => _error =
-            'Please agree to the Terms & Conditions and Privacy Policy to continue.',
+            'Please agree to the Terms of Service and Privacy Policy to continue.',
       );
       return;
     }
@@ -909,14 +909,16 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
+                    // Explicit 44x44 tap target (the accessibility
+                    // minimum) — shrinkWrap so Checkbox doesn't fall back
+                    // to its own default 48x48 minimum and overflow this box.
                     SizedBox(
-                      width: 22,
-                      height: 22,
+                      width: 44,
+                      height: 44,
                       child: Checkbox(
                         value: _agreedToTerms,
                         onChanged: (v) =>
                             setState(() => _agreedToTerms = v ?? false),
-                        visualDensity: VisualDensity.compact,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                     ),
@@ -930,7 +932,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                               text: "I have read and agree to Giggre's ",
                             ),
                             TextSpan(
-                              text: 'Terms & Conditions',
+                              text: 'Terms of Service',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w700,
                                 decoration: TextDecoration.underline,

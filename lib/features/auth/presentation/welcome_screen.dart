@@ -683,7 +683,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     if (!_agreedToTerms) {
       setState(
         () => _signupError =
-            'Please agree to the Terms & Conditions and Privacy Policy to continue.',
+            'Please agree to the Terms of Service and Privacy Policy to continue.',
       );
       return;
     }
@@ -2177,15 +2177,12 @@ class _ConsentLineState extends State<_ConsentLine> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        SizedBox(
-          width: 22,
-          height: 22,
-          child: Checkbox(
-            value: widget.agreed,
-            onChanged: (v) => widget.onChanged(v ?? false),
-            visualDensity: VisualDensity.compact,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
+        // No manual sizing here — Checkbox's default materialTapTargetSize
+        // (padded) gives it a 48x48 tap area, clearing the 44x44 minimum
+        // touch target guideline, while the visible glyph stays small.
+        Checkbox(
+          value: widget.agreed,
+          onChanged: (v) => widget.onChanged(v ?? false),
         ),
         const SizedBox(width: 8),
         Expanded(
@@ -2195,7 +2192,7 @@ class _ConsentLineState extends State<_ConsentLine> {
               children: [
                 const TextSpan(text: "I have read and agree to Giggre's "),
                 TextSpan(
-                  text: 'Terms & Conditions',
+                  text: 'Terms of Service',
                   style: linkStyle,
                   recognizer: _termsTap,
                 ),

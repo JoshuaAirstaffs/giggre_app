@@ -108,6 +108,7 @@ class QuickGigMatchingService {
     required List<String> exclude,
     required double maxSearchRadiusKm,
     required bool allowUnverified,
+    required String hostId,
   }) async {
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance
         .collection('users')
@@ -127,6 +128,12 @@ class QuickGigMatchingService {
       if (exclude.contains(doc.id)) continue;
 
       final data = doc.data();
+      // A worker who's blocked this host should never be dispatched one of
+      // their quick gigs — same guarantee already applied client-side to
+      // the Open/Offered gig feed in gig_map_section.dart.
+      final blockedUsers = List<String>.from(data['blockedUsers'] ?? []);
+      if (blockedUsers.contains(hostId)) continue;
+
       final geo = data['location'] as GeoPoint?;
       if (geo == null) continue;
 
@@ -363,6 +370,7 @@ class QuickGigMatchingService {
           exclude: excluded,
           maxSearchRadiusKm: config.maxSearchRadiusKm,
           allowUnverified: allowUnverified,
+          hostId: hostId,
         );
 
         if (worker == null) {
@@ -539,6 +547,7 @@ class QuickGigMatchingService {
           exclude: excluded,
           maxSearchRadiusKm: config.maxSearchRadiusKm,
           allowUnverified: allowUnverified,
+          hostId: hostId,
         );
 
         if (worker == null) {
@@ -734,6 +743,7 @@ class QuickGigMatchingService {
           exclude: excluded,
           maxSearchRadiusKm: config.maxSearchRadiusKm,
           allowUnverified: allowUnverified,
+          hostId: gigData['hostId'] as String? ?? '',
         );
 
         if (worker == null) {

@@ -77,9 +77,10 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Giggre needs your location to set the gig location when posting a job.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Giggre needs your location to set the gig location when posting a job.</string>
+<string>Giggre uses your location to show gigs near you and to confirm you have arrived at a gig site when you check in.</string>
+
+<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+<string>Giggre uses your location in the background only while you have an active gig in progress, so check-in and check-out can be confirmed and the Host can see the gig is underway. Background location is not collected when you have no active gig.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 	<dict>

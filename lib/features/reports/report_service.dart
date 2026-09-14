@@ -56,61 +56,73 @@ class ReportService {
     if (!context.mounted) return;
 
     if (existing.docs.isNotEmpty) {
-      await _showSheet(context, alreadyReported: true);
+      await _showSheet(context, initiallyReported: true, onSubmit: null);
       return;
     }
 
-    final submission = await _showSheet(context, alreadyReported: false);
-    if (submission == null || !context.mounted) return;
+    await _showSheet(
+      context,
+      initiallyReported: false,
+      onSubmit: (reason, details) async {
+        String reportedUserName = '';
+        String reportedUserEmail = '';
+        String snapshot = contentSnapshot.trim();
+        try {
+          final authorDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(contentAuthorId)
+              .get();
+          final authorData = authorDoc.data();
+          reportedUserName = authorData?['name'] as String? ?? '';
+          reportedUserEmail = authorData?['email'] as String? ?? '';
+          if (snapshot.isEmpty && contentType == ReportContentType.user) {
+            snapshot = (authorData?['bio'] as String? ?? '').trim();
+          }
+        } catch (_) {
+          // Denormalised fields are best-effort — the report still goes
+          // through without them rather than blocking submission on this
+          // lookup.
+        }
+        if (snapshot.length > _maxSnapshotChars) {
+          snapshot = snapshot.substring(0, _maxSnapshotChars);
+        }
 
-    String reportedUserName = '';
-    String reportedUserEmail = '';
-    String snapshot = contentSnapshot.trim();
-    try {
-      final authorDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(contentAuthorId)
-          .get();
-      final authorData = authorDoc.data();
-      reportedUserName = authorData?['name'] as String? ?? '';
-      reportedUserEmail = authorData?['email'] as String? ?? '';
-      if (snapshot.isEmpty && contentType == ReportContentType.user) {
-        snapshot = (authorData?['bio'] as String? ?? '').trim();
-      }
-    } catch (_) {
-      // Denormalised fields are best-effort — the report still goes through
-      // without them rather than blocking submission on this lookup.
-    }
-    if (snapshot.length > _maxSnapshotChars) {
-      snapshot = snapshot.substring(0, _maxSnapshotChars);
-    }
-
-    await FirebaseFirestore.instance.collection('reports').add({
-      'contentType': contentType.value,
-      'contentId': contentId,
-      'contentSnapshot': snapshot,
-      'surface': surface,
-      if (roomId != null) 'roomId': roomId,
-      if (gigId != null) 'gigId': gigId,
-      'reporterId': uid,
-      'reportedUserId': contentAuthorId,
-      'reportedUserName': reportedUserName,
-      'reportedUserEmail': reportedUserEmail,
-      'reason': submission.reason,
-      'details': submission.details,
-      'status': 'pending',
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+        await FirebaseFirestore.instance.collection('reports').add({
+          'contentType': contentType.value,
+          'contentId': contentId,
+          'contentSnapshot': snapshot,
+          'surface': surface,
+          if (roomId != null) 'roomId': roomId,
+          if (gigId != null) 'gigId': gigId,
+          'reporterId': uid,
+          'reportedUserId': contentAuthorId,
+          'reportedUserName': reportedUserName,
+          'reportedUserEmail': reportedUserEmail,
+          'reason': reason,
+          'details': details,
+          'status': 'pending',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      },
+    );
   }
 
-  static Future<_ReportSubmission?> _showSheet(
+  // Owns the whole sheet lifecycle (form -> submitting -> confirmed) as one
+  // continuously-open bottom sheet, so the reporter sees the "Report
+  // received" confirmation immediately in place rather than the sheet just
+  // closing — a plain SnackBar wasn't noticeable enough on its own.
+  static Future<void> _showSheet(
     BuildContext context, {
-    required bool alreadyReported,
+    required bool initiallyReported,
+    required Future<void> Function(String reason, String details)? onSubmit,
   }) {
     String? selectedReason;
     final detailsController = TextEditingController();
+    bool submitted = initiallyReported;
+    bool submitting = false;
+    String? submitError;
 
-    return showModalBottomSheet<_ReportSubmission>(
+    return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -124,7 +136,6 @@ class ReportService {
         builder: (ctx, setSheetState) {
           final cardColor = Theme.of(ctx).cardColor;
           final onSurface = Theme.of(ctx).colorScheme.onSurface;
-          final submitted = alreadyReported;
 
           return Padding(
             padding: EdgeInsets.only(
@@ -312,19 +323,44 @@ class ReportService {
                           contentPadding: const EdgeInsets.all(12),
                         ),
                       ),
+                      if (submitError != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          submitError!,
+                          style: const TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 20),
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton(
-                          onPressed: selectedReason == null
+                          onPressed: (selectedReason == null || submitting)
                               ? null
-                              : () => Navigator.pop(
-                                  ctx,
-                                  _ReportSubmission(
-                                    reason: selectedReason!,
-                                    details: detailsController.text.trim(),
-                                  ),
-                                ),
+                              : () async {
+                                  setSheetState(() {
+                                    submitting = true;
+                                    submitError = null;
+                                  });
+                                  try {
+                                    await onSubmit!(
+                                      selectedReason!,
+                                      detailsController.text.trim(),
+                                    );
+                                    setSheetState(() {
+                                      submitting = false;
+                                      submitted = true;
+                                    });
+                                  } catch (e) {
+                                    setSheetState(() {
+                                      submitting = false;
+                                      submitError =
+                                          'Something went wrong. Please try again.';
+                                    });
+                                  }
+                                },
                           style: FilledButton.styleFrom(
                             backgroundColor: Colors.orange.shade700,
                             disabledBackgroundColor: Colors.grey.withValues(
@@ -335,20 +371,29 @@ class ReportService {
                               borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                          child: const Text(
-                            'Submit report',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                          child: submitting
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text(
+                                  'Submit report',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(height: 8),
                       SizedBox(
                         width: double.infinity,
                         child: TextButton(
-                          onPressed: () => Navigator.pop(ctx),
+                          onPressed: submitting ? null : () => Navigator.pop(ctx),
                           child: const Text(
                             'Cancel',
                             style: TextStyle(color: kSub, fontSize: 15),
@@ -365,10 +410,4 @@ class ReportService {
       ),
     ).whenComplete(() => detailsController.dispose());
   }
-}
-
-class _ReportSubmission {
-  final String reason;
-  final String details;
-  const _ReportSubmission({required this.reason, required this.details});
 }

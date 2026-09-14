@@ -57,7 +57,7 @@ class _TermsAndConditionsState extends State<TermsAndConditions> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        title: Text('Terms & Conditions',
+        title: Text('Terms of Service',
             style: TextStyle(color: onSurface, fontSize: 18, fontWeight: FontWeight.bold)),
       ),
       body: SafeArea(
@@ -83,7 +83,7 @@ class _TermsAndConditionsState extends State<TermsAndConditions> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Terms and Conditions',
+                                Text('Terms of Service',
                                     style: TextStyle(
                                         color: Colors.white,
                                         fontSize: 14,

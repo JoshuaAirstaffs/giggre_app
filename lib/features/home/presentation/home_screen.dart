@@ -1618,7 +1618,7 @@ class _GiggreMenu extends StatelessWidget {
       tintAlphaLight: 0.12,
     ),
     _GiggreMenuItem(
-      title: 'Terms & Conditions',
+      title: 'Terms of Service',
       icon: Icons.description_outlined,
       screen: TermsAndConditions(),
       color: _kMenuPurple,
