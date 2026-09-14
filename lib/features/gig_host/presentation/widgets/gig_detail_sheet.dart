@@ -15,6 +15,7 @@ import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/services/gms_availability.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:giggre_app/features/chat/gig_chat_action.dart';
+import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/map_style.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -27,6 +28,8 @@ import '../../../../core/widgets/gig_completion_celebration.dart';
 import '../../../gig_shared/active_gig_theme.dart';
 import '../../../gig_shared/active_gig_step.dart';
 import '../../../gig_shared/active_gig_widgets.dart';
+import '../../../reports/models/report_content_type.dart';
+import '../../../reports/report_service.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
 
 String _generatePaymentCode() {
@@ -730,6 +733,332 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     }
   }
 
+  // Removes one applicant from this gig's `applicants` array without
+  // selecting/claiming a slot for them — used when a host blocks an
+  // applicant from the profile sheet below.
+  Future<void> _declineApplicant(Map<String, dynamic> applicant) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection(_collection)
+          .doc(widget.gigId)
+          .update({'applicants': FieldValue.arrayRemove([applicant])});
+    } catch (e) {
+      debugPrint('[GigDetailSheet] decline applicant error: $e');
+    }
+  }
+
+  Future<void> _showApplicantProfileSheet(Map<String, dynamic> applicant) async {
+    final workerId = applicant['workerId'] as String? ?? '';
+    final workerName = applicant['workerName'] as String? ?? 'Worker';
+    if (workerId.isEmpty) return;
+    final hostUid = FirebaseAuth.instance.currentUser?.uid;
+    final requiredSkills =
+        ((_data?['requiredSkills'] as List<dynamic>? ?? []))
+            .map((s) => s.toString())
+            .toList();
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return FutureBuilder<
+            ({
+              DocumentSnapshot<Map<String, dynamic>> userDoc,
+              List<_CompletedGigMatch> matches,
+            })>(
+          future: () async {
+            final userDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(workerId)
+                .get();
+            final matches = await _fetchSkillMatchedCompletedGigs(
+              workerId,
+              requiredSkills,
+            );
+            return (userDoc: userDoc, matches: matches);
+          }(),
+          builder: (_, snap) {
+            final isDark = Theme.of(ctx).brightness == Brightness.dark;
+            final onSurface = activeGigTextPrimary(isDark);
+            final data = snap.data?.userDoc.data();
+            final matchedGigs = snap.data?.matches ?? const [];
+            final photoUrl = data?['photoUrl'] as String? ?? '';
+            final bio = data?['bio'] as String? ?? '';
+            final skills = (data?['skills'] as List<dynamic>? ?? [])
+                .map((s) => s.toString())
+                .toList();
+            final rating = (data?['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
+            final ratingCount = (data?['ratingCount'] as num?)?.toInt() ?? 0;
+            final isVerified = data?['isVerified'] as String? ?? 'unverified';
+            final memberSince = (data?['createdAt'] as Timestamp?)?.toDate();
+
+            return Container(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                20,
+                20,
+                MediaQuery.of(ctx).viewPadding.bottom + 20,
+              ),
+              decoration: BoxDecoration(
+                color: Theme.of(ctx).cardColor,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
+              ),
+              child: snap.connectionState != ConnectionState.done
+                  ? const SizedBox(
+                      height: 160,
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  : SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Center(
+                            child: Container(
+                              width: 36,
+                              height: 4,
+                              margin: const EdgeInsets.only(bottom: 16),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.withValues(alpha: 0.3),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _ProfileAvatar(
+                                photoUrl: photoUrl,
+                                name: workerName,
+                                size: 52,
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            workerName,
+                                            style: TextStyle(
+                                              color: onSurface,
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        _verificationBadge(ctx, isVerified),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.star_rounded,
+                                          color: kGold,
+                                          size: 16,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${rating.toStringAsFixed(1)} ($ratingCount)',
+                                          style: const TextStyle(
+                                            color: kSub,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    if (memberSince != null) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Member since ${DateFormat('MMMM y').format(memberSince)}',
+                                        style: const TextStyle(
+                                          color: kSub,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.flag_outlined,
+                                  color: Colors.orange,
+                                ),
+                                tooltip: 'Report',
+                                onPressed: () {
+                                  Navigator.pop(ctx);
+                                  ReportService.show(
+                                    context,
+                                    contentType: ReportContentType.user,
+                                    contentId: workerId,
+                                    contentSnapshot: bio,
+                                    contentAuthorId: workerId,
+                                    surface: 'profile',
+                                  );
+                                },
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.block_rounded,
+                                  color: Colors.redAccent,
+                                ),
+                                tooltip: 'Block',
+                                onPressed: () async {
+                                  Navigator.pop(ctx);
+                                  if (hostUid == null) return;
+                                  await FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(hostUid)
+                                      .update({
+                                        'blockedUsers': FieldValue.arrayUnion([
+                                          workerId,
+                                        ]),
+                                      });
+                                  await _declineApplicant(applicant);
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          '$workerName has been blocked and their application removed.',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          if (bio.isNotEmpty) ...[
+                            const SizedBox(height: 16),
+                            Text(
+                              'About',
+                              style: TextStyle(
+                                color: onSurface,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              bio,
+                              style: TextStyle(
+                                color: activeGigTextMuted(isDark),
+                                fontSize: 13,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                          if (skills.isNotEmpty) ...[
+                            const SizedBox(height: 16),
+                            Text(
+                              'Skills',
+                              style: TextStyle(
+                                color: onSurface,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: skills
+                                  .map(
+                                    (s) => Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: kHostAccent.solid.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        borderRadius: BorderRadius.circular(
+                                          20,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        s,
+                                        style: TextStyle(
+                                          color: kHostAccent.solid,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ],
+                          if (matchedGigs.isNotEmpty) ...[
+                            const SizedBox(height: 16),
+                            Text(
+                              'Recent Related Completed Gigs',
+                              style: TextStyle(
+                                color: onSurface,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            ...matchedGigs.map(
+                              (g) => Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.check_circle_rounded,
+                                      color: Color(0xFF10B981),
+                                      size: 14,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        g.title.isNotEmpty
+                                            ? g.title
+                                            : 'Untitled gig',
+                                        style: TextStyle(
+                                          color: activeGigTextMuted(isDark),
+                                          fontSize: 12.5,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      DateFormat('MMM d, y').format(
+                                        g.completedAt,
+                                      ),
+                                      style: const TextStyle(
+                                        color: kSub,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildApplicantsSection(List<Map<String, dynamic>> applicants) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final onSurface = activeGigTextPrimary(isDark);
@@ -802,6 +1131,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     workerName: name,
                     accentColor: kActiveGigSuccessGreen,
                     onSelect: () => _selectWorker(applicant),
+                    onViewProfile: () => _showApplicantProfileSheet(applicant),
                   ),
                 );
               }).toList(),
@@ -2393,6 +2723,110 @@ Future<int> _fetchWorkerCompletedCount(String workerId) async {
   return snaps.fold<int>(0, (total, snap) => total + snap.docs.length);
 }
 
+class _CompletedGigMatch {
+  final String title;
+  final DateTime completedAt;
+  const _CompletedGigMatch({required this.title, required this.completedAt});
+}
+
+// Up to the 3 most recent gigs this worker completed whose required skill(s)
+// overlap with [requiredSkills] — shown on the applicant profile sheet so a
+// host can judge relevant experience at a glance. open_gigs carries a
+// `requiredSkills` list; offered_gigs carries a single `skillRequired`
+// string; quick_gigs has no skill field at all and never matches. Multi-
+// worker gigs (any collection) track this worker's own completion on their
+// `workers/{uid}` subcollection doc instead of the top-level gig doc, so
+// that's queried separately via collectionGroup, same as
+// gig_history_screen.dart's _fetchMultiWorkerCompletions.
+Future<List<_CompletedGigMatch>> _fetchSkillMatchedCompletedGigs(
+  String workerId,
+  List<String> requiredSkills,
+) async {
+  final wanted = requiredSkills
+      .map((s) => s.toLowerCase().trim())
+      .where((s) => s.isNotEmpty)
+      .toSet();
+  if (wanted.isEmpty) return [];
+
+  final db = FirebaseFirestore.instance;
+  bool overlaps(Set<String> gigSkills) => gigSkills.any(wanted.contains);
+  final results = <_CompletedGigMatch>[];
+
+  void collect(
+    QuerySnapshot<Map<String, dynamic>> snap,
+    Set<String> Function(Map<String, dynamic> data) skillsOf,
+  ) {
+    for (final doc in snap.docs) {
+      final data = doc.data();
+      if (!overlaps(skillsOf(data))) continue;
+      final completedAt = (data['completedAt'] as Timestamp?)?.toDate();
+      if (completedAt == null) continue;
+      results.add(
+        _CompletedGigMatch(
+          title: data['title'] as String? ?? '',
+          completedAt: completedAt,
+        ),
+      );
+    }
+  }
+
+  Set<String> openSkills(Map<String, dynamic> d) =>
+      (d['requiredSkills'] as List<dynamic>? ?? [])
+          .map((s) => s.toString().toLowerCase().trim())
+          .toSet();
+  Set<String> offeredSkills(Map<String, dynamic> d) {
+    final s = (d['skillRequired'] as String? ?? '').toLowerCase().trim();
+    return s.isEmpty ? const {} : {s};
+  }
+
+  final snaps = await Future.wait([
+    db
+        .collection('open_gigs')
+        .where('assignedWorkerId', isEqualTo: workerId)
+        .where('status', isEqualTo: 'completed')
+        .get(),
+    db
+        .collection('offered_gigs')
+        .where('workerId', isEqualTo: workerId)
+        .where('status', isEqualTo: 'completed')
+        .get(),
+    db
+        .collectionGroup('workers')
+        .where('workerId', isEqualTo: workerId)
+        .where('status', isEqualTo: 'completed')
+        .get(),
+  ]);
+  collect(snaps[0], openSkills);
+  collect(snaps[1], offeredSkills);
+
+  for (final doc in snaps[2].docs) {
+    final slot = doc.data();
+    final gigId = slot['gigId'] as String?;
+    final gigCollection = slot['gigCollection'] as String?;
+    if (gigId == null || gigCollection == null || gigCollection == 'quick_gigs') {
+      continue;
+    }
+    final gigSnap = await db.collection(gigCollection).doc(gigId).get();
+    final gigData = gigSnap.data();
+    if (gigData == null) continue;
+    final gigSkills = gigCollection == 'open_gigs'
+        ? openSkills(gigData)
+        : offeredSkills(gigData);
+    if (!overlaps(gigSkills)) continue;
+    final completedAt = (slot['completedAt'] as Timestamp?)?.toDate();
+    if (completedAt == null) continue;
+    results.add(
+      _CompletedGigMatch(
+        title: gigData['title'] as String? ?? '',
+        completedAt: completedAt,
+      ),
+    );
+  }
+
+  results.sort((a, b) => b.completedAt.compareTo(a.completedAt));
+  return results.take(3).toList();
+}
+
 // Verified applicants/assigned workers get a plain "Verified" badge. A
 // non-verified one who still got through only did so because
 // general_config/gig_visibility_rules.allowGigAccessForUnverified was on
@@ -2638,6 +3072,7 @@ class _ApplicantTile extends StatefulWidget {
   final String workerName;
   final Color accentColor;
   final VoidCallback onSelect;
+  final VoidCallback onViewProfile;
 
   const _ApplicantTile({
     super.key,
@@ -2645,6 +3080,7 @@ class _ApplicantTile extends StatefulWidget {
     required this.workerName,
     required this.accentColor,
     required this.onSelect,
+    required this.onViewProfile,
   });
 
   @override
@@ -2709,62 +3145,72 @@ class _ApplicantTileState extends State<_ApplicantTile> {
       ),
       child: Row(
         children: [
-          _ProfileAvatar(
-            photoUrl: _photoUrl,
-            name: widget.workerName,
-            size: 38,
-          ),
-          const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.workerName,
-                  style: TextStyle(
-                    color: onSurface,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onViewProfile,
+              child: Row(
+                children: [
+                  _ProfileAvatar(
+                    photoUrl: _photoUrl,
+                    name: widget.workerName,
+                    size: 38,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (!_loading) ...[
-                  const SizedBox(height: 3),
-                  _verificationBadge(context, _isVerified),
-                ],
-                const SizedBox(height: 3),
-                if (_loading)
-                  SizedBox(
-                    height: 11,
-                    width: 11,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: kHostAccent.solid,
-                    ),
-                  )
-                else
-                  RichText(
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    text: TextSpan(
-                      style: TextStyle(
-                        color: activeGigTextMuted(isDark),
-                        fontSize: 10.5,
-                      ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const TextSpan(
-                          text: '★ ',
-                          style: TextStyle(color: kGold),
+                        Text(
+                          widget.workerName,
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        TextSpan(
-                          text:
-                              '${_rating.toStringAsFixed(1)} ($_ratingCount) · $_completedGigs gigs done',
-                        ),
+                        if (!_loading) ...[
+                          const SizedBox(height: 3),
+                          _verificationBadge(context, _isVerified),
+                        ],
+                        const SizedBox(height: 3),
+                        if (_loading)
+                          SizedBox(
+                            height: 11,
+                            width: 11,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: kHostAccent.solid,
+                            ),
+                          )
+                        else
+                          RichText(
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            text: TextSpan(
+                              style: TextStyle(
+                                color: activeGigTextMuted(isDark),
+                                fontSize: 10.5,
+                              ),
+                              children: [
+                                const TextSpan(
+                                  text: '★ ',
+                                  style: TextStyle(color: kGold),
+                                ),
+                                TextSpan(
+                                  text:
+                                      '${_rating.toStringAsFixed(1)} ($_ratingCount) · $_completedGigs gigs done',
+                                ),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                   ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 8),

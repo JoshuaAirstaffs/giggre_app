@@ -5,7 +5,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:giggre_app/core/services/content_filter_service.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
+import 'package:giggre_app/core/widgets/content_rejection_modal.dart';
+import 'package:giggre_app/features/reports/models/report_content_type.dart';
+import 'package:giggre_app/features/reports/report_service.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:provider/provider.dart';
 
@@ -14,6 +18,7 @@ class _Msg {
   final String? id; // null = optimistic (not yet committed)
   final String text;
   final bool isMe;
+  final String senderId;
   final bool isSupport;
   final bool isAutoReply;
   final bool hasSeenBySupport;
@@ -25,6 +30,7 @@ class _Msg {
     this.id,
     required this.text,
     required this.isMe,
+    this.senderId = '',
     this.isSupport = false,
     this.isAutoReply = false,
     this.hasSeenBySupport = false,
@@ -43,6 +49,7 @@ class _Msg {
     id: id ?? this.id,
     text: text,
     isMe: isMe,
+    senderId: senderId,
     isSupport: isSupport,
     isAutoReply: isAutoReply,
     hasSeenBySupport: hasSeenBySupport ?? this.hasSeenBySupport,
@@ -418,6 +425,11 @@ class _ChatState extends State<Chat> {
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
 
+    if (ContentFilterService.instance.check(text)) {
+      showContentRejectionModal(context);
+      return;
+    }
+
     _msgController.clear();
     final uid = _uid;
     final name = context.read<CurrentUserProvider>().currentName ?? '';
@@ -426,6 +438,7 @@ class _ChatState extends State<Chat> {
     final optimistic = _Msg(
       text: text,
       isMe: true,
+      senderId: uid ?? '',
       time: DateTime.now(),
       pending: true,
     );
@@ -591,6 +604,7 @@ class _ChatState extends State<Chat> {
       id: doc.id,
       text: data['text'] as String? ?? '',
       isMe: data['senderId'] == _uid,
+      senderId: data['senderId'] as String? ?? '',
       isSupport: data['isSupport'] as bool? ?? false,
       isAutoReply: data['isAutoReply'] as bool? ?? false,
       hasSeenBySupport: data['hasSeenByAdmin'] as bool? ?? false,
@@ -780,235 +794,57 @@ class _ChatState extends State<Chat> {
     }
   }
 
-  static const _reportReasons = [
-    'Harassment or abuse',
-    'Spam',
-    'Inappropriate content',
-    'Scam or fraud',
-    'Other',
-  ];
-
   Future<void> _reportUser() async {
-    final uid = _uid;
     final peerUid = widget.gigChatParams?.peerUid;
-    if (uid == null || peerUid == null || peerUid.isEmpty) return;
-    final peerName = widget.gigChatParams?.peerName ?? 'this user';
+    if (peerUid == null || peerUid.isEmpty) return;
+    await ReportService.show(
+      context,
+      contentType: ReportContentType.user,
+      contentId: peerUid,
+      contentSnapshot: '',
+      contentAuthorId: peerUid,
+      surface: 'chat',
+    );
+  }
 
-    String? selectedReason;
-    final detailsController = TextEditingController();
+  Future<void> _reportMessage(_Msg msg) async {
+    if (msg.id == null || msg.senderId.isEmpty) return;
+    await ReportService.show(
+      context,
+      contentType: ReportContentType.message,
+      contentId: msg.id!,
+      contentSnapshot: msg.text,
+      contentAuthorId: msg.senderId,
+      surface: 'chat',
+      roomId: widget.roomId,
+    );
+  }
 
-    final submitted = await showModalBottomSheet<bool>(
+  Future<void> _showMessageActions(_Msg msg) async {
+    final selected = await showModalBottomSheet<String>(
       context: context,
-      isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) {
-          final cardColor = Theme.of(ctx).cardColor;
-          final onSurface = Theme.of(ctx).colorScheme.onSurface;
-          return Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom,
-            ),
-            child: Container(
-              width: double.infinity,
-              padding: EdgeInsets.fromLTRB(
-                24,
-                12,
-                24,
-                MediaQuery.of(ctx).viewPadding.bottom + 24,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(ctx).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.flag_rounded, color: Colors.orange),
+                title: const Text('Report message'),
+                onTap: () => Navigator.pop(ctx, 'report'),
               ),
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 36,
-                        height: 4,
-                        margin: const EdgeInsets.only(bottom: 20),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.withValues(alpha: 0.3),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withValues(alpha: 0.12),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.flag_rounded,
-                            color: Colors.orange,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'Report $peerName',
-                            style: TextStyle(
-                              color: onSurface,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 17,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Tell us what\'s wrong. This will also block them immediately — our team will review the conversation separately.',
-                      style: TextStyle(color: kSub, fontSize: 13, height: 1.4),
-                    ),
-                    const SizedBox(height: 16),
-                    for (final reason in _reportReasons)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () =>
-                              setSheetState(() => selectedReason = reason),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
-                            ),
-                            decoration: BoxDecoration(
-                              color: selectedReason == reason
-                                  ? kBlue.withValues(alpha: 0.1)
-                                  : Colors.grey.withValues(alpha: 0.06),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: selectedReason == reason
-                                    ? kBlue
-                                    : Colors.transparent,
-                                width: 1.2,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  selectedReason == reason
-                                      ? Icons.check_circle_rounded
-                                      : Icons.circle_outlined,
-                                  size: 18,
-                                  color: selectedReason == reason
-                                      ? kBlue
-                                      : kSub,
-                                ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  reason,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: onSurface,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: detailsController,
-                      maxLines: 3,
-                      style: TextStyle(fontSize: 14, color: onSurface),
-                      decoration: InputDecoration(
-                        hintText: 'Additional details (optional)',
-                        hintStyle: const TextStyle(color: kSub, fontSize: 13),
-                        filled: true,
-                        fillColor: Colors.grey.withValues(alpha: 0.06),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.all(12),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: selectedReason == null
-                            ? null
-                            : () => Navigator.pop(ctx, true),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.orange.shade700,
-                          disabledBackgroundColor: Colors.grey.withValues(
-                            alpha: 0.3,
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        child: const Text(
-                          'Report & block',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text(
-                          'Cancel',
-                          style: TextStyle(color: kSub, fontSize: 15),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
+            ],
+          ),
+        ),
       ),
     );
-    final details = detailsController.text.trim();
-    detailsController.dispose();
-    if (submitted != true || selectedReason == null || !mounted) return;
-
-    await FirebaseFirestore.instance.collection('reports').add({
-      'reporterId': uid,
-      'reportedUserId': peerUid,
-      'reportedUserName': widget.gigChatParams?.peerName ?? '',
-      'roomId': widget.roomId,
-      'reason': selectedReason,
-      'details': details,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    // Reporting someone blocks them immediately — no need to wait on admin
-    // review for that part. Same write _toggleBlockUser does.
-    await FirebaseFirestore.instance.collection('users').doc(uid).update({
-      'blockedUsers': FieldValue.arrayUnion([peerUid]),
-    });
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Report submitted and $peerName has been blocked.'),
-        ),
-      );
-    }
+    if (selected == 'report') _reportMessage(msg);
   }
 
   String _formatTime(DateTime dt) {
@@ -1178,12 +1014,23 @@ class _ChatState extends State<Chat> {
                         );
                       }
                       final msg = _msgs[_isLoadingMore ? i - 1 : i];
-                      return _MessageBubble(
-                        msg: msg,
-                        isDark: isDark,
-                        timeStr: msg.time != null ? _formatTime(msg.time!) : '',
-                        isGigChat: _isGigChat,
-                        peerPhotoUrl: _peerPhotoUrl,
+                      final canReport =
+                          !msg.isMe &&
+                          !msg.isSupport &&
+                          !msg.isAutoReply &&
+                          msg.id != null &&
+                          msg.senderId.isNotEmpty;
+                      return GestureDetector(
+                        onLongPress: canReport
+                            ? () => _showMessageActions(msg)
+                            : null,
+                        child: _MessageBubble(
+                          msg: msg,
+                          isDark: isDark,
+                          timeStr: msg.time != null ? _formatTime(msg.time!) : '',
+                          isGigChat: _isGigChat,
+                          peerPhotoUrl: _peerPhotoUrl,
+                        ),
                       );
                     },
                   ),

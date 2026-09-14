@@ -69,6 +69,7 @@ class _SavedScreenState extends State<SavedScreen> {
   String _isVerified = '';
   List<String> _workerSkills = [];
   DateTime? _suspendedUntil;
+  Set<String> _blockedHostIds = {};
 
   @override
   void initState() {
@@ -102,6 +103,9 @@ class _SavedScreenState extends State<SavedScreen> {
             _isVerified = data['isVerified'] as String? ?? '';
             _workerSkills = skillsXP.keys.toList();
             _suspendedUntil = suspendedUntil;
+            _blockedHostIds = (data['blockedUsers'] as List<dynamic>? ?? [])
+                .map((e) => e.toString())
+                .toSet();
           });
         });
   }
@@ -403,11 +407,22 @@ class _SavedScreenState extends State<SavedScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 final gigsById = gigsSnap.data!;
+                // A blocked host's bookmarked gig should disappear here too,
+                // not just from the main feed — bookmarks with no gig data
+                // ("No longer available" below) aren't affected since there's
+                // no hostId left to check.
+                final visibleDocs = docs
+                    .where(
+                      (d) => !_blockedHostIds.contains(
+                        gigsById[d.id]?['hostId'],
+                      ),
+                    )
+                    .toList();
                 return ListView.builder(
                   padding: const EdgeInsets.all(16),
-                  itemCount: docs.length,
+                  itemCount: visibleDocs.length,
                   itemBuilder: (context, i) {
-                    final gigId = docs[i].id;
+                    final gigId = visibleDocs[i].id;
                     final data = gigsById[gigId];
                     if (data == null) {
                       return Card(

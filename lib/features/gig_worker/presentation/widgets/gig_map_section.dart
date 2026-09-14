@@ -20,6 +20,8 @@ import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/worker_active_gig.dart';
 import '../../../../core/widgets/account_not_verified_modal.dart';
+import '../../../reports/models/report_content_type.dart';
+import '../../../reports/report_service.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -742,6 +744,33 @@ void showFullGigDetailSheet(
                             },
                           ),
                         ),
+                      if (gig.hostId != uid)
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(
+                            Icons.flag_outlined,
+                            color: kSub,
+                            size: 20,
+                          ),
+                          // Close this sheet before opening the report sheet
+                          // instead of stacking one modal bottom sheet on
+                          // top of another — nesting them crashes the
+                          // framework on dismiss (InheritedElement
+                          // _dependents assertion).
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            ReportService.show(
+                              context,
+                              contentType: ReportContentType.gig,
+                              contentId: gig.id,
+                              contentSnapshot: gig.title,
+                              contentAuthorId: gig.hostId,
+                              surface: 'gig_detail',
+                              gigId: gig.id,
+                            );
+                          },
+                        ),
                     ],
                   ),
                 ],
@@ -1356,6 +1385,28 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   late StreamSubscription _openSub, _offeredSub;
 
+  // Hosts this worker has blocked — filtered out of _unfilteredGigs below so
+  // a blocked host's listings disappear from the feed instantly on block
+  // (and reappear instantly on unblock), without waiting for a new gig
+  // snapshot to arrive.
+  Set<String> _blockedHostIds = {};
+  StreamSubscription? _blockedUsersSub;
+
+  void _startBlockedUsersSub() {
+    if (widget.uid.isEmpty) return;
+    _blockedUsersSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.uid)
+        .snapshots()
+        .listen((doc) {
+          final ids = (doc.data()?['blockedUsers'] as List<dynamic>? ?? [])
+              .map((e) => e.toString())
+              .toSet();
+          if (!mounted) return;
+          setState(() => _blockedHostIds = ids);
+        }, onError: (e) => debugPrint('[GigMap] blockedUsers stream error: $e'));
+  }
+
   // ── Country matching (only show gigs in the worker's own country) ─────────
   String? _myCountryCode;
   final Map<String, String> _countryCodeCache = {};
@@ -1519,6 +1570,7 @@ class _GigMapSectionState extends State<GigMapSection> {
     final db = FirebaseFirestore.instance;
     _startOpenSub(db);
     _startOfferedSub(db);
+    _startBlockedUsersSub();
     _initMap();
     widget.externalFocusRequest?.addListener(_handleExternalFocusRequest);
     // Home may already be mounted (IndexedStack keeps tabs alive) when the
@@ -2232,11 +2284,17 @@ class _GigMapSectionState extends State<GigMapSection> {
     _osmController.dispose();
     _openSub.cancel();
     _offeredSub.cancel();
+    _blockedUsersSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
-  List<GigMarkerData> get _unfilteredGigs => [..._openGigs, ..._offeredGigs];
+  List<GigMarkerData> get _visibleOfferedGigs =>
+      _offeredGigs.where((g) => !_blockedHostIds.contains(g.hostId)).toList();
+
+  List<GigMarkerData> get _unfilteredGigs => [..._openGigs, ..._offeredGigs]
+      .where((g) => !_blockedHostIds.contains(g.hostId))
+      .toList();
 
   bool _matchesSkill(String skill, String other) =>
       skill.toLowerCase().trim() == other.toLowerCase().trim();
@@ -3210,7 +3268,7 @@ class _GigMapSectionState extends State<GigMapSection> {
 
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final total = _allGigs.length;
-    final offeredCount = _offeredGigs.length;
+    final offeredCount = _visibleOfferedGigs.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3718,7 +3776,7 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   Widget _buildFullScreenLayout(BuildContext ctx) {
     final total = _allGigs.length;
-    final offeredCount = _offeredGigs.length;
+    final offeredCount = _visibleOfferedGigs.length;
     final topPad = MediaQuery.of(ctx).padding.top;
     final bottomPad = MediaQuery.of(ctx).padding.bottom;
 

@@ -9,7 +9,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
+import 'package:giggre_app/core/services/content_filter_service.dart';
 import 'package:giggre_app/core/services/earnings_service.dart';
+import 'package:giggre_app/core/widgets/content_rejection_modal.dart';
 import 'package:giggre_app/services/delete_acc_service.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
@@ -636,6 +638,15 @@ class _ProfileTabState extends State<ProfileTab> {
                               ? null
                               : () async {
                                   if (!formKey.currentState!.validate()) {
+                                    return;
+                                  }
+                                  if (ContentFilterService.instance.check(
+                                        nameCtrl.text,
+                                      ) ||
+                                      ContentFilterService.instance.check(
+                                        bioCtrl.text,
+                                      )) {
+                                    showContentRejectionModal(ctx);
                                     return;
                                   }
                                   setModal(() => saving = true);

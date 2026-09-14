@@ -13,7 +13,9 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:http/http.dart' as http;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/services/content_filter_service.dart';
 import '../../../core/services/gms_availability.dart';
+import '../../../core/widgets/content_rejection_modal.dart';
 import '../../../core/utils/country_check.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -255,6 +257,12 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
+    if (ContentFilterService.instance.check(_titleCtrl.text) ||
+        ContentFilterService.instance.check(_descCtrl.text)) {
+      showContentRejectionModal(context);
+      return;
+    }
+
     final hasLocation =
         _useMapLocation ? _mapPosition != null : _gpsPosition != null;
     if (!hasLocation) {
@@ -431,6 +439,11 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) {
       _showSnack('Enter a title before saving as template.');
+      return;
+    }
+    if (ContentFilterService.instance.check(title) ||
+        ContentFilterService.instance.check(_descCtrl.text)) {
+      showContentRejectionModal(context);
       return;
     }
     final budgetVal = double.tryParse(_budgetCtrl.text.trim()) ?? 0;

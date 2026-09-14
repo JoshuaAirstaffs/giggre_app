@@ -14,6 +14,7 @@ import {
   sendCancelIncomingCallPush,
   broadcastToAllUsers,
 } from "./push";
+import { containsBlockedTerm, logAutoModeration } from "./wordFilter";
 
 admin.initializeApp();
 
@@ -1292,5 +1293,114 @@ export const onIncomingCall = onDocumentUpdated(
     if (statusBefore === "ringing" && statusAfter !== "ringing") {
       await sendCancelIncomingCallPush(event.params.userId);
     }
+  }
+);
+
+// ── Server-side word filter backstop ────────────────────────────────────────
+// ContentFilterService (lib/core/services/content_filter_service.dart)
+// already blocks these same submissions client-side before they round-trip
+// to Firestore — these triggers are the backstop for a modified client or a
+// direct API call that skips it. See wordFilter.ts for the shared matcher,
+// which mirrors the client's whole-word/phrase regex exactly.
+
+function makeGigWordFilterTrigger(collection: string) {
+  return onDocumentCreated(`${collection}/{gigId}`, async (event) => {
+    const gig = event.data?.data();
+    if (!gig) return;
+    const title = gig.title as string | undefined;
+    const description = gig.description as string | undefined;
+    if (!(await containsBlockedTerm(title, description))) return;
+
+    await event.data?.ref.delete();
+    await logAutoModeration(collection, event.params.gigId, "deleted", [
+      "title",
+      "description",
+    ]);
+  });
+}
+
+export const onQuickGigWordFilter = makeGigWordFilterTrigger("quick_gigs");
+export const onOpenGigWordFilter = makeGigWordFilterTrigger("open_gigs");
+export const onOfferedGigWordFilter = makeGigWordFilterTrigger("offered_gigs");
+
+// Chat messages are redacted in place (not deleted) — deleting would leave a
+// confusing gap in an otherwise-continuous conversation the other
+// participant may already be reading.
+export const onChatMessageWordFilter = onDocumentCreated(
+  "chat_rooms/{roomId}/messages/{messageId}",
+  async (event) => {
+    const msg = event.data?.data();
+    if (!msg) return;
+    const text = msg.text as string | undefined;
+    if (!(await containsBlockedTerm(text))) return;
+
+    await event.data?.ref.update({
+      text: "[Message removed for violating community guidelines]",
+    });
+    await logAutoModeration(
+      "chat_rooms/*/messages",
+      event.params.messageId,
+      "redacted",
+      ["text"]
+    );
+  }
+);
+
+// Profile edits are reverted to their previous value rather than deleted —
+// there's no sane "delete" for a user document. Only re-checks name/bio
+// when one of them actually changed, so this stays a no-op on the vast
+// majority of user-doc updates (rating, balance, tokens, etc.).
+export const onUserProfileWordFilter = onDocumentUpdated(
+  "users/{uid}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+
+    const nameChanged = before.name !== after.name;
+    const bioChanged = before.bio !== after.bio;
+    if (!nameChanged && !bioChanged) return;
+
+    const checkName = nameChanged
+      ? (after.name as string | undefined)
+      : undefined;
+    const checkBio = bioChanged ? (after.bio as string | undefined) : undefined;
+    if (!(await containsBlockedTerm(checkName, checkBio))) return;
+
+    const revert: Record<string, unknown> = {};
+    const matchedFields: string[] = [];
+    if (nameChanged) {
+      revert.name = before.name ?? "";
+      matchedFields.push("name");
+    }
+    if (bioChanged) {
+      revert.bio = before.bio ?? "";
+      matchedFields.push("bio");
+    }
+    await event.data?.after.ref.update(revert);
+    await logAutoModeration("users", event.params.uid, "redacted", matchedFields);
+  }
+);
+
+// Support tickets are deleted outright, same as gigs — brand new, nothing
+// else references them yet at create time. A mirrored first chat message
+// (contact_us.dart's authenticated branch) lives in chat_rooms/*/messages
+// and is independently caught by onChatMessageWordFilter above.
+export const onSupportTicketWordFilter = onDocumentCreated(
+  "support_tickets/{ticketId}",
+  async (event) => {
+    const ticket = event.data?.data();
+    if (!ticket) return;
+    const subject = ticket.subject as string | undefined;
+    const message = ticket.message as string | undefined;
+    if (!(await containsBlockedTerm(subject, message))) return;
+
+    await event.data?.ref.delete();
+    await logAutoModeration(
+      "support_tickets",
+      event.params.ticketId,
+      "deleted",
+      ["subject", "message"]
+    );
   }
 );

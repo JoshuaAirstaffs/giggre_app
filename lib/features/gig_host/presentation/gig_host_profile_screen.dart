@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:giggre_app/core/services/content_filter_service.dart';
+import 'package:giggre_app/core/widgets/content_rejection_modal.dart';
 import 'package:giggre_app/services/delete_acc_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
+import 'package:giggre_app/features/home/presentation/blocked_users_screen.dart';
 import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
@@ -529,11 +532,20 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             ? null
                             : () async {
                                 if (!formKey.currentState!.validate()) return;
+                                final messenger = ScaffoldMessenger.of(context);
+                                if (ContentFilterService.instance.check(
+                                      nameCtrl.text,
+                                    ) ||
+                                    ContentFilterService.instance.check(
+                                      bioCtrl.text,
+                                    )) {
+                                  showContentRejectionModal(context);
+                                  return;
+                                }
                                 setModal(() => saving = true);
                                 final uid =
                                     FirebaseAuth.instance.currentUser?.uid;
                                 if (uid == null) return;
-                                final messenger = ScaffoldMessenger.of(context);
                                 try {
                                   String? newPhotoUrl;
                                   if (pickedImage != null) {
@@ -1231,6 +1243,18 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                 activeThumbColor: kAmber,
                                 onChanged: (value) =>
                                     themeProvider.setDark(value),
+                              ),
+                            ),
+                          ),
+                          _Divider(isDark: isDark),
+                          _MenuRow(
+                            icon: Icons.block_rounded,
+                            iconColor: kSub,
+                            label: 'Blocked Users',
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const BlockedUsersScreen(),
                               ),
                             ),
                           ),

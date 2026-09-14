@@ -177,11 +177,16 @@ service cloud.firestore {
     }
 
     // ─── User Reports ──────────────────────────────────────────
+    // Effectively create-only for regular users: the one exception is
+    // reading back a report THEY filed (never another user's), which
+    // ReportService needs to detect an already-pending duplicate report on
+    // the same contentId before showing the form again. No one can browse
+    // other users' reports, and only admins can update/delete.
     match /reports/{reportId} {
       allow create: if isAuth() &&
         request.resource.data.reporterId == request.auth.uid;
-      allow read: if isAuth() &&
-        (resource.data.reporterId == request.auth.uid || isAdmin());
+      allow read: if isAdmin() ||
+        (isAuth() && resource.data.reporterId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 

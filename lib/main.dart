@@ -9,6 +9,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:giggre_app/core/services/content_filter_service.dart';
 import 'package:giggre_app/core/services/push_notification_service.dart';
 import 'package:giggre_app/core/services/sign_out_service.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
@@ -95,6 +96,7 @@ void main() async {
     // bare push payload. See firebaseMessagingBackgroundHandler's own doc.
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     await CurrentUserProvider.initNotifications();
+    await ContentFilterService.instance.initialize();
     FilePicker.platform;
     CurrentUserProvider.navigatorKey = navigatorKey;
   } catch (e) {

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../services/delete_acc_service.dart';
+import '../../home/presentation/blocked_users_screen.dart';
 import 'widgets/worker_widgets.dart';
 
 class WorkerSettingsScreen extends StatefulWidget {
@@ -196,6 +197,18 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
                 const SectionLabel('ACCOUNT'),
                 const SizedBox(height: 8),
                 MenuCard(children: [
+                  MenuRow(
+                    icon: Icons.block_rounded,
+                    iconColor: kSub,
+                    label: 'Blocked Users',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const BlockedUsersScreen(),
+                      ),
+                    ),
+                  ),
+                  const WorkerDivider(),
                   MenuRow(
                     icon: Icons.delete_outline_rounded,
                     iconColor: Colors.redAccent,

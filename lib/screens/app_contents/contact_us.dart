@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:giggre_app/core/services/content_filter_service.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
@@ -1094,6 +1095,17 @@ class _FormsState extends State<_Forms> {
         context,
         title: 'Incomplete Fields',
         message: 'Please fill in all required fields before submitting.',
+        isSuccess: false,
+      );
+      return;
+    }
+
+    if (ContentFilterService.instance.check(subject) ||
+        ContentFilterService.instance.check(message)) {
+      _showModal(
+        context,
+        title: 'Submission Failed',
+        message: ContentFilterService.rejectionMessage,
         isSuccess: false,
       );
       return;
