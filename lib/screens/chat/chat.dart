@@ -633,136 +633,263 @@ class _ChatState extends State<Chat> {
   }
 
   // ── Block / report ──────────────────────────────────────────────────────────
-  Future<bool?> _showBlockConfirmSheet({
+  // Owns the whole sheet lifecycle (confirm -> submitting -> done) as one
+  // continuously-open bottom sheet — same pattern as ReportService and
+  // showUserProfileSheet, so block/unblock gets the same in-place
+  // confirmation instead of a SnackBar after the sheet closes.
+  Future<void> _showBlockConfirmSheet({
     required bool block,
     required String peerName,
+    required String uid,
+    required String peerUid,
   }) {
     final accent = block ? Colors.redAccent : kBlue;
-    return showModalBottomSheet<bool>(
+    bool submitting = false;
+    bool done = false;
+
+    return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final cardColor = Theme.of(ctx).cardColor;
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
-          ),
-          child: Container(
-            width: double.infinity,
-            padding: EdgeInsets.fromLTRB(
-              24,
-              12,
-              24,
-              MediaQuery.of(ctx).viewPadding.bottom + 24,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final cardColor = Theme.of(ctx).cardColor;
+          final onSurface = Theme.of(ctx).colorScheme.onSurface;
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom,
             ),
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(24),
+            child: Container(
+              width: double.infinity,
+              padding: EdgeInsets.fromLTRB(
+                24,
+                12,
+                24,
+                MediaQuery.of(ctx).viewPadding.bottom + 24,
               ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 36,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 20),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
                 ),
-                Stack(
-                  alignment: Alignment.bottomRight,
-                  children: [
-                    CircleAvatar(
-                      radius: 36,
-                      backgroundColor: accent.withValues(alpha: 0.12),
-                      backgroundImage:
-                          (_peerPhotoUrl != null && _peerPhotoUrl!.isNotEmpty)
-                          ? CachedNetworkImageProvider(_peerPhotoUrl!)
-                          : null,
-                      child: (_peerPhotoUrl == null || _peerPhotoUrl!.isEmpty)
-                          ? Icon(Icons.person_rounded, color: accent, size: 34)
-                          : null,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 20),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(2),
                     ),
-                    Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: accent,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: cardColor, width: 2.5),
+                  ),
+                  if (done) ...[
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            block
+                                ? Icons.block_rounded
+                                : Icons.lock_open_rounded,
+                            color: accent,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            block ? 'User blocked' : 'User unblocked',
+                            style: TextStyle(
+                              color: onSurface,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 17,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      block
+                          ? '$peerName has been blocked. You won\'t see their content anymore, and they can\'t message you.'
+                          : '$peerName has been unblocked. You can message each other again.',
+                      style: const TextStyle(
+                        color: kSub,
+                        fontSize: 13,
+                        height: 1.4,
                       ),
-                      child: Icon(
-                        block ? Icons.block_rounded : Icons.lock_open_rounded,
-                        color: Colors.white,
-                        size: 14,
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text(
+                          'Done',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ] else ...[
+                    Stack(
+                      alignment: Alignment.bottomRight,
+                      children: [
+                        CircleAvatar(
+                          radius: 36,
+                          backgroundColor: accent.withValues(alpha: 0.12),
+                          backgroundImage:
+                              (_peerPhotoUrl != null &&
+                                  _peerPhotoUrl!.isNotEmpty)
+                              ? CachedNetworkImageProvider(_peerPhotoUrl!)
+                              : null,
+                          child:
+                              (_peerPhotoUrl == null || _peerPhotoUrl!.isEmpty)
+                              ? Icon(
+                                  Icons.person_rounded,
+                                  color: accent,
+                                  size: 34,
+                                )
+                              : null,
+                        ),
+                        Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: accent,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: cardColor, width: 2.5),
+                          ),
+                          child: Icon(
+                            block
+                                ? Icons.block_rounded
+                                : Icons.lock_open_rounded,
+                            color: Colors.white,
+                            size: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      block ? 'Block $peerName?' : 'Unblock $peerName?',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: onSurface,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      block
+                          ? 'Neither of you will be able to send messages to each other. You can undo this anytime.'
+                          : 'You\'ll be able to message each other again.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: kSub,
+                        height: 1.5,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: submitting
+                            ? null
+                            : () async {
+                                setSheetState(() => submitting = true);
+                                try {
+                                  await FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(uid)
+                                      .update({
+                                        'blockedUsers': block
+                                            ? FieldValue.arrayUnion([peerUid])
+                                            : FieldValue.arrayRemove([
+                                                peerUid,
+                                              ]),
+                                      });
+                                  setSheetState(() {
+                                    submitting = false;
+                                    done = true;
+                                  });
+                                } catch (e) {
+                                  setSheetState(() => submitting = false);
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(
+                                      context,
+                                    ).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Something went wrong. Please try again.',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: accent,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: submitting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(
+                                block ? 'Block user' : 'Unblock user',
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: submitting
+                            ? null
+                            : () => Navigator.pop(ctx),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(color: kSub, fontSize: 15),
+                        ),
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  block ? 'Block $peerName?' : 'Unblock $peerName?',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Theme.of(ctx).colorScheme.onSurface,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 18,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  block
-                      ? 'Neither of you will be able to send messages to each other. You can undo this anytime.'
-                      : 'You\'ll be able to message each other again.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: kSub,
-                    height: 1.5,
-                    fontSize: 13.5,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: accent,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: Text(
-                      block ? 'Block user' : 'Unblock user',
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text(
-                      'Cancel',
-                      style: TextStyle(color: kSub, fontSize: 15),
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
@@ -772,26 +899,12 @@ class _ChatState extends State<Chat> {
     if (uid == null || peerUid == null || peerUid.isEmpty) return;
     final peerName = widget.gigChatParams?.peerName ?? 'this user';
 
-    final block = !_isBlocked;
-    final confirmed = await _showBlockConfirmSheet(
-      block: block,
+    await _showBlockConfirmSheet(
+      block: !_isBlocked,
       peerName: peerName,
+      uid: uid,
+      peerUid: peerUid,
     );
-    if (confirmed != true || !mounted) return;
-
-    await FirebaseFirestore.instance.collection('users').doc(uid).update({
-      'blockedUsers': block
-          ? FieldValue.arrayUnion([peerUid])
-          : FieldValue.arrayRemove([peerUid]),
-    });
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(block ? '$peerName blocked.' : '$peerName unblocked.'),
-        ),
-      );
-    }
   }
 
   Future<void> _reportUser() async {

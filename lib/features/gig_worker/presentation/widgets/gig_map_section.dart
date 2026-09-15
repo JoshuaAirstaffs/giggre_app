@@ -20,6 +20,7 @@ import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/worker_active_gig.dart';
 import '../../../../core/widgets/account_not_verified_modal.dart';
+import '../../../gig_shared/user_profile_sheet.dart';
 import '../../../reports/models/report_content_type.dart';
 import '../../../reports/report_service.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
@@ -855,6 +856,23 @@ void showFullGigDetailSheet(
                         ),
                       ],
                     ),
+                  ),
+                  TextButton(
+                    // Close this sheet before opening the profile sheet
+                    // instead of stacking one modal bottom sheet on top of
+                    // another — nesting them here caused every open sheet
+                    // to disappear together once the profile sheet's Block
+                    // action triggered a rebuild.
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      showUserProfileSheet(
+                        context,
+                        uid: gig.hostId,
+                        fallbackName: gig.hostName,
+                        surface: 'gig_detail',
+                      );
+                    },
+                    child: const Text('View'),
                   ),
                 ],
               ),
