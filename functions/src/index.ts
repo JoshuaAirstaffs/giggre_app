@@ -15,23 +15,20 @@ import {
   broadcastToAllUsers,
 } from "./push";
 import { containsBlockedTerm, logAutoModeration } from "./wordFilter";
+import { firestoreTriggerRegion, isDevProject } from "./region";
 
 admin.initializeApp();
 
-// Matches this project's Firestore database location (asia-east2) so
-// triggers don't take a cross-region network hop to reach it.
-setGlobalOptions({ region: "asia-east2", maxInstances: 10 });
+// Resolved per project: dev's database is asia-east2 and prod's is nam5, and
+// a Firestore document trigger must sit in a region compatible with the
+// database it watches. This was hardcoded to asia-east2, which is correct for
+// dev and silently wrong for prod — the 20 document triggers below inherit it.
+setGlobalOptions({ region: firestoreTriggerRegion(), maxInstances: 10 });
 
-// Every user doc in the dev Firebase project (simpleproject-8ff7a) belongs to
-// a closed-testing tester by definition, so tester-broadcast tooling below
-// needs no per-user filtering — it just no-ops outside that project.
-const DEV_PROJECT_ID = "simpleproject-8ff7a";
-
-function isDevProject(): boolean {
-  const currentProject =
-    process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT;
-  return currentProject === DEV_PROJECT_ID;
-}
+// Every user doc in the dev Firebase project belongs to a closed-testing
+// tester by definition, so tester-broadcast tooling below needs no per-user
+// filtering — it just no-ops outside that project. isDevProject lives in
+// ./region alongside the trigger-region logic that shares its project check.
 
 // Shared secret checked against the x-release-secret header on
 // publishVersionAnnouncement, so only trusted deploy tooling can trigger a
@@ -1404,3 +1401,14 @@ export const onSupportTicketWordFilter = onDocumentCreated(
     );
   }
 );
+
+// ── Ratings ─────────────────────────────────────────────────────────────────
+// Aggregation, blind reveal, and comment moderation for the append-only
+// `ratings` collection. Defined in their own module; each function pins its
+// own region there rather than inheriting setGlobalOptions above, which this
+// module's body runs too late to provide. See functions/src/ratings.ts.
+export {
+  onRatingCreated,
+  revealStaleRatings,
+  onRatingWordFilter,
+} from "./ratings";

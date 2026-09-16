@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/models/rating_summary.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
 
@@ -11,8 +12,7 @@ class WorkerHeader extends StatelessWidget {
   final String email;
   final String phone;
   final String photoUrl;
-  final double rating;
-  final int ratingCount;
+  final RatingSummary rating;
   final String memberSince;
   final bool isDark;
   final VoidCallback onEdit;
@@ -30,7 +30,6 @@ class WorkerHeader extends StatelessWidget {
     required this.phone,
     required this.photoUrl,
     required this.rating,
-    required this.ratingCount,
     required this.memberSince,
     required this.isDark,
     required this.onEdit,

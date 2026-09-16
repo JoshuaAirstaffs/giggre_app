@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/models/rating_summary.dart';
+import '../../../core/services/rating_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import 'package:provider/provider.dart';
@@ -76,8 +78,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   String _photoUrl = '';
   List<String> _skills = [];
   Set<String> _bookmarkedGigIds = {};
-  double _ratingAsWorker = 5.0;
-  int _ratingCount = 0;
+  RatingSummary _rating = RatingSummary.empty;
   String _memberSince = '';
 
   // Toggles
@@ -295,9 +296,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             _photoUrl = data['photoUrl'] as String? ?? '';
             final skillsXP = data['skillsXP'] as Map<String, dynamic>? ?? {};
             _skills = skillsXP.keys.toList();
-            _ratingAsWorker =
-                (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
-            _ratingCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
+            _rating = RatingSummary.fromUserData(data, RateeRole.worker);
             _availableForGigs = data['availableForGigs'] as bool? ?? false;
             _autoAccept = data['autoAccept'] as bool? ?? false;
             _seekingQuickGigs = data['seekingQuickGigs'] as bool? ?? false;
@@ -1745,8 +1744,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 email: _email,
                                 phone: _phone,
                                 photoUrl: _photoUrl,
-                                rating: _ratingAsWorker,
-                                ratingCount: _ratingCount,
+                                rating: _rating,
                                 memberSince: _memberSince,
                                 isDark: isDark,
                                 onEdit: _openProfile,

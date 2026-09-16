@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../../core/models/rating_summary.dart';
+import '../../../../core/services/rating_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../chat/worker_message_action.dart';
@@ -210,8 +212,7 @@ class _FavoriteWorkerCard extends StatelessWidget {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final name = worker['name'] as String? ?? 'Worker';
     final photoUrl = worker['photoUrl'] as String? ?? '';
-    final rating = (worker['ratingAsWorker'] as num? ?? 5.0).toDouble();
-    final ratingCount = (worker['ratingCount'] as num? ?? 0).toInt();
+    final summary = RatingSummary.fromUserData(worker, RateeRole.worker);
     final skills =
         (worker['skills'] as List?)?.map((e) => e.toString()).toList() ?? [];
     final isOnline = worker['isOnline'] as bool? ?? false;
@@ -271,8 +272,9 @@ class _FavoriteWorkerCard extends StatelessWidget {
                 Row(
                   children: [
                     ...List.generate(5, (i) {
-                      final full = i < rating.floor();
-                      final half = !full && i < rating && rating - i >= 0.5;
+                      final value = summary.average ?? 0;
+                      final full = i < value.floor();
+                      final half = !full && i < value && value - i >= 0.5;
                       return Icon(
                         full
                             ? Icons.star_rounded
@@ -285,7 +287,7 @@ class _FavoriteWorkerCard extends StatelessWidget {
                     }),
                     const SizedBox(width: 4),
                     Text(
-                      rating.toStringAsFixed(1),
+                      summary.shortLabel,
                       style: TextStyle(
                         color: onSurface,
                         fontSize: 11,
@@ -294,7 +296,9 @@ class _FavoriteWorkerCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 3),
                     Text(
-                      '($ratingCount)',
+                      summary.hasRatings
+                          ? '(${summary.count})'
+                          : 'No ratings yet',
                       style: const TextStyle(color: kSub, fontSize: 10),
                     ),
                   ],

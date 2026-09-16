@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/models/rating_summary.dart';
+import '../../../core/services/rating_service.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:giggre_app/core/services/content_filter_service.dart';
 import 'package:giggre_app/core/widgets/content_rejection_modal.dart';
@@ -56,7 +58,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   String _company = '';
   String _photoUrl = '';
   String _createdAt = '';
-  double _ratingAsHost = 5.0;
+  RatingSummary _hostRating = RatingSummary.empty;
   int _ratingCount = 0;
   String _isVerified = '';
 
@@ -139,8 +141,8 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                 FirebaseAuth.instance.currentUser?.photoURL ??
                 '';
             _createdAt = createdAtStr;
-            _ratingAsHost = (data['ratingAsHost'] as num? ?? 5.0).toDouble();
-            _ratingCount = (data['ratingAsHostCount'] as num? ?? 0).toInt();
+            _hostRating = RatingSummary.fromUserData(data, RateeRole.host);
+            _ratingCount = _hostRating.count;
             _loading = false;
             _isVerified = data['isVerified'] ?? false;
           });
@@ -845,11 +847,13 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                       children: [
                                         ...List.generate(5, (i) {
                                           final full =
-                                              i < _ratingAsHost.floor();
+                                              i < (_hostRating.average ?? 0)
+                                                  .floor();
                                           final half =
                                               !full &&
-                                              i < _ratingAsHost &&
-                                              _ratingAsHost - i >= 0.5;
+                                              i < (_hostRating.average ?? 0) &&
+                                              (_hostRating.average ?? 0) - i >=
+                                                  0.5;
                                           return Icon(
                                             full
                                                 ? Icons.star_rounded
@@ -862,7 +866,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                         }),
                                         const SizedBox(width: 6),
                                         Text(
-                                          _ratingAsHost.toStringAsFixed(1),
+                                          _hostRating.shortLabel,
                                           style: TextStyle(
                                             color: onSurface,
                                             fontSize: 13,
@@ -1061,7 +1065,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                   ),
                                   SizedBox(height: 4),
                                   Text(
-                                    '$_ratingAsHost ($_ratingCount)',
+                                    _hostRating.label,
                                     style: TextStyle(
                                       color: onSurface,
                                       fontSize: 14,

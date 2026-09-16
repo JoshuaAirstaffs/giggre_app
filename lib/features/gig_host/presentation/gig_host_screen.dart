@@ -6,6 +6,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/models/rating_summary.dart';
+import '../../../core/services/rating_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
@@ -1201,8 +1203,7 @@ class _WorkerData {
   final String skill;
   final LatLng position;
   final String photoUrl;
-  final double rating;
-  final int ratingCount;
+  final RatingSummary summary;
 
   _WorkerData({
     required this.id,
@@ -1210,8 +1211,7 @@ class _WorkerData {
     required this.skill,
     required this.position,
     this.photoUrl = '',
-    this.rating = 5.0,
-    this.ratingCount = 0,
+    this.summary = RatingSummary.empty,
   });
 }
 
@@ -1603,8 +1603,10 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                     skill: skills.isNotEmpty ? skills.first : 'General',
                     position: LatLng(geo.latitude, geo.longitude),
                     photoUrl: data['photoUrl'] as String? ?? '',
-                    rating: (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0,
-                    ratingCount: (data['ratingCount'] as num?)?.toInt() ?? 0,
+                    summary: RatingSummary.fromUserData(
+                      data,
+                      RateeRole.worker,
+                    ),
                   );
                 })
                 .whereType<_WorkerData>()
@@ -1934,8 +1936,10 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                         _StatCell(
                           icon: Icons.star_rounded,
                           iconColor: Colors.amber,
-                          value: worker.rating.toStringAsFixed(1),
-                          label: 'Rating (${worker.ratingCount})',
+                          value: worker.summary.shortLabel,
+                          label: worker.summary.hasRatings
+                              ? 'Rating (${worker.summary.count})'
+                              : 'No ratings yet',
                         ),
                         Container(width: 1, height: 36, color: borderColor),
                         _StatCell(
@@ -2588,7 +2592,7 @@ class _ClusterWorkerTileState extends State<_ClusterWorkerTile> {
                     ),
                     const SizedBox(width: 3),
                     Text(
-                      w.rating.toStringAsFixed(1),
+                      w.summary.shortLabel,
                       style: TextStyle(
                         color: onSurface,
                         fontSize: 12,

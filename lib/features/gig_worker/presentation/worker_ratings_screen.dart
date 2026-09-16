@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../core/models/rating_summary.dart';
+import '../../../core/services/rating_service.dart';
 import '../../../core/theme/app_colors.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20,11 +22,10 @@ class _WorkerRatingsScreenState extends State<WorkerRatingsScreen> {
   List<_RatingItem> _items = [];
 
   // Canonical rating shown across the rest of the app (dashboard, favorite
-  // worker cards, worker picker) — read directly from the user doc so this
-  // screen's header always matches, rather than recomputing its own average
-  // from whatever gig docs happen to carry a hostRating.
-  double _avgRating = 0;
-  int _ratingCount = 0;
+  // worker cards, worker picker) — the same `ratingWorker` aggregate, so this
+  // screen's header always matches rather than averaging the list below,
+  // which only holds the ratings that have been revealed so far.
+  RatingSummary _summary = RatingSummary.empty;
 
   @override
   void initState() {
@@ -40,30 +41,44 @@ class _WorkerRatingsScreenState extends State<WorkerRatingsScreen> {
     }
 
     try {
+      final db = FirebaseFirestore.instance;
       final results = await Future.wait([
-        _fetchCollection('quick_gigs', uid, 'quick'),
-        _fetchCollection('open_gigs', uid, 'open'),
-        _fetchCollection('offered_gigs', uid, 'offered'),
+        // Only revealed ratings: an unrevealed one would fail the read rule
+        // and take the whole query down with it, and showing it early would
+        // defeat the blind reveal anyway. Null `revealedAt` is not greater
+        // than epoch, so this filters them out.
+        db
+            .collection('ratings')
+            .where('rateeId', isEqualTo: uid)
+            .where('rateeRole', isEqualTo: 'worker')
+            .where(
+              'revealedAt',
+              isGreaterThan: Timestamp.fromMillisecondsSinceEpoch(0),
+            )
+            .orderBy('revealedAt', descending: true)
+            .get(),
+        db.collection('users').doc(uid).get(),
       ]);
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get();
 
-      final all = results.expand((e) => e).toList()
-        ..sort((a, b) {
-          if (a.ratedAt == null && b.ratedAt == null) return 0;
-          if (a.ratedAt == null) return 1;
-          if (b.ratedAt == null) return -1;
-          return b.ratedAt!.compareTo(a.ratedAt!);
-        });
-
-      final userData = userDoc.data() ?? {};
+      final ratingDocs =
+          results[0] as QuerySnapshot<Map<String, dynamic>>;
+      final userDoc =
+          results[1] as DocumentSnapshot<Map<String, dynamic>>;
 
       setState(() {
-        _items = all;
-        _avgRating = (userData['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
-        _ratingCount = (userData['ratingCount'] as num?)?.toInt() ?? 0;
+        _items = ratingDocs.docs.map((doc) {
+          final d = doc.data();
+          return _RatingItem(
+            gigTitle: d['gigTitle'] as String? ?? 'Gig',
+            hostName: d['raterName'] as String? ?? '',
+            rating: (d['stars'] as num?)?.toInt() ?? 0,
+            gigType: _gigTypeLabel(d['gigCollection'] as String?),
+            ratedAt: (d['createdAt'] as Timestamp?)?.toDate(),
+            tags: List<String>.from(d['tags'] as List? ?? const []),
+            comment: d['comment'] as String?,
+          );
+        }).toList();
+        _summary = RatingSummary.fromUserData(userDoc.data(), RateeRole.worker);
         _loading = false;
       });
     } catch (e) {
@@ -72,34 +87,12 @@ class _WorkerRatingsScreenState extends State<WorkerRatingsScreen> {
     }
   }
 
-  Future<List<_RatingItem>> _fetchCollection(
-    String collection,
-    String uid,
-    String type,
-  ) async {
-    final snap = await FirebaseFirestore.instance
-        .collection(collection)
-        .where('workerId', isEqualTo: uid)
-        .get();
-
-    return snap.docs
-        .where((doc) {
-          final rating = (doc.data()['hostRating'] as num?)?.toInt() ?? 0;
-          return rating > 0;
-        })
-        .map((doc) {
-          final d = doc.data();
-          final ratedAt = (d['hostRatedAt'] as Timestamp?)?.toDate();
-          return _RatingItem(
-            gigTitle: d['title'] as String? ?? type,
-            hostName: d['hostName'] as String? ?? '',
-            rating: (d['hostRating'] as num).toInt(),
-            gigType: type,
-            ratedAt: ratedAt,
-          );
-        })
-        .toList();
-  }
+  static String _gigTypeLabel(String? gigCollection) => switch (gigCollection) {
+    'quick_gigs' => 'quick',
+    'open_gigs' => 'open',
+    'offered_gigs' => 'offered',
+    _ => 'gig',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -112,8 +105,7 @@ class _WorkerRatingsScreenState extends State<WorkerRatingsScreen> {
         children: [
           _RatingsHeader(
             isDark: isDark,
-            avgRating: _avgRating,
-            ratingCount: _ratingCount,
+            summary: _summary,
             items: _items,
           ),
           Expanded(
@@ -150,6 +142,8 @@ class _RatingItem {
   final int rating;
   final String gigType;
   final DateTime? ratedAt;
+  final List<String> tags;
+  final String? comment;
 
   const _RatingItem({
     required this.gigTitle,
@@ -157,6 +151,8 @@ class _RatingItem {
     required this.rating,
     required this.gigType,
     this.ratedAt,
+    this.tags = const [],
+    this.comment,
   });
 }
 
@@ -166,14 +162,12 @@ class _RatingItem {
 
 class _RatingsHeader extends StatelessWidget {
   final bool isDark;
-  final double avgRating;
-  final int ratingCount;
+  final RatingSummary summary;
   final List<_RatingItem> items;
 
   const _RatingsHeader({
     required this.isDark,
-    required this.avgRating,
-    required this.ratingCount,
+    required this.summary,
     required this.items,
   });
 
@@ -233,7 +227,7 @@ class _RatingsHeader extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        avgRating.toStringAsFixed(1),
+                        summary.shortLabel,
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 48,
@@ -244,9 +238,10 @@ class _RatingsHeader extends StatelessWidget {
                       const SizedBox(height: 6),
                       Row(
                         children: List.generate(5, (i) {
-                          final full = i < avgRating.floor();
+                          final value = summary.average ?? 0;
+                          final full = i < value.floor();
                           final half =
-                              !full && i < avgRating && avgRating - i >= 0.5;
+                              !full && i < value && value - i >= 0.5;
                           return Icon(
                             full
                                 ? Icons.star_rounded
@@ -260,7 +255,10 @@ class _RatingsHeader extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '$ratingCount ${ratingCount == 1 ? 'review' : 'reviews'}',
+                        summary.hasRatings
+                            ? '${summary.count} '
+                                  '${summary.count == 1 ? 'review' : 'reviews'}'
+                            : 'No ratings yet',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.65),
                           fontSize: 13,

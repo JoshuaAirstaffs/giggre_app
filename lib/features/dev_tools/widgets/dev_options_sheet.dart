@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
+import '../dev_actions.dart';
 import '../dev_toggles.dart';
+import '../models/dev_action.dart';
 import '../models/dev_toggle.dart';
 
 class DevOptionsSheet {
@@ -9,13 +11,18 @@ class DevOptionsSheet {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => const _DevOptionsSheetBody(),
+      // The sheet's own context dies with it on tap, so actions are handed
+      // the caller's context instead — a dialog opened from a row outlives
+      // the sheet that launched it.
+      builder: (_) => _DevOptionsSheetBody(hostContext: context),
     );
   }
 }
 
 class _DevOptionsSheetBody extends StatelessWidget {
-  const _DevOptionsSheetBody();
+  final BuildContext hostContext;
+
+  const _DevOptionsSheetBody({required this.hostContext});
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +70,21 @@ class _DevOptionsSheetBody extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             for (final toggle in devToggles) _DevToggleRow(toggle: toggle),
+            if (devActions.isNotEmpty) ...[
+              const Divider(height: 24),
+              Text(
+                'PREVIEWS',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.8,
+                  color: kSub,
+                ),
+              ),
+              const SizedBox(height: 4),
+              for (final action in devActions)
+                _DevActionRow(action: action, hostContext: hostContext),
+            ],
           ],
         ),
       ),
@@ -119,6 +141,35 @@ class _DevToggleRowState extends State<_DevToggleRow> {
       ),
       value: _value!,
       onChanged: _onChanged,
+    );
+  }
+}
+
+
+class _DevActionRow extends StatelessWidget {
+  final DevActionDescriptor action;
+  final BuildContext hostContext;
+
+  const _DevActionRow({required this.action, required this.hostContext});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(action.icon, color: kAmber, size: 22),
+      title: Text(
+        action.label,
+        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+      ),
+      subtitle: Text(
+        action.description,
+        style: TextStyle(fontSize: 12, color: kSub),
+      ),
+      trailing: Icon(Icons.chevron_right_rounded, color: kSub, size: 20),
+      onTap: () {
+        Navigator.pop(context);
+        action.run(hostContext);
+      },
     );
   }
 }

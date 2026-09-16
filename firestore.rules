@@ -42,6 +42,47 @@ service cloud.firestore {
         );
     }
 
+// ─── Rating helpers ────────────────────────────────────────
+    // Aggregates are written only by the onRatingCreated Cloud Function
+    // (Admin SDK, bypasses rules). Clients submit a ratings/{id} doc and
+    // never touch the totals — previously they computed the average
+    // themselves and wrote it straight onto the target user doc, so anyone
+    // could set their own rating to 5.0 with a modified client.
+    //
+    // Only the current aggregates are listed. The superseded flat fields
+    // (ratingAsWorker / ratingCount / ratingAsHost / ratingAsHostCount) are
+    // deliberately left writable: nothing reads them any more, and app
+    // versions predating RatingService still write them on every rating.
+    // Denying those writes would break older clients to protect dead data.
+    function ratingAggregateKeys() {
+      return ['ratingWorker', 'ratingHost'];
+    }
+
+    function touchesRatingAggregate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(ratingAggregateKeys());
+    }
+
+    // A rating is only valid between the two parties to the gig it cites,
+    // in the direction it claims. rateeRole 'worker' means the host is
+    // rating their worker; 'host' means the worker is rating their host.
+    // Multi-worker gigs leave workerId/assignedWorkerId unset on the gig doc
+    // and identify a worker by their own `workers/{uid}` slot doc instead —
+    // same pattern as the gig update rules below.
+    function isRatingCounterparty(data) {
+      let gigPath = /databases/$(database)/documents/$(data.gigCollection)/$(data.gigId);
+      let gig = get(gigPath).data;
+      return data.rateeRole == 'worker'
+        ? (gig.hostId == request.auth.uid &&
+            (gig.get('workerId', '') == data.rateeId ||
+             gig.get('assignedWorkerId', '') == data.rateeId ||
+             exists(/databases/$(database)/documents/$(data.gigCollection)/$(data.gigId)/workers/$(data.rateeId))))
+        : (gig.hostId == data.rateeId &&
+            (gig.get('workerId', '') == request.auth.uid ||
+             gig.get('assignedWorkerId', '') == request.auth.uid ||
+             exists(/databases/$(database)/documents/$(data.gigCollection)/$(data.gigId)/workers/$(request.auth.uid))));
+    }
+
 //     function isApplicant() {
 //   // Worker is adding themselves to the applicants map/array
 //   // Adjust the field name to match your actual data shape
@@ -54,7 +95,13 @@ service cloud.firestore {
     match /users/{uid} {
       // Public read — allows unauthenticated referral code lookup during registration
       allow read: if true;
-      allow write: if isAuth();
+      // ratingWorker/ratingHost are server-only in both directions — a client
+      // can neither seed them at registration nor edit them later. No app
+      // version has ever written them, so this needs no rollout phasing.
+      allow create: if isAuth() &&
+        !request.resource.data.keys().hasAny(ratingAggregateKeys());
+      allow update: if isAuth() && (!touchesRatingAggregate() || isAdmin());
+      allow delete: if isAuth();
 
       // ─── User Documents ──────────────────────────────────────
       match /documents/{docId} {
@@ -478,6 +525,56 @@ service cloud.firestore {
     // client ever needs to read or write this directly.
     match /mail/{docId} {
       allow read, write: if false;
+    }
+
+    // ─── Ratings ───────────────────────────────────────────────
+    // Append-only, one doc per (gig, rater, ratee). The doc id is bound to
+    // those three below, so a duplicate submission is rejected here rather
+    // than being double-counted into an aggregate. Aggregation, reveal, and
+    // comment moderation all happen server-side in functions/src/ratings.ts.
+    match /ratings/{ratingId} {
+      // Hidden until revealed — a rater can always see their own, and the
+      // pair is revealed together once both sides have rated (or after the
+      // window closes) so neither can wait to see the other's first.
+      allow read: if isAuth() && (
+        resource.data.revealedAt != null ||
+        resource.data.raterId == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow create: if isAuth() &&
+        request.resource.data.raterId == request.auth.uid &&
+        request.resource.data.rateeId != request.auth.uid &&
+        request.resource.data.rateeRole in ['worker', 'host'] &&
+        request.resource.data.gigCollection in
+          ['quick_gigs', 'open_gigs', 'offered_gigs'] &&
+        request.resource.data.stars is int &&
+        request.resource.data.stars >= 1 &&
+        request.resource.data.stars <= 5 &&
+        request.resource.data.tags is list &&
+        request.resource.data.tags.size() <= 6 &&
+        request.resource.data.get('comment', '').size() <= 500 &&
+        // Server-owned fields must start empty so a client can't submit a
+        // pre-aggregated or pre-revealed rating.
+        request.resource.data.aggregated == false &&
+        request.resource.data.revealedAt == null &&
+        request.resource.data.createdAt == request.time &&
+        ratingId == request.resource.data.gigCollection + '__' +
+          request.resource.data.gigId + '__' + request.auth.uid + '__' +
+          request.resource.data.rateeId &&
+        isRatingCounterparty(request.resource.data);
+
+      // Editable only by its author, and only until it is revealed.
+      allow update: if isAuth() &&
+        resource.data.raterId == request.auth.uid &&
+        resource.data.revealedAt == null &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['stars', 'tags', 'comment']) &&
+        request.resource.data.stars is int &&
+        request.resource.data.stars >= 1 &&
+        request.resource.data.stars <= 5;
+
+      allow delete: if isAdmin();
     }
 
     // ─── Verification Requests ─────────────────────────────────

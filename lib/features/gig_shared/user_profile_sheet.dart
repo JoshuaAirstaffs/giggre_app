@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/models/rating_summary.dart';
+import '../../core/services/rating_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -69,8 +71,7 @@ Future<void> showUserProfileSheet(
           final skills = (data?['skills'] as List<dynamic>? ?? [])
               .map((s) => s.toString())
               .toList();
-          final rating = (data?['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
-          final ratingCount = (data?['ratingCount'] as num?)?.toInt() ?? 0;
+          final summary = RatingSummary.fromUserData(data, RateeRole.worker);
           final isVerified = data?['isVerified'] as String? ?? 'unverified';
           final memberSince = (data?['createdAt'] as Timestamp?)?.toDate();
 
@@ -231,7 +232,7 @@ Future<void> showUserProfileSheet(
                                       ),
                                       const SizedBox(width: 4),
                                       Text(
-                                        '${rating.toStringAsFixed(1)} ($ratingCount)',
+                                        summary.label,
                                         style: const TextStyle(
                                           color: kSub,
                                           fontSize: 13,

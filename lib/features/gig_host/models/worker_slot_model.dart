@@ -3,8 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// One worker's independent slot on a multi-worker gig.
 /// Lives at `{gigCollection}/{gigId}/workers/{workerId}` — doc id == workerId.
 ///
-/// This is the single source of truth for that worker's tracking, payment,
-/// and rating on this gig. The parent gig doc only holds the coarse
+/// This is the single source of truth for that worker's tracking and payment
+/// on this gig. Ratings are not stored here — they live in the top-level
+/// `ratings` collection, keyed by gig and by both parties. The parent gig doc only holds the coarse
 /// aggregate (workerSlots/ratePerSlot/filledSlotCount/slotsCompleted).
 class WorkerSlotModel {
   final String workerId;
@@ -33,8 +34,6 @@ class WorkerSlotModel {
   final DateTime? paymentConfirmedAt;
   final String? paymentConfirmedBy;
   final bool? paymentConfirmedManually;
-  final int? hostRating;
-  final DateTime? hostRatedAt;
 
   const WorkerSlotModel({
     required this.workerId,
@@ -63,8 +62,6 @@ class WorkerSlotModel {
     this.paymentConfirmedAt,
     this.paymentConfirmedBy,
     this.paymentConfirmedManually,
-    this.hostRating,
-    this.hostRatedAt,
   });
 
   Map<String, dynamic> toMap() => {
@@ -110,8 +107,6 @@ class WorkerSlotModel {
       paymentConfirmedAt: ts('paymentConfirmedAt'),
       paymentConfirmedBy: d['paymentConfirmedBy'] as String?,
       paymentConfirmedManually: d['paymentConfirmedManually'] as bool?,
-      hostRating: (d['hostRating'] as num?)?.toInt(),
-      hostRatedAt: ts('hostRatedAt'),
     );
   }
 

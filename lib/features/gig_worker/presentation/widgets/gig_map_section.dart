@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../../core/models/rating_summary.dart';
+import '../../../../core/services/rating_service.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
@@ -118,8 +120,9 @@ Future<double?> fetchHostRating(String hostId) async {
         .collection('users')
         .doc(hostId)
         .get();
-    final rating = (doc.data()?['ratingAsHost'] as num?)?.toDouble();
-    return rating;
+    // Null when the host has no ratings yet — callers already treat null as
+    // "nothing to show" rather than substituting a default.
+    return RatingSummary.fromUserData(doc.data(), RateeRole.host).average;
   } catch (_) {
     return null;
   }
@@ -3768,8 +3771,7 @@ class _GigMapSectionState extends State<GigMapSection> {
           .collection('users')
           .doc(hostId)
           .get();
-      final rating = (doc.data()?['ratingAsHost'] as num?)?.toDouble();
-      return rating;
+      return RatingSummary.fromUserData(doc.data(), RateeRole.host).average;
     } catch (_) {
       return null;
     }

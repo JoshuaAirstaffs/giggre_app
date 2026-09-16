@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/models/rating_summary.dart';
+import '../../../core/services/rating_service.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -51,16 +53,14 @@ class _WorkerEntry {
   final String userId; // Custom human-readable ID e.g. "YSJ135610"
   final String name;
   final String email;
-  final double rating;
-  final int ratingCount;
+  final RatingSummary summary;
   final int completedGigs;
   const _WorkerEntry({
     required this.uid,
     required this.userId,
     required this.name,
     required this.email,
-    this.rating = 5.0,
-    this.ratingCount = 0,
+    this.summary = RatingSummary.empty,
     this.completedGigs = 0,
   });
 }
@@ -1606,8 +1606,7 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
             userId: data['userId'] ?? '',
             name: data['name'] ?? 'Unknown',
             email: data['email'] ?? '',
-            rating: (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0,
-            ratingCount: (data['ratingCount'] as num?)?.toInt() ?? 0,
+            summary: RatingSummary.fromUserData(data, RateeRole.worker),
             completedGigs: completed,
           );
         }),
@@ -1715,8 +1714,7 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
           userId: data['userId'] ?? normalised,
           name: data['name'] ?? 'Unknown',
           email: data['email'] ?? '',
-          rating: (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0,
-          ratingCount: (data['ratingCount'] as num?)?.toInt() ?? 0,
+          summary: RatingSummary.fromUserData(data, RateeRole.worker),
           completedGigs: completed,
         );
         _uidSearching = false;
@@ -2056,7 +2054,7 @@ class _WorkerTile extends StatelessWidget {
                   const Icon(Icons.star_rounded, color: Colors.amber, size: 12),
                   const SizedBox(width: 2),
                   Text(
-                    worker.rating.toStringAsFixed(1),
+                    worker.summary.shortLabel,
                     style: const TextStyle(
                       color: kSub,
                       fontSize: 11,
@@ -2064,7 +2062,9 @@ class _WorkerTile extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    ' (${worker.ratingCount})',
+                    worker.summary.hasRatings
+                        ? ' (${worker.summary.count})'
+                        : '',
                     style: const TextStyle(color: kSub, fontSize: 11),
                   ),
                   const SizedBox(width: 8),

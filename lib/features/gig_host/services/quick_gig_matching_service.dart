@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/models/rating_summary.dart';
+import '../../../core/services/rating_service.dart';
 import 'package:flutter/foundation.dart';
 import '../models/worker_slot_model.dart';
 
@@ -141,7 +143,11 @@ class QuickGigMatchingService {
       if (dist > maxSearchRadiusKm) continue;
 
       final rate = (data['acceptanceRate'] as num?)?.toDouble() ?? 1.0;
-      final rating = (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
+      // Shrunk toward the platform mean rather than the raw average, so an
+      // unrated worker scores as average instead of as perfect. The old
+      // `?? 5.0` meant a worker's first four-star rating ranked them *below*
+      // every worker who had never been rated at all.
+      final rating = RatingSummary.fromUserData(data, RateeRole.worker).shrunk;
       final score = _score(distanceKm: dist, acceptanceRate: rate, rating: rating);
 
       if (score > bestScore) {

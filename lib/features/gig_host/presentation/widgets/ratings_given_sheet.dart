@@ -20,6 +20,13 @@ class _RatingsGivenSheetState extends State<RatingsGivenSheet> {
     _load();
   }
 
+  static String _gigTypeLabel(String? gigCollection) => switch (gigCollection) {
+    'quick_gigs' => 'quick',
+    'open_gigs' => 'open',
+    'offered_gigs' => 'offered',
+    _ => 'gig',
+  };
+
   Future<void> _load() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
@@ -27,48 +34,26 @@ class _RatingsGivenSheetState extends State<RatingsGivenSheet> {
       return;
     }
 
-    final db = FirebaseFirestore.instance;
-    final collections = {
-      'quick_gigs': 'quick',
-      'open_gigs': 'open',
-      'offered_gigs': 'offered',
-    };
-
     try {
-      final results = await Future.wait(
-        collections.entries.map((e) => db
-            .collection(e.key)
-            .where('hostId', isEqualTo: uid)
-            .get()),
-      );
+      // Ratings this host gave. No reveal filter needed — the read rule lets
+      // a rater always see their own, revealed or not.
+      final snap = await FirebaseFirestore.instance
+          .collection('ratings')
+          .where('raterId', isEqualTo: uid)
+          .where('rateeRole', isEqualTo: 'worker')
+          .orderBy('createdAt', descending: true)
+          .get();
 
-      final entries = <_RatingEntry>[];
-      for (int i = 0; i < results.length; i++) {
-        final gigType = collections.values.elementAt(i);
-        for (final doc in results[i].docs) {
-          final d = doc.data();
-          final rating = (d['hostRating'] as num?)?.toInt() ?? 0;
-          if (rating <= 0) continue;
-          final ratedAt = d['hostRatedAt'] as Timestamp?;
-          entries.add(_RatingEntry(
-            gigTitle: d['title'] as String? ?? 'Gig',
-            workerName: d['assignedWorkerName'] as String? ??
-                d['workerName'] as String? ??
-                'Worker',
-            rating: rating,
-            gigType: gigType,
-            ratedAt: ratedAt?.toDate(),
-          ));
-        }
-      }
-
-      // Sort by ratedAt descending (nulls last)
-      entries.sort((a, b) {
-        if (a.ratedAt == null && b.ratedAt == null) return 0;
-        if (a.ratedAt == null) return 1;
-        if (b.ratedAt == null) return -1;
-        return b.ratedAt!.compareTo(a.ratedAt!);
-      });
+      final entries = snap.docs.map((doc) {
+        final d = doc.data();
+        return _RatingEntry(
+          gigTitle: d['gigTitle'] as String? ?? 'Gig',
+          workerName: d['rateeName'] as String? ?? 'Worker',
+          rating: (d['stars'] as num?)?.toInt() ?? 0,
+          gigType: _gigTypeLabel(d['gigCollection'] as String?),
+          ratedAt: (d['createdAt'] as Timestamp?)?.toDate(),
+        );
+      }).toList();
 
       if (mounted) setState(() { _ratings = entries; _loading = false; });
     } catch (e) {

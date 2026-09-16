@@ -24,6 +24,9 @@ import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
 import 'quick_gig_search_sheet.dart';
 import '../../../../core/widgets/gig_completion_celebration.dart';
+import '../../../../core/models/rating_summary.dart';
+import '../../../../core/services/rating_service.dart';
+import '../../../../core/widgets/rating_dialog.dart';
 import '../../../gig_shared/active_gig_theme.dart';
 import '../../../gig_shared/active_gig_step.dart';
 import '../../../gig_shared/active_gig_widgets.dart';
@@ -421,15 +424,14 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     if (!mounted) return;
 
     if (workerId != null && workerId.isNotEmpty) {
-      await showDialog(
+      await RatingDialog.show(
         context: context,
-        barrierDismissible: false,
-        builder: (_) => _RatingDialog(
-          workerId: workerId,
-          workerName: workerName,
-          gigId: widget.gigId,
-          gigCollection: _collection,
-        ),
+        rateeId: workerId,
+        rateeName: workerName,
+        rateeRole: RateeRole.worker,
+        gigId: widget.gigId,
+        gigCollection: _collection,
+        gigTitle: _data?['title'] as String? ?? 'Gig',
       );
     }
     if (mounted) Navigator.pop(context);
@@ -470,15 +472,14 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     if (!mounted) return;
 
     if (workerId.isNotEmpty) {
-      await showDialog(
+      await RatingDialog.show(
         context: context,
-        barrierDismissible: false,
-        builder: (_) => _RatingDialog(
-          workerId: workerId,
-          workerName: workerName,
-          gigId: widget.gigId,
-          gigCollection: _collection,
-        ),
+        rateeId: workerId,
+        rateeName: workerName,
+        rateeRole: RateeRole.worker,
+        gigId: widget.gigId,
+        gigCollection: _collection,
+        gigTitle: _data?['title'] as String? ?? 'Gig',
       );
     }
     if (mounted) Navigator.pop(context);
@@ -540,16 +541,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     );
     if (!mounted) return;
 
-    await showDialog(
+    await RatingDialog.show(
       context: context,
-      barrierDismissible: false,
-      builder: (_) => _RatingDialog(
-        workerId: worker.workerId,
-        workerName: worker.workerName,
-        gigId: widget.gigId,
-        gigCollection: _collection,
-        slotWorkerId: worker.workerId,
-      ),
+      rateeId: worker.workerId,
+      rateeName: worker.workerName,
+      rateeRole: RateeRole.worker,
+      gigId: widget.gigId,
+      gigCollection: _collection,
+      gigTitle: _data?['title'] as String? ?? 'Gig',
+      slotWorkerId: worker.workerId,
     );
   }
 
@@ -2487,8 +2487,7 @@ class _WorkerProfileCard extends StatefulWidget {
 
 class _WorkerProfileCardState extends State<_WorkerProfileCard> {
   String? _photoUrl;
-  double _rating = 5.0;
-  int _ratingCount = 0;
+  RatingSummary _summary = RatingSummary.empty;
   int _completedGigs = 0;
   String _isVerified = 'unverified';
   bool _loading = true;
@@ -2522,8 +2521,7 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
       final data = userSnap.data();
       setState(() {
         _photoUrl = data?['photoUrl'] as String?;
-        _rating = (data?['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
-        _ratingCount = (data?['ratingCount'] as num?)?.toInt() ?? 0;
+        _summary = RatingSummary.fromUserData(data, RateeRole.worker);
         _completedGigs = completed;
         _isVerified = data?['isVerified'] as String? ?? 'unverified';
         _loading = false;
@@ -2572,7 +2570,7 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
                 )
               else
                 Text(
-                  '★ ${_rating.toStringAsFixed(1)} ($_ratingCount) · $_completedGigs gigs done',
+                  '★ ${_summary.label} · $_completedGigs gigs done',
                   style: TextStyle(
                     color: activeGigTextMuted(isDark),
                     fontSize: 10.5,
@@ -2690,8 +2688,7 @@ class _ApplicantTile extends StatefulWidget {
 
 class _ApplicantTileState extends State<_ApplicantTile> {
   String? _photoUrl;
-  double _rating = 5.0;
-  int _ratingCount = 0;
+  RatingSummary _summary = RatingSummary.empty;
   int _completedGigs = 0;
   String _isVerified = 'unverified';
   bool _loading = true;
@@ -2721,8 +2718,7 @@ class _ApplicantTileState extends State<_ApplicantTile> {
       final data = userSnap.data();
       setState(() {
         _photoUrl = data?['photoUrl'] as String?;
-        _rating = (data?['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
-        _ratingCount = (data?['ratingCount'] as num?)?.toInt() ?? 0;
+        _summary = RatingSummary.fromUserData(data, RateeRole.worker);
         _completedGigs = completed;
         _isVerified = data?['isVerified'] as String? ?? 'unverified';
         _loading = false;
@@ -2802,7 +2798,7 @@ class _ApplicantTileState extends State<_ApplicantTile> {
                                 ),
                                 TextSpan(
                                   text:
-                                      '${_rating.toStringAsFixed(1)} ($_ratingCount) · $_completedGigs gigs done',
+                                      '${_summary.label} · $_completedGigs gigs done',
                                 ),
                               ],
                             ),
@@ -3958,189 +3954,6 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
                     'Submit Request',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Rating Dialog — shown after host confirms gig completed
-// ─────────────────────────────────────────────────────────────────────────────
-class _RatingDialog extends StatefulWidget {
-  final String workerId;
-  final String workerName;
-  final String gigId;
-  final String gigCollection;
-  // When set, this gig uses the multi-worker `workers` subcollection — the
-  // rating is written to that worker's own slot doc instead of the gig doc.
-  final String? slotWorkerId;
-
-  const _RatingDialog({
-    required this.workerId,
-    required this.workerName,
-    required this.gigId,
-    required this.gigCollection,
-    this.slotWorkerId,
-  });
-
-  @override
-  State<_RatingDialog> createState() => _RatingDialogState();
-}
-
-class _RatingDialogState extends State<_RatingDialog> {
-  int _selected = 0;
-  bool _submitting = false;
-
-  static const _labels = ['', 'Poor', 'Fair', 'Good', 'Great', 'Excellent'];
-  static const _green = Color(0xFF22C55E);
-  static const _starActive = Color(0xFFFACC15);
-
-  Future<void> _submit() async {
-    if (_selected == 0) return;
-    setState(() => _submitting = true);
-    try {
-      final db = FirebaseFirestore.instance;
-      final snap = await db.collection('users').doc(widget.workerId).get();
-      final data = snap.data() ?? {};
-      final currentRating = (data['ratingAsWorker'] as num?)?.toDouble() ?? 5.0;
-      final currentCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
-      final newCount = currentCount + 1;
-      final newRating = ((currentRating * currentCount) + _selected) / newCount;
-      final gigRef = db.collection(widget.gigCollection).doc(widget.gigId);
-      final ratingTargetRef = widget.slotWorkerId == null
-          ? gigRef
-          : gigRef.collection('workers').doc(widget.slotWorkerId);
-      await Future.wait([
-        db.collection('users').doc(widget.workerId).update({
-          'ratingAsWorker': double.parse(newRating.toStringAsFixed(2)),
-          'ratingCount': newCount,
-        }),
-        ratingTargetRef.update({
-          'hostRating': _selected,
-          'hostRatedAt': FieldValue.serverTimestamp(),
-        }),
-      ]);
-    } catch (_) {}
-    if (mounted) Navigator.pop(context);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cardColor = Theme.of(context).cardColor;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    final label = _selected > 0 ? _labels[_selected] : 'Tap a star to rate';
-
-    return AlertDialog(
-      backgroundColor: cardColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: _green.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.verified_rounded, color: _green, size: 30),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            'Rate Your Worker',
-            style: TextStyle(
-              color: onSurface,
-              fontSize: 17,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'How was ${widget.workerName}?',
-            style: const TextStyle(color: kSub, fontSize: 13),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(5, (i) {
-              final starNum = i + 1;
-              return GestureDetector(
-                onTap: () => setState(() => _selected = starNum),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Icon(
-                    starNum <= _selected
-                        ? Icons.star_rounded
-                        : Icons.star_outline_rounded,
-                    color: starNum <= _selected ? _starActive : kSub,
-                    size: 40,
-                  ),
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 10),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 150),
-            child: Text(
-              label,
-              key: ValueKey(label),
-              style: TextStyle(
-                color: _selected > 0 ? _starActive : kSub,
-                fontSize: 13,
-                fontWeight: _selected > 0 ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: TextButton(
-                  onPressed: _submitting ? null : () => Navigator.pop(context),
-                  child: const Text(
-                    'Skip',
-                    style: TextStyle(color: kSub, fontSize: 14),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 2,
-                child: ElevatedButton(
-                  onPressed: (_selected == 0 || _submitting) ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _green,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: _green.withValues(alpha: 0.4),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                  ),
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text(
-                          'Submit',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
                 ),
               ),
             ],

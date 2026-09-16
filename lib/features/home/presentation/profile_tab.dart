@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/models/rating_summary.dart';
+import '../../../core/services/rating_service.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -152,16 +154,14 @@ class _ProfileTabState extends State<ProfileTab> {
   String _isVerified = '';
 
   // Worker stats
-  double _ratingAsWorker = 5.0;
-  int _workerRatingCount = 0;
+  RatingSummary _workerRating = RatingSummary.empty;
   Map<String, double> _earningsByCode = {};
   Map<String, double> _weeklyByCode = {};
   int _completedGigsWorker = 0;
   List<String> _skills = [];
 
   // Host stats
-  double _ratingAsHost = 5.0;
-  int _hostRatingCount = 0;
+  RatingSummary _hostRating = RatingSummary.empty;
   int _gigsPosted = 0;
   int _activeGigs = 0;
   int _completedGigsHost = 0;
@@ -276,17 +276,17 @@ class _ProfileTabState extends State<ProfileTab> {
             _createdAt = createdAtStr;
             _isVerified = data['isVerified'] ?? '';
 
-            _ratingAsWorker = (data['ratingAsWorker'] as num? ?? 5.0)
-                .toDouble();
-            _workerRatingCount = (data['ratingCount'] as num? ?? 0).toInt();
+            _workerRating = RatingSummary.fromUserData(
+              data,
+              RateeRole.worker,
+            );
             _earningsByCode = earningsByCode;
             _weeklyByCode = weeklyByCode;
             _completedGigsWorker = (earningsMap['completedGigs'] as num? ?? 0)
                 .toInt();
             _skills = skillsXP.keys.toList();
 
-            _ratingAsHost = (data['ratingAsHost'] as num? ?? 5.0).toDouble();
-            _hostRatingCount = (data['ratingAsHostCount'] as num? ?? 0).toInt();
+            _hostRating = RatingSummary.fromUserData(data, RateeRole.host);
 
             _loading = false;
           });
@@ -823,10 +823,10 @@ class _ProfileTabState extends State<ProfileTab> {
     final hasOtherCurrencies = _earningsByCode.length > 1;
 
     final workerColumns = <_StatColumn>[
-      if (_workerRatingCount > 0)
+      if (_workerRating.hasRatings)
         _StatColumn(
-          value: '${_ratingAsWorker.toStringAsFixed(1)} ★',
-          label: 'Worker rating ($_workerRatingCount)',
+          value: '${_workerRating.shortLabel} ★',
+          label: 'Worker rating (${_workerRating.count})',
           valueColor: goldText,
         ),
       _StatColumn(value: '$_completedGigsWorker', label: 'Gigs done'),
@@ -840,10 +840,10 @@ class _ProfileTabState extends State<ProfileTab> {
     ];
 
     final hostColumns = <_StatColumn>[
-      if (_hostRatingCount > 0)
+      if (_hostRating.hasRatings)
         _StatColumn(
-          value: '${_ratingAsHost.toStringAsFixed(1)} ★',
-          label: 'Host rating ($_hostRatingCount)',
+          value: '${_hostRating.shortLabel} ★',
+          label: 'Host rating (${_hostRating.count})',
           valueColor: goldText,
         ),
       _StatColumn(
