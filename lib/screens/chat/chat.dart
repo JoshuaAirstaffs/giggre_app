@@ -25,6 +25,11 @@ class _Msg {
   final bool hasSeenByPeer; // for gig chats: peer read the message
   final DateTime? time;
   final bool pending; // true while waiting for server
+  // Web-only origin (giggre-website's ChatPage) — soft-deleted messages keep
+  // their doc (order/hasSeen bookkeeping stays intact) but flip this instead
+  // of removing it. Rendered here as "Message has been removed" too, so a
+  // deletion from either platform looks the same on both.
+  final bool isDeleted;
 
   const _Msg({
     this.id,
@@ -37,6 +42,7 @@ class _Msg {
     this.hasSeenByPeer = false,
     this.time,
     this.pending = false,
+    this.isDeleted = false,
   });
 
   _Msg copyWith({
@@ -45,6 +51,7 @@ class _Msg {
     bool? hasSeenBySupport,
     bool? hasSeenByPeer,
     DateTime? time,
+    bool? isDeleted,
   }) => _Msg(
     id: id ?? this.id,
     text: text,
@@ -56,6 +63,7 @@ class _Msg {
     hasSeenByPeer: hasSeenByPeer ?? this.hasSeenByPeer,
     time: time ?? this.time,
     pending: pending ?? this.pending,
+    isDeleted: isDeleted ?? this.isDeleted,
   );
 }
 
@@ -480,6 +488,7 @@ class _ChatState extends State<Chat> {
         'hasSeenByAdmin': false,
         if (_isGigChat) 'hasSeenByPeer': false,
         'isAutoReply': false,
+        'isDeleted': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -611,6 +620,7 @@ class _ChatState extends State<Chat> {
       hasSeenByPeer: data['hasSeenByPeer'] as bool? ?? false,
       time: ts?.toDate(),
       pending: false,
+      isDeleted: data['isDeleted'] as bool? ?? false,
     );
   }
 
@@ -933,7 +943,68 @@ class _ChatState extends State<Chat> {
     );
   }
 
-  Future<void> _showMessageActions(_Msg msg) async {
+  // Soft-delete — mirrors giggre-website's ChatPage.tsx: flips `isDeleted`
+  // instead of removing the doc, so the thread's order and hasSeen
+  // bookkeeping stay intact. Rendered as "Message has been removed" by
+  // _MessageBubble on both platforms.
+  Future<void> _deleteMessage(_Msg msg) async {
+    if (msg.id == null) return;
+    try {
+      await _messagesRef.doc(msg.id).update({'isDeleted': true});
+      // Optimistic local update — _startIncomingStream's listener only
+      // watches for messages with createdAt greater than what's already
+      // loaded, so it structurally never sees a `modified` event for a
+      // message that was already on screen (i.e. every message except ones
+      // that arrived after this chat was opened). Without this, deleting an
+      // older message wouldn't show as removed until the chat is reopened.
+      if (mounted) {
+        setState(() {
+          final idx = _msgs.indexWhere((m) => m.id == msg.id);
+          if (idx != -1) {
+            _msgs[idx] = _msgs[idx].copyWith(isDeleted: true);
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Delete message error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Couldn\'t delete this message. Please try again.'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteMessage(_Msg msg) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this message?'),
+        content: const Text(
+          'It will be replaced with "Message has been removed" for both of you. This can\'t be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) _deleteMessage(msg);
+  }
+
+  Future<void> _showMessageActions(
+    _Msg msg, {
+    required bool canReport,
+    required bool canDelete,
+  }) async {
     final selected = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -947,17 +1018,34 @@ class _ChatState extends State<Chat> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 8),
-              ListTile(
-                leading: const Icon(Icons.flag_rounded, color: Colors.orange),
-                title: const Text('Report message'),
-                onTap: () => Navigator.pop(ctx, 'report'),
-              ),
+              if (canReport)
+                ListTile(
+                  leading: const Icon(
+                    Icons.flag_rounded,
+                    color: Colors.orange,
+                  ),
+                  title: const Text('Report message'),
+                  onTap: () => Navigator.pop(ctx, 'report'),
+                ),
+              if (canDelete)
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: Colors.red,
+                  ),
+                  title: const Text(
+                    'Delete message',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  onTap: () => Navigator.pop(ctx, 'delete'),
+                ),
             ],
           ),
         ),
       ),
     );
     if (selected == 'report') _reportMessage(msg);
+    if (selected == 'delete') _confirmDeleteMessage(msg);
   }
 
   String _formatTime(DateTime dt) {
@@ -1132,10 +1220,17 @@ class _ChatState extends State<Chat> {
                           !msg.isSupport &&
                           !msg.isAutoReply &&
                           msg.id != null &&
+                          !msg.isDeleted &&
                           msg.senderId.isNotEmpty;
+                      final canDelete =
+                          msg.isMe && msg.id != null && !msg.isDeleted;
                       return GestureDetector(
-                        onLongPress: canReport
-                            ? () => _showMessageActions(msg)
+                        onLongPress: (canReport || canDelete)
+                            ? () => _showMessageActions(
+                                msg,
+                                canReport: canReport,
+                                canDelete: canDelete,
+                              )
                             : null,
                         child: _MessageBubble(
                           msg: msg,
@@ -1407,7 +1502,12 @@ class _MessageBubble extends StatelessWidget {
                       vertical: 10,
                     ),
                     decoration: BoxDecoration(
-                      border: (msg.isMe && !msg.isAutoReply)
+                      border: msg.isDeleted
+                          ? Border.all(
+                              color: Colors.grey.withValues(alpha: 0.4),
+                              width: 1,
+                            )
+                          : (msg.isMe && !msg.isAutoReply)
                           ? null
                           : Border.all(
                               color: msg.isMe
@@ -1417,7 +1517,11 @@ class _MessageBubble extends StatelessWidget {
                                   : kAmber,
                               width: 1.5,
                             ),
-                      color: msg.isMe
+                      color: msg.isDeleted
+                          ? (isDark
+                                ? Colors.grey.shade800.withValues(alpha: 0.4)
+                                : Colors.grey.shade200.withValues(alpha: 0.6))
+                          : msg.isMe
                           ? kBlue
                           : isDark
                           ? Colors.grey.shade800
@@ -1429,7 +1533,16 @@ class _MessageBubble extends StatelessWidget {
                         bottomRight: Radius.circular(msg.isMe ? 4 : 16),
                       ),
                     ),
-                    child: Column(
+                    child: msg.isDeleted
+                        ? Text(
+                            'Message has been removed',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontStyle: FontStyle.italic,
+                              color: Colors.grey.shade500,
+                            ),
+                          )
+                        : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (msg.isAutoReply) ...[
