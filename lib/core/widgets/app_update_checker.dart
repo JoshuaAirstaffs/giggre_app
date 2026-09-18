@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -6,12 +7,28 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:in_app_update/in_app_update.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:giggre_app/main.dart' show navigatorKey;
 import 'package:giggre_app/core/theme/app_colors.dart';
 
 class AppUpdateChecker extends StatefulWidget {
   final Widget child;
   const AppUpdateChecker({super.key, required this.child});
+
+  /// Notifies whenever a Play Store update becomes available, so other
+  /// screens (e.g. HomeScreen's update banner) can reflect it without
+  /// running their own separate `InAppUpdate.checkForUpdate()` call.
+  static final ValueNotifier<bool> updateAvailable = ValueNotifier<bool>(
+    false,
+  );
+
+  /// Re-shows the update dialog on demand (e.g. from a banner/menu tap),
+  /// reusing whatever release notes were fetched by the last check.
+  static void promptUpdateNow() {
+    _AppUpdateCheckerState._instance?._showUpdateDialog(
+      releaseNotes: _AppUpdateCheckerState._instance!._cachedReleaseNotes,
+    );
+  }
 
   @override
   State<AppUpdateChecker> createState() => _AppUpdateCheckerState();
@@ -21,10 +38,15 @@ class _AppUpdateCheckerState extends State<AppUpdateChecker>
     with WidgetsBindingObserver {
   bool _dialogShown = false;
   Timer? _timer;
+  List<String> _cachedReleaseNotes = const [];
+  String? _iosStoreUrl;
+
+  static _AppUpdateCheckerState? _instance;
 
   @override
   void initState() {
     super.initState();
+    _instance = this;
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
     _timer = Timer.periodic(
@@ -35,6 +57,7 @@ class _AppUpdateCheckerState extends State<AppUpdateChecker>
 
   @override
   void dispose() {
+    if (identical(_instance, this)) _instance = null;
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     super.dispose();
@@ -47,31 +70,95 @@ class _AppUpdateCheckerState extends State<AppUpdateChecker>
 
   Future<void> _checkForUpdate() async {
     debugPrint('[AppUpdate] _checkForUpdate called — isWeb:$kIsWeb platform:${kIsWeb ? 'web' : Platform.operatingSystem}');
-    if (_dialogShown || kIsWeb || !Platform.isAndroid) return;
-    debugPrint('[AppUpdate] Checking for update...');
+    if (_dialogShown || kIsWeb) return;
     try {
-      final info = await InAppUpdate.checkForUpdate();
-      debugPrint('[AppUpdate] Availability     : ${info.updateAvailability}');
-      debugPrint('[AppUpdate] Available version : ${info.availableVersionCode ?? 'n/a'}');
-      debugPrint('[AppUpdate] Staleness days    : ${info.clientVersionStalenessDays ?? 'n/a'}');
-      debugPrint('[AppUpdate] Immediate allowed : ${info.immediateUpdateAllowed}');
-      debugPrint('[AppUpdate] Flexible allowed  : ${info.flexibleUpdateAllowed}');
-      debugPrint('[AppUpdate] Install status    : ${info.installStatus}');
-      if (info.updateAvailability == UpdateAvailability.updateAvailable) {
-        debugPrint('[AppUpdate] → New version detected, showing modal');
-        _dialogShown = true;
-        final packageInfo = await PackageInfo.fromPlatform();
-        final notes = await _fetchReleaseNotes(packageInfo.packageName);
-        _showUpdateDialog(releaseNotes: notes);
-      } else {
-        debugPrint('[AppUpdate] → No update available');
+      if (Platform.isAndroid) {
+        await _checkAndroidUpdate();
+      } else if (Platform.isIOS) {
+        await _checkIosUpdate();
       }
     } catch (e) {
       debugPrint('[AppUpdate] check error: $e');
     }
   }
 
-  Future<List<String>> _fetchReleaseNotes(String packageName) async {
+  Future<void> _checkAndroidUpdate() async {
+    debugPrint('[AppUpdate] Checking Play Store for update...');
+    final info = await InAppUpdate.checkForUpdate();
+    debugPrint('[AppUpdate] Availability     : ${info.updateAvailability}');
+    debugPrint('[AppUpdate] Available version : ${info.availableVersionCode ?? 'n/a'}');
+    debugPrint('[AppUpdate] Staleness days    : ${info.clientVersionStalenessDays ?? 'n/a'}');
+    debugPrint('[AppUpdate] Immediate allowed : ${info.immediateUpdateAllowed}');
+    debugPrint('[AppUpdate] Flexible allowed  : ${info.flexibleUpdateAllowed}');
+    debugPrint('[AppUpdate] Install status    : ${info.installStatus}');
+    if (info.updateAvailability != UpdateAvailability.updateAvailable) {
+      debugPrint('[AppUpdate] → No update available');
+      return;
+    }
+    debugPrint('[AppUpdate] → New version detected, showing modal');
+    _dialogShown = true;
+    final packageInfo = await PackageInfo.fromPlatform();
+    final notes = await _fetchPlayStoreReleaseNotes(packageInfo.packageName);
+    _cachedReleaseNotes = notes;
+    AppUpdateChecker.updateAvailable.value = true;
+    _showUpdateDialog(releaseNotes: notes);
+  }
+
+  Future<void> _checkIosUpdate() async {
+    debugPrint('[AppUpdate] Checking App Store for update...');
+    final packageInfo = await PackageInfo.fromPlatform();
+    final response = await http
+        .get(
+          Uri.parse(
+            'https://itunes.apple.com/lookup?bundleId=${packageInfo.packageName}',
+          ),
+        )
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) return;
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final results = data['results'] as List<dynamic>?;
+    if (results == null || results.isEmpty) {
+      debugPrint('[AppUpdate] → App not found on the App Store yet');
+      return;
+    }
+    final result = results.first as Map<String, dynamic>;
+    final storeVersion = result['version'] as String?;
+    final storeUrl = result['trackViewUrl'] as String?;
+    if (storeVersion == null || storeUrl == null) return;
+
+    debugPrint('[AppUpdate] Current version : ${packageInfo.version}');
+    debugPrint('[AppUpdate] Store version   : $storeVersion');
+    if (!_isNewerVersion(current: packageInfo.version, store: storeVersion)) {
+      debugPrint('[AppUpdate] → No update available');
+      return;
+    }
+
+    debugPrint('[AppUpdate] → New version detected, showing modal');
+    _dialogShown = true;
+    _iosStoreUrl = storeUrl;
+    final notes = (result['releaseNotes'] as String? ?? '')
+        .split('\n')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    _cachedReleaseNotes = notes;
+    AppUpdateChecker.updateAvailable.value = true;
+    _showUpdateDialog(releaseNotes: notes);
+  }
+
+  bool _isNewerVersion({required String current, required String store}) {
+    final c = current.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+    final s = store.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+    for (var i = 0; i < s.length || i < c.length; i++) {
+      final cv = i < c.length ? c[i] : 0;
+      final sv = i < s.length ? s[i] : 0;
+      if (sv != cv) return sv > cv;
+    }
+    return false;
+  }
+
+  Future<List<String>> _fetchPlayStoreReleaseNotes(String packageName) async {
     try {
       final response = await http.get(
         Uri.parse('https://play.google.com/store/apps/details?id=$packageName&hl=en'),
@@ -127,7 +214,17 @@ class _AppUpdateCheckerState extends State<AppUpdateChecker>
         onUpdate: () async {
           Navigator.of(ctx, rootNavigator: true).pop();
           try {
-            await InAppUpdate.performImmediateUpdate();
+            if (Platform.isIOS) {
+              final url = _iosStoreUrl;
+              if (url != null) {
+                await launchUrl(
+                  Uri.parse(url),
+                  mode: LaunchMode.externalApplication,
+                );
+              }
+            } else {
+              await InAppUpdate.performImmediateUpdate();
+            }
           } catch (e) {
             debugPrint('[AppUpdate] update error: $e');
           }

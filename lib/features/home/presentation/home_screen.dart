@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:in_app_update/in_app_update.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
@@ -19,6 +18,7 @@ import 'package:provider/provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:giggre_app/core/widgets/app_update_checker.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
 import 'package:giggre_app/core/widgets/entrance_animation.dart';
 import 'package:giggre_app/screens/app_contents/about_giggre.dart';
@@ -46,7 +46,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _selectedRole;
   bool _saving = false;
   bool _hasUpdate = false;
-  bool _updateDismissed = false;
   bool _pendingDeletion = false;
   String _deletionStatus = 'pending_deletion';
   List<Map<String, dynamic>> _updates = [];
@@ -64,8 +63,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _fetchUpdates();
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) _activeGigStream = watchActiveWorkerGig(uid);
+    _hasUpdate = AppUpdateChecker.updateAvailable.value;
+    AppUpdateChecker.updateAvailable.addListener(_onUpdateAvailableChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkAppUpdate();
       _initLocationServiceListener();
       _checkInternet();
       _internetCheckTimer = Timer.periodic(
@@ -73,6 +73,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         (_) => _checkInternet(),
       );
     });
+  }
+
+  void _onUpdateAvailableChanged() {
+    if (mounted) setState(() => _hasUpdate = AppUpdateChecker.updateAvailable.value);
   }
 
   // The device's radios can go quiet while the screen is off, so the stale
@@ -112,129 +116,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    AppUpdateChecker.updateAvailable.removeListener(_onUpdateAvailableChanged);
     _internetCheckTimer?.cancel();
     _locationServiceSub?.cancel();
     super.dispose();
   }
 
-  Future<void> _checkAppUpdate() async {
-    if (kIsWeb || !Platform.isAndroid) return;
-    try {
-      final info = await InAppUpdate.checkForUpdate();
-      if (info.updateAvailability == UpdateAvailability.updateAvailable) {
-        if (!mounted) return;
-        setState(() => _hasUpdate = true);
-      }
-    } catch (e) {
-      debugPrint('[AppUpdate] check error: $e');
-    }
-  }
-
-  void _showUpdateModal() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        final cardColor = Theme.of(ctx).cardColor;
-        final borderColor = Theme.of(ctx).dividerColor;
-        final onSurface = Theme.of(ctx).colorScheme.onSurface;
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          child: Container(
-            padding: const EdgeInsets.all(28),
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: borderColor),
-              boxShadow: [
-                BoxShadow(
-                  color: kBlue.withValues(alpha: 0.12),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    color: kBlue.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.system_update_rounded,
-                      color: kBlue,
-                      size: 32,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  'New Update Available',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: onSurface,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'A new version of Giggre is available. Update now to get the latest features and improvements.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: kSub, fontSize: 13.5, height: 1.6),
-                ),
-                const SizedBox(height: 28),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () async {
-                      Navigator.of(ctx, rootNavigator: true).pop();
-                      try {
-                        await InAppUpdate.performImmediateUpdate();
-                      } catch (e) {
-                        debugPrint('[AppUpdate] update error: $e');
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kBlue,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text(
-                      'Update Now',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(ctx, rootNavigator: true).pop();
-                    if (mounted) setState(() => _updateDismissed = true);
-                  },
-                  child: const Text(
-                    'Later',
-                    style: TextStyle(color: kSub, fontSize: 13),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
 
   Future<void> _fetchUpdates() async {
     try {
@@ -694,8 +581,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => _GiggreMenu(
-        hasPendingUpdate: _hasUpdate && _updateDismissed,
-        onUpdate: _showUpdateModal,
+        hasPendingUpdate: _hasUpdate,
+        onUpdate: AppUpdateChecker.promptUpdateNow,
       ),
     );
   }
@@ -884,7 +771,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (_hasUpdate) ...[
               const SizedBox(height: 14),
               GestureDetector(
-                onTap: _showUpdateModal,
+                onTap: AppUpdateChecker.promptUpdateNow,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
