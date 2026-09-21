@@ -68,6 +68,14 @@
       "collectionGroup": "workers",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
+        { "fieldPath": "hostId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "workers",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
         { "fieldPath": "workerId", "order": "ASCENDING" },
         { "fieldPath": "gigCollection", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }

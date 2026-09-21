@@ -30,7 +30,7 @@ import '../../../../core/widgets/rating_dialog.dart';
 import '../../../gig_shared/active_gig_theme.dart';
 import '../../../gig_shared/active_gig_step.dart';
 import '../../../gig_shared/active_gig_widgets.dart';
-import '../../../gig_shared/user_profile_sheet.dart';
+import '../../../gig_shared/user_profile_screen.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
 
 String _generatePaymentCode() {
@@ -754,11 +754,12 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             .map((s) => s.toString())
             .toList();
 
-    await showUserProfileSheet(
+    await UserProfileScreen.push(
       context,
       uid: workerId,
       fallbackName: workerName,
       surface: 'profile',
+      role: RateeRole.worker,
       matchSkillsForCompletedGigs: requiredSkills,
       onBlocked: () => _declineApplicant(applicant),
     );

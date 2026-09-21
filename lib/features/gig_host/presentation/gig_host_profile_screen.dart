@@ -17,6 +17,10 @@ import 'package:giggre_app/features/gig_worker/presentation/verification_screen.
 import 'package:giggre_app/features/home/presentation/blocked_users_screen.dart';
 import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
 import '../../../core/providers/current_user_provider.dart';
+import '../../../core/services/avatar_service.dart';
+import '../../../core/widgets/avatars/avatar_picker_sheet.dart';
+import '../../../core/widgets/avatars/giggre_avatar.dart';
+import '../../../core/widgets/avatars/giggre_avatar_art.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/utils/currency_formatter.dart';
@@ -57,6 +61,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
   String _bio = '';
   String _company = '';
   String _photoUrl = '';
+  String? _avatarId;
   String _createdAt = '';
   RatingSummary _hostRating = RatingSummary.empty;
   int _ratingCount = 0;
@@ -140,6 +145,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                 data['photoUrl'] ??
                 FirebaseAuth.instance.currentUser?.photoURL ??
                 '';
+            _avatarId = data['avatarId'] as String?;
             _createdAt = createdAtStr;
             _hostRating = RatingSummary.fromUserData(data, RateeRole.host);
             _ratingCount = _hostRating.count;
@@ -283,46 +289,35 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
     return months[month];
   }
 
+  /// Runs the "change your picture" flow. Exactly one of [onPickedImage] and
+  /// [onPickedAvatar] fires, because a photo and an avatar are alternatives.
   Future<void> _pickAvatar(
-    void Function(void Function()) setModal,
-    void Function(XFile) onPicked,
-  ) async {
-    final source = await showDialog<ImageSource>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(ctx).cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Change Profile Photo',
-          style: TextStyle(
-            color: Theme.of(ctx).colorScheme.onSurface,
-            fontSize: 15,
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt_rounded, color: kAmber),
-              title: const Text('Take Photo'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_rounded, color: kAmber),
-              title: const Text('Choose from Library'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-          ],
-        ),
-      ),
-    );
+    void Function(void Function()) setModal, {
+    required void Function(XFile) onPickedImage,
+    required void Function(String) onPickedAvatar,
+    String? currentAvatarId,
+  }) async {
+    final source = await showProfilePictureSourceDialog(context);
     if (source == null) return;
+
+    if (source == ProfilePictureSource.giggreAvatar) {
+      if (!mounted) return;
+      final id = await showGiggreAvatarPicker(
+        context,
+        currentAvatarId: currentAvatarId ?? _avatarId,
+      );
+      if (id != null) setModal(() => onPickedAvatar(id));
+      return;
+    }
+
     final picked = await ImagePicker().pickImage(
-      source: source,
+      source: source == ProfilePictureSource.camera
+          ? ImageSource.camera
+          : ImageSource.gallery,
       imageQuality: 80,
       maxWidth: 512,
     );
-    if (picked != null) setModal(() => onPicked(picked));
+    if (picked != null) setModal(() => onPickedImage(picked));
   }
 
   void _showEditPersonalInfo() {
@@ -332,6 +327,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
     final phoneCtrl = TextEditingController(text: _phone);
     bool saving = false;
     XFile? pickedImage;
+    String? pickedAvatarId;
     final formKey = GlobalKey<FormState>();
 
     showModalBottomSheet(
@@ -397,7 +393,15 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                             ? null
                             : () => _pickAvatar(
                                 setModal,
-                                (img) => pickedImage = img,
+                                currentAvatarId: pickedAvatarId,
+                                onPickedImage: (img) {
+                                  pickedImage = img;
+                                  pickedAvatarId = null;
+                                },
+                                onPickedAvatar: (id) {
+                                  pickedAvatarId = id;
+                                  pickedImage = null;
+                                },
                               ),
                         child: Stack(
                           children: [
@@ -417,16 +421,28 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                         File(pickedImage!.path),
                                         fit: BoxFit.cover,
                                       )
-                                    : _photoUrl.isNotEmpty
-                                    ? CachedNetworkImage(
-                                        imageUrl: _photoUrl,
-                                        fit: BoxFit.cover,
-                                        placeholder: (c, u) =>
-                                            const _DefaultAvatar(size: 80),
-                                        errorWidget: (c, u, e) =>
-                                            const _DefaultAvatar(size: 80),
-                                      )
-                                    : const _DefaultAvatar(size: 80),
+                                    // The pending pick wins while the sheet is
+                                    // open; the saved one shows until there is
+                                    // a pending pick of either kind.
+                                    : GiggreAvatar.forId(
+                                            pickedAvatarId ?? _avatarId,
+                                            size: 80,
+                                            circle: false,
+                                          ) ??
+                                          (_photoUrl.isNotEmpty
+                                              ? CachedNetworkImage(
+                                                  imageUrl: _photoUrl,
+                                                  fit: BoxFit.cover,
+                                                  placeholder: (c, u) =>
+                                                      const _DefaultAvatar(
+                                                        size: 80,
+                                                      ),
+                                                  errorWidget: (c, u, e) =>
+                                                      const _DefaultAvatar(
+                                                        size: 80,
+                                                      ),
+                                                )
+                                              : const _DefaultAvatar(size: 80)),
                               ),
                             ),
                             Positioned(
@@ -550,21 +566,39 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                 if (uid == null) return;
                                 try {
                                   String? newPhotoUrl;
-                                  if (pickedImage != null) {
-                                    final ref = FirebaseStorage.instance
-                                        .ref()
-                                        .child('profile_images/$uid.jpg');
-                                    await ref.putFile(File(pickedImage!.path));
-                                    newPhotoUrl = await ref.getDownloadURL();
-                                  }
                                   final updates = <String, dynamic>{
                                     'name': nameCtrl.text.trim(),
                                     'company': companyCtrl.text.trim(),
                                     'phone': phoneCtrl.text.trim(),
                                     'bio': bioCtrl.text.trim(),
                                   };
-                                  if (newPhotoUrl != null) {
-                                    updates['photoUrl'] = newPhotoUrl;
+                                  final chosenAvatar = giggreAvatarById(
+                                    pickedAvatarId,
+                                  );
+                                  if (chosenAvatar != null) {
+                                    // A still of the avatar goes to the same
+                                    // Storage path a photo would, so screens
+                                    // that only know photoUrl show it too.
+                                    newPhotoUrl =
+                                        await AvatarService.uploadStill(
+                                          uid: uid,
+                                          art: chosenAvatar,
+                                        );
+                                    updates.addAll(
+                                      AvatarService.avatarUpdates(
+                                        newPhotoUrl,
+                                        chosenAvatar.id,
+                                      ),
+                                    );
+                                  } else if (pickedImage != null) {
+                                    final ref = FirebaseStorage.instance
+                                        .ref()
+                                        .child('profile_images/$uid.jpg');
+                                    await ref.putFile(File(pickedImage!.path));
+                                    newPhotoUrl = await ref.getDownloadURL();
+                                    updates.addAll(
+                                      AvatarService.photoUpdates(newPhotoUrl),
+                                    );
                                   }
                                   await FirebaseFirestore.instance
                                       .collection('users')
@@ -578,6 +612,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                     _bio = bioCtrl.text.trim();
                                     if (newPhotoUrl != null) {
                                       _photoUrl = newPhotoUrl;
+                                      _avatarId = chosenAvatar?.id;
                                     }
                                   });
                                   if (ctx.mounted) Navigator.pop(ctx);
@@ -806,7 +841,11 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              _Avatar(photoUrl: _photoUrl, size: 72),
+                              _Avatar(
+                                photoUrl: _photoUrl,
+                                avatarId: _avatarId,
+                                size: 72,
+                              ),
                               const SizedBox(width: 16),
                               Expanded(
                                 child: Column(
@@ -847,7 +886,8 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                       children: [
                                         ...List.generate(5, (i) {
                                           final full =
-                                              i < (_hostRating.average ?? 0)
+                                              i <
+                                              (_hostRating.average ?? 0)
                                                   .floor();
                                           final half =
                                               !full &&
@@ -1013,7 +1053,9 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                           value: _spentByCurrency.isEmpty
                               ? CurrencyFormatter.format(
                                   0,
-                                  context.watch<CurrentUserProvider>().currencyCode,
+                                  context
+                                      .watch<CurrentUserProvider>()
+                                      .currencyCode,
                                 )
                               : (_spentByCurrency.entries.toList()
                                       ..sort((a, b) => a.key.compareTo(b.key)))
@@ -1336,11 +1378,17 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
 
 class _Avatar extends StatelessWidget {
   final String photoUrl;
+
+  /// The Giggre character this user picked, if any — takes precedence
+  /// over [photoUrl], which holds a still of that same avatar.
+  final String? avatarId;
   final double size;
-  const _Avatar({required this.photoUrl, required this.size});
+  const _Avatar({required this.photoUrl, required this.size, this.avatarId});
 
   @override
   Widget build(BuildContext context) {
+    final avatar = GiggreAvatar.forId(avatarId, size: size);
+    if (avatar != null) return avatar;
     if (photoUrl.isNotEmpty) {
       return ClipOval(
         child: CachedNetworkImage(

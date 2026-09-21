@@ -23,6 +23,10 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/profile_tab_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../core/widgets/earnings_breakdown_dialog.dart';
+import '../../../core/services/avatar_service.dart';
+import '../../../core/widgets/avatars/avatar_picker_sheet.dart';
+import '../../../core/widgets/avatars/giggre_avatar.dart';
+import '../../../core/widgets/avatars/giggre_avatar_art.dart';
 import '../../../core/widgets/entrance_animation.dart';
 import '../../gig_worker/presentation/gig_history_screen.dart';
 import '../../gig_worker/presentation/worker_ratings_screen.dart';
@@ -150,6 +154,7 @@ class _ProfileTabState extends State<ProfileTab> {
   String _bio = '';
   String _company = '';
   String _photoUrl = '';
+  String? _avatarId;
   String _createdAt = '';
   String _isVerified = '';
 
@@ -273,13 +278,11 @@ class _ProfileTabState extends State<ProfileTab> {
                 data['photoUrl'] ??
                 FirebaseAuth.instance.currentUser?.photoURL ??
                 '';
+            _avatarId = data['avatarId'] as String?;
             _createdAt = createdAtStr;
             _isVerified = data['isVerified'] ?? '';
 
-            _workerRating = RatingSummary.fromUserData(
-              data,
-              RateeRole.worker,
-            );
+            _workerRating = RatingSummary.fromUserData(data, RateeRole.worker);
             _earningsByCode = earningsByCode;
             _weeklyByCode = weeklyByCode;
             _completedGigsWorker = (earningsMap['completedGigs'] as num? ?? 0)
@@ -386,6 +389,29 @@ class _ProfileTabState extends State<ProfileTab> {
     return months[month];
   }
 
+  /// The picture the edit sheet shows: whatever has just been picked, else
+  /// what is already saved. Already inside a ClipOval, so the avatar skips its
+  /// own.
+  Widget _editPreview({
+    required XFile? pickedImage,
+    required String? avatarId,
+    required String photoUrl,
+  }) {
+    if (pickedImage != null) {
+      return Image.file(File(pickedImage.path), fit: BoxFit.cover);
+    }
+    final avatar = GiggreAvatar.forId(avatarId, size: 80, circle: false);
+    if (avatar != null) return avatar;
+    if (photoUrl.isNotEmpty) {
+      return CachedNetworkImage(
+        imageUrl: photoUrl,
+        fit: BoxFit.cover,
+        errorWidget: (_, _, _) => const Icon(Icons.person, size: 40),
+      );
+    }
+    return const Icon(Icons.person, size: 40);
+  }
+
   void _showEditProfile() {
     final nameCtrl = TextEditingController(text: _name);
     final companyCtrl = TextEditingController(text: _company);
@@ -393,6 +419,7 @@ class _ProfileTabState extends State<ProfileTab> {
     final bioCtrl = TextEditingController(text: _bio);
     bool saving = false;
     XFile? pickedImage;
+    String? pickedAvatarId;
     final formKey = GlobalKey<FormState>();
 
     showModalBottomSheet(
@@ -456,50 +483,41 @@ class _ProfileTabState extends State<ProfileTab> {
                           onTap: saving
                               ? null
                               : () async {
-                                  final source = await showDialog<ImageSource>(
-                                    context: ctx,
-                                    builder: (c) => AlertDialog(
-                                      backgroundColor: Theme.of(c).cardColor,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      content: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          ListTile(
-                                            leading: const Icon(
-                                              Icons.camera_alt_rounded,
-                                              color: kBlue,
-                                            ),
-                                            title: const Text('Camera'),
-                                            onTap: () => Navigator.pop(
-                                              c,
-                                              ImageSource.camera,
-                                            ),
-                                          ),
-                                          ListTile(
-                                            leading: const Icon(
-                                              Icons.photo_library_rounded,
-                                              color: kBlue,
-                                            ),
-                                            title: const Text('Gallery'),
-                                            onTap: () => Navigator.pop(
-                                              c,
-                                              ImageSource.gallery,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
+                                  final source =
+                                      await showProfilePictureSourceDialog(ctx);
                                   if (source == null) return;
+
+                                  if (source ==
+                                      ProfilePictureSource.giggreAvatar) {
+                                    if (!ctx.mounted) return;
+                                    final id = await showGiggreAvatarPicker(
+                                      ctx,
+                                      currentAvatarId:
+                                          pickedAvatarId ?? _avatarId,
+                                    );
+                                    if (id == null) return;
+                                    // The two are alternatives, so choosing
+                                    // one always drops the other.
+                                    setModal(() {
+                                      pickedAvatarId = id;
+                                      pickedImage = null;
+                                    });
+                                    return;
+                                  }
+
                                   final picked = await ImagePicker().pickImage(
-                                    source: source,
+                                    source:
+                                        source == ProfilePictureSource.camera
+                                        ? ImageSource.camera
+                                        : ImageSource.gallery,
                                     imageQuality: 80,
                                     maxWidth: 512,
                                   );
                                   if (picked != null) {
-                                    setModal(() => pickedImage = picked);
+                                    setModal(() {
+                                      pickedImage = picked;
+                                      pickedAvatarId = null;
+                                    });
                                   }
                                 },
                           child: Stack(
@@ -515,21 +533,18 @@ class _ProfileTabState extends State<ProfileTab> {
                                   ),
                                 ),
                                 child: ClipOval(
-                                  child: pickedImage != null
-                                      ? Image.file(
-                                          File(pickedImage!.path),
-                                          fit: BoxFit.cover,
-                                        )
-                                      : _photoUrl.isNotEmpty
-                                      ? CachedNetworkImage(
-                                          imageUrl: _photoUrl,
-                                          fit: BoxFit.cover,
-                                          errorWidget: (_, _, _) => const Icon(
-                                            Icons.person,
-                                            size: 40,
-                                          ),
-                                        )
-                                      : const Icon(Icons.person, size: 40),
+                                  child: _editPreview(
+                                    pickedImage: pickedImage,
+                                    // While the sheet is open the preview
+                                    // shows the pending choice; the saved one
+                                    // only until something is picked.
+                                    avatarId:
+                                        pickedAvatarId ??
+                                        (pickedImage == null
+                                            ? _avatarId
+                                            : null),
+                                    photoUrl: _photoUrl,
+                                  ),
                                 ),
                               ),
                               Positioned(
@@ -654,24 +669,43 @@ class _ProfileTabState extends State<ProfileTab> {
                                       FirebaseAuth.instance.currentUser?.uid;
                                   if (uid == null) return;
                                   try {
-                                    String? newPhotoUrl;
-                                    if (pickedImage != null) {
-                                      final ref = FirebaseStorage.instance
-                                          .ref()
-                                          .child('profile_images/$uid.jpg');
-                                      await ref.putFile(
-                                        File(pickedImage!.path),
-                                      );
-                                      newPhotoUrl = await ref.getDownloadURL();
-                                    }
                                     final updates = <String, dynamic>{
                                       'name': nameCtrl.text.trim(),
                                       'company': companyCtrl.text.trim(),
                                       'phone': phoneCtrl.text.trim(),
                                       'bio': bioCtrl.text.trim(),
                                     };
-                                    if (newPhotoUrl != null) {
-                                      updates['photoUrl'] = newPhotoUrl;
+                                    final chosenAvatar = giggreAvatarById(
+                                      pickedAvatarId,
+                                    );
+                                    if (chosenAvatar != null) {
+                                      // A still of the avatar goes to the same
+                                      // Storage path a photo would, so every
+                                      // screen that only knows photoUrl shows
+                                      // it too.
+                                      final url =
+                                          await AvatarService.uploadStill(
+                                            uid: uid,
+                                            art: chosenAvatar,
+                                          );
+                                      updates.addAll(
+                                        AvatarService.avatarUpdates(
+                                          url,
+                                          chosenAvatar.id,
+                                        ),
+                                      );
+                                    } else if (pickedImage != null) {
+                                      final ref = FirebaseStorage.instance
+                                          .ref()
+                                          .child('profile_images/$uid.jpg');
+                                      await ref.putFile(
+                                        File(pickedImage!.path),
+                                      );
+                                      updates.addAll(
+                                        AvatarService.photoUpdates(
+                                          await ref.getDownloadURL(),
+                                        ),
+                                      );
                                     }
                                     await FirebaseFirestore.instance
                                         .collection('users')
@@ -905,6 +939,7 @@ class _ProfileTabState extends State<ProfileTab> {
                   phone: _phone,
                   bio: _bio,
                   photoUrl: _photoUrl,
+                  avatarId: _avatarId,
                   createdAt: _createdAt,
                   isVerified: _isVerified,
                   tokens: tokens,
@@ -1214,6 +1249,11 @@ class _ProfileTabState extends State<ProfileTab> {
 // ─────────────────────────────────────────────────────────────────────────────
 class _ProfileCard extends StatelessWidget {
   final String name, email, phone, bio, photoUrl, createdAt, isVerified;
+
+  /// The Giggre character this user picked, if any. Takes precedence
+  /// over [photoUrl], which holds a still of this same avatar for every
+  /// screen that cannot animate it.
+  final String? avatarId;
   final ProfileTabTokens tokens;
   final VoidCallback onEdit;
   final bool isOwner;
@@ -1224,6 +1264,7 @@ class _ProfileCard extends StatelessWidget {
     required this.phone,
     required this.bio,
     required this.photoUrl,
+    required this.avatarId,
     required this.createdAt,
     required this.isVerified,
     required this.tokens,
@@ -1319,26 +1360,32 @@ class _ProfileCard extends StatelessWidget {
                         ),
                       ),
                       child: ClipOval(
-                        child: photoUrl.isNotEmpty
-                            ? CachedNetworkImage(
-                                imageUrl: photoUrl,
-                                fit: BoxFit.cover,
-                                placeholder: (_, _) => _DefaultAvatar(
-                                  size: 76,
-                                  name: name,
-                                  tokens: tokens,
-                                ),
-                                errorWidget: (_, _, _) => _DefaultAvatar(
-                                  size: 76,
-                                  name: name,
-                                  tokens: tokens,
-                                ),
-                              )
-                            : _DefaultAvatar(
-                                size: 76,
-                                name: name,
-                                tokens: tokens,
-                              ),
+                        child:
+                            GiggreAvatar.forId(
+                              avatarId,
+                              size: 76,
+                              circle: false,
+                            ) ??
+                            (photoUrl.isNotEmpty
+                                ? CachedNetworkImage(
+                                    imageUrl: photoUrl,
+                                    fit: BoxFit.cover,
+                                    placeholder: (_, _) => _DefaultAvatar(
+                                      size: 76,
+                                      name: name,
+                                      tokens: tokens,
+                                    ),
+                                    errorWidget: (_, _, _) => _DefaultAvatar(
+                                      size: 76,
+                                      name: name,
+                                      tokens: tokens,
+                                    ),
+                                  )
+                                : _DefaultAvatar(
+                                    size: 76,
+                                    name: name,
+                                    tokens: tokens,
+                                  )),
                       ),
                     ),
                     if (_verified)

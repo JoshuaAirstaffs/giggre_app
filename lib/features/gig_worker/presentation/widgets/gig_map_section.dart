@@ -22,7 +22,7 @@ import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/worker_active_gig.dart';
 import '../../../../core/widgets/account_not_verified_modal.dart';
-import '../../../gig_shared/user_profile_sheet.dart';
+import '../../../gig_shared/user_profile_screen.dart';
 import '../../../reports/models/report_content_type.dart';
 import '../../../reports/report_service.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
@@ -868,11 +868,15 @@ void showFullGigDetailSheet(
                     // action triggered a rebuild.
                     onPressed: () {
                       Navigator.pop(ctx);
-                      showUserProfileSheet(
+                      UserProfileScreen.push(
                         context,
                         uid: gig.hostId,
                         fallbackName: gig.hostName,
                         surface: 'gig_detail',
+                        // Viewing the host, so this is their host-side
+                        // reputation — not the worker rating they'd have
+                        // from gigs they've worked themselves.
+                        role: RateeRole.host,
                       );
                     },
                     child: const Text('View'),

@@ -1,5 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+
+import '../models/rating_review.dart';
 
 /// Which side of the gig is being rated. `worker` means a host is rating the
 /// worker they hired; `host` means a worker is rating the host who hired them.
@@ -80,14 +85,16 @@ class RatingService {
             as String? ??
         '';
 
-    final ratingRef = db.collection(_collection).doc(
-      ratingId(
-        gigCollection: gigCollection,
-        gigId: gigId,
-        raterId: raterId,
-        rateeId: rateeId,
-      ),
-    );
+    final ratingRef = db
+        .collection(_collection)
+        .doc(
+          ratingId(
+            gigCollection: gigCollection,
+            gigId: gigId,
+            raterId: raterId,
+            rateeId: rateeId,
+          ),
+        );
 
     final trimmed = comment?.trim();
 
@@ -122,5 +129,84 @@ class RatingService {
       }
       rethrow;
     }
+  }
+
+  /// The most recent revealed ratings this user received in [role].
+  ///
+  /// Only revealed ones: an unrevealed rating fails the read rule and would
+  /// take the whole query down with it, and surfacing it early would defeat
+  /// the blind reveal. A null `revealedAt` is not greater than epoch, which
+  /// is what filters them out here.
+  /// [startAfterRevealedAt] pages the list: pass the `revealedAt` of the last
+  /// review already shown to fetch the next batch.
+  static Future<List<RatingReview>> recentReviews({
+    required String userId,
+    required RateeRole role,
+    int limit = 5,
+    DateTime? startAfterRevealedAt,
+  }) async {
+    var query = FirebaseFirestore.instance
+        .collection(_collection)
+        .where('rateeId', isEqualTo: userId)
+        .where('rateeRole', isEqualTo: role.name)
+        .where(
+          'revealedAt',
+          isGreaterThan: Timestamp.fromMillisecondsSinceEpoch(0),
+        )
+        .orderBy('revealedAt', descending: true);
+
+    if (startAfterRevealedAt != null) {
+      query = query.startAfter([Timestamp.fromDate(startAfterRevealedAt)]);
+    }
+
+    final snap = await query.limit(limit).get();
+    final reviews = snap.docs.map(RatingReview.fromDoc).toList();
+    if (reviews.isEmpty) return reviews;
+
+    // Profiles show the reviewer's verification standing in place of their
+    // name, so resolve it here — one batched read for the whole page rather
+    // than a lookup per card. A failure leaves it unknown, which the card
+    // renders as no claim at all; it must never fall back to "unverified"
+    // and quietly understate a verified reviewer.
+    Set<String>? verified;
+    try {
+      verified = await verifiedAmong(reviews.map((r) => r.raterId));
+    } catch (e) {
+      debugPrint('[RatingService] reviewer verification lookup failed: $e');
+    }
+    return [
+      for (final r in reviews)
+        r.withRaterVerified(
+          verified == null || r.raterId.isEmpty
+              ? null
+              : verified.contains(r.raterId),
+        ),
+    ];
+  }
+
+  /// Firestore caps a `whereIn` at 30 values, so rater lookups go in batches
+  /// of that size.
+  static const _idLookupChunk = 30;
+
+  /// Which of [userIds] are identity-verified, by the same `isVerified`
+  /// field the profile header badges. `users` is publicly readable, so this
+  /// needs no extra rule.
+  static Future<Set<String>> verifiedAmong(Iterable<String> userIds) async {
+    final ids = userIds.where((id) => id.isNotEmpty).toSet().toList();
+    if (ids.isEmpty) return {};
+
+    final db = FirebaseFirestore.instance;
+    final verified = <String>{};
+    for (var i = 0; i < ids.length; i += _idLookupChunk) {
+      final chunk = ids.sublist(i, math.min(i + _idLookupChunk, ids.length));
+      final snap = await db
+          .collection('users')
+          .where(FieldPath.documentId, whereIn: chunk)
+          .get();
+      for (final doc in snap.docs) {
+        if (doc.data()['isVerified'] == 'verified') verified.add(doc.id);
+      }
+    }
+    return verified;
   }
 }
