@@ -13,6 +13,8 @@ import '../../../core/theme/profile_tab_theme.dart';
 import '../../../core/widgets/entrance_animation.dart';
 import '../../../utils/user_utils.dart';
 import 'register_screen.dart';
+import 'email_verification_screen.dart';
+import 'phone_verification_screen.dart';
 import '../../../services/sound_service.dart';
 import '../../../main.dart';
 
@@ -58,6 +60,20 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // Returns the verification screen this user still needs to complete, or
+  // null if they're fully verified (or grandfathered in — see
+  // needsEmailVerification/needsPhoneVerification).
+  Widget? _pendingVerificationScreen(Map<String, dynamic> data) {
+    final phone = data['phone'] as String? ?? '';
+    if (data['signInMethod'] == 'email' && needsEmailVerification(data)) {
+      return EmailVerificationScreen(phone: phone);
+    }
+    if (needsPhoneVerification(data)) {
+      return PhoneVerificationScreen(phone: phone);
+    }
+    return null;
+  }
+
   Future<void> _handlePostSignIn(User user) async {
     final userRef = FirebaseFirestore.instance
         .collection('users')
@@ -80,7 +96,16 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    if (needsNewUserId(data?['userId'] as String?)) {
+    final pending = _pendingVerificationScreen(data!);
+    if (pending != null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => pending),
+      );
+      return;
+    }
+
+    if (needsNewUserId(data['userId'] as String?)) {
       final newId = await generateUserId();
       await userRef.update({'userId': newId});
     }
@@ -122,6 +147,16 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       final docData = doc.data() ?? {};
+
+      final pending = _pendingVerificationScreen(docData);
+      if (pending != null) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => pending),
+        );
+        return;
+      }
+
       final provider = context.read<CurrentUserProvider>();
       provider.setCurrentUserInfo(
         cred.user?.email,

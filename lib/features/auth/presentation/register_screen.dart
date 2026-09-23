@@ -12,6 +12,8 @@ import '../../../main.dart';
 import '../../../utils/user_utils.dart';
 import 'dashboard_screen.dart';
 import 'welcome_screen.dart';
+import 'email_verification_screen.dart';
+import 'phone_verification_screen.dart';
 import '../../../services/sound_service.dart';
 import 'dart:math';
 
@@ -599,8 +601,18 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
           (existingData!['phone'] as String).isNotEmpty) {
         isCompletingRegistration.value = false;
         if (mounted) {
+          final phone = existingData['phone'] as String;
+          Widget destination;
+          if (existingData['signInMethod'] == 'email' &&
+              needsEmailVerification(existingData)) {
+            destination = EmailVerificationScreen(phone: phone);
+          } else if (needsPhoneVerification(existingData)) {
+            destination = PhoneVerificationScreen(phone: phone);
+          } else {
+            destination = const DashboardScreen();
+          }
           Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const DashboardScreen()),
+            MaterialPageRoute(builder: (_) => destination),
             (route) => false,
           );
         }
@@ -627,8 +639,6 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         'photoUrl'        : authUser.photoURL ?? widget.pendingPhotoUrl ?? '',
         'balance'         : 0,
         'createdAt'       : Timestamp.now(),
-        'termsAccepted'   : true,
-        'termsAcceptedAt' : Timestamp.now(),
         'skills'          : [],
         'openGigsUnlocked': false,
         'signInMethod'    : widget.user != null ? 'google' : widget.pendingProvider,
@@ -636,6 +646,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         'ratingAsHost'    : 5.0,
         'ratingCount'     : 0,
         'isVerified'      : 'unverified',
+        'emailVerified'   : authUser.emailVerified,
+        'phoneVerified'   : false,
         'referredBy'      : referrerId,
         'referrals'       : {
           'referral_code'         : await _generateReferralCode(),
@@ -678,28 +690,14 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       }
 
       if (mounted) {
+        // Phone is always verified next — Google already verifies email, so
+        // there's no separate email-verification step for this path.
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+          MaterialPageRoute(
+            builder: (_) => PhoneVerificationScreen(phone: fullPhone),
+          ),
           (route) => false,
         );
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (navigatorKey.currentContext != null) {
-            ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
-              SnackBar(
-                content: const Row(children: [
-                  Icon(Icons.check_circle_outline, color: Colors.white),
-                  SizedBox(width: 10),
-                  Expanded(child: Text('Welcome to Giggre! Your account is ready.')),
-                ]),
-                backgroundColor: const Color(0xFF1B6CA8),
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                duration: const Duration(seconds: 3),
-              ),
-            );
-          }
-        });
       }
     } catch (e) {
       // Firestore write failed — sign out and send back to login so the user
@@ -1298,6 +1296,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         email: email,
         password: password,
       );
+      await cred.user!.sendEmailVerification();
       final userId = await generateUserId();
       final newUid = cred.user!.uid;
 
@@ -1327,6 +1326,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'slot'            : 'AVAILABLE',
         'acceptanceRate'  : 1.0,
         'isVerified'      : 'unverified',
+        'emailVerified'   : false,
+        'phoneVerified'   : false,
         'referredBy'      : referrerId,
         'referrals'       : {
           'referral_code'         : await _generateReferralCode(),
@@ -1369,30 +1370,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
 
       if (mounted) {
+        // Email is verified first, then phone — the final "welcome" message
+        // shows once both are done, at the end of PhoneVerificationScreen.
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+          MaterialPageRoute(
+            builder: (_) => EmailVerificationScreen(phone: fullPhone),
+          ),
           (route) => false,
         );
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (navigatorKey.currentContext != null) {
-            ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
-              SnackBar(
-                content: const Row(children: [
-                  Icon(Icons.check_circle_outline, color: Colors.white),
-                  SizedBox(width: 10),
-                  Expanded(
-                      child: Text(
-                          'Welcome to Giggre! Your account is ready.')),
-                ]),
-                backgroundColor: const Color(0xFF1B6CA8),
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                duration: const Duration(seconds: 3),
-              ),
-            );
-          }
-        });
       }
     } on FirebaseAuthException catch (e) {
       String message;

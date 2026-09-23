@@ -1,0 +1,367 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import '../../../core/theme/app_colors.dart';
+import 'demo_logo_badge.dart';
+import 'demo_theme.dart';
+
+/// Self-playing phone-screen mockup for the "What is Giggre?" opening
+/// slide: the real login screen (`login_screen.dart`) fades into the real
+/// home screen's Gig Worker / Gig Host picker (`_RoleSegmentedControl` in
+/// `home_screen.dart`), then loops that role selection back and forth so
+/// both options read clearly before the slide advances. Purely decorative —
+/// nothing here is tappable.
+///
+/// Interactive-looking content (fields, role picker, continue button) is
+/// deliberately top-anchored within the phone screen rather than centered
+/// or bottom-anchored, leaving its lower portion empty — that's the area a
+/// bottom-positioned avatar overlay is expected to sit in front of.
+class DemoPhonePreview extends StatefulWidget {
+  const DemoPhonePreview({super.key});
+
+  @override
+  State<DemoPhonePreview> createState() => _DemoPhonePreviewState();
+}
+
+class _DemoPhonePreviewState extends State<DemoPhonePreview> {
+  static const _loginDuration = Duration(milliseconds: 1900);
+  static const _roleSwitchInterval = Duration(milliseconds: 1800);
+
+  bool _showHome = false;
+  String _selectedRole = 'worker';
+  Timer? _loginTimer;
+  Timer? _roleTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loginTimer = Timer(_loginDuration, () {
+      if (!mounted) return;
+      setState(() => _showHome = true);
+      _roleTimer = Timer.periodic(_roleSwitchInterval, (_) {
+        if (!mounted) return;
+        setState(() {
+          _selectedRole = _selectedRole == 'worker' ? 'host' : 'worker';
+        });
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _loginTimer?.cancel();
+    _roleTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _PhoneChrome(
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 500),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.08),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
+        ),
+        child: _showHome
+            ? _MockHomeScreen(key: const ValueKey('home'), selectedRole: _selectedRole)
+            : const _MockLoginScreen(key: ValueKey('login')),
+      ),
+    );
+  }
+}
+
+/// Rounded "case" + notch around the mock screen content, sized to fit
+/// (never overflow) whatever space its parent gives it while keeping a
+/// realistic tall-phone proportion.
+class _PhoneChrome extends StatelessWidget {
+  final Widget child;
+  const _PhoneChrome({required this.child});
+
+  static const _aspect = 9 / 18.5; // width / height
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        var height = constraints.maxHeight * 0.85;
+        var width = height * _aspect;
+        if (width > constraints.maxWidth * 0.85) {
+          width = constraints.maxWidth * 0.85;
+          height = width / _aspect;
+        }
+        return Center(
+          child: SizedBox(
+            width: width,
+            height: height,
+            child: Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: const Color(0xFF15202B),
+                borderRadius: BorderRadius.circular(32),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(26),
+                    child: ColoredBox(color: dCard, child: child),
+                  ),
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: Container(
+                      margin: const EdgeInsets.only(top: 6),
+                      width: 46,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF15202B),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Mirrors `login_screen.dart`'s copy and field layout at mock scale.
+class _MockLoginScreen extends StatelessWidget {
+  const _MockLoginScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 34, 18, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const DemoLogoBadge(size: 40),
+          const SizedBox(height: 14),
+          const Text(
+            'Welcome back!',
+            style: TextStyle(color: dTitle, fontSize: 14.5, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 3),
+          const Text(
+            'Find your next gig, or get trusted help nearby.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: dBody, fontSize: 9, height: 1.3),
+          ),
+          const SizedBox(height: 18),
+          const _MockAuthField(icon: Icons.email_outlined, hint: 'Email Address'),
+          const SizedBox(height: 9),
+          const _MockAuthField(icon: Icons.lock_outline, hint: 'Password'),
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: kGold, borderRadius: BorderRadius.circular(10)),
+            child: const Text(
+              'Log In',
+              style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MockAuthField extends StatelessWidget {
+  final IconData icon;
+  final String hint;
+  const _MockAuthField({required this.icon, required this.hint});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: dBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: dBorder),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: dMuted, size: 14),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              hint,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: dMuted, fontSize: 10),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Mirrors `home_screen.dart`'s real role picker + continue button — same
+/// icons, labels, and `worker` → kBlue / `host` → kGold color mapping —
+/// with [selectedRole] swapped on a timer instead of a tap.
+class _MockHomeScreen extends StatelessWidget {
+  final String selectedRole;
+  const _MockHomeScreen({super.key, required this.selectedRole});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 28, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                decoration: const BoxDecoration(color: dBorder, shape: BoxShape.circle),
+                child: const Icon(Icons.person_rounded, color: dMuted, size: 14),
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Hi, Alex',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: dTitle, fontSize: 11.5, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const Icon(Icons.notifications_none_rounded, color: dMuted, size: 16),
+            ],
+          ),
+          const SizedBox(height: 22),
+          const Text(
+            'Choose how you want to use Giggre',
+            style: TextStyle(color: dTitle, fontSize: 10.5, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 9),
+          _MockRoleSegmentedControl(selectedRole: selectedRole),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selectedRole == 'worker' ? kBlue : kGold,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              selectedRole == 'worker' ? 'Continue as Gig Worker' : 'Continue as Gig Host',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MockRoleSegmentedControl extends StatelessWidget {
+  final String selectedRole;
+  const _MockRoleSegmentedControl({required this.selectedRole});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: dCard,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: dBorder),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(9),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _MockRoleHalf(
+                  icon: Icons.work_outline_rounded,
+                  label: 'Gig Worker',
+                  isSelected: selectedRole == 'worker',
+                  selectedColor: kBlue,
+                ),
+              ),
+              Container(width: 1, color: dBorder),
+              Expanded(
+                child: _MockRoleHalf(
+                  icon: Icons.storefront_outlined,
+                  label: 'Gig Host',
+                  isSelected: selectedRole == 'host',
+                  selectedColor: kGold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MockRoleHalf extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isSelected;
+  final Color selectedColor;
+
+  const _MockRoleHalf({
+    required this.icon,
+    required this.label,
+    required this.isSelected,
+    required this.selectedColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      color: isSelected ? selectedColor : selectedColor.withValues(alpha: 0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: isSelected ? Colors.white : dMuted),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 8.5,
+              fontWeight: FontWeight.w700,
+              color: isSelected ? Colors.white : dBody,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

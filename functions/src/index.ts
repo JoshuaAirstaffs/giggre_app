@@ -928,6 +928,54 @@ export const onOpenGigCancelledCascade =
 export const onOfferedGigCancelledCascade =
   makeGigCancellationCascadeTrigger("offered_gigs");
 
+// Manual on-demand push trigger for testing delivery end-to-end without
+// waiting on a real event (chat message, gig update, etc.) to happen.
+// Looks the user up by email since that's what's easiest to identify by
+// hand while testing. Set the shared secret via:
+//   firebase functions:secrets:set TEST_PUSH_SECRET --project <dev|prod>
+const testPushSecret = defineSecret("TEST_PUSH_SECRET");
+
+
+export const sendTestPush = onRequest(
+ { secrets: [testPushSecret] },
+ async (req, res) => {
+   if (req.method !== "POST") {
+     res.status(405).send("Method not allowed");
+     return;
+   }
+   if (req.get("x-test-secret") !== testPushSecret.value()) {
+     res.status(401).send("Unauthorized");
+     return;
+   }
+
+
+   const email = (req.body?.email as string | undefined) ?? "rose@airstaffs.com";
+   const snap = await admin
+     .firestore()
+     .collection("users")
+     .where("email", "==", email)
+     .limit(1)
+     .get();
+   if (snap.empty) {
+     res.status(404).send(`No user found for email ${email}`);
+     return;
+   }
+   const uid = snap.docs[0].id;
+
+
+   await sendPushToUser(uid, {
+     title: (req.body?.title as string | undefined) ?? "Test Push",
+     body:
+       (req.body?.body as string | undefined) ??
+       `Manual test push sent at ${new Date().toISOString()}`,
+     channelId: "gig_chat_v2",
+   });
+
+
+   res.status(200).json({ ok: true, uid });
+ }
+);
+
 // Called manually (via curl) right after a new dev build is published —
 // see functions/README.md for the exact command. Not automatic: it doesn't
 // poll the Play Developer API, it just needs a nudge once you've uploaded

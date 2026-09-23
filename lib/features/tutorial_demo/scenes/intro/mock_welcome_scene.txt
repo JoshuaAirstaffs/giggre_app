@@ -1,0 +1,50 @@
+import 'package:flutter/material.dart';
+import '../../widgets/demo_avatar_video.dart';
+import '../../widgets/demo_phone_preview.dart';
+
+/// Opening slide of the "What is Giggre?" explainer — a self-playing phone
+/// mockup ([DemoPhonePreview], login screen fading into the real home
+/// screen's Gig Worker / Gig Host picker) centered in the frame, with the
+/// talking avatar ([DemoAvatarVideo]) overlaid independently at the
+/// bottom-left. The avatar has no background of its own and is allowed to
+/// sit in front of the bottom of the phone mockup — the two are positioned
+/// independently rather than one making room for the other, which is why
+/// the phone mockup's own interactive-looking content is top-anchored
+/// (see [DemoPhonePreview]) rather than centered or bottom-anchored.
+class MockWelcomeScene extends StatelessWidget {
+  const MockWelcomeScene({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth;
+        final maxHeight = constraints.maxHeight;
+        // As wide as the frame allows, capped only by whatever width keeps
+        // the 4:3 box's height within the frame — i.e. the largest size at
+        // which the whole avatar stays visible.
+        final avatarWidth = maxWidth < maxHeight * 4 / 3
+            ? maxWidth
+            : maxHeight * 4 / 3;
+        return Stack(
+          children: [
+            const Positioned.fill(child: DemoPhonePreview()),
+            Positioned(
+              left: 0,
+              bottom: -5,
+              child: SizedBox(
+                width: avatarWidth,
+                child: const AspectRatio(
+                  aspectRatio: 4 / 3,
+                  child: DemoAvatarVideo(
+                    assetPath: 'assets/video/tutorial/01_AV_What_Is_Giggre.webm',
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}

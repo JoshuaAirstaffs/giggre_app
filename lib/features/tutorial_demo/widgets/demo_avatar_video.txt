@@ -1,0 +1,61 @@
+import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
+
+/// Silent, looping avatar clip meant to sit as a foreground overlay on top
+/// of a slide's other content — the source video has no background, so it
+/// reads as a floating talking-head rather than a rectangle. Muted since a
+/// slide's own narration (see `DemoAudioController`) already owns the audio;
+/// this is a visual-only companion to it.
+///
+/// Renders nothing until the clip has actually loaded, and swallows any
+/// failure to do so (no video plugin available, as in widget tests; asset
+/// missing; codec unsupported) rather than surfacing it — the avatar is a
+/// nice-to-have on top of the slide, never something it depends on.
+class DemoAvatarVideo extends StatefulWidget {
+  final String assetPath;
+
+  const DemoAvatarVideo({super.key, required this.assetPath});
+
+  @override
+  State<DemoAvatarVideo> createState() => _DemoAvatarVideoState();
+}
+
+class _DemoAvatarVideoState extends State<DemoAvatarVideo> {
+  VideoPlayerController? _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    final controller = VideoPlayerController.asset(widget.assetPath);
+    try {
+      await controller.initialize();
+      await controller.setLooping(true);
+      await controller.setVolume(0);
+      await controller.play();
+    } catch (_) {
+      return;
+    }
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    setState(() => _controller = controller);
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    if (controller == null) return const SizedBox.shrink();
+    return VideoPlayer(controller);
+  }
+}

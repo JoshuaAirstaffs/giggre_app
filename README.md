@@ -36,7 +36,7 @@ flutter build appbundle --flavor prod --dart-define=FLAVOR=prod
 flutter build apk --flavor dev --dart-define=FLAVOR=dev
 
 # Prod APK (installable prod build, not for Play upload)
-flutter build apk --flavor prod --dart-define=FLAVOR=prod
+flutter build apk --release --flavor prod --dart-define=FLAVOR=prod
 ```
 
 ### Optional shortcut aliases (Git Bash)

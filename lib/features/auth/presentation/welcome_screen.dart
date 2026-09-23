@@ -15,7 +15,8 @@ import 'package:provider/provider.dart';
 import '../../../core/theme/profile_tab_theme.dart';
 import '../../../utils/user_utils.dart';
 import '../../../main.dart';
-import 'dashboard_screen.dart';
+import 'email_verification_screen.dart';
+import 'phone_verification_screen.dart';
 import 'register_screen.dart';
 import '../../../services/sound_service.dart';
 
@@ -137,6 +138,20 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     }
   }
 
+  // Returns the verification screen this user still needs to complete, or
+  // null if they're fully verified (or grandfathered in — see
+  // needsEmailVerification/needsPhoneVerification).
+  Widget? _pendingVerificationScreen(Map<String, dynamic> data) {
+    final phone = data['phone'] as String? ?? '';
+    if (data['signInMethod'] == 'email' && needsEmailVerification(data)) {
+      return EmailVerificationScreen(phone: phone);
+    }
+    if (needsPhoneVerification(data)) {
+      return PhoneVerificationScreen(phone: phone);
+    }
+    return null;
+  }
+
   Future<void> _handlePostSignIn(User user) async {
     final userRef = FirebaseFirestore.instance
         .collection('users')
@@ -159,7 +174,16 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       return;
     }
 
-    if (needsNewUserId(data?['userId'] as String?)) {
+    final pending = _pendingVerificationScreen(data!);
+    if (pending != null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => pending),
+      );
+      return;
+    }
+
+    if (needsNewUserId(data['userId'] as String?)) {
       final newId = await generateUserId();
       await userRef.update({'userId': newId});
     }
@@ -201,6 +225,16 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       if (!mounted) return;
 
       final docData = doc.data() ?? {};
+
+      final pending = _pendingVerificationScreen(docData);
+      if (pending != null) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => pending),
+        );
+        return;
+      }
+
       final provider = context.read<CurrentUserProvider>();
       provider.setCurrentUserInfo(
         cred.user?.email,
@@ -738,6 +772,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         email: email,
         password: password,
       );
+      await cred.user!.sendEmailVerification();
       final userId = await generateUserId();
       final newUid = cred.user!.uid;
 
@@ -772,6 +807,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         'slot': 'AVAILABLE',
         'acceptanceRate': 1.0,
         'isVerified': 'unverified',
+        'emailVerified': false,
+        'phoneVerified': false,
         'referredBy': referrerId,
         'referrals': {
           'referral_code': await _generateReferralCode(),
@@ -814,8 +851,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       }
 
       if (mounted) {
+        // Email is verified first, then phone — the final "welcome" message
+        // shows once both are done, at the end of PhoneVerificationScreen.
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+          MaterialPageRoute(
+            builder: (_) => EmailVerificationScreen(phone: fullPhone),
+          ),
           (route) => false,
         );
         Future.delayed(const Duration(milliseconds: 300), () {
@@ -1666,7 +1707,33 @@ class _LoginPanel extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 6),
+
+          // ─── DIVIDER ───
+          Row(
+            children: [
+              Expanded(child: Divider(color: tokens.divider)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'or continue with',
+                  style: TextStyle(color: tokens.textMuted, fontSize: 12),
+                ),
+              ),
+              Expanded(child: Divider(color: tokens.divider)),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ─── SOCIAL LOGO ROW ───
+          _SocialLogoRow(
+            tokens: tokens,
+            onGoogleTap: onGoogleTap,
+            isGoogleLoading: isGoogleLoading,
+            onAppleTap: onAppleTap,
+            isAppleLoading: isAppleLoading,
+          ),
+          const SizedBox(height: 20),
 
           // ─── SIGN UP ───
           Row(
@@ -1982,6 +2049,32 @@ class _SignupPanel extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
+          // ─── DIVIDER ───
+          Row(
+            children: [
+              Expanded(child: Divider(color: tokens.divider)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'or sign up with',
+                  style: TextStyle(color: tokens.textMuted, fontSize: 12),
+                ),
+              ),
+              Expanded(child: Divider(color: tokens.divider)),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ─── SOCIAL LOGO ROW ───
+          _SocialLogoRow(
+            tokens: tokens,
+            onGoogleTap: onGoogleTap,
+            isGoogleLoading: isGoogleLoading,
+            onAppleTap: onAppleTap,
+            isAppleLoading: isAppleLoading,
+          ),
+          const SizedBox(height: 20),
+
           // ─── LOG IN ───
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -2189,10 +2282,11 @@ class _ConsentLineState extends State<_ConsentLine> {
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: RichText(
-            text: TextSpan(
-              style: const TextStyle(fontSize: 9.5, color: _kMuted2),
-              children: [
+      child: RichText(
+        textAlign: TextAlign.center,
+        text: TextSpan(
+          style: const TextStyle(fontSize: 9.5, color: _kMuted2),
+          children: [
                 const TextSpan(text: "I have read and agree to Giggre's "),
                 TextSpan(
                   text: 'Terms & Conditions',
@@ -2200,15 +2294,15 @@ class _ConsentLineState extends State<_ConsentLine> {
                   recognizer: _termsTap,
                 ),
                 const TextSpan(text: ' and '),
-                TextSpan(
-                  text: 'Privacy Policy',
-                  style: linkStyle,
-                  recognizer: _privacyTap,
-                ),
-                const TextSpan(text: '.'),
-              ],
+            TextSpan(
+              text: 'Privacy Policy',
+              style: linkStyle,
+              recognizer: _privacyTap,
             ),
-          ),
+                const TextSpan(text: '.'),
+          ],
+        ),
+      ),
         ),
       ],
     );
@@ -2558,58 +2652,58 @@ class _SocialLogoRow extends StatelessWidget {
       children: [
         Expanded(
           child: SizedBox(
-            height: 52,
-            child: OutlinedButton.icon(
-              onPressed: isGoogleLoading ? null : onGoogleTap,
-              icon: isGoogleLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
-              label: Text(
-                'Google',
-                style: TextStyle(
-                  fontSize: 14.5,
-                  fontWeight: FontWeight.w700,
-                  color: tokens.textPrimary,
-                ),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: tokens.cardBorder),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          height: 52,
+          child: OutlinedButton.icon(
+            onPressed: isGoogleLoading ? null : onGoogleTap,
+            icon: isGoogleLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
+            label: Text(
+              isGoogleLoading ? 'Signing in...' : 'Continue with Google',
+              style: TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w700,
+                color: tokens.textPrimary,
               ),
             ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: tokens.cardBorder),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            ),
+          ),
           ),
         ),
         if (showApple) ...[
           const SizedBox(width: 12),
           Expanded(
             child: SizedBox(
-              height: 52,
-              child: ElevatedButton.icon(
-                onPressed: isAppleLoading ? null : onAppleTap,
-                icon: isAppleLoading
-                    ? SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: appleFg),
-                      )
+            height: 52,
+            child: ElevatedButton.icon(
+              onPressed: isAppleLoading ? null : onAppleTap,
+              icon: isAppleLoading
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: appleFg),
+                    )
                     : Icon(Icons.apple, color: appleFg, size: 22),
-                label: Text(
-                  'Apple',
-                  style: TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w700,
-                    color: appleFg,
-                  ),
+              label: Text(
+                isAppleLoading ? 'Signing in...' : 'Apple',
+                style: TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                  color: appleFg,
                 ),
-                style: ElevatedButton.styleFrom(
+              ),
+              style: ElevatedButton.styleFrom(
                   backgroundColor: appleBg,
-                  elevation: 0,
+                elevation: 0,
                   side: BorderSide(color: tokens.cardBorder),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                 ),
               ),
             ),
