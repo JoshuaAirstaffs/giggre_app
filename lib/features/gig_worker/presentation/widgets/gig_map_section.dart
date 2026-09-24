@@ -20,6 +20,7 @@ import '../../../../core/theme/map_style.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/worker_active_gig.dart';
 import '../../../../core/widgets/account_not_verified_modal.dart';
 import '../../../gig_shared/user_profile_screen.dart';
@@ -446,13 +447,12 @@ Future<void> applyToOpenGig(
       return;
     }
 
-    if (await workerHasPendingCancellation(uid)) {
+    final pendingBy = await workerPendingCancellationRequestedBy(uid);
+    if (pendingBy != null) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              "Your cancellation request hasn't been approved by the admin yet.",
-            ),
+          SnackBar(
+            content: Text(pendingCancellationBlockMessage(pendingBy)),
             backgroundColor: Colors.orange,
             behavior: SnackBarBehavior.floating,
           ),
@@ -2165,13 +2165,12 @@ class _GigMapSectionState extends State<GigMapSection> {
         return;
       }
 
-      if (await workerHasPendingCancellation(widget.uid)) {
+      final pendingBy = await workerPendingCancellationRequestedBy(widget.uid);
+      if (pendingBy != null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                "Your cancellation request hasn't been approved by the admin yet.",
-              ),
+            SnackBar(
+              content: Text(pendingCancellationBlockMessage(pendingBy)),
               backgroundColor: Colors.orange,
               behavior: SnackBarBehavior.floating,
             ),

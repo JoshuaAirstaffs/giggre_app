@@ -880,10 +880,16 @@ async function autoApproveIfStaleWorkerCancellation(
           });
         }
       }
-      // This worker's own slot doc has served its purpose — delete it so it
-      // drops off the host's live worker list, same cleanup the client does
-      // in _cancelQuickGig/_cancelOpenGig/_cancelOfferedGig.
-      tx.delete(ref);
+      // Keep the slot doc, marked cancelled, rather than deleting it — the
+      // host's list hides cancelled slots but reads them to show who left and
+      // on whose request (releasedWorkersFor in
+      // lib/core/utils/cancellation_request.dart), same as a slot an admin
+      // approved by hand.
+      tx.update(ref, {
+        status: "cancelled",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        cancellation_reason: updatedReasons,
+      });
       return true;
     }
 

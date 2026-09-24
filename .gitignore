@@ -69,3 +69,9 @@ node_modules/
 functions/node_modules/
 # Widget Preview related
 .widget_preview/
+
+# Firebase service-account keys. Full admin credentials on a live project —
+# the console downloads them as <project>-firebase-adminsdk-<hash>.json.
+*-firebase-adminsdk-*.json
+*service-account*.json
+*serviceaccount*.json

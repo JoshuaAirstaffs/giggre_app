@@ -233,6 +233,10 @@ class ActiveGigProgressCard extends StatelessWidget {
   final bool arrivedPromptVisible;
   final VoidCallback onConfirmArrival;
   final bool isCancelPending;
+  // Which side asked for the pending cancellation — the notice below says
+  // "your request" only when it really was this user's (see
+  // cancellationRequestedBy in core/utils/cancellation_request.dart).
+  final bool cancelRequestedByHost;
   final bool showStartGig;
   final VoidCallback onStartGig;
   final bool showGigComplete;
@@ -249,6 +253,7 @@ class ActiveGigProgressCard extends StatelessWidget {
     required this.arrivedPromptVisible,
     required this.onConfirmArrival,
     required this.isCancelPending,
+    this.cancelRequestedByHost = false,
     required this.showStartGig,
     required this.onStartGig,
     required this.showGigComplete,
@@ -375,15 +380,17 @@ class ActiveGigProgressCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: kAmber.withValues(alpha: 0.3)),
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
-                        Icon(Icons.hourglass_top_rounded,
+                        const Icon(Icons.hourglass_top_rounded,
                             color: kAmber, size: 18),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Cancellation pending — admin is reviewing your request.',
-                            style: TextStyle(
+                            cancelRequestedByHost
+                                ? 'The host requested to cancel this gig — admin is reviewing it.'
+                                : 'Cancellation pending — admin is reviewing your request.',
+                            style: const TextStyle(
                                 color: kAmber,
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w600),

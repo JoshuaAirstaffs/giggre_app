@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../core/utils/cancellation_request.dart' as cancel_req;
+
 /// One worker's independent slot on a multi-worker gig.
 /// Lives at `{gigCollection}/{gigId}/workers/{workerId}` — doc id == workerId.
 ///
@@ -35,6 +37,10 @@ class WorkerSlotModel {
   final String? paymentConfirmedBy;
   final bool? paymentConfirmedManually;
 
+  /// Who asked for this slot's latest cancellation — 'worker' | 'host' |
+  /// 'system' (see cancellationRequestedBy), or null when there's none.
+  final String? cancellationRequestedBy;
+
   const WorkerSlotModel({
     required this.workerId,
     required this.workerName,
@@ -62,6 +68,7 @@ class WorkerSlotModel {
     this.paymentConfirmedAt,
     this.paymentConfirmedBy,
     this.paymentConfirmedManually,
+    this.cancellationRequestedBy,
   });
 
   Map<String, dynamic> toMap() => {
@@ -107,6 +114,7 @@ class WorkerSlotModel {
       paymentConfirmedAt: ts('paymentConfirmedAt'),
       paymentConfirmedBy: d['paymentConfirmedBy'] as String?,
       paymentConfirmedManually: d['paymentConfirmedManually'] as bool?,
+      cancellationRequestedBy: cancel_req.cancellationRequestedBy(d),
     );
   }
 
@@ -139,4 +147,44 @@ CollectionReference<Map<String, dynamic>> workersRef(
       .collection(gigCollection)
       .doc(gigId)
       .collection('workers');
+}
+
+/// Stable 1-based "Worker N" numbers for a gig's slots, keyed by workerId.
+///
+/// Numbered in the order workers were put on the gig — `selectedAt` (open),
+/// `dispatchedAt` (quick) or `offeredAt` (offered), whichever the slot has —
+/// across every slot including cancelled ones, so a worker keeps their number
+/// when someone else leaves and a replacement takes the next one. Declined
+/// candidates never joined and get no number. [slots] is each slot doc's
+/// data with its doc id as `workerId`.
+Map<String, int> workerSlotNumbers(Iterable<Map<String, dynamic>> slots) {
+  DateTime? joinedAt(Map<String, dynamic> d) {
+    for (final key in const [
+      'selectedAt',
+      'dispatchedAt',
+      'offeredAt',
+      'acceptedAt',
+    ]) {
+      final ts = d[key];
+      if (ts is Timestamp) return ts.toDate();
+    }
+    return null;
+  }
+
+  final entries = [
+    for (final d in slots)
+      if (d['status'] != 'declined' &&
+          (d['workerId'] as String? ?? '').isNotEmpty)
+        (id: d['workerId'] as String, at: joinedAt(d)),
+  ];
+  // A just-written slot's server timestamp is still null locally — it's the
+  // newest, so it sorts last. workerId breaks ties so the order never flips.
+  entries.sort((a, b) {
+    final at = a.at, bt = b.at;
+    if (at == null && bt != null) return 1;
+    if (at != null && bt == null) return -1;
+    final byTime = (at == null || bt == null) ? 0 : at.compareTo(bt);
+    return byTime != 0 ? byTime : a.id.compareTo(b.id);
+  });
+  return {for (var i = 0; i < entries.length; i++) entries[i].id: i + 1};
 }

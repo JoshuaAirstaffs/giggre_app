@@ -14,6 +14,13 @@ import 'models/report_content_type.dart';
 class ReportService {
   ReportService._();
 
+  /// The default set: content moderation, for a profile, a chat message or a
+  /// gig listing — things someone posted.
+  ///
+  /// A finished gig needs different ones. What goes wrong there is about what
+  /// happened on site, and none of these describe a worker who never turned
+  /// up or a host who paid less than agreed. See [gigReasonsAboutWorker] and
+  /// [gigReasonsAboutHost], which [show] takes via `reasons`.
   static const _reasons = [
     'Sexual content',
     'Harassment or bullying',
@@ -22,10 +29,48 @@ class ReportService {
     'Scam or fraud',
     'Spam',
     'Impersonation',
-    'Other',
+    otherReason,
+  ];
+
+  /// What a host reports about the worker they hired, after the gig closes.
+  static const gigReasonsAboutWorker = [
+    'Work not done properly',
+    'Never showed up',
+    'Showed up very late',
+    'Someone else came instead',
+    'Damaged property or belongings',
+    'Asked for payment outside the app',
+    'Harassment or threatening behavior',
+    otherReason,
+  ];
+
+  /// What a worker reports about the host who hired them, after the gig
+  /// closes. Payment sits first because it is the one thing the worker
+  /// cannot verify until the gig is already over.
+  static const gigReasonsAboutHost = [
+    'Payment was different from what was agreed',
+    'Never paid for the gig',
+    'Work was not what the gig described',
+    'Asked me to do work outside the gig',
+    'Unsafe working conditions',
+    'Location was not as described',
+    'Asked to be paid outside the app',
+    'Harassment or threatening behavior',
+    otherReason,
   ];
 
   static const _maxSnapshotChars = 2000;
+
+  /// The escape hatch every reason list ends with. Picking it swaps the
+  /// fixed label for whatever the reporter types, so `reason` records what
+  /// actually happened rather than the word "Other" — which told an admin
+  /// nothing and pushed the real reason into the optional details field,
+  /// where it was easy to leave blank.
+  static const otherReason = 'Other';
+
+  /// Kept short on purpose: `reason` is the one line an admin sees in a list
+  /// of reports. Elaboration belongs in the details field below it.
+  static const _maxCustomReason = 100;
 
   /// Opens the report bottom sheet. [contentAuthorId] is the uid of whoever
   /// authored the reported content (the reported user themself, when
@@ -41,6 +86,11 @@ class ReportService {
     required String surface,
     String? roomId,
     String? gigId,
+    /// Overrides the reason list. Defaults to content moderation; a
+    /// completed-gig report passes one of the gigReasons* sets instead.
+    List<String>? reasons,
+    /// Heading on the form. Defaults to the generic 'Report content'.
+    String? title,
   }) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid == contentAuthorId) return;
@@ -55,14 +105,25 @@ class ReportService {
 
     if (!context.mounted) return;
 
+    final reasonList = reasons ?? _reasons;
+    final heading = title ?? 'Report content';
+
     if (existing.docs.isNotEmpty) {
-      await _showSheet(context, initiallyReported: true, onSubmit: null);
+      await _showSheet(
+        context,
+        initiallyReported: true,
+        onSubmit: null,
+        reasons: reasonList,
+        title: heading,
+      );
       return;
     }
 
     await _showSheet(
       context,
       initiallyReported: false,
+      reasons: reasonList,
+      title: heading,
       onSubmit: (reason, details) async {
         String reportedUserName = '';
         String reportedUserEmail = '';
@@ -115,9 +176,16 @@ class ReportService {
     BuildContext context, {
     required bool initiallyReported,
     required Future<void> Function(String reason, String details)? onSubmit,
+    required List<String> reasons,
+    required String title,
   }) {
     String? selectedReason;
     final detailsController = TextEditingController();
+    final customReasonController = TextEditingController();
+    // Mirrors "the custom reason has something in it", so Submit can stay
+    // disabled until it does. A flag rather than reading the controller in
+    // build, so typing only rebuilds on the empty/non-empty flip.
+    bool customReasonFilled = false;
     bool submitted = initiallyReported;
     bool submitting = false;
     String? submitError;
@@ -242,7 +310,7 @@ class ReportService {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              'Report content',
+                              title,
                               style: TextStyle(
                                 color: onSurface,
                                 fontWeight: FontWeight.w700,
@@ -258,7 +326,7 @@ class ReportService {
                         style: TextStyle(color: kSub, fontSize: 13, height: 1.4),
                       ),
                       const SizedBox(height: 16),
-                      for (final reason in _reasons)
+                      for (final reason in reasons)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: InkWell(
@@ -306,6 +374,54 @@ class ReportService {
                             ),
                           ),
                         ),
+                      // Sits directly under the Other row, which is always
+                      // last in every reason list.
+                      if (selectedReason == otherReason) ...[
+                        const SizedBox(height: 2),
+                        TextField(
+                          controller: customReasonController,
+                          autofocus: true,
+                          maxLength: _maxCustomReason,
+                          textCapitalization: TextCapitalization.sentences,
+                          style: TextStyle(fontSize: 14, color: onSurface),
+                          onChanged: (value) {
+                            final filled = value.trim().isNotEmpty;
+                            if (filled != customReasonFilled) {
+                              setSheetState(() => customReasonFilled = filled);
+                            }
+                          },
+                          decoration: InputDecoration(
+                            hintText: 'What happened?',
+                            hintStyle:
+                                const TextStyle(color: kSub, fontSize: 13),
+                            filled: true,
+                            fillColor: kBlue.withValues(alpha: 0.06),
+                            // The ceiling is a guard, not a target — no need
+                            // to count up to it on a one-line field.
+                            counterText: '',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: kBlue.withValues(alpha: 0.4),
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: kBlue.withValues(alpha: 0.4),
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: kBlue),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 8),
                       TextField(
                         controller: detailsController,
@@ -337,7 +453,13 @@ class ReportService {
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton(
-                          onPressed: (selectedReason == null || submitting)
+                          onPressed:
+                              (selectedReason == null ||
+                                  submitting ||
+                                  // Other with nothing typed would file a
+                                  // report whose reason is the word "Other".
+                                  (selectedReason == otherReason &&
+                                      !customReasonFilled))
                               ? null
                               : () async {
                                   setSheetState(() {
@@ -346,7 +468,9 @@ class ReportService {
                                   });
                                   try {
                                     await onSubmit!(
-                                      selectedReason!,
+                                      selectedReason == otherReason
+                                          ? customReasonController.text.trim()
+                                          : selectedReason!,
                                       detailsController.text.trim(),
                                     );
                                     setSheetState(() {
@@ -408,6 +532,9 @@ class ReportService {
           );
         },
       ),
-    ).whenComplete(() => detailsController.dispose());
+    ).whenComplete(() {
+      detailsController.dispose();
+      customReasonController.dispose();
+    });
   }
 }

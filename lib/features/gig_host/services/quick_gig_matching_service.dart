@@ -359,8 +359,18 @@ class QuickGigMatchingService {
         final gigData = gigSnap.data()!;
         final status = gigData['status'] as String? ?? '';
 
-        if (['cancelled', 'navigating', 'arrived', 'working', 'completed', 'no_worker']
-            .contains(status)) {
+        // 'cancellation_requested' stops the search too: the host has asked
+        // for this gig to end, so dispatching another worker into it would
+        // hand them a gig that's already on its way out.
+        if ([
+          'cancelled',
+          'cancellation_requested',
+          'navigating',
+          'arrived',
+          'working',
+          'completed',
+          'no_worker',
+        ].contains(status)) {
           return;
         }
 
@@ -409,7 +419,14 @@ class QuickGigMatchingService {
         }
 
         // Worker accepted / gig was cancelled
-        if (['navigating', 'arrived', 'working', 'completed', 'cancelled'].contains(finalStatus)) {
+        if ([
+          'navigating',
+          'arrived',
+          'working',
+          'completed',
+          'cancelled',
+          'cancellation_requested',
+        ].contains(finalStatus)) {
           return;
         }
 
@@ -528,7 +545,13 @@ class QuickGigMatchingService {
         final status = gigData['status'] as String? ?? '';
         final filledSlotCount = (gigData['filledSlotCount'] as num?)?.toInt() ?? 0;
 
-        if (['cancelled', 'no_worker', 'filled', 'completed'].contains(status)) {
+        if ([
+          'cancelled',
+          'cancellation_requested',
+          'no_worker',
+          'filled',
+          'completed',
+        ].contains(status)) {
           return;
         }
         if (filledSlotCount >= workerSlots) {

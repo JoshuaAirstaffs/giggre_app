@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/utils/cancellation_request.dart';
 import '../../../core/utils/worker_active_gig.dart';
 import 'widgets/gig_map_section.dart';
 
@@ -172,13 +173,12 @@ class _SavedScreenState extends State<SavedScreen> {
       }
       return;
     }
-    if (await workerHasPendingCancellation(widget.uid)) {
+    final pendingBy = await workerPendingCancellationRequestedBy(widget.uid);
+    if (pendingBy != null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              "Your cancellation request hasn't been approved by the admin yet.",
-            ),
+          SnackBar(
+            content: Text(pendingCancellationBlockMessage(pendingBy)),
             backgroundColor: Colors.orange,
             behavior: SnackBarBehavior.floating,
           ),

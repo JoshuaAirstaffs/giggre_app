@@ -3,31 +3,57 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/utils/cancellation_request.dart';
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Small dashboard banner for the gap left by ActiveGigBar hiding immediately
 //  once a cancellation is requested (see watchActiveWorkerGig in
-//  active_gig_bar.dart) — this is the worker's only feedback that their
-//  request is still awaiting host/admin approval.
+//  active_gig_bar.dart) — this is the worker's only feedback that a request
+//  (theirs or the host's) is still awaiting admin approval.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Live stream of whether the current user has a cancellation request still
-/// awaiting approval, across quick_gigs/open_gigs (multi-worker slot docs,
-/// same scoping as watchActiveWorkerGig) and the legacy top-level
-/// workerId/status fields on quick_gigs/open_gigs/offered_gigs.
-Stream<bool> watchPendingCancellation(String uid) {
-  late final StreamController<bool> controller;
+/// A cancellation request still awaiting approval on one of this worker's
+/// gigs, carrying who asked for it — the card's copy differs, since either
+/// side can request one.
+class PendingCancellation {
+  /// 'worker' | 'host' | 'system'. Legacy entries with no `requestedBy` read
+  /// as 'worker', the only case that existed before hosts could request.
+  final String requestedBy;
+
+  const PendingCancellation(this.requestedBy);
+
+  factory PendingCancellation.fromGig(Map<String, dynamic> data) =>
+      PendingCancellation(
+        cancellationRequestedBy(data) ?? kCancelRequesterWorker,
+      );
+
+  bool get byHost => requestedBy == kCancelRequesterHost;
+}
+
+/// Live stream of the current user's cancellation request still awaiting
+/// approval (null when there is none), across quick_gigs/open_gigs
+/// (multi-worker slot docs, same scoping as watchActiveWorkerGig) and the
+/// legacy top-level workerId/status fields on
+/// quick_gigs/open_gigs/offered_gigs.
+Stream<PendingCancellation?> watchPendingCancellation(String uid) {
+  late final StreamController<PendingCancellation?> controller;
   StreamSubscription? slotSub, quickSub, openSub, offeredSub;
-  bool slotPending = false;
-  bool quickPending = false;
-  bool openPending = false;
-  bool offeredPending = false;
+  PendingCancellation? slotPending;
+  PendingCancellation? quickPending;
+  PendingCancellation? openPending;
+  PendingCancellation? offeredPending;
 
   void emit() {
     if (controller.isClosed) return;
-    controller.add(slotPending || quickPending || openPending || offeredPending);
+    controller.add(slotPending ?? quickPending ?? openPending ?? offeredPending);
   }
 
-  controller = StreamController<bool>.broadcast(
+  PendingCancellation? firstOf(QuerySnapshot<Map<String, dynamic>> snap) =>
+      snap.docs.isEmpty
+          ? null
+          : PendingCancellation.fromGig(snap.docs.first.data());
+
+  controller = StreamController<PendingCancellation?>.broadcast(
     onListen: () {
       slotSub = FirebaseFirestore.instance
           .collectionGroup('workers')
@@ -35,10 +61,13 @@ Stream<bool> watchPendingCancellation(String uid) {
           .where('status', isEqualTo: 'cancellation_requested')
           .snapshots()
           .listen((snap) {
-        slotPending = snap.docs.any((d) {
+        final slot = snap.docs.where((d) {
           final collection = d.data()['gigCollection'] as String?;
           return collection == 'quick_gigs' || collection == 'open_gigs';
         });
+        slotPending = slot.isEmpty
+            ? null
+            : PendingCancellation.fromGig(slot.first.data());
         emit();
       }, onError: (_) {});
       quickSub = FirebaseFirestore.instance
@@ -48,7 +77,7 @@ Stream<bool> watchPendingCancellation(String uid) {
           .limit(1)
           .snapshots()
           .listen((snap) {
-        quickPending = snap.docs.isNotEmpty;
+        quickPending = firstOf(snap);
         emit();
       }, onError: (_) {});
       openSub = FirebaseFirestore.instance
@@ -58,7 +87,7 @@ Stream<bool> watchPendingCancellation(String uid) {
           .limit(1)
           .snapshots()
           .listen((snap) {
-        openPending = snap.docs.isNotEmpty;
+        openPending = firstOf(snap);
         emit();
       }, onError: (_) {});
       offeredSub = FirebaseFirestore.instance
@@ -68,7 +97,7 @@ Stream<bool> watchPendingCancellation(String uid) {
           .limit(1)
           .snapshots()
           .listen((snap) {
-        offeredPending = snap.docs.isNotEmpty;
+        offeredPending = firstOf(snap);
         emit();
       }, onError: (_) {});
     },
@@ -83,7 +112,10 @@ Stream<bool> watchPendingCancellation(String uid) {
 }
 
 class PendingCancellationCard extends StatelessWidget {
-  const PendingCancellationCard({super.key});
+  /// The host asked for this cancellation, not the worker reading the card.
+  final bool requestedByHost;
+
+  const PendingCancellationCard({super.key, this.requestedByHost = false});
 
   static const Color _color = Color(0xFFB45309);
 
@@ -96,27 +128,31 @@ class PendingCancellationCard extends StatelessWidget {
         border: Border.all(color: _color.withValues(alpha: 0.3)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: const Row(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.hourglass_top_rounded, color: _color, size: 18),
-          SizedBox(width: 10),
+          const Icon(Icons.hourglass_top_rounded, color: _color, size: 18),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Waiting for the admin to approve your cancellation',
-                  style: TextStyle(
+                  requestedByHost
+                      ? 'The host asked to cancel your gig'
+                      : 'Waiting for the admin to approve your cancellation',
+                  style: const TextStyle(
                     color: _color,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                SizedBox(height: 2),
+                const SizedBox(height: 2),
                 Text(
-                  "You'll be able to take new gigs once it's approved",
-                  style: TextStyle(
+                  requestedByHost
+                      ? "Waiting for the admin to review it — you'll be able to take new gigs once it's settled"
+                      : "You'll be able to take new gigs once it's approved",
+                  style: const TextStyle(
                     color: _color,
                     fontSize: 11,
                     fontWeight: FontWeight.w400,

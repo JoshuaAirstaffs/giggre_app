@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'cancellation_request.dart';
+
 // Same collection/field/status convention as _checkForActiveGig
 // (gig_worker_screen.dart) and watchActiveWorkerGig (active_gig_bar.dart) —
 // do not invent new status values here.
@@ -52,7 +54,12 @@ Future<bool> workerHasActiveGig(String uid) async {
 /// to just 'cancellation_requested' — lets callers that block an apply/accept
 /// action tell this specific case apart from a plain in-progress gig and
 /// show a more specific message.
-Future<bool> workerHasPendingCancellation(String uid) async {
+///
+/// Returns who asked for that cancellation ('worker' | 'host' | 'system', see
+/// cancellationRequestedBy), or null when there's none pending — the blocking
+/// copy can't say "your request" when the host is the one who asked. Legacy
+/// entries without a `requestedBy` read as 'worker'.
+Future<String?> workerPendingCancellationRequestedBy(String uid) async {
   final db = FirebaseFirestore.instance;
 
   final subcollectionSnap = await db
@@ -61,7 +68,10 @@ Future<bool> workerHasPendingCancellation(String uid) async {
       .where('status', isEqualTo: 'cancellation_requested')
       .limit(1)
       .get();
-  if (subcollectionSnap.docs.isNotEmpty) return true;
+  if (subcollectionSnap.docs.isNotEmpty) {
+    return cancellationRequestedBy(subcollectionSnap.docs.first.data()) ??
+        kCancelRequesterWorker;
+  }
 
   final legacyResults = await Future.wait([
     for (final collection in _gigCollections)
@@ -72,5 +82,11 @@ Future<bool> workerHasPendingCancellation(String uid) async {
           .limit(1)
           .get(),
   ]);
-  return legacyResults.any((snap) => snap.docs.isNotEmpty);
+  for (final snap in legacyResults) {
+    if (snap.docs.isNotEmpty) {
+      return cancellationRequestedBy(snap.docs.first.data()) ??
+          kCancelRequesterWorker;
+    }
+  }
+  return null;
 }

@@ -5,6 +5,9 @@ import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/models/submitted_rating.dart';
+import '../../../core/services/rating_service.dart';
+import '../../gig_shared/post_gig_actions.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig History Screen — all completed gigs for the current worker
@@ -21,6 +24,13 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
   bool _loading = true;
   List<_HistoryItem> _items = [];
   Map<String, double> _earningsByCode = {};
+
+  /// The ratings this worker has already given, resolved once for the whole
+  /// list so each row doesn't cost its own read — and so a rated row can show
+  /// the stars and review it left. Null means the lookup failed; each card
+  /// then resolves itself rather than the list silently offering to re-rate
+  /// everything.
+  Map<String, SubmittedRating>? _ratingsGiven;
 
   @override
   void initState() {
@@ -41,6 +51,12 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
       _fetchCollection('offered_gigs', uid, 'Offered'),
       _fetchMultiWorkerCompletions(uid),
     ]);
+    Map<String, SubmittedRating>? ratingsGiven;
+    try {
+      ratingsGiven = await RatingService.ratingsGivenBy(uid);
+    } catch (e) {
+      debugPrint('[GigHistoryScreen] ratings-given lookup failed: $e');
+    }
     final userDoc = await FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
@@ -56,8 +72,10 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
     final byCode = rawTotal.map(
         (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0.0));
 
+    if (!mounted) return;
     setState(() {
       _items = all;
+      _ratingsGiven = ratingsGiven;
       _earningsByCode = Map<String, double>.from(byCode);
       _loading = false;
     });
@@ -85,6 +103,9 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
         currencyCode: (d['currencyCode'] as String?) ?? 'USD',
         completedAt: completedAt,
         hostName: d['hostName'] as String? ?? '',
+        gigId: doc.id,
+        gigCollection: collection,
+        hostId: d['hostId'] as String? ?? '',
         workerSlots: (d['workerSlots'] as num?)?.toInt() ?? 1,
       );
     }).toList();
@@ -130,6 +151,10 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
         currencyCode: (d['currencyCode'] as String?) ?? 'USD',
         completedAt: completedAt,
         hostName: d['hostName'] as String? ?? gigData?['hostName'] as String? ?? '',
+        gigId: gigId,
+        gigCollection: gigCollection,
+        hostId: d['hostId'] as String? ?? gigData?['hostId'] as String? ?? '',
+        slotWorkerId: uid,
         workerSlots: (gigData?['workerSlots'] as num?)?.toInt() ?? 1,
       );
     }));
@@ -170,7 +195,10 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 if (showHeader) _MonthHeader(date: item.completedAt),
-                                _GigHistoryCard(item: item),
+                                _GigHistoryCard(
+                                  item: item,
+                                  ratingsGiven: _ratingsGiven,
+                                ),
                                 const SizedBox(height: 10),
                               ],
                             );
@@ -202,6 +230,17 @@ class _HistoryItem {
   final String hostName;
   final int workerSlots;
 
+  /// The gig's own path — distinct from [id], which is only a list key and
+  /// carries the slot doc id too on multi-worker gigs. Rating and reporting
+  /// need the real one.
+  final String gigId;
+  final String gigCollection;
+  final String hostId;
+
+  /// Set on multi-worker gigs, where this worker's completion (and their
+  /// rating of the host) is scoped to their own slot doc.
+  final String? slotWorkerId;
+
   const _HistoryItem({
     required this.id,
     required this.type,
@@ -211,6 +250,10 @@ class _HistoryItem {
     required this.currencyCode,
     required this.completedAt,
     required this.hostName,
+    required this.gigId,
+    required this.gigCollection,
+    required this.hostId,
+    this.slotWorkerId,
     this.workerSlots = 1,
   });
 
@@ -390,7 +433,8 @@ class _MonthHeader extends StatelessWidget {
 
 class _GigHistoryCard extends StatelessWidget {
   final _HistoryItem item;
-  const _GigHistoryCard({required this.item});
+  final Map<String, SubmittedRating>? ratingsGiven;
+  const _GigHistoryCard({required this.item, this.ratingsGiven});
 
   Color get _typeColor {
     switch (item.type) {
@@ -507,6 +551,26 @@ class _GigHistoryCard extends StatelessWidget {
                             const TextStyle(color: kSub, fontSize: 11)),
                   ],
                 ),
+                // The rating dialog is offered once, at payment confirmation,
+                // and can be skipped; reporting a host had no post-completion
+                // entry point at all. Both live here for every finished gig.
+                if (item.hostId.isNotEmpty &&
+                    item.gigCollection.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  PostGigActions(
+                    gigId: item.gigId,
+                    gigCollection: item.gigCollection,
+                    gigTitle: item.title,
+                    rateeId: item.hostId,
+                    rateeName:
+                        item.hostName.isEmpty ? 'Host' : item.hostName,
+                    rateeRole: RateeRole.host,
+                    slotWorkerId: item.slotWorkerId,
+                    surface: 'gig_history',
+                    compact: true,
+                    ratingsGiven: ratingsGiven,
+                  ),
+                ],
               ],
             ),
           ),

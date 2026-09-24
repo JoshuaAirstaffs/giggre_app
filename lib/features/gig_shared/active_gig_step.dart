@@ -109,7 +109,7 @@ GigStepCopy hostInstructionFor(
     case GigStep.completed:
       return GigStepCopy(
         'Gig complete!',
-        'Rate $workerName to help other hosts.',
+        'Rate and review $workerName to help other hosts.',
       );
   }
 }

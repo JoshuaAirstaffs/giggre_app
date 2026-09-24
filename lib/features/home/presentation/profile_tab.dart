@@ -1061,7 +1061,7 @@ class _ProfileTabState extends State<ProfileTab> {
                           _ActionRow(
                             icon: Icons.star_outline_rounded,
                             iconColor: kGold,
-                            label: 'Ratings Given',
+                            label: 'Ratings & Reviews',
                             tokens: tokens,
                             onTap: () => showModalBottomSheet(
                               context: context,

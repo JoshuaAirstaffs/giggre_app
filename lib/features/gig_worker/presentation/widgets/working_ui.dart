@@ -18,6 +18,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/map_style.dart';
+import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
 import 'worker_payment_confirm_sheet.dart';
@@ -162,6 +163,13 @@ class _WorkingUIState extends State<WorkingUI> {
   GigStep _lastActiveStep = GigStep.navigating;
   String _lastStatusString = 'navigating';
   bool _cancelPending = false;
+  // A cancellation can be asked for by either side, so the pending notice has
+  // to know which — otherwise a host-initiated request reads to the worker as
+  // "admin is reviewing your request".
+  bool _cancelRequestedByHost = false;
+  // Whether this listener has seen a live (non-pending) status yet — see the
+  // lastProgressStatus fallback in _listenGig.
+  bool _sawActiveStatus = false;
 
   // Guard: show host rating dialog only once
   bool _ratingShown = false;
@@ -257,27 +265,44 @@ class _WorkingUIState extends State<WorkingUI> {
 
       if (status == 'cancelled' && !_cancelledHandled) {
         _cancelledHandled = true;
+        // Read the requester off this snapshot rather than _cancelRequestedByHost:
+        // a gig can go straight to 'cancelled' without this listener ever
+        // seeing the pending state (app restored after approval, say).
+        final byHost = isHostRequestedCancellation(snap.data());
         WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _onAdminCancelled(),
+          (_) => _onAdminCancelled(byHost: byHost),
         );
         return;
       }
 
       final isCancelPending = status == 'cancellation_requested';
+      final cancelRequestedByHost =
+          isCancelPending && isHostRequestedCancellation(snap.data());
 
+      // A pending request freezes the doc's status, so the tracker holds the
+      // step the gig was on. If this listener started up mid-request (the
+      // host asked while the screen was closed) there's no in-memory step to
+      // hold — fall back to the lastProgressStatus whoever requested it
+      // stamped, rather than resetting the worker to 'On the way'.
       final newStep = isCancelPending
-          ? _lastActiveStep
+          ? (_sawActiveStatus
+                ? _lastActiveStep
+                : gigStepFromStatus(_frozenStatus(snap.data())))
           : gigStepFromStatus(status);
 
       if (!isCancelPending) {
+        _sawActiveStatus = true;
         _lastActiveStep = newStep;
         _lastStatusString = status;
       }
 
-      if (newStep != _step || isCancelPending != _cancelPending) {
+      if (newStep != _step ||
+          isCancelPending != _cancelPending ||
+          cancelRequestedByHost != _cancelRequestedByHost) {
         setState(() {
           _step = newStep;
           _cancelPending = isCancelPending;
+          _cancelRequestedByHost = cancelRequestedByHost;
         });
       }
 
@@ -444,12 +469,24 @@ class _WorkingUIState extends State<WorkingUI> {
 
   /// On app restore, if the gig is already in 'working' status, pre-load the
   /// elapsed time from Firestore so the timer shows the correct running total.
+  // The step a doc is really on: while a cancellation is pending its status
+  // reads 'cancellation_requested', and the step it froze at lives in
+  // lastProgressStatus (written by every requester — see
+  // hostCancellationRequestUpdate and _showCancelReasonDialog below).
+  static String _frozenStatus(Map<String, dynamic>? data) {
+    final status = data?['status'] as String? ?? 'navigating';
+    if (status != 'cancellation_requested') return status;
+    return data?['lastProgressStatus'] as String? ?? 'working';
+  }
+
   Future<void> _restoreElapsedIfWorking() async {
     try {
       final snap = await _targetRef.get();
       if (!snap.exists || !mounted) return;
       final data = snap.data()!;
-      if ((data['status'] as String?) != 'working') return;
+      // Counts a gig frozen mid-work by a pending cancellation as working —
+      // otherwise the stopwatch restarts from zero on that screen.
+      if (_frozenStatus(data) != 'working') return;
       final startTs = data['workStartedAt'] as Timestamp?;
       if (startTs == null) return;
       final alreadyElapsed = DateTime.now().difference(startTs.toDate());
@@ -531,11 +568,15 @@ class _WorkingUIState extends State<WorkingUI> {
   }
 
   // ── Admin approved cancellation — notify and exit ─────────────────────────
-  void _onAdminCancelled() {
+  void _onAdminCancelled({bool byHost = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Your cancellation request has been approved.'),
+      SnackBar(
+        content: Text(
+          byHost
+              ? "The host's cancellation request was approved — this gig has been cancelled."
+              : 'Your cancellation request has been approved.',
+        ),
         backgroundColor: Colors.redAccent,
         behavior: SnackBarBehavior.floating,
       ),
@@ -769,6 +810,7 @@ class _WorkingUIState extends State<WorkingUI> {
                           !_cancelPending && _arrivedPromptVisible,
                       onConfirmArrival: _confirmArrival,
                       isCancelPending: _cancelPending,
+                      cancelRequestedByHost: _cancelRequestedByHost,
                       showStartGig: !_cancelPending && _step == GigStep.arrived,
                       onStartGig: _startWork,
                       showGigComplete:

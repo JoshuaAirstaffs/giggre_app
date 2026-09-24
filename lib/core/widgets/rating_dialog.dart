@@ -92,6 +92,23 @@ class _RatingDialogState extends State<RatingDialog> {
   /// counter stays hidden until the ceiling is actually in play.
   static const _counterFrom = 400;
 
+  /// Mirrors "the review field has something in it", so the dialog can say
+  /// that a review still needs a star to post. Kept as a flag rather than
+  /// reading the controller in build, so typing only rebuilds on the
+  /// empty/non-empty flip instead of once per keystroke.
+  bool _hasReviewText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _commentController.addListener(_onReviewChanged);
+  }
+
+  void _onReviewChanged() {
+    final has = _commentController.text.trim().isNotEmpty;
+    if (has != _hasReviewText) setState(() => _hasReviewText = has);
+  }
+
   @override
   void dispose() {
     _commentController.dispose();
@@ -99,8 +116,8 @@ class _RatingDialogState extends State<RatingDialog> {
   }
 
   String get _title => widget.rateeRole == RateeRole.worker
-      ? 'Rate Your Worker'
-      : 'Rate Your Host';
+      ? 'Rate & review your worker'
+      : 'Rate & review your host';
 
   /// Null rather than empty: [RatingService.submit] omits the field entirely
   /// when there is nothing to say, and the preview result reads the same way.
@@ -266,8 +283,8 @@ class _RatingDialogState extends State<RatingDialog> {
                 ),
               ),
             ),
-            // Tags only appear once a star is picked, so the dialog opens at
-            // the same size and complexity it always has.
+            // Tags stay behind a star — they read as qualifiers on a
+            // rating ("On time", "Would book again") and say nothing alone.
             if (_selected > 0) ...[
               const SizedBox(height: 16),
               Wrap(
@@ -309,31 +326,72 @@ class _RatingDialogState extends State<RatingDialog> {
                   );
                 }).toList(),
               ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _commentController,
-                enabled: !_submitting,
-                minLines: 2,
-                maxLines: 4,
-                maxLength: _maxComment,
-                keyboardType: TextInputType.multiline,
-                textCapitalization: TextCapitalization.sentences,
-                style: TextStyle(color: onSurface, fontSize: 13),
-                buildCounter: _commentCounter,
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: widget.rateeRole == RateeRole.worker
-                      ? 'Anything else about their work? (optional)'
-                      : 'Anything else about this host? (optional)',
-                  hintStyle: const TextStyle(color: kSub, fontSize: 12),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  border: _commentBorder(kSub.withValues(alpha: 0.4)),
-                  enabledBorder: _commentBorder(kSub.withValues(alpha: 0.4)),
-                  disabledBorder: _commentBorder(kSub.withValues(alpha: 0.2)),
-                  focusedBorder: _commentBorder(_green),
+            ],
+            // The review is offered from the start rather than only after a
+            // star is picked. Hiding it until the dialog was half-completed
+            // is the main reason nothing in the app read as supporting
+            // written reviews at all.
+            const SizedBox(height: 18),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Write a review',
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                widget.rateeRole == RateeRole.worker
+                    ? 'Optional — shown on their worker profile.'
+                    : 'Optional — shown on their host profile.',
+                style: const TextStyle(color: kSub, fontSize: 11),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _commentController,
+              enabled: !_submitting,
+              minLines: 2,
+              maxLines: 4,
+              maxLength: _maxComment,
+              keyboardType: TextInputType.multiline,
+              textCapitalization: TextCapitalization.sentences,
+              style: TextStyle(color: onSurface, fontSize: 13),
+              buildCounter: _commentCounter,
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: widget.rateeRole == RateeRole.worker
+                    ? 'What was it like working with them?'
+                    : 'What was it like working for them?',
+                hintStyle: const TextStyle(color: kSub, fontSize: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                border: _commentBorder(kSub.withValues(alpha: 0.4)),
+                enabledBorder: _commentBorder(kSub.withValues(alpha: 0.4)),
+                disabledBorder: _commentBorder(kSub.withValues(alpha: 0.2)),
+                focusedBorder: _commentBorder(_green),
+              ),
+            ),
+            // A review with no star cannot be submitted — the create rule
+            // requires 1–5 stars — so say why the button is dead rather than
+            // leaving the rater to work it out.
+            if (_hasReviewText && _selected == 0) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Tap a star above to post your review.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _starActive,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],

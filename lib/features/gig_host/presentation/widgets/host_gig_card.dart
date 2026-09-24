@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:giggre_app/features/gig_host/models/gig_template_model.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../gig_shared/active_gig_step.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
@@ -281,19 +282,23 @@ class _HostGigCardState extends State<HostGigCard> {
         return;
       }
 
-      await FirebaseFirestore.instance
-          .collection(_collectionFor(gigType))
-          .doc(docId)
-          .update({
-            'cancellation_reason': FieldValue.arrayUnion([
-              {'reason': reason, 'approved': null, 'requestedBy': 'host'},
-            ]),
-            'status': 'cancellation_requested',
-          });
+      // Same fan-out as the detail sheet's cancel: each active worker's own
+      // slot doc gets the request too, so multi-worker gigs actually reach
+      // their workers. This also writes the cancellationRequestedAt /
+      // lastProgressStatus that this path used to skip — without the
+      // timestamp the request never appeared in either side's notifications.
+      final flagged = await requestHostCancellationForGig(
+        gigCollection: _collectionFor(gigType),
+        gigId: docId,
+        gigStatus: widget.data['status'] as String? ?? 'working',
+        reason: reason,
+      );
       messenger.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Cancellation request submitted. Pending admin review.',
+            flagged > 1
+                ? 'Cancellation requested for $flagged workers. Pending admin review.'
+                : 'Cancellation request submitted. Pending admin review.',
           ),
           backgroundColor: Colors.orange,
           behavior: SnackBarBehavior.floating,

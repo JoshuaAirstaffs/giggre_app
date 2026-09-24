@@ -1219,7 +1219,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                           _MenuRow(
                             icon: Icons.star_outline_rounded,
                             iconColor: kAmber,
-                            label: 'Ratings Given',
+                            label: 'Ratings & Reviews',
                             onTap: _showRatingsGiven,
                           ),
                           _Divider(isDark: isDark),

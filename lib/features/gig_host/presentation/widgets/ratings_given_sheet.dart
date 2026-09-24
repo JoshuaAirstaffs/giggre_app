@@ -52,6 +52,11 @@ class _RatingsGivenSheetState extends State<RatingsGivenSheet> {
           rating: (d['stars'] as num?)?.toInt() ?? 0,
           gigType: _gigTypeLabel(d['gigCollection'] as String?),
           ratedAt: (d['createdAt'] as Timestamp?)?.toDate(),
+          comment: d['comment'] as String?,
+          tags: (d['tags'] as List?)
+                  ?.map((t) => t.toString())
+                  .toList() ??
+              const [],
         );
       }).toList();
 
@@ -108,7 +113,7 @@ class _RatingsGivenSheetState extends State<RatingsGivenSheet> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Ratings Given',
+                      Text('Ratings & Reviews Given',
                           style: TextStyle(
                               color: onSurface,
                               fontSize: 16,
@@ -140,7 +145,7 @@ class _RatingsGivenSheetState extends State<RatingsGivenSheet> {
                           style: TextStyle(color: kSub, fontSize: 14)),
                       const SizedBox(height: 6),
                       const Text(
-                        'Rate workers after completing a gig\nto see your ratings here.',
+                        'Rate and review workers after completing\na gig to see them here.',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: kSub, fontSize: 12),
                       ),
@@ -178,13 +183,23 @@ class _RatingEntry {
   final String gigType;
   final DateTime? ratedAt;
 
+  /// The written review left with the stars, and the tags tapped alongside
+  /// it. Both optional — this sheet used to drop them, so a host had no way
+  /// to see what they had actually written about anyone.
+  final String? comment;
+  final List<String> tags;
+
   const _RatingEntry({
     required this.gigTitle,
     required this.workerName,
     required this.rating,
     required this.gigType,
     this.ratedAt,
+    this.comment,
+    this.tags = const [],
   });
+
+  bool get hasReview => (comment?.trim().isNotEmpty) ?? false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -317,6 +332,40 @@ class _RatingCard extends StatelessWidget {
                     ],
                   ],
                 ),
+                if (entry.tags.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final tag in entry.tags)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: kAmber.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(tag,
+                              style: const TextStyle(
+                                  color: kAmber,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                    ],
+                  ),
+                ],
+                if (entry.hasReview) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '\u201C${entry.comment!.trim()}\u201D',
+                    style: TextStyle(
+                        color: onSurface.withValues(alpha: 0.75),
+                        fontSize: 12,
+                        height: 1.45,
+                        fontStyle: FontStyle.italic),
+                  ),
+                ],
               ],
             ),
           ),

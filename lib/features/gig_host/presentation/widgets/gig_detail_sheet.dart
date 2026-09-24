@@ -17,6 +17,7 @@ import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:giggre_app/features/chat/gig_chat_action.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/map_style.dart';
+import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../models/worker_slot_model.dart';
 import '../../services/quick_gig_matching_service.dart';
@@ -30,6 +31,7 @@ import '../../../../core/widgets/rating_dialog.dart';
 import '../../../gig_shared/active_gig_theme.dart';
 import '../../../gig_shared/active_gig_step.dart';
 import '../../../gig_shared/active_gig_widgets.dart';
+import '../../../gig_shared/post_gig_actions.dart';
 import '../../../gig_shared/user_profile_screen.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
 
@@ -339,22 +341,22 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         return;
       }
 
-      await FirebaseFirestore.instance
-          .collection(_collection)
-          .doc(widget.gigId)
-          .update({
-            'cancellation_reason': FieldValue.arrayUnion([
-              {'reason': reason, 'approved': null, 'requestedBy': 'host'},
-            ]),
-            'lastProgressStatus': _data?['status'] as String? ?? 'working',
-            'cancellationRequestedAt': FieldValue.serverTimestamp(),
-            'status': 'cancellation_requested',
-          });
+      // Fans out to each active worker's own slot doc as well as the gig —
+      // on a multi-worker gig the slot doc is the only thing the worker's
+      // screen listens to, and admin reviews one slot at a time.
+      final flagged = await requestHostCancellationForGig(
+        gigCollection: _collection,
+        gigId: widget.gigId,
+        gigStatus: _data?['status'] as String? ?? 'working',
+        reason: reason,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Cancellation request submitted. Pending admin review.',
+              flagged > 1
+                  ? 'Cancellation requested for $flagged workers. Pending admin review.'
+                  : 'Cancellation request submitted. Pending admin review.',
             ),
             backgroundColor: Colors.orange,
           ),
@@ -483,6 +485,54 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       );
     }
     if (mounted) Navigator.pop(context);
+  }
+
+  // Drop one worker from a multi-worker gig without touching the others —
+  // the per-slot counterpart to _requestCancellation, and the same shape as
+  // the worker's own request (WorkingUI._showCancelReasonDialog), so admin
+  // review and the existing slot cleanup treat both identically.
+  Future<void> _requestWorkerSlotCancellation(WorkerSlotModel worker) async {
+    final controller = TextEditingController();
+    try {
+      final submitted =
+          await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => _CancelReasonDialog(controller: controller),
+          ) ??
+          false;
+      if (!submitted || !mounted) return;
+      final reason = controller.text.trim();
+      if (reason.isEmpty) return;
+
+      await requestHostCancellationForWorker(
+        gigCollection: _collection,
+        gigId: widget.gigId,
+        workerId: worker.workerId,
+        workerStatus: worker.status,
+        reason: reason,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cancellation requested for ${worker.workerName}. Pending admin review.',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit cancellation request: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      controller.dispose();
+    }
   }
 
   // Multi-worker equivalent of _confirmCompleted — operates on a single
@@ -1172,10 +1222,12 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             _MultiWorkerSection(
               gigId: widget.gigId,
               gigCollection: _collection,
+              gigTitle: title,
               gigLocation: gigLocation,
               workerSlots: workerSlots,
               filledSlotCount: filledSlotCount,
               onMarkPaid: _confirmWorkerSlotCompleted,
+              onRequestCancellation: _requestWorkerSlotCancellation,
               buildMapArea: _buildMapArea,
             ),
             if (showCancelGig) ...[
@@ -1619,6 +1671,21 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     ),
                   );
                 },
+              ),
+              const SizedBox(height: 10),
+              // Rating is otherwise offered once, inline at payment
+              // confirmation, and that dialog has a Skip button — this is the
+              // only way back to it. Reporting had no post-completion entry
+              // point at all; the worker's profile (where the flag lives) is
+              // only reachable from the applicants list and the live map.
+              PostGigActions(
+                gigId: widget.gigId,
+                gigCollection: _collection,
+                gigTitle: title,
+                rateeId: workerId,
+                rateeName: resolvedWorkerName,
+                rateeRole: RateeRole.worker,
+                surface: 'completed_gig',
               ),
               const SizedBox(height: 16),
             ],
@@ -2904,6 +2971,20 @@ String _workerStatusLabel(String status) {
   }
 }
 
+// Host-side reading of a pending slot cancellation's requester. Legacy
+// entries without `requestedBy` read as the worker's, the only case that
+// existed before hosts could request.
+String _slotCancellationRequesterLabel(WorkerSlotModel worker) {
+  switch (worker.cancellationRequestedBy) {
+    case kCancelRequesterHost:
+      return 'Cancellation requested by you';
+    case 'system':
+      return 'Cancellation requested automatically';
+    default:
+      return 'Cancellation requested by the worker';
+  }
+}
+
 typedef _MapAreaBuilder =
     Widget Function({
       required Widget liveMap,
@@ -2916,10 +2997,12 @@ typedef _MapAreaBuilder =
 class _MultiWorkerSection extends StatefulWidget {
   final String gigId;
   final String gigCollection;
+  final String gigTitle;
   final LatLng? gigLocation;
   final int workerSlots;
   final int filledSlotCount;
   final void Function(WorkerSlotModel) onMarkPaid;
+  final void Function(WorkerSlotModel) onRequestCancellation;
   // Shared with the parent sheet so the live map here is gated by the same
   // entrance/resize state — see _GigDetailSheetState._buildMapArea.
   final _MapAreaBuilder buildMapArea;
@@ -2927,10 +3010,12 @@ class _MultiWorkerSection extends StatefulWidget {
   const _MultiWorkerSection({
     required this.gigId,
     required this.gigCollection,
+    required this.gigTitle,
     required this.gigLocation,
     required this.workerSlots,
     required this.filledSlotCount,
     required this.onMarkPaid,
+    required this.onRequestCancellation,
     required this.buildMapArea,
   });
 
@@ -3102,29 +3187,56 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
             // but that depends on their app being open. Filter cancelled
             // slots out of this render too, so the host's list doesn't wait
             // on that to happen.
+            final slotData = [
+              for (final d in snap.data!.docs) {'workerId': d.id, ...d.data()},
+            ];
+            // "Worker 1/2/3…" — names alone don't tell the host which slot is
+            // which, and the cards are listed in that same order.
+            final numbers = workerSlotNumbers(slotData);
+            int orderOf(String id) => numbers[id] ?? numbers.length + 1;
             final workers =
                 snap.data!.docs
                     .map((d) => WorkerSlotModel.fromDoc(d))
                     .where((w) => w.status != 'cancelled')
                     .toList()
-                  ..sort((a, b) => a.workerName.compareTo(b.workerName));
+                  ..sort((a, b) {
+                    final byNumber = orderOf(
+                      a.workerId,
+                    ).compareTo(orderOf(b.workerId));
+                    return byNumber != 0
+                        ? byNumber
+                        : a.workerName.compareTo(b.workerName);
+                  });
+            // …but still tell the host who left and on whose request.
+            final released = releasedWorkersFor(slotData);
+            final releasedNotices = [
+              for (final r in released) ...[
+                _ReleasedWorkerNotice(worker: r, number: numbers[r.workerId]),
+                const SizedBox(height: 8),
+              ],
+            ];
             if (workers.isEmpty) {
-              return Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 20),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: _hostSheetRowSurface(isDark),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: activeGigCardBorder(isDark)),
-                ),
-                child: Text(
-                  'No workers assigned yet',
-                  style: TextStyle(
-                    color: activeGigTextMuted(isDark),
-                    fontSize: 13,
+              return Column(
+                children: [
+                  ...releasedNotices,
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _hostSheetRowSurface(isDark),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: activeGigCardBorder(isDark)),
+                    ),
+                    child: Text(
+                      'No workers assigned yet',
+                      style: TextStyle(
+                        color: activeGigTextMuted(isDark),
+                        fontSize: 13,
+                      ),
+                    ),
                   ),
-                ),
+                ],
               );
             }
             final trackableWorkers = workers
@@ -3143,6 +3255,7 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
                 : null;
             return Column(
               children: [
+                ...releasedNotices,
                 if (widget.gigLocation != null &&
                     trackableWorkers.isNotEmpty) ...[
                   ClipRRect(
@@ -3177,6 +3290,10 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
                     child: _WorkerSlotCard(
                       key: ValueKey('slot_${w.workerId}'),
                       worker: w,
+                      number: numbers[w.workerId],
+                      gigId: widget.gigId,
+                      gigCollection: widget.gigCollection,
+                      gigTitle: widget.gigTitle,
                       isSelected: w.workerId == effectiveSelectedId,
                       isTrackable: isTrackable,
                       onTap: isTrackable
@@ -3188,6 +3305,8 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
                             )
                           : null,
                       onMarkPaid: () => widget.onMarkPaid(w),
+                      onRequestCancellation: () =>
+                          widget.onRequestCancellation(w),
                     ),
                   );
                 }),
@@ -3297,20 +3416,98 @@ class _WorkerAvatarColumnState extends State<_WorkerAvatarColumn> {
   }
 }
 
+// One line per worker who has come off the gig, in place of their card —
+// says who asked, since either side can drop a slot.
+class _ReleasedWorkerNotice extends StatelessWidget {
+  final ReleasedWorker worker;
+
+  /// Same "Worker N" the card showed (workerSlotNumbers); null if unknown.
+  final int? number;
+
+  const _ReleasedWorkerNotice({required this.worker, required this.number});
+
+  // Auto-approval keeps the original requester, so this is always the host
+  // or the worker; 'system' is only ever the no-worker-selected auto-cancel,
+  // which has no worker to release, and is covered just in case.
+  String get _label {
+    final who = number != null ? 'Worker $number' : 'The worker';
+    switch (worker.requestedBy) {
+      case kCancelRequesterHost:
+        return '$who is no longer continuing · you requested the cancellation';
+      case 'system':
+        return '$who is no longer continuing · cancelled automatically';
+      default:
+        return '$who is no longer continuing · they requested the cancellation';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: kActiveGigDestructiveRed.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: kActiveGigDestructiveRed.withValues(alpha: 0.25),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.person_off_outlined,
+            size: 16,
+            color: kActiveGigDestructiveRed,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _label,
+              style: TextStyle(
+                color: activeGigTextPrimary(isDark),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _WorkerSlotCard extends StatelessWidget {
   final WorkerSlotModel worker;
+
+  /// "Worker N" position on the gig (workerSlotNumbers); null if unknown.
+  final int? number;
+
+  // Taken from the section rather than off the slot doc: `gigId`/
+  // `gigCollection` are denormalised onto the slot and default to '' when
+  // missing, and an empty gig path would make the rating unwritable.
+  final String gigId;
+  final String gigCollection;
+  final String gigTitle;
   final bool isSelected;
   final bool isTrackable;
   final VoidCallback? onTap;
   final VoidCallback onMarkPaid;
+  final VoidCallback onRequestCancellation;
 
   const _WorkerSlotCard({
     super.key,
     required this.worker,
+    required this.number,
+    required this.gigId,
+    required this.gigCollection,
+    required this.gigTitle,
     required this.isSelected,
     required this.isTrackable,
     required this.onTap,
     required this.onMarkPaid,
+    required this.onRequestCancellation,
   });
 
   @override
@@ -3333,6 +3530,18 @@ class _WorkerSlotCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (number != null) ...[
+              Text(
+                'WORKER $number',
+                style: TextStyle(
+                  color: activeGigTextMuted(isDark),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              const SizedBox(height: 4),
+            ],
             Row(
               children: [
                 if (isTrackable) ...[
@@ -3389,6 +3598,49 @@ class _WorkerSlotCard extends StatelessWidget {
                 ),
               ],
             ),
+            // Either side can ask to drop a slot, and the badge alone doesn't
+            // say which — the host needs to know whether this is their own
+            // request or the worker walking off.
+            if (worker.status == 'cancellation_requested') ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.hourglass_top_rounded,
+                    size: 14,
+                    color: kAmber,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _slotCancellationRequesterLabel(worker),
+                      style: const TextStyle(
+                        color: kAmber,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            // Each slot is paid and rated on its own, so the offer to rate
+            // a worker whose rating was skipped belongs here rather than on
+            // the gig as a whole — the gig doc has no single counterparty.
+            if (worker.status == 'completed') ...[
+              const SizedBox(height: 10),
+              PostGigActions(
+                gigId: gigId,
+                gigCollection: gigCollection,
+                gigTitle: gigTitle,
+                rateeId: worker.workerId,
+                rateeName: worker.workerName,
+                rateeRole: RateeRole.worker,
+                slotWorkerId: worker.workerId,
+                surface: 'completed_gig',
+                compact: true,
+              ),
+            ],
             if (worker.status == 'task_complete') ...[
               const SizedBox(height: 10),
               SizedBox(
@@ -3407,6 +3659,32 @@ class _WorkerSlotCard extends StatelessWidget {
                   child: const Text(
                     'Mark Complete & Pay',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+            // Dropping one worker is its own action — cancelling the gig
+            // from the section below asks admin to release every slot.
+            if (kHostCancellableSlotStatuses.contains(worker.status)) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                height: 36,
+                child: OutlinedButton.icon(
+                  onPressed: onRequestCancellation,
+                  icon: const Icon(Icons.cancel_outlined, size: 15),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: kActiveGigDestructiveRed,
+                    side: BorderSide(
+                      color: kActiveGigDestructiveRed.withValues(alpha: 0.4),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  label: const Text(
+                    'Request Cancellation',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
