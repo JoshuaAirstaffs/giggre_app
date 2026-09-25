@@ -19,6 +19,10 @@ class WorkerSlotModel {
   final String hostName;
   final double rate;
   final String currencyCode;
+  // What was actually paid — written unconditionally by the host at
+  // payment-confirmation time (see gig_detail_sheet.dart). Null until then.
+  final double? finalAmount;
+  final double? adjustedAmount;
   final String status;
   final GeoPoint? workerLocation;
   final DateTime? locationUpdatedAt;
@@ -51,6 +55,8 @@ class WorkerSlotModel {
     this.hostName = '',
     required this.rate,
     this.currencyCode = 'USD',
+    this.finalAmount,
+    this.adjustedAmount,
     this.status = 'navigating',
     this.workerLocation,
     this.locationUpdatedAt,
@@ -72,17 +78,17 @@ class WorkerSlotModel {
   });
 
   Map<String, dynamic> toMap() => {
-        'workerId': workerId,
-        'workerName': workerName,
-        if (workerPhotoUrl != null) 'workerPhotoUrl': workerPhotoUrl,
-        'gigId': gigId,
-        'gigCollection': gigCollection,
-        'hostId': hostId,
-        'hostName': hostName,
-        'rate': rate,
-        'currencyCode': currencyCode,
-        'status': status,
-      };
+    'workerId': workerId,
+    'workerName': workerName,
+    if (workerPhotoUrl != null) 'workerPhotoUrl': workerPhotoUrl,
+    'gigId': gigId,
+    'gigCollection': gigCollection,
+    'hostId': hostId,
+    'hostName': hostName,
+    'rate': rate,
+    'currencyCode': currencyCode,
+    'status': status,
+  };
 
   factory WorkerSlotModel.fromDoc(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>? ?? {};
@@ -97,6 +103,8 @@ class WorkerSlotModel {
       hostName: d['hostName'] as String? ?? '',
       rate: (d['rate'] as num?)?.toDouble() ?? 0,
       currencyCode: d['currencyCode'] as String? ?? 'USD',
+      finalAmount: (d['finalAmount'] as num?)?.toDouble(),
+      adjustedAmount: (d['adjustedAmount'] as num?)?.toDouble(),
       status: d['status'] as String? ?? 'navigating',
       workerLocation: d['workerLocation'] as GeoPoint?,
       locationUpdatedAt: ts('locationUpdatedAt'),

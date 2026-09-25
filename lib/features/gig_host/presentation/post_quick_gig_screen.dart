@@ -49,6 +49,16 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   final _descCtrl = TextEditingController();
   final _budgetCtrl = TextEditingController();
 
+  // Pay type — 'flat' (budget field is the job total) or 'hourly' (budget
+  // field is the rate). No estimated-hours input — budget for an hourly
+  // gig is just the rate itself; the display sites that know about
+  // hourly gigs show it as "$X/hr" rather than treating it as a total.
+  String _payType = 'flat';
+
+  // Optional, shown for both flat and hourly gigs — purely informational
+  // (a rough time-commitment hint for the worker), never used for pay.
+  final _workDurationCtrl = TextEditingController();
+
   // Multi-worker slots
   int _workerSlots = 1;
 
@@ -92,6 +102,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     _titleCtrl.dispose();
     _descCtrl.dispose();
     _budgetCtrl.dispose();
+    _workDurationCtrl.dispose();
     _errorPlayer.dispose();
     super.dispose();
   }
@@ -146,7 +157,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           'https://nominatim.openstreetmap.org/reverse'
           '?lat=${pos.latitude}&lon=${pos.longitude}&format=json',
         );
-        final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'}).timeout(const Duration(seconds: 10));
+        final res = await http
+            .get(uri, headers: {'User-Agent': 'giggre_app/1.0'})
+            .timeout(const Duration(seconds: 10));
         String address = 'GPS location ready';
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -201,10 +214,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       lastDate: now.add(const Duration(days: 365)),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: Theme.of(ctx).colorScheme.copyWith(
-                primary: kAmber,
-                onPrimary: Colors.black,
-              ),
+          colorScheme: Theme.of(
+            ctx,
+          ).colorScheme.copyWith(primary: kAmber, onPrimary: Colors.black),
         ),
         child: child!,
       ),
@@ -218,10 +230,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       initialTime: _scheduledTime ?? TimeOfDay.now(),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: Theme.of(ctx).colorScheme.copyWith(
-                primary: kAmber,
-                onPrimary: Colors.black,
-              ),
+          colorScheme: Theme.of(
+            ctx,
+          ).colorScheme.copyWith(primary: kAmber, onPrimary: Colors.black),
         ),
         child: child!,
       ),
@@ -231,7 +242,8 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 
   // ── Map location picker ───────────────────────────────────────────────────────
   Future<void> _openMapPicker() async {
-    final initial = _mapPosition ??
+    final initial =
+        _mapPosition ??
         (_gpsPosition != null
             ? LatLng(_gpsPosition!.latitude, _gpsPosition!.longitude)
             : null);
@@ -263,15 +275,19 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       return;
     }
 
-    final hasLocation =
-        _useMapLocation ? _mapPosition != null : _gpsPosition != null;
+    final hasLocation = _useMapLocation
+        ? _mapPosition != null
+        : _gpsPosition != null;
     if (!hasLocation) {
       _showSnack('Location is required. Please enable GPS or select on map.');
       return;
     }
 
     if (_scheduledDate == null) {
-      _showSnack('Schedule is required. Please pick a date and time.', isError: true);
+      _showSnack(
+        'Schedule is required. Please pick a date and time.',
+        isError: true,
+      );
       return;
     }
 
@@ -319,7 +335,10 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           ? GeoPoint(_mapPosition!.latitude, _mapPosition!.longitude)
           : GeoPoint(_gpsPosition!.latitude, _gpsPosition!.longitude);
 
-      final gigCountry = await countryCodeFromCoordinates(geoPoint.latitude, geoPoint.longitude);
+      final gigCountry = await countryCodeFromCoordinates(
+        geoPoint.latitude,
+        geoPoint.longitude,
+      );
       final currency = gigCountry != null
           ? CurrencyFormatter.countryToCurrency(gigCountry)
           : fallbackCurrency;
@@ -337,24 +356,35 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       }
 
       final rate = double.parse(_budgetCtrl.text.trim());
+      final isHourly = _payType == 'hourly';
+      // No estimated-hours input — budget for an hourly gig is just the
+      // rate itself; the real payout is computed later from actual
+      // tracked work duration, not from any hours guessed at posting time.
+      final budget = rate;
+      final workDurationHours = double.tryParse(_workDurationCtrl.text.trim());
       final gig = QuickGigModel(
         hostId: uid,
         hostName: widget.hostName,
         title: _titleCtrl.text.trim(),
         description: _descCtrl.text.trim(),
         category: 'Quick',
-        budget: rate,
+        budget: budget,
         currencyCode: currency,
+        payType: _payType,
+        hourlyRate: isHourly ? rate : null,
+        workDurationHours: workDurationHours,
         duration: 'Flexible',
         location: geoPoint,
         address: _address,
         status: 'scanning',
         scheduledDate: scheduledAt,
         workerSlots: _workerSlots,
-        ratePerSlot: rate,
+        ratePerSlot: budget,
       );
 
-      final docRef = await FirebaseFirestore.instance.collection('quick_gigs').add(gig.toMap());
+      final docRef = await FirebaseFirestore.instance
+          .collection('quick_gigs')
+          .add(gig.toMap());
 
       // Start smart dispatch in background (do not await)
       QuickGigMatchingService.startAutoSearch(
@@ -379,7 +409,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           msg,
           style: isError ? const TextStyle(color: Colors.white) : null,
         ),
-        backgroundColor: isError ? Colors.redAccent : Theme.of(context).cardColor,
+        backgroundColor: isError
+            ? Colors.redAccent
+            : Theme.of(context).cardColor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
@@ -402,7 +434,11 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 color: Colors.red.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.public_off_rounded, color: Colors.red, size: 40),
+              child: const Icon(
+                Icons.public_off_rounded,
+                color: Colors.red,
+                size: 40,
+              ),
             ),
             const SizedBox(height: 16),
             const Text(
@@ -422,7 +458,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 onPressed: () => Navigator.of(context).pop(),
@@ -461,18 +499,20 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
-      await FirebaseFirestore.instance.collection('gig_templates').add(
-        GigTemplateModel(
-          hostId: uid,
-          gigType: 'quick',
-          name: name.isNotEmpty ? name : title,
-          title: title,
-          description: _descCtrl.text.trim(),
-          budget: budgetVal,
-          currencyCode: currency,
-          createdAt: DateTime.now(),
-        ).toMap(),
-      );
+      await FirebaseFirestore.instance
+          .collection('gig_templates')
+          .add(
+            GigTemplateModel(
+              hostId: uid,
+              gigType: 'quick',
+              name: name.isNotEmpty ? name : title,
+              title: title,
+              description: _descCtrl.text.trim(),
+              budget: budgetVal,
+              currencyCode: currency,
+              createdAt: DateTime.now(),
+            ).toMap(),
+          );
       if (mounted) _showSnack('Template saved!');
     } catch (_) {
       if (mounted) _showSnack('Failed to save template.');
@@ -491,8 +531,11 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: kSub, size: 20),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: kSub,
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -504,15 +547,21 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 color: kAmber.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
               ),
-              child:
-                  const Icon(Icons.flash_on_rounded, color: kAmber, size: 17),
+              child: const Icon(
+                Icons.flash_on_rounded,
+                color: kAmber,
+                size: 17,
+              ),
             ),
             const SizedBox(width: 10),
-            Text('Post Quick Gig',
-                style: TextStyle(
-                    color: onSurface,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16)),
+            Text(
+              'Post Quick Gig',
+              style: TextStyle(
+                color: onSurface,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
           ],
         ),
         actions: [
@@ -560,19 +609,39 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 ),
                 const SizedBox(height: 20),
 
+                // ── Pay type ─────────────────────────────────────────
+                _SectionLabel('Pay Type'),
+                const SizedBox(height: 10),
+                _buildPayTypeToggle(),
+                const SizedBox(height: 20),
+
                 // ── Amount ────────────────────────────────────────
-                _SectionLabel('Amount'),
+                _SectionLabel(
+                  _payType == 'hourly' ? 'Hourly Rate (per hour)' : 'Amount',
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _payType == 'hourly'
+                      ? 'How much you\'ll pay per hour worked — the final payout is based on actual tracked time.'
+                      : 'Total amount you\'ll pay for this gig, regardless of how long it takes.',
+                  style: TextStyle(
+                    color: kSub.withValues(alpha: 0.8),
+                    fontSize: 12,
+                  ),
+                ),
                 const SizedBox(height: 10),
                 TutorialAnchor(
                   id: 'postGig.amount',
                   child: _buildTextField(
                     controller: _budgetCtrl,
                     hint: '0.00',
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     inputFormatters: [
                       FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d+\.?\d{0,2}')),
+                        RegExp(r'^\d+\.?\d{0,2}'),
+                      ),
                     ],
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return 'Enter amount';
@@ -581,11 +650,46 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                       return null;
                     },
                     prefix: Text(
-                        '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
-                        style: const TextStyle(
-                            color: kAmber,
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold)),
+                      '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
+                      style: const TextStyle(
+                        color: kAmber,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // ── Work duration ────────────────────────────────────
+                _SectionLabel('Work Duration (optional)'),
+                const SizedBox(height: 6),
+                Text(
+                  'Roughly how long this gig will take — just a heads-up for workers, not a minimum or a commitment.',
+                  style: TextStyle(
+                    color: kSub.withValues(alpha: 0.8),
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildTextField(
+                  controller: _workDurationCtrl,
+                  hint: 'e.g. 4',
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d+\.?\d{0,2}'),
+                    ),
+                  ],
+                  prefix: const Text(
+                    '~',
+                    style: TextStyle(
+                      color: kAmber,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -596,7 +700,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 Text(
                   'Each worker is paid the amount above independently',
                   style: TextStyle(
-                      color: kSub.withValues(alpha: 0.8), fontSize: 12),
+                    color: kSub.withValues(alpha: 0.8),
+                    fontSize: 12,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TutorialAnchor(
@@ -608,11 +714,14 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 // ── Schedule ──────────────────────────────────────
                 Row(
                   children: [
-                    Text('Schedule',
-                        style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold)),
+                    Text(
+                      'Schedule',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -644,13 +753,17 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                               width: 18,
                               height: 18,
                               child: CircularProgressIndicator(
-                                  color: Colors.black, strokeWidth: 2.5),
+                                color: Colors.black,
+                                strokeWidth: 2.5,
+                              ),
                             )
                           : const Icon(Icons.send_rounded, size: 18),
                       label: Text(
                         _posting ? 'Posting...' : 'Post Quick Gig',
                         style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold),
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: kAmber,
@@ -658,7 +771,8 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                         disabledBackgroundColor: kAmber.withValues(alpha: 0.4),
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30)),
+                          borderRadius: BorderRadius.circular(30),
+                        ),
                       ),
                     ),
                   ),
@@ -671,14 +785,19 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _posting ? null : _saveAsTemplate,
                     icon: const Icon(Icons.bookmark_add_outlined, size: 18),
-                    label: const Text('Save as Template',
-                        style: TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w600)),
+                    label: const Text(
+                      'Save as Template',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: kAmber,
                       side: BorderSide(color: kAmber.withValues(alpha: 0.6)),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30)),
+                        borderRadius: BorderRadius.circular(30),
+                      ),
                     ),
                   ),
                 ),
@@ -701,8 +820,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     final dateLabel = dateSet
         ? DateFormat('EEE, MMM d').format(_scheduledDate!)
         : 'Pick a date';
-    final timeLabel =
-        timeSet ? _scheduledTime!.format(context) : 'Pick a time';
+    final timeLabel = timeSet ? _scheduledTime!.format(context) : 'Pick a time';
 
     return Row(
       children: [
@@ -712,21 +830,22 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
             onTap: _pickDate,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               decoration: BoxDecoration(
                 color: dateSet ? kAmber.withValues(alpha: 0.08) : cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color:
-                      dateSet ? kAmber.withValues(alpha: 0.6) : borderColor,
+                  color: dateSet ? kAmber.withValues(alpha: 0.6) : borderColor,
                   width: dateSet ? 1.5 : 1,
                 ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.calendar_today_rounded,
-                      color: dateSet ? kAmber : kSub, size: 16),
+                  Icon(
+                    Icons.calendar_today_rounded,
+                    color: dateSet ? kAmber : kSub,
+                    size: 16,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -744,8 +863,11 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                   if (dateSet)
                     GestureDetector(
                       onTap: () => setState(() => _scheduledDate = null),
-                      child: const Icon(Icons.close_rounded,
-                          color: kSub, size: 14),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        color: kSub,
+                        size: 14,
+                      ),
                     ),
                 ],
               ),
@@ -759,21 +881,22 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
             onTap: _pickTime,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               decoration: BoxDecoration(
                 color: timeSet ? kAmber.withValues(alpha: 0.08) : cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color:
-                      timeSet ? kAmber.withValues(alpha: 0.6) : borderColor,
+                  color: timeSet ? kAmber.withValues(alpha: 0.6) : borderColor,
                   width: timeSet ? 1.5 : 1,
                 ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.access_time_rounded,
-                      color: timeSet ? kAmber : kSub, size: 16),
+                  Icon(
+                    Icons.access_time_rounded,
+                    color: timeSet ? kAmber : kSub,
+                    size: 16,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -790,8 +913,11 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                   if (timeSet)
                     GestureDetector(
                       onTap: () => setState(() => _scheduledTime = null),
-                      child: const Icon(Icons.close_rounded,
-                          color: kSub, size: 14),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        color: kSub,
+                        size: 14,
+                      ),
                     ),
                 ],
               ),
@@ -816,89 +942,94 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         GestureDetector(
           onTap: hasError ? _fetchGpsLocation : null,
           child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: hasError
-                  ? Colors.redAccent.withValues(alpha: 0.5)
-                  : borderColor,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: hasError
+                    ? Colors.redAccent.withValues(alpha: 0.5)
+                    : borderColor,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color:
+                        (_useMapLocation
+                                ? kBlue
+                                : (hasError ? Colors.redAccent : kAmber))
+                            .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    _useMapLocation
+                        ? Icons.map_outlined
+                        : (hasError
+                              ? Icons.location_off_outlined
+                              : Icons.location_on_rounded),
+                    color: _useMapLocation
+                        ? kBlue
+                        : (hasError ? Colors.redAccent : kAmber),
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _loadingLocation
+                      ? const Row(
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                color: kAmber,
+                                strokeWidth: 2,
+                              ),
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              'Detecting location...',
+                              style: TextStyle(color: kSub, fontSize: 13),
+                            ),
+                          ],
+                        )
+                      : hasError
+                      ? Text(
+                          _locationError!,
+                          style: const TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 13,
+                          ),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _address.isNotEmpty ? _address : 'Location ready',
+                              style: TextStyle(color: onSurface, fontSize: 13),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _useMapLocation
+                                  ? 'Map-selected location'
+                                  : 'Current GPS location',
+                              style: TextStyle(
+                                color: _useMapLocation ? kBlue : kSub,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+              ],
             ),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: (_useMapLocation
-                          ? kBlue
-                          : (hasError ? Colors.redAccent : kAmber))
-                      .withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  _useMapLocation
-                      ? Icons.map_outlined
-                      : (hasError
-                          ? Icons.location_off_outlined
-                          : Icons.location_on_rounded),
-                  color: _useMapLocation
-                      ? kBlue
-                      : (hasError ? Colors.redAccent : kAmber),
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _loadingLocation
-                    ? const Row(
-                        children: [
-                          SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                                color: kAmber, strokeWidth: 2),
-                          ),
-                          SizedBox(width: 10),
-                          Text('Detecting location...',
-                              style:
-                                  TextStyle(color: kSub, fontSize: 13)),
-                        ],
-                      )
-                    : hasError
-                        ? Text(_locationError!,
-                            style: const TextStyle(
-                                color: Colors.redAccent, fontSize: 13))
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _address.isNotEmpty
-                                    ? _address
-                                    : 'Location ready',
-                                style: TextStyle(
-                                    color: onSurface, fontSize: 13),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                _useMapLocation
-                                    ? 'Map-selected location'
-                                    : 'Current GPS location',
-                                style: TextStyle(
-                                  color: _useMapLocation ? kBlue : kSub,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ],
-                          ),
-              ),
-            ],
-          ),
-        ),
         ),
         const SizedBox(height: 10),
 
@@ -938,6 +1069,47 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     );
   }
 
+  // ── Pay type toggle ────────────────────────────────────────────────────────
+  Widget _buildPayTypeToggle() {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final textColor = Theme.of(context).colorScheme.onSurface;
+
+    Widget segment(String label, String value) {
+      final selected = _payType == value;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _payType = value),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: selected ? kAmber.withValues(alpha: 0.15) : cardColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: selected ? kAmber : borderColor),
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: selected ? kAmber : textColor,
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        segment('Flat Rate', 'flat'),
+        const SizedBox(width: 10),
+        segment('Hourly Rate', 'hourly'),
+      ],
+    );
+  }
+
   // ── Text Field Builder ────────────────────────────────────────────────────────
   Widget _buildTextField({
     required TextEditingController controller,
@@ -961,13 +1133,17 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       style: TextStyle(color: textColor, fontSize: 14),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle:
-            TextStyle(color: textColor.withValues(alpha: 0.35), fontSize: 14),
+        hintStyle: TextStyle(
+          color: textColor.withValues(alpha: 0.35),
+          fontSize: 14,
+        ),
         prefix: prefix,
         filled: true,
         fillColor: cardColor,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 14,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: borderColor),
@@ -982,16 +1158,13 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide:
-              const BorderSide(color: Colors.redAccent, width: 1.5),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
         ),
         focusedErrorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide:
-              const BorderSide(color: Colors.redAccent, width: 1.5),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
         ),
-        errorStyle:
-            const TextStyle(color: Colors.redAccent, fontSize: 11),
+        errorStyle: const TextStyle(color: Colors.redAccent, fontSize: 11),
       ),
     );
   }
@@ -1033,7 +1206,10 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 if (rate > 0 && _workerSlots > 1)
                   Text(
                     'Total: ${CurrencyFormatter.format(rate * _workerSlots, currencyCode)}',
-                    style: TextStyle(color: kSub.withValues(alpha: 0.8), fontSize: 11),
+                    style: TextStyle(
+                      color: kSub.withValues(alpha: 0.8),
+                      fontSize: 11,
+                    ),
                   ),
               ],
             ),
@@ -1059,11 +1235,14 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-            fontSize: 15,
-            fontWeight: FontWeight.bold));
+    return Text(
+      text,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurface,
+        fontSize: 15,
+        fontWeight: FontWeight.bold,
+      ),
+    );
   }
 }
 
@@ -1088,7 +1267,11 @@ class _StepperButton extends StatelessWidget {
           color: kAmber.withValues(alpha: enabled ? 0.12 : 0.05),
           shape: BoxShape.circle,
         ),
-        child: Icon(icon, color: enabled ? kAmber : kSub.withValues(alpha: 0.4), size: 18),
+        child: Icon(
+          icon,
+          color: enabled ? kAmber : kSub.withValues(alpha: 0.4),
+          size: 18,
+        ),
       ),
     );
   }
@@ -1118,8 +1301,7 @@ class _LocationModeButton extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding:
-            const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+        padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
         decoration: BoxDecoration(
           color: active
               ? accentColor.withValues(alpha: 0.1)
@@ -1143,8 +1325,7 @@ class _LocationModeButton extends StatelessWidget {
                 style: TextStyle(
                   color: active ? accentColor : kSub,
                   fontSize: 12,
-                  fontWeight:
-                      active ? FontWeight.w600 : FontWeight.normal,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.normal,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1181,7 +1362,6 @@ class _MapPickerScreen extends StatefulWidget {
 }
 
 class _MapPickerScreenState extends State<_MapPickerScreen> {
-
   GoogleMapController? _googleMapController;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();
@@ -1240,7 +1420,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
           CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
         );
       } else if (_osmMapReady) {
-        _osmController.move(ll.LatLng(_myLocation!.latitude, _myLocation!.longitude), 14.0);
+        _osmController.move(
+          ll.LatLng(_myLocation!.latitude, _myLocation!.longitude),
+          14.0,
+        );
       }
       return;
     }
@@ -1252,7 +1435,8 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) return;
+          perm == LocationPermission.deniedForever)
+        return;
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -1266,7 +1450,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
           CameraUpdate.newLatLngZoom(_myLocation!, 14.0),
         );
       } else if (_osmMapReady) {
-        _osmController.move(ll.LatLng(_myLocation!.latitude, _myLocation!.longitude), 14.0);
+        _osmController.move(
+          ll.LatLng(_myLocation!.latitude, _myLocation!.longitude),
+          14.0,
+        );
       }
     } catch (_) {}
   }
@@ -1281,8 +1468,13 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     String? roadPart;
     if (addrObj != null) {
       final houseNumber = addrObj['house_number'] as String?;
-      final road = (addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway']) as String?;
-      if (houseNumber != null && houseNumber.isNotEmpty && road != null && road.isNotEmpty) {
+      final road =
+          (addrObj['road'] ?? addrObj['pedestrian'] ?? addrObj['footway'])
+              as String?;
+      if (houseNumber != null &&
+          houseNumber.isNotEmpty &&
+          road != null &&
+          road.isNotEmpty) {
         roadPart = '$houseNumber $road';
       } else if (road != null && road.isNotEmpty) {
         roadPart = road;
@@ -1309,9 +1501,16 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     if (addr.containsKey('house_number')) return 5;
     final cls = result['class'] as String? ?? '';
     if (cls == 'building') return 4;
-    if (addr.containsKey('road') || addr.containsKey('pedestrian') || addr.containsKey('footway')) return 3;
-    if (addr.containsKey('suburb') || addr.containsKey('neighbourhood')) return 2;
-    if (addr.containsKey('city') || addr.containsKey('town') || addr.containsKey('village')) return 1;
+    if (addr.containsKey('road') ||
+        addr.containsKey('pedestrian') ||
+        addr.containsKey('footway'))
+      return 3;
+    if (addr.containsKey('suburb') || addr.containsKey('neighbourhood'))
+      return 2;
+    if (addr.containsKey('city') ||
+        addr.containsKey('town') ||
+        addr.containsKey('village'))
+      return 1;
     return 0;
   }
 
@@ -1327,16 +1526,19 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       return;
     }
     final bias = _myLocation ?? _picked;
-    final uri = Uri.parse(
-            'https://maps.googleapis.com/maps/api/place/autocomplete/json')
-        .replace(queryParameters: {
-      'input': input.trim(),
-      'key': kGoogleMapsApiKey,
-      'components': 'country:ph',
-      'location': '${bias.latitude},${bias.longitude}',
-      'radius': '50000',
-      'language': 'en',
-    });
+    final uri =
+        Uri.parse(
+          'https://maps.googleapis.com/maps/api/place/autocomplete/json',
+        ).replace(
+          queryParameters: {
+            'input': input.trim(),
+            'key': kGoogleMapsApiKey,
+            'components': 'country:ph',
+            'location': '${bias.latitude},${bias.longitude}',
+            'radius': '50000',
+            'language': 'en',
+          },
+        );
     try {
       final res = await http.get(uri);
       if (!mounted) return;
@@ -1346,12 +1548,15 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         // Logs the exact reason (e.g. REQUEST_DENIED, API_NOT_ACTIVATED)
         // so you can see it in the debug console.
         debugPrint(
-            '[Places] status=$status msg=${data['error_message'] ?? ''}');
+          '[Places] status=$status msg=${data['error_message'] ?? ''}',
+        );
         return;
       }
-      final predictions =
-          (data['predictions'] as List? ?? []).cast<Map<String, dynamic>>();
-      debugPrint('[Places] got ${predictions.length} predictions, showing=${ predictions.isNotEmpty}');
+      final predictions = (data['predictions'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
+      debugPrint(
+        '[Places] got ${predictions.length} predictions, showing=${predictions.isNotEmpty}',
+      );
       setState(() {
         _placeSuggestions = predictions;
         _showSuggestions = predictions.isNotEmpty;
@@ -1374,13 +1579,16 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     FocusScope.of(context).unfocus();
     try {
       final uri =
-          Uri.parse('https://maps.googleapis.com/maps/api/place/details/json')
-              .replace(queryParameters: {
-        'place_id': placeId,
-        'fields': 'name,formatted_address,geometry',
-        'key': kGoogleMapsApiKey,
-        'language': 'en',
-      });
+          Uri.parse(
+            'https://maps.googleapis.com/maps/api/place/details/json',
+          ).replace(
+            queryParameters: {
+              'place_id': placeId,
+              'fields': 'name,formatted_address,geometry',
+              'key': kGoogleMapsApiKey,
+              'language': 'en',
+            },
+          );
       final res = await http.get(uri);
       if (!mounted) return;
       final body = jsonDecode(res.body) as Map<String, dynamic>;
@@ -1407,11 +1615,11 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         _locationLocked = true;
       });
       if (_useGoogleMaps) {
-        _googleMapController
-            ?.animateCamera(CameraUpdate.newLatLngZoom(point, 18.0));
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(point, 18.0),
+        );
       } else if (_osmMapReady) {
-        _osmController.move(
-            ll.LatLng(point.latitude, point.longitude), 18.0);
+        _osmController.move(ll.LatLng(point.latitude, point.longitude), 18.0);
       }
     } catch (_) {
       if (!mounted) return;
@@ -1436,15 +1644,19 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       _searchError = null;
     });
     try {
-      final uri = Uri.parse('https://nominatim.openstreetmap.org/search').replace(
-        queryParameters: {
-          'q': query,
-          'format': 'json',
-          'limit': '5',
-          'addressdetails': '1',
-        },
+      final uri = Uri.parse('https://nominatim.openstreetmap.org/search')
+          .replace(
+            queryParameters: {
+              'q': query,
+              'format': 'json',
+              'limit': '5',
+              'addressdetails': '1',
+            },
+          );
+      final res = await http.get(
+        uri,
+        headers: {'User-Agent': 'giggre_app/1.0'},
       );
-      final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
       if (!mounted) return;
       final data = jsonDecode(res.body) as List;
       if (data.isEmpty) {
@@ -1455,8 +1667,12 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         return;
       }
       // Pick the most specific result (specific address > road > neighbourhood > city).
-      final sorted = List<Map<String, dynamic>>.from(data.cast<Map<String, dynamic>>())
-        ..sort((a, b) => _nominatimSpecificity(b).compareTo(_nominatimSpecificity(a)));
+      final sorted =
+          List<Map<String, dynamic>>.from(data.cast<Map<String, dynamic>>())
+            ..sort(
+              (a, b) =>
+                  _nominatimSpecificity(b).compareTo(_nominatimSpecificity(a)),
+            );
       final result = sorted.first;
       final lat = double.parse(result['lat'] as String);
       final lon = double.parse(result['lon'] as String);
@@ -1473,7 +1689,9 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         _locationLocked = true;
       });
       if (_useGoogleMaps) {
-        _googleMapController?.animateCamera(CameraUpdate.newLatLngZoom(point, 18.0));
+        _googleMapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(point, 18.0),
+        );
       } else if (_osmMapReady) {
         _osmController.move(ll.LatLng(point.latitude, point.longitude), 18.0);
       }
@@ -1495,7 +1713,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         'https://nominatim.openstreetmap.org/reverse'
         '?lat=${pos.latitude}&lon=${pos.longitude}&format=json&zoom=18&addressdetails=1',
       );
-      final res = await http.get(uri, headers: {'User-Agent': 'giggre_app/1.0'});
+      final res = await http.get(
+        uri,
+        headers: {'User-Agent': 'giggre_app/1.0'},
+      );
       if (!mounted || requestId != _geocodeRequestId) return;
       String address = 'Selected location';
       if (res.statusCode == 200) {
@@ -1530,11 +1751,15 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     setState(() {
       if (recentLat != null && recentLng != null && recentAddr != null) {
         _recentLocation = _SavedLocation(
-            position: LatLng(recentLat, recentLng), address: recentAddr);
+          position: LatLng(recentLat, recentLng),
+          address: recentAddr,
+        );
       }
       if (favLat != null && favLng != null && favAddr != null) {
         _favoriteLocation = _SavedLocation(
-            position: LatLng(favLat, favLng), address: favAddr);
+          position: LatLng(favLat, favLng),
+          address: favAddr,
+        );
       }
     });
   }
@@ -1554,8 +1779,12 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     await prefs.setDouble('map_picker_fav_lng', _picked.longitude);
     await prefs.setString('map_picker_fav_address', _address);
     if (!mounted) return;
-    setState(() => _favoriteLocation =
-        _SavedLocation(position: _picked, address: _address));
+    setState(
+      () => _favoriteLocation = _SavedLocation(
+        position: _picked,
+        address: _address,
+      ),
+    );
   }
 
   Future<void> _clearFavoriteLocation() async {
@@ -1590,11 +1819,14 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
       _locationLocked = true;
     });
     if (_useGoogleMaps) {
-      _googleMapController
-          ?.animateCamera(CameraUpdate.newLatLngZoom(loc.position, 18.0));
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(loc.position, 18.0),
+      );
     } else if (_osmMapReady) {
       _osmController.move(
-          ll.LatLng(loc.position.latitude, loc.position.longitude), 18.0);
+        ll.LatLng(loc.position.latitude, loc.position.longitude),
+        18.0,
+      );
     }
   }
 
@@ -1610,7 +1842,10 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
   // at screen-center, so whatever's under it is always the current pick.
   void _onCameraMoved(LatLng center) {
     if (_locationLocked) return;
-    setState(() { _picked = center; _showQuickPicks = false; });
+    setState(() {
+      _picked = center;
+      _showQuickPicks = false;
+    });
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 600), () {
       if (_suppressNextGeocode) {
@@ -1644,7 +1879,9 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         },
         onPositionChanged: (camera, hasGesture) {
           if (!hasGesture) return;
-          _onCameraMoved(LatLng(camera.center.latitude, camera.center.longitude));
+          _onCameraMoved(
+            LatLng(camera.center.latitude, camera.center.longitude),
+          );
         },
       ),
       children: [
@@ -1665,7 +1902,11 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                   color: Colors.red,
                   size: 44,
                   shadows: [
-                    Shadow(color: Colors.black45, blurRadius: 6, offset: Offset(0, 2)),
+                    Shadow(
+                      color: Colors.black45,
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
+                    ),
                   ],
                 ),
               ),
@@ -1712,19 +1953,25 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(label,
-                        style: TextStyle(
-                            color: onSurface.withValues(alpha: 0.55),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                            letterSpacing: 0.3)),
-                    Text(address,
-                        style: TextStyle(
-                            color: onSurface,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: onSurface.withValues(alpha: 0.55),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    Text(
+                      address,
+                      style: TextStyle(
+                        color: onSurface,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
@@ -1789,15 +2036,21 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
         backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: kSub, size: 20),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: kSub,
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Select Location',
-            style: TextStyle(
-                color: onSurface,
-                fontWeight: FontWeight.bold,
-                fontSize: 16)),
+        title: Text(
+          'Select Location',
+          style: TextStyle(
+            color: onSurface,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
       ),
       body: Stack(
         children: [
@@ -1807,7 +2060,8 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                   style: Theme.of(context).brightness == Brightness.dark
                       ? kDarkMapStyle
                       : null,
-                  onMapCreated: (controller) => _googleMapController = controller,
+                  onMapCreated: (controller) =>
+                      _googleMapController = controller,
                   initialCameraPosition: CameraPosition(
                     target: _picked,
                     zoom: 16.0,
@@ -1841,7 +2095,11 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                     color: Colors.red,
                     size: 44,
                     shadows: [
-                      Shadow(color: Colors.black45, blurRadius: 6, offset: Offset(0, 2)),
+                      Shadow(
+                        color: Colors.black45,
+                        blurRadius: 6,
+                        offset: Offset(0, 2),
+                      ),
                     ],
                   ),
                 ),
@@ -1898,10 +2156,14 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                     decoration: InputDecoration(
                       hintText: 'Search address or place...',
                       hintStyle: TextStyle(
-                          color: onSurface.withValues(alpha: 0.4),
-                          fontSize: 13),
-                      prefixIcon: const Icon(Icons.search_rounded,
-                          color: kSub, size: 20),
+                        color: onSurface.withValues(alpha: 0.4),
+                        fontSize: 13,
+                      ),
+                      prefixIcon: const Icon(
+                        Icons.search_rounded,
+                        color: kSub,
+                        size: 20,
+                      ),
                       suffixIcon: _searching
                           ? const Padding(
                               padding: EdgeInsets.all(12),
@@ -1909,17 +2171,24 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                                 width: 16,
                                 height: 16,
                                 child: CircularProgressIndicator(
-                                    color: kAmber, strokeWidth: 2),
+                                  color: kAmber,
+                                  strokeWidth: 2,
+                                ),
                               ),
                             )
                           : IconButton(
-                              icon: const Icon(Icons.arrow_forward_rounded,
-                                  color: kAmber, size: 20),
+                              icon: const Icon(
+                                Icons.arrow_forward_rounded,
+                                color: kAmber,
+                                size: 20,
+                              ),
                               onPressed: _searchAddress,
                             ),
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 14),
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
                     ),
                   ),
                 ),
@@ -1930,16 +2199,23 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                   Container(
                     margin: const EdgeInsets.only(top: 6),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: cardColor,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                          color: Colors.redAccent.withValues(alpha: 0.4)),
+                        color: Colors.redAccent.withValues(alpha: 0.4),
+                      ),
                     ),
-                    child: Text(_searchError!,
-                        style: const TextStyle(
-                            color: Colors.redAccent, fontSize: 12)),
+                    child: Text(
+                      _searchError!,
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 if (_showSuggestions && _placeSuggestions.isNotEmpty)
                   Container(
@@ -1971,41 +2247,52 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                           final p = _placeSuggestions[index];
                           final mainText =
                               (p['structured_formatting'] as Map?)?['main_text']
-                                      as String? ??
-                                  p['description'] as String? ??
-                                  '';
+                                  as String? ??
+                              p['description'] as String? ??
+                              '';
                           final secondaryText =
-                              (p['structured_formatting'] as Map?)?[
-                                  'secondary_text'] as String?;
+                              (p['structured_formatting']
+                                      as Map?)?['secondary_text']
+                                  as String?;
                           return InkWell(
                             onTap: () => _selectSuggestion(p),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 10),
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.location_on_outlined,
-                                      size: 18, color: kSub),
+                                  const Icon(
+                                    Icons.location_on_outlined,
+                                    size: 18,
+                                    color: kSub,
+                                  ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Text(mainText,
-                                            style: TextStyle(
-                                                color: onSurface,
-                                                fontSize: 13,
-                                                fontWeight:
-                                                    FontWeight.w500)),
+                                        Text(
+                                          mainText,
+                                          style: TextStyle(
+                                            color: onSurface,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
                                         if (secondaryText != null &&
                                             secondaryText.isNotEmpty)
-                                          Text(secondaryText,
-                                              style: TextStyle(
-                                                  color:
-                                                      onSurface.withValues(
-                                                          alpha: 0.55),
-                                                  fontSize: 11)),
+                                          Text(
+                                            secondaryText,
+                                            style: TextStyle(
+                                              color: onSurface.withValues(
+                                                alpha: 0.55,
+                                              ),
+                                              fontSize: 11,
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ),
@@ -2052,197 +2339,195 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
 
           // ── Confirm card ───────────────────────────────────────
           Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                padding:
-                    const EdgeInsets.fromLTRB(20, 18, 20, 32),
-                decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(24)),
-                  border: Border(
-                      top: BorderSide(color: borderColor)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 20,
-                      offset: const Offset(0, -4),
-                    ),
-                  ],
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color:
-                                kAmber.withValues(alpha: 0.15),
-                            borderRadius:
-                                BorderRadius.circular(10),
-                          ),
-                          child: const Icon(
-                              Icons.location_on_rounded,
-                              color: kAmber,
-                              size: 20),
+                border: Border(top: BorderSide(color: borderColor)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 20,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: kAmber.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _geocoding
-                              ? const Row(
-                                  children: [
-                                    SizedBox(
-                                      width: 14,
-                                      height: 14,
-                                      child:
-                                          CircularProgressIndicator(
-                                              color: kAmber,
-                                              strokeWidth: 2),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                        'Getting address...',
-                                        style: TextStyle(
-                                            color: kSub,
-                                            fontSize: 13)),
-                                  ],
-                                )
-                              : Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      _address.isNotEmpty
-                                          ? _address
-                                          : 'Location selected',
-                                      style: TextStyle(
-                                          color: onSurface,
-                                          fontSize: 13,
-                                          fontWeight:
-                                              FontWeight.w500),
-                                      maxLines: 2,
-                                      overflow:
-                                          TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      _locationLocked
-                                          ? 'Location pinned'
-                                          : 'Drag the map to fine-tune the pin',
-                                      style: TextStyle(
-                                        color: _locationLocked
-                                            ? const Color(0xFF10B981)
-                                            : kSub,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Lat: ${_picked.latitude.toStringAsFixed(6)}  Lng: ${_picked.longitude.toStringAsFixed(6)}',
-                                      style: const TextStyle(
-                                          color: kSub, fontSize: 10),
-                                    ),
-                                  ],
-                                ),
+                        child: const Icon(
+                          Icons.location_on_rounded,
+                          color: kAmber,
+                          size: 20,
                         ),
-                        if (!_geocoding) ...[
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () {
-                              if (_isFavoriteCurrentLocation()) {
-                                _clearFavoriteLocation();
-                              } else {
-                                _saveFavoriteLocation();
-                              }
-                            },
-                            child: Icon(
-                              _isFavoriteCurrentLocation()
-                                  ? Icons.star_rounded
-                                  : Icons.star_border_rounded,
-                              color: _isFavoriteCurrentLocation()
-                                  ? const Color(0xFFF59E0B)
-                                  : kSub,
-                              size: 24,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    if (_locationLocked) ...[
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            setState(() => _locationLocked = false);
-                            if (_useGoogleMaps) {
-                              _googleMapController?.animateCamera(
-                                CameraUpdate.newLatLng(_picked),
-                              );
-                            } else if (_osmMapReady) {
-                              _osmController.move(
-                                ll.LatLng(_picked.latitude, _picked.longitude),
-                                _osmController.camera.zoom,
-                              );
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _geocoding
+                            ? const Row(
+                                children: [
+                                  SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      color: kAmber,
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Getting address...',
+                                    style: TextStyle(color: kSub, fontSize: 13),
+                                  ),
+                                ],
+                              )
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _address.isNotEmpty
+                                        ? _address
+                                        : 'Location selected',
+                                    style: TextStyle(
+                                      color: onSurface,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _locationLocked
+                                        ? 'Location pinned'
+                                        : 'Drag the map to fine-tune the pin',
+                                    style: TextStyle(
+                                      color: _locationLocked
+                                          ? const Color(0xFF10B981)
+                                          : kSub,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Lat: ${_picked.latitude.toStringAsFixed(6)}  Lng: ${_picked.longitude.toStringAsFixed(6)}',
+                                    style: const TextStyle(
+                                      color: kSub,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                      if (!_geocoding) ...[
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () {
+                            if (_isFavoriteCurrentLocation()) {
+                              _clearFavoriteLocation();
+                            } else {
+                              _saveFavoriteLocation();
                             }
                           },
-                          icon: const Icon(
-                            Icons.edit_location_alt_outlined,
-                            size: 16,
-                          ),
-                          label: const Text(
-                            'Select Different Location',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: kAmber,
-                            side: BorderSide(
-                              color: kAmber.withValues(alpha: 0.6),
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: Icon(
+                            _isFavoriteCurrentLocation()
+                                ? Icons.star_rounded
+                                : Icons.star_border_rounded,
+                            color: _isFavoriteCurrentLocation()
+                                ? const Color(0xFFF59E0B)
+                                : kSub,
+                            size: 24,
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
+                      ],
                     ],
+                  ),
+                  const SizedBox(height: 16),
+                  if (_locationLocked) ...[
                     SizedBox(
                       width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton.icon(
-                        onPressed: _geocoding ? null : _confirm,
-                        icon: const Icon(Icons.check_rounded,
-                            size: 18),
-                        label: const Text('Confirm Location',
-                            style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: kAmber,
-                          foregroundColor: Colors.black,
-                          disabledBackgroundColor:
-                              kAmber.withValues(alpha: 0.4),
-                          elevation: 0,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          setState(() => _locationLocked = false);
+                          if (_useGoogleMaps) {
+                            _googleMapController?.animateCamera(
+                              CameraUpdate.newLatLng(_picked),
+                            );
+                          } else if (_osmMapReady) {
+                            _osmController.move(
+                              ll.LatLng(_picked.latitude, _picked.longitude),
+                              _osmController.camera.zoom,
+                            );
+                          }
+                        },
+                        icon: const Icon(
+                          Icons.edit_location_alt_outlined,
+                          size: 16,
+                        ),
+                        label: const Text(
+                          'Select Different Location',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: kAmber,
+                          side: BorderSide(
+                            color: kAmber.withValues(alpha: 0.6),
+                          ),
                           shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(30)),
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
                         ),
                       ),
                     ),
+                    const SizedBox(height: 10),
                   ],
-                ),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      onPressed: _geocoding ? null : _confirm,
+                      icon: const Icon(Icons.check_rounded, size: 18),
+                      label: const Text(
+                        'Confirm Location',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kAmber,
+                        foregroundColor: Colors.black,
+                        disabledBackgroundColor: kAmber.withValues(alpha: 0.4),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
+          ),
         ],
       ),
     );

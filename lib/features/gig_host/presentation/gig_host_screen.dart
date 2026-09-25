@@ -25,6 +25,7 @@ import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
 import '../models/gig_template_model.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/utils/host_active_gig.dart';
 import 'widgets/notifications_sheet.dart';
 import 'widgets/gig_detail_sheet.dart';
 import 'widgets/host_gig_card.dart';
@@ -157,6 +158,12 @@ class _GigHostScreenState extends State<GigHostScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
+
+                // ── Active Gigs ──────────────────────────────────
+                _ActiveGigsSection(
+                  uid: uid,
+                  animationGeneration: widget.animationGeneration,
+                ),
 
                 // ── Your Gigs ──────────────────────────────────
                 EntranceAnimation(
@@ -1027,6 +1034,173 @@ class _GigTypeCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig Area Preview — 5 most recent across all types
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  Active Gigs — the host's gigs currently underway (worker en route, on
+//  the job, wrapping up, or awaiting payout). Shown above "Your Gigs" so a
+//  host with something in-flight sees it first. Renders nothing at all
+//  (no header either) once loaded if there's nothing active, so it never
+//  shows an empty state on top of the full list right below it.
+// ─────────────────────────────────────────────────────────────────────────────
+class _ActiveGigsSection extends StatefulWidget {
+  final String uid;
+  final int animationGeneration;
+  const _ActiveGigsSection({required this.uid, this.animationGeneration = 0});
+
+  @override
+  State<_ActiveGigsSection> createState() => _ActiveGigsSectionState();
+}
+
+class _ActiveGigsSectionState extends State<_ActiveGigsSection> {
+  List<Map<String, dynamic>> _quick = [], _open = [], _offered = [];
+  bool _loading = true;
+  StreamSubscription? _quickSub, _openSub, _offeredSub;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.uid.isEmpty) return;
+    final db = FirebaseFirestore.instance;
+    void onErr(Object e) {
+      if (FirebaseAuth.instance.currentUser == null) return;
+      debugPrint('[_ActiveGigsSection] stream error: $e');
+    }
+
+    // Same query shape as _GigPreviewList (hostId + orderBy only, no status
+    // filter) so this doesn't need its own hostId+status composite index —
+    // active-ness is filtered client-side in `_active` below instead.
+    _quickSub = db
+        .collection('quick_gigs')
+        .where('hostId', isEqualTo: widget.uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen(
+          (s) => setState(() {
+            _quick = s.docs.map((d) {
+              final m = Map<String, dynamic>.from(d.data());
+              m['gigType'] = m['gigType'] ?? 'quick';
+              m['docId'] = d.id;
+              return m;
+            }).toList();
+            _loading = false;
+          }),
+          onError: onErr,
+        );
+
+    _openSub = db
+        .collection('open_gigs')
+        .where('hostId', isEqualTo: widget.uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen(
+          (s) => setState(() {
+            _open = s.docs.map((d) {
+              final m = Map<String, dynamic>.from(d.data());
+              m['gigType'] = m['gigType'] ?? 'open';
+              m['docId'] = d.id;
+              return m;
+            }).toList();
+            _loading = false;
+          }),
+          onError: onErr,
+        );
+
+    _offeredSub = db
+        .collection('offered_gigs')
+        .where('hostId', isEqualTo: widget.uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .listen(
+          (s) => setState(() {
+            _offered = s.docs.map((d) {
+              final m = Map<String, dynamic>.from(d.data());
+              m['gigType'] = m['gigType'] ?? 'offered';
+              m['docId'] = d.id;
+              return m;
+            }).toList();
+            _loading = false;
+          }),
+          onError: onErr,
+        );
+  }
+
+  @override
+  void dispose() {
+    _quickSub?.cancel();
+    _openSub?.cancel();
+    _offeredSub?.cancel();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> get _active {
+    final all = [..._quick, ..._open, ..._offered].where((d) {
+      final s = d['status'] as String? ?? '';
+      return kHostActiveGigStatuses.contains(s);
+    }).toList();
+    all.sort((a, b) {
+      final aTs = a['createdAt'] as Timestamp?;
+      final bTs = b['createdAt'] as Timestamp?;
+      if (aTs == null || bTs == null) return 0;
+      return bTs.toDate().compareTo(aTs.toDate());
+    });
+    return all;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const SizedBox.shrink();
+
+    final active = _active;
+    if (active.isEmpty) return const SizedBox.shrink();
+
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          EntranceAnimation(
+            key: ValueKey('active-gigs-${widget.animationGeneration}'),
+            type: EntranceAnimationType.fadeInSlideUp,
+            child: Row(
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF2E9E6B),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Active Gigs',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...active.asMap().entries.map(
+            (entry) => EntranceAnimation(
+              key: ValueKey(
+                'active-gig-${entry.key}-${widget.animationGeneration}',
+              ),
+              type: EntranceAnimationType.fadeInSlideUp,
+              delay: Duration(milliseconds: entry.key * 40),
+              child: HostGigCard(data: entry.value, showActions: false),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _GigPreviewList extends StatefulWidget {
   final String uid;
   final int animationGeneration;
@@ -1603,10 +1777,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                     skill: skills.isNotEmpty ? skills.first : 'General',
                     position: LatLng(geo.latitude, geo.longitude),
                     photoUrl: data['photoUrl'] as String? ?? '',
-                    summary: RatingSummary.fromUserData(
-                      data,
-                      RateeRole.worker,
-                    ),
+                    summary: RatingSummary.fromUserData(data, RateeRole.worker),
                   );
                 })
                 .whereType<_WorkerData>()

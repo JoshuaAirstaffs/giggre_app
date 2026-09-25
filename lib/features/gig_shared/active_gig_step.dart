@@ -25,8 +25,33 @@ GigStep gigStepFromStatus(String s) {
   }
 }
 
-const kStepLabels = ['On My Way', "I'm Here", 'On the Job', 'All Done', 'Getting Paid', 'Wrapped Up'];
-const kStepLabelsHost = ["Worker's on the Way", 'Worker Arrived', 'On the Job', 'All Done', 'Awaiting Payout', 'Wrapped Up'];
+const kStepLabels = [
+  'On My Way',
+  "I'm Here",
+  'On the Job',
+  'All Done',
+  'Getting Paid',
+  'Wrapped Up',
+];
+const kStepLabelsHost = [
+  "Worker's on the Way",
+  'Worker Arrived',
+  'On the Job',
+  'All Done',
+  'Awaiting Payout',
+  'Wrapped Up',
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Final amount owed for an hourly gig — single source of truth for both
+//  sides of the payment-confirmation flow. Rounds the tracked work
+//  duration (working_ui.dart's durationSeconds) to the nearest minute
+//  before multiplying by the rate, rather than paying to the exact second.
+// ─────────────────────────────────────────────────────────────────────────────
+double hourlyPayAmount(double hourlyRate, int durationSeconds) {
+  final roundedMinutes = (durationSeconds / 60).round();
+  return hourlyRate * (roundedMinutes / 60);
+}
 
 // Title/body copy for the progress card's instruction block.
 class GigStepCopy {
@@ -135,4 +160,12 @@ String dedupedAddress(String address) {
 String fmtDist(double meters) {
   if (meters < 1000) return '${meters.round()} m';
   return '${(meters / 1000).toStringAsFixed(1)} km';
+}
+
+String fmtWorkDuration(int seconds) {
+  final h = seconds ~/ 3600;
+  final m = (seconds % 3600) ~/ 60;
+  if (h > 0) return '${h}h ${m}m';
+  if (m > 0) return '${m}m';
+  return '<1m';
 }

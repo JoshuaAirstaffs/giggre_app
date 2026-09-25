@@ -24,6 +24,16 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
   bool _loading = true;
   List<_HistoryItem> _items = [];
   Map<String, double> _earningsByCode = {};
+  // null = no filter ("All"). Chip row only shows once the worker has
+  // actually earned in more than one currency.
+  String? _currencyFilter;
+
+  List<String> get _availableCurrencies =>
+      (_items.map((i) => i.currencyCode).toSet().toList()..sort());
+
+  List<_HistoryItem> get _filteredItems => _currencyFilter == null
+      ? _items
+      : _items.where((i) => i.currencyCode == _currencyFilter).toList();
 
   /// The ratings this worker has already given, resolved once for the whole
   /// list so each row doesn't cost its own read — and so a rated row can show
@@ -67,10 +77,10 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
 
     final earningsData =
         ((userDoc.data() ?? {})['earnings'] as Map<String, dynamic>?) ?? {};
-    final rawTotal =
-        (earningsData['total'] as Map<String, dynamic>?) ?? {};
+    final rawTotal = (earningsData['total'] as Map<String, dynamic>?) ?? {};
     final byCode = rawTotal.map(
-        (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0.0));
+      (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0.0),
+    );
 
     if (!mounted) return;
     setState(() {
@@ -82,7 +92,10 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
   }
 
   Future<List<_HistoryItem>> _fetchCollection(
-      String collection, String uid, String type) async {
+    String collection,
+    String uid,
+    String type,
+  ) async {
     final snap = await FirebaseFirestore.instance
         .collection(collection)
         .where('workerId', isEqualTo: uid)
@@ -91,15 +104,22 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
 
     return snap.docs.map((doc) {
       final d = doc.data();
-      final completedAt = (d['completedAt'] as Timestamp?)?.toDate() ??
+      final completedAt =
+          (d['completedAt'] as Timestamp?)?.toDate() ??
           (d['createdAt'] as Timestamp?)?.toDate() ??
           DateTime.now();
+      // `finalAmount` is what the host's payment flow actually confirmed
+      // (hourly-computed, flat, or manually adjusted) — `budget` alone is
+      // only the posting-time estimate, wrong for any completed hourly gig.
+      final finalAmount =
+          (d['finalAmount'] as num?)?.toDouble() ??
+          (d['adjustedAmount'] as num?)?.toDouble();
       return _HistoryItem(
         id: doc.id,
         type: type,
         title: d['title'] as String? ?? type,
         address: d['address'] as String? ?? '',
-        budget: (d['budget'] as num?)?.toDouble() ?? 0,
+        budget: finalAmount ?? (d['budget'] as num?)?.toDouble() ?? 0,
         currencyCode: (d['currencyCode'] as String?) ?? 'USD',
         completedAt: completedAt,
         hostName: d['hostName'] as String? ?? '',
@@ -142,12 +162,18 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
       final completedAt = (d['completedAt'] as Timestamp?)?.toDate() ??
           (d['acceptedAt'] as Timestamp?)?.toDate() ??
           DateTime.now();
+      // `finalAmount` lives on this same worker-slot doc (written by
+      // _confirmWorkerSlotCompleted) — `rate` alone is only the
+      // posting-time estimate, wrong for a completed hourly gig.
+      final finalAmount =
+          (d['finalAmount'] as num?)?.toDouble() ??
+          (d['adjustedAmount'] as num?)?.toDouble();
       return _HistoryItem(
         id: '${gigId}_${doc.id}',
         type: typeLabel,
         title: gigData?['title'] as String? ?? typeLabel,
         address: gigData?['address'] as String? ?? '',
-        budget: (d['rate'] as num?)?.toDouble() ?? 0,
+        budget: finalAmount ?? (d['rate'] as num?)?.toDouble() ?? 0,
         currencyCode: (d['currencyCode'] as String?) ?? 'USD',
         completedAt: completedAt,
         hostName: d['hostName'] as String? ?? gigData?['hostName'] as String? ?? '',
@@ -165,6 +191,13 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final onSurface = Theme.of(context).colorScheme.onSurface;
+    final filtered = _filteredItems;
+    final filter = _currencyFilter;
+    // Filtered to one currency: show just that currency's total rather
+    // than the full multi-currency breakdown — otherwise unchanged.
+    final headerEarnings = filter == null
+        ? _earningsByCode
+        : {filter: _earningsByCode[filter] ?? 0};
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -172,23 +205,29 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
         children: [
           _GigHistoryHeader(
             isDark: isDark,
-            earningsByCode: _earningsByCode,
-            gigCount: _items.length,
+            earningsByCode: headerEarnings,
+            gigCount: filtered.length,
           ),
+          if (_availableCurrencies.length > 1)
+            _CurrencyFilterBar(
+              currencies: _availableCurrencies,
+              selected: _currencyFilter,
+              onSelected: (c) => setState(() => _currencyFilter = c),
+            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator(color: kBlue))
-                : _items.isEmpty
+                : filtered.isEmpty
                     ? _EmptyState(onSurface: onSurface)
                     : RefreshIndicator(
                         color: kBlue,
                         onRefresh: _load,
                         child: ListView.builder(
                           padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                          itemCount: _items.length,
+                          itemCount: filtered.length,
                           itemBuilder: (ctx, i) {
-                            final prev = i > 0 ? _items[i - 1] : null;
-                            final item = _items[i];
+                            final prev = i > 0 ? filtered[i - 1] : null;
+                            final item = filtered[i];
                             final showHeader = prev == null ||
                                 !_sameMonth(prev.completedAt, item.completedAt);
                             return Column(
@@ -279,7 +318,8 @@ class _GigHistoryHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final sortedEntries = earningsByCode.isEmpty
         ? [MapEntry(context.watch<CurrentUserProvider>().currencyCode, 0.0)]
-        : (earningsByCode.entries.toList()..sort((a, b) => a.key.compareTo(b.key)));
+        : (earningsByCode.entries.toList()
+            ..sort((a, b) => a.key.compareTo(b.key)));
 
     final earningsValue = sortedEntries
         .map((e) => CurrencyFormatter.format(e.value, e.key))
@@ -313,16 +353,22 @@ class _GigHistoryHeader extends StatelessWidget {
                         color: Colors.white.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.arrow_back_ios_new_rounded,
-                          color: Colors.white, size: 16),
+                      child: const Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white,
+                        size: 16,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Text('Gig History',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold)),
+                  const Text(
+                    'Gig History',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 24),
@@ -380,19 +426,91 @@ class _StatChip extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(value,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold)),
-                Text(label,
-                    style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.65),
-                        fontSize: 11)),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.65),
+                    fontSize: 11,
+                  ),
+                ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Currency filter — only shown once the worker has earned in more than
+//  one currency (mixed quick/open/offered gigs across countries).
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CurrencyFilterBar extends StatelessWidget {
+  final List<String> currencies;
+  final String? selected;
+  final ValueChanged<String?> onSelected;
+
+  const _CurrencyFilterBar({
+    required this.currencies,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    Widget chip(String label, String? value) {
+      final isSelected = selected == value;
+      return Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: GestureDetector(
+          onTap: () => onSelected(value),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? kBlue.withValues(alpha: 0.15)
+                  : (isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.04)),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isSelected ? kBlue : Theme.of(context).dividerColor,
+              ),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? kBlue : onSurface,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: SizedBox(
+        height: 34,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          children: [chip('All', null), ...currencies.map((c) => chip(c, c))],
+        ),
       ),
     );
   }
@@ -407,8 +525,19 @@ class _MonthHeader extends StatelessWidget {
   const _MonthHeader({required this.date});
 
   static const _months = [
-    '', 'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
+    '',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
 
   @override
@@ -418,10 +547,11 @@ class _MonthHeader extends StatelessWidget {
       child: Text(
         '${_months[date.month]} ${date.year}',
         style: const TextStyle(
-            color: kSub,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.4),
+          color: kSub,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.4,
+        ),
       ),
     );
   }
@@ -474,7 +604,11 @@ class _GigHistoryCard extends StatelessWidget {
               color: _typeColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(11),
             ),
-            child: Icon(Icons.check_circle_rounded, color: _typeColor, size: 20),
+            child: Icon(
+              Icons.check_circle_rounded,
+              color: _typeColor,
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -484,20 +618,24 @@ class _GigHistoryCard extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(item.title,
-                          style: TextStyle(
-                              color: onSurface,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600),
-                          overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        item.title,
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      CurrencyFormatter.format(item.budget, item.currencyCode),
+                      '+${CurrencyFormatter.format(item.budget, item.currencyCode)}',
                       style: const TextStyle(
-                          color: Color(0xFF10B981),
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold),
+                        color: Color(0xFF10B981),
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
@@ -528,14 +666,18 @@ class _GigHistoryCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      const Icon(Icons.location_on_rounded,
-                          color: kSub, size: 12),
+                      const Icon(
+                        Icons.location_on_rounded,
+                        color: kSub,
+                        size: 12,
+                      ),
                       const SizedBox(width: 3),
                       Expanded(
-                        child: Text(item.address,
-                            style:
-                                const TextStyle(color: kSub, fontSize: 11),
-                            overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          item.address,
+                          style: const TextStyle(color: kSub, fontSize: 11),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
@@ -543,12 +685,16 @@ class _GigHistoryCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(Icons.access_time_rounded,
-                        color: kSub, size: 11),
+                    const Icon(
+                      Icons.access_time_rounded,
+                      color: kSub,
+                      size: 11,
+                    ),
                     const SizedBox(width: 3),
-                    Text(dateStr,
-                        style:
-                            const TextStyle(color: kSub, fontSize: 11)),
+                    Text(
+                      dateStr,
+                      style: const TextStyle(color: kSub, fontSize: 11),
+                    ),
                   ],
                 ),
                 // The rating dialog is offered once, at payment confirmation,
@@ -579,7 +725,11 @@ class _GigHistoryCard extends StatelessWidget {
     );
   }
 
-  int _hour(int h) => h == 0 ? 12 : h > 12 ? h - 12 : h;
+  int _hour(int h) => h == 0
+      ? 12
+      : h > 12
+      ? h - 12
+      : h;
 }
 
 class _TypeBadge extends StatelessWidget {
@@ -595,9 +745,14 @@ class _TypeBadge extends StatelessWidget {
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(label,
-          style: TextStyle(
-              color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }
@@ -616,17 +771,25 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.work_history_outlined,
-              size: 64, color: onSurface.withValues(alpha: 0.2)),
+          Icon(
+            Icons.work_history_outlined,
+            size: 64,
+            color: onSurface.withValues(alpha: 0.2),
+          ),
           const SizedBox(height: 16),
-          Text('No completed gigs yet',
-              style: TextStyle(
-                  color: onSurface.withValues(alpha: 0.5),
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500)),
+          Text(
+            'No completed gigs yet',
+            style: TextStyle(
+              color: onSurface.withValues(alpha: 0.5),
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           const SizedBox(height: 6),
-          const Text('Your finished gigs will appear here',
-              style: TextStyle(color: kSub, fontSize: 13)),
+          const Text(
+            'Your finished gigs will appear here',
+            style: TextStyle(color: kSub, fontSize: 13),
+          ),
         ],
       ),
     );

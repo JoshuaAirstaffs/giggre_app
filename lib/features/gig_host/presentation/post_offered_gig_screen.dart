@@ -105,6 +105,14 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   final _titleCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _budgetCtrl = TextEditingController();
+  // Optional, purely informational — never used in any pay calculation.
+  final _workDurationCtrl = TextEditingController();
+
+  // Pay type — 'flat' (budget field is the job total) or 'hourly' (budget
+  // field is the rate). No estimated-hours input — budget for an hourly
+  // gig is just the rate itself; the real payout is computed later from
+  // actual tracked work duration, not from any hours guessed at posting.
+  String _payType = 'flat';
 
   // Worker selection — multiple workers can be offered the same gig, each
   // independently accepting/declining and settling on their own timeline.
@@ -194,6 +202,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     _titleCtrl.dispose();
     _descCtrl.dispose();
     _budgetCtrl.dispose();
+    _workDurationCtrl.dispose();
     _errorPlayer.dispose();
     super.dispose();
   }
@@ -395,7 +404,10 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     }
 
     if (_scheduledDate == null) {
-      _showSnack('Schedule is required. Please pick a date and time.', isError: true);
+      _showSnack(
+        'Schedule is required. Please pick a date and time.',
+        isError: true,
+      );
       return;
     }
 
@@ -443,7 +455,10 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
           ? GeoPoint(_mapPosition!.latitude, _mapPosition!.longitude)
           : GeoPoint(_gpsPosition!.latitude, _gpsPosition!.longitude);
 
-      final gigCountry = await countryCodeFromCoordinates(geoPoint.latitude, geoPoint.longitude);
+      final gigCountry = await countryCodeFromCoordinates(
+        geoPoint.latitude,
+        geoPoint.longitude,
+      );
       final currency = gigCountry != null
           ? CurrencyFormatter.countryToCurrency(gigCountry)
           : fallbackCurrency;
@@ -462,6 +477,12 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
       final rate = double.parse(_budgetCtrl.text.trim());
       final isSingle = _selectedWorkers.length == 1;
+      final isHourly = _payType == 'hourly';
+      // No estimated-hours input — budget for an hourly gig is just the
+      // rate itself; the real payout is computed later from actual
+      // tracked work duration, not from any hours guessed at posting time.
+      final budget = rate;
+      final workDurationHours = double.tryParse(_workDurationCtrl.text.trim());
       final gig = OfferedGigModel(
         hostId: uid,
         hostName: widget.hostName,
@@ -474,13 +495,16 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         description: _descCtrl.text.trim(),
         skillRequired: _selectedSkill!,
         experienceLevel: _experienceLevel,
-        budget: rate,
+        budget: budget,
         currencyCode: currency,
+        payType: _payType,
+        hourlyRate: isHourly ? rate : null,
+        workDurationHours: workDurationHours,
         location: geoPoint,
         address: _address,
         scheduledDate: scheduledAt,
         workerSlots: _selectedWorkers.length,
-        ratePerSlot: rate,
+        ratePerSlot: budget,
       );
 
       final gigRef = await FirebaseFirestore.instance
@@ -502,8 +526,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
               rate: rate,
               currencyCode: currency,
               status: 'offered',
-            ).toMap()
-              ..['offeredAt'] = FieldValue.serverTimestamp(),
+            ).toMap()..['offeredAt'] = FieldValue.serverTimestamp(),
           );
         }
         await batch.commit();
@@ -526,7 +549,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
           msg,
           style: isError ? const TextStyle(color: Colors.white) : null,
         ),
-        backgroundColor: isError ? Colors.redAccent : Theme.of(context).cardColor,
+        backgroundColor: isError
+            ? Colors.redAccent
+            : Theme.of(context).cardColor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
@@ -771,8 +796,26 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 ),
                 const SizedBox(height: 20),
 
+                // ── Pay type ─────────────────────────────────────────
+                _SectionLabel('Pay Type'),
+                const SizedBox(height: 10),
+                _buildPayTypeToggle(),
+                const SizedBox(height: 20),
+
                 // ── Amount ────────────────────────────────────────
-                _SectionLabel('Amount'),
+                _SectionLabel(
+                  _payType == 'hourly' ? 'Hourly Rate (per hour)' : 'Amount',
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _payType == 'hourly'
+                      ? 'How much you\'ll pay per hour worked — the final payout is based on actual tracked time.'
+                      : 'Total amount you\'ll pay for this gig, regardless of how long it takes.',
+                  style: TextStyle(
+                    color: kSub.withValues(alpha: 0.8),
+                    fontSize: 12,
+                  ),
+                ),
                 const SizedBox(height: 10),
                 TutorialAnchor(
                   id: 'postGig.amount',
@@ -800,6 +843,39 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                         fontSize: 15,
                         fontWeight: FontWeight.bold,
                       ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // ── Work duration ────────────────────────────────────
+                _SectionLabel('Work Duration (optional)'),
+                const SizedBox(height: 6),
+                Text(
+                  'Roughly how long this gig will take — just a heads-up for workers, not a minimum or a commitment.',
+                  style: TextStyle(
+                    color: kSub.withValues(alpha: 0.8),
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildTextField(
+                  controller: _workDurationCtrl,
+                  hint: 'e.g. 4',
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d+\.?\d{0,2}'),
+                    ),
+                  ],
+                  prefix: const Text(
+                    '~',
+                    style: TextStyle(
+                      color: _kPurple,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
@@ -862,8 +938,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _kPurple,
                         foregroundColor: Colors.white,
-                        disabledBackgroundColor:
-                            _kPurple.withValues(alpha: 0.4),
+                        disabledBackgroundColor: _kPurple.withValues(
+                          alpha: 0.4,
+                        ),
                         elevation: 0,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(30),
@@ -952,84 +1029,84 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                       style: TextStyle(color: kSub, fontSize: 14),
                     )
                   : isSingle
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _selectedWorkers.single.name,
-                              style: TextStyle(
-                                color: onSurface,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              _selectedWorkers.single.email,
-                              style: const TextStyle(color: kSub, fontSize: 11),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${_selectedWorkers.length} workers selected',
-                              style: TextStyle(
-                                color: onSurface,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: _selectedWorkers
-                                  .map(
-                                    (w) => Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 3,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: _kPurple.withValues(alpha: 0.1),
-                                        borderRadius: BorderRadius.circular(20),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            w.name,
-                                            style: const TextStyle(
-                                              color: _kPurple,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          GestureDetector(
-                                            onTap: () => setState(() {
-                                              _selectedWorkers = _selectedWorkers
-                                                  .where((e) => e.uid != w.uid)
-                                                  .toList();
-                                              _fetchWorkerSkills();
-                                            }),
-                                            child: const Icon(
-                                              Icons.close_rounded,
-                                              size: 12,
-                                              color: _kPurple,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-                            ),
-                          ],
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _selectedWorkers.single.name,
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _selectedWorkers.single.email,
+                          style: const TextStyle(color: kSub, fontSize: 11),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${_selectedWorkers.length} workers selected',
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: _selectedWorkers
+                              .map(
+                                (w) => Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _kPurple.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        w.name,
+                                        style: const TextStyle(
+                                          color: _kPurple,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      GestureDetector(
+                                        onTap: () => setState(() {
+                                          _selectedWorkers = _selectedWorkers
+                                              .where((e) => e.uid != w.uid)
+                                              .toList();
+                                          _fetchWorkerSkills();
+                                        }),
+                                        child: const Icon(
+                                          Icons.close_rounded,
+                                          size: 12,
+                                          color: _kPurple,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ],
+                    ),
             ),
             Icon(
               hasWorker
@@ -1064,7 +1141,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     try {
       final docs = await Future.wait(
         _selectedWorkers.map(
-          (w) => FirebaseFirestore.instance.collection('users').doc(w.uid).get(),
+          (w) =>
+              FirebaseFirestore.instance.collection('users').doc(w.uid).get(),
         ),
       );
       if (!mounted) return;
@@ -1467,6 +1545,47 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     );
   }
 
+  // ── Pay type toggle ────────────────────────────────────────────────────────
+  Widget _buildPayTypeToggle() {
+    final cardColor = Theme.of(context).cardColor;
+    final borderColor = Theme.of(context).dividerColor;
+    final textColor = Theme.of(context).colorScheme.onSurface;
+
+    Widget segment(String label, String value) {
+      final selected = _payType == value;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _payType = value),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: selected ? _kPurple.withValues(alpha: 0.15) : cardColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: selected ? _kPurple : borderColor),
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: selected ? _kPurple : textColor,
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        segment('Flat Rate', 'flat'),
+        const SizedBox(width: 10),
+        segment('Hourly Rate', 'hourly'),
+      ],
+    );
+  }
+
   // ── Text Field Builder ────────────────────────────────────────────────────────
   Widget _buildTextField({
     required TextEditingController controller,
@@ -1535,7 +1654,10 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 class _WorkerPickerSheet extends StatefulWidget {
   final String hostId;
   final List<_WorkerEntry> initiallySelected;
-  const _WorkerPickerSheet({required this.hostId, this.initiallySelected = const []});
+  const _WorkerPickerSheet({
+    required this.hostId,
+    this.initiallySelected = const [],
+  });
 
   @override
   State<_WorkerPickerSheet> createState() => _WorkerPickerSheetState();
@@ -1984,13 +2106,18 @@ class _WorkerPickerSheetState extends State<_WorkerPickerSheet> {
                 foregroundColor: Colors.white,
                 disabledBackgroundColor: purple.withValues(alpha: 0.35),
                 elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
               child: Text(
                 _selected.isEmpty
                     ? 'Select workers'
                     : 'Use ${_selected.length} selected worker${_selected.length == 1 ? '' : 's'}',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -3310,10 +3437,7 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
                             );
                           } else if (_osmMapReady) {
                             _osmController.move(
-                              ll.LatLng(
-                                _picked.latitude,
-                                _picked.longitude,
-                              ),
+                              ll.LatLng(_picked.latitude, _picked.longitude),
                               _osmController.camera.zoom,
                             );
                           }

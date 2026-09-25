@@ -381,14 +381,24 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     final title = data['title'] as String? ?? 'Gig';
     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
     final currencyCode = (data['currencyCode'] as String?) ?? 'USD';
+    final payType = data['payType'] as String? ?? 'flat';
+    final hourlyRate = (data['hourlyRate'] as num?)?.toDouble();
+    final durationSeconds = (data['durationSeconds'] as num?)?.toInt();
+    // What the worker is actually paid — for a flat gig this is just the
+    // posted budget; for an hourly gig it's rate * real tracked duration
+    // (rounded to the nearest minute), not the posting-time estimate.
+    final payableAmount =
+        (payType == 'hourly' && hourlyRate != null && durationSeconds != null)
+        ? hourlyPayAmount(hourlyRate, durationSeconds)
+        : budget;
 
     String? paymentCode;
-    await PaymentSelectionSheet.show(
+    final confirmation = await PaymentSelectionSheet.show(
       context: context,
       gigTitle: title,
-      budget: budget,
+      budget: payableAmount,
       currencyCode: currencyCode,
-      onConfirm: (paymentMethod) async {
+      onConfirm: (paymentMethod, amount, adjustmentReason) async {
         paymentCode = _generatePaymentCode();
         await Future.wait([
           db.collection(_collection).doc(widget.gigId).update({
@@ -396,20 +406,28 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             'paymentMethod': paymentMethod,
             'paymentCode': paymentCode,
             'paymentInitiatedAt': FieldValue.serverTimestamp(),
+            // Written unconditionally — this is what the worker's own
+            // payment-confirm screen actually pays out, since it has no
+            // other way to know the hourly-computed (or adjusted) amount;
+            // it never sees this host-side `payableAmount` calculation.
+            'finalAmount': amount,
+            if (amount != payableAmount) 'adjustedAmount': amount,
+            if (adjustmentReason != null)
+              'amountAdjustmentReason': adjustmentReason,
           }),
           if (workerId != null && workerId.isNotEmpty)
             db.collection('users').doc(workerId).update({'slot': 'AVAILABLE'}),
         ]);
       },
     );
-    if (!mounted || paymentCode == null) return;
+    if (!mounted || confirmation == null || paymentCode == null) return;
 
     final workerConfirmed = await HostPaymentCodeSheet.show(
       context: context,
       gigId: widget.gigId,
       gigCollection: _collection,
       paymentCode: paymentCode!,
-      budget: budget,
+      budget: confirmation.amount,
       currencyCode: currencyCode,
       workerName: workerName,
       workerId: workerId ?? '',
@@ -546,13 +564,28 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         .collection('workers')
         .doc(worker.workerId);
 
+    // Multi-worker hourly gigs: the rate is on the PARENT gig doc (shared
+    // across every slot), but the tracked work duration is this worker's
+    // own — working_ui.dart writes workStartedAt/durationSeconds onto
+    // their own workers/{workerId} doc, not the gig doc, so each worker
+    // gets paid for their own actual time, not someone else's.
+    final gigData = _data;
+    final payType = gigData?['payType'] as String? ?? 'flat';
+    final hourlyRate = (gigData?['hourlyRate'] as num?)?.toDouble();
+    final payableAmount =
+        (payType == 'hourly' &&
+            hourlyRate != null &&
+            worker.durationSeconds != null)
+        ? hourlyPayAmount(hourlyRate, worker.durationSeconds!)
+        : worker.rate;
+
     String? paymentCode;
-    await PaymentSelectionSheet.show(
+    final confirmation = await PaymentSelectionSheet.show(
       context: context,
       gigTitle: _data?['title'] as String? ?? 'Gig',
-      budget: worker.rate,
+      budget: payableAmount,
       currencyCode: worker.currencyCode,
-      onConfirm: (paymentMethod) async {
+      onConfirm: (paymentMethod, amount, adjustmentReason) async {
         paymentCode = _generatePaymentCode();
         await Future.wait([
           slotRef.update({
@@ -560,6 +593,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             'paymentMethod': paymentMethod,
             'paymentCode': paymentCode,
             'paymentInitiatedAt': FieldValue.serverTimestamp(),
+            'finalAmount': amount,
+            if (amount != payableAmount) 'adjustedAmount': amount,
+            if (adjustmentReason != null)
+              'amountAdjustmentReason': adjustmentReason,
           }),
           db.collection('users').doc(worker.workerId).update({
             'slot': 'AVAILABLE',
@@ -567,14 +604,14 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         ]);
       },
     );
-    if (!mounted || paymentCode == null) return;
+    if (!mounted || confirmation == null || paymentCode == null) return;
 
     final workerConfirmed = await HostPaymentCodeSheet.show(
       context: context,
       gigId: widget.gigId,
       gigCollection: _collection,
       paymentCode: paymentCode!,
-      budget: worker.rate,
+      budget: confirmation.amount,
       currencyCode: worker.currencyCode,
       workerName: worker.workerName,
       workerId: worker.workerId,
@@ -789,20 +826,23 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       await FirebaseFirestore.instance
           .collection(_collection)
           .doc(widget.gigId)
-          .update({'applicants': FieldValue.arrayRemove([applicant])});
+          .update({
+            'applicants': FieldValue.arrayRemove([applicant]),
+          });
     } catch (e) {
       debugPrint('[GigDetailSheet] decline applicant error: $e');
     }
   }
 
-  Future<void> _showApplicantProfileSheet(Map<String, dynamic> applicant) async {
+  Future<void> _showApplicantProfileSheet(
+    Map<String, dynamic> applicant,
+  ) async {
     final workerId = applicant['workerId'] as String? ?? '';
     final workerName = applicant['workerName'] as String? ?? 'Worker';
     if (workerId.isEmpty) return;
-    final requiredSkills =
-        ((_data?['requiredSkills'] as List<dynamic>? ?? []))
-            .map((s) => s.toString())
-            .toList();
+    final requiredSkills = ((_data?['requiredSkills'] as List<dynamic>? ?? []))
+        .map((s) => s.toString())
+        .toList();
 
     await UserProfileScreen.push(
       context,
@@ -962,6 +1002,14 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     );
   }
 
+  // Formats an hours estimate compactly, e.g. 4 -> "4 hrs", 1.5 -> "1.5 hrs".
+  String _fmtDurationHours(double hours) {
+    final trimmed = hours == hours.roundToDouble()
+        ? hours.toStringAsFixed(0)
+        : hours.toStringAsFixed(1);
+    return '$trimmed hr${hours == 1 ? '' : 's'}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1033,6 +1081,27 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     final progressStatus = status == 'cancellation_requested'
         ? (data['lastProgressStatus'] as String? ?? 'working')
         : status;
+    final isWorking = progressStatus == 'working';
+    // Written by working_ui.dart's _startWork() the moment the worker taps
+    // in — lets the host see a live-ticking "time on the job" counter.
+    final workStartedAt = (data['workStartedAt'] as Timestamp?)?.toDate();
+    // Written by working_ui.dart's _completeWork() when the worker taps
+    // done — the stopwatch-tracked total, not an estimate.
+    final durationSeconds = (data['durationSeconds'] as num?)?.toInt();
+    final payType = data['payType'] as String? ?? 'flat';
+    final hourlyRate = (data['hourlyRate'] as num?)?.toDouble();
+    final workDurationHours = (data['workDurationHours'] as num?)?.toDouble();
+    final payableAmount =
+        (payType == 'hourly' && hourlyRate != null && durationSeconds != null)
+        ? hourlyPayAmount(hourlyRate, durationSeconds)
+        : budget;
+    // `finalAmount` is written unconditionally once the host confirms the
+    // payment method (see _confirmCompleted) — reopening the code sheet
+    // must show that same confirmed figure, not silently recompute/revert.
+    final finalPayableAmount =
+        (data['finalAmount'] as num?)?.toDouble() ??
+        (data['adjustedAmount'] as num?)?.toDouble() ??
+        payableAmount;
     final resolvedWorkerName = isSearching
         ? 'Searching for worker…'
         : (workerName.isNotEmpty ? workerName : 'Worker');
@@ -1162,7 +1231,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                         children: [
                           TextSpan(
                             text: CurrencyFormatter.format(
-                              budget,
+                              payType == 'hourly' && hourlyRate != null
+                                  ? hourlyRate
+                                  : budget,
                               currencyCode,
                             ),
                             style: TextStyle(
@@ -1172,7 +1243,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                             ),
                           ),
                           TextSpan(
-                            text: ' / worker',
+                            text: payType == 'hourly' ? ' / hr' : ' / worker',
                             style: TextStyle(
                               color: activeGigTextMuted(isDark),
                               fontSize: 10,
@@ -1204,6 +1275,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               isDark: isDark,
               value: '$filledSlotCount of $workerSlots filled',
             ),
+            if (workDurationHours != null) ...[
+              const SizedBox(height: 14),
+              _InfoGridCell(
+                icon: Icons.hourglass_bottom_rounded,
+                label: 'WORK DURATION',
+                isDark: isDark,
+                value: '~${_fmtDurationHours(workDurationHours)} (estimate)',
+              ),
+            ],
             if (address.isNotEmpty) ...[
               const SizedBox(height: 14),
               _InfoGridCell(
@@ -1299,6 +1379,96 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   stepLabels: kStepLabelsHost,
                 ),
               ),
+              if (isWorking && workStartedAt != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: kHostAccent.solid.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: kHostAccent.solid.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.timer_rounded,
+                        color: kHostAccent.solid,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Worker is on the job',
+                          style: TextStyle(
+                            color: kHostAccent.solid,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      LiveWorkDuration(
+                        startedAt: workStartedAt,
+                        color: kHostAccent.solid,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+            ],
+
+            // ── Total work duration (hourly amount owed) ──────────
+            if (isTaskComplete && durationSeconds != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: kHostAccent.solid.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: kHostAccent.solid.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.timer_outlined,
+                      color: kHostAccent.solid,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        payType == 'hourly'
+                            ? 'Total work duration · ${CurrencyFormatter.format(payableAmount, currencyCode)}'
+                            : 'Total work duration',
+                        style: TextStyle(
+                          color: kHostAccent.solid,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      fmtWorkDuration(durationSeconds),
+                      style: TextStyle(
+                        color: kHostAccent.solid,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 16),
             ],
 
@@ -1312,7 +1482,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     paymentCode,
                     workerId,
                     workerName,
-                    budget,
+                    finalPayableAmount,
                     currencyCode,
                   ),
                   icon: const Icon(Icons.qr_code_rounded, size: 20),
@@ -1364,7 +1534,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                           children: [
                             TextSpan(
                               text: CurrencyFormatter.format(
-                                budget,
+                                payType == 'hourly' && hourlyRate != null
+                                    ? hourlyRate
+                                    : budget,
                                 currencyCode,
                               ),
                               style: TextStyle(
@@ -1374,7 +1546,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                               ),
                             ),
                             TextSpan(
-                              text: ' / gig',
+                              text: payType == 'hourly' ? ' / hr' : ' / gig',
                               style: TextStyle(
                                 color: activeGigTextMuted(isDark),
                                 fontSize: 10,
@@ -1546,7 +1718,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                         children: [
                           TextSpan(
                             text: CurrencyFormatter.format(
-                              budget,
+                              payType == 'hourly' && hourlyRate != null
+                                  ? hourlyRate
+                                  : budget,
                               currencyCode,
                             ),
                             style: TextStyle(
@@ -1556,7 +1730,11 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                             ),
                           ),
                           TextSpan(
-                            text: isMultiWorker ? ' / worker' : ' / gig',
+                            text: payType == 'hourly'
+                                ? ' / hr'
+                                : isMultiWorker
+                                ? ' / worker'
+                                : ' / gig',
                             style: TextStyle(
                               color: activeGigTextMuted(isDark),
                               fontSize: 10,
@@ -1589,6 +1767,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 label: 'WORKERS NEEDED',
                 isDark: isDark,
                 value: '$filledSlotCount of $workerSlots filled',
+              ),
+            ],
+            if (workDurationHours != null) ...[
+              const SizedBox(height: 14),
+              _InfoGridCell(
+                icon: Icons.hourglass_bottom_rounded,
+                label: 'WORK DURATION',
+                isDark: isDark,
+                value: '~${_fmtDurationHours(workDurationHours)} (estimate)',
               ),
             ],
             if (address.isNotEmpty) ...[
@@ -2674,6 +2861,7 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
             targetUserId: widget.workerId,
             targetUserName: widget.workerName,
             iconColor: Colors.white,
+            viewerIsWorker: false,
           ),
         ),
       ],
@@ -3513,6 +3701,13 @@ class _WorkerSlotCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isCompleted = worker.status == 'completed';
+    final isWorking = worker.status == 'working';
+    // Once wrapped up, show what was actually paid — not the posted rate,
+    // which for hourly gigs is just the per-hour figure, not the total.
+    final displayAmount = isCompleted
+        ? (worker.finalAmount ?? worker.adjustedAmount ?? worker.rate)
+        : worker.rate;
 
     return InkWell(
       onTap: onTap,
@@ -3566,15 +3761,20 @@ class _WorkerSlotCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  CurrencyFormatter.format(worker.rate, worker.currencyCode),
-                  style: TextStyle(
-                    color: kHostAccent.onWhiteText,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+                if (isCompleted) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    CurrencyFormatter.format(
+                      displayAmount,
+                      worker.currencyCode,
+                    ),
+                    style: TextStyle(
+                      color: kHostAccent.onWhiteText,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
+                ],
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -3619,6 +3819,51 @@ class _WorkerSlotCard extends StatelessWidget {
                         fontSize: 11.5,
                         fontWeight: FontWeight.w600,
                       ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (isWorking && worker.workStartedAt != null) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(
+                    Icons.hourglass_bottom_rounded,
+                    size: 13,
+                    color: activeGigTextMuted(isDark),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'On the job — ',
+                    style: TextStyle(
+                      color: activeGigTextMuted(isDark),
+                      fontSize: 11.5,
+                    ),
+                  ),
+                  LiveWorkDuration(
+                    startedAt: worker.workStartedAt!,
+                    color: kAmber,
+                  ),
+                ],
+              ),
+            ] else if (worker.durationSeconds != null &&
+                worker.durationSeconds! > 0) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(
+                    Icons.hourglass_bottom_rounded,
+                    size: 13,
+                    color: activeGigTextMuted(isDark),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Worked ${fmtWorkDuration(worker.durationSeconds!)}',
+                    style: TextStyle(
+                      color: activeGigTextMuted(isDark),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],

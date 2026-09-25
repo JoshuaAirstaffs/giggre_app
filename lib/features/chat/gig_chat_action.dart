@@ -14,6 +14,7 @@ class GigChatAction extends StatefulWidget {
     required this.targetUserId,
     required this.targetUserName,
     this.iconColor,
+    this.viewerIsWorker,
   });
 
   final String gigId;
@@ -22,6 +23,12 @@ class GigChatAction extends StatefulWidget {
   // Overrides the default kBlue icon color. Null preserves today's look
   // everywhere this widget is already used.
   final Color? iconColor;
+  // Whether the CURRENT user (not targetUser) is the worker side of this gig
+  // — the caller already knows this statically (a host-facing screen passes
+  // false, a worker-facing screen passes true). Threaded into GigChatParams
+  // so Chat can show worker/host-specific UI (quick replies, share location)
+  // without a round trip. Leave null if the caller doesn't know.
+  final bool? viewerIsWorker;
 
   @override
   State<GigChatAction> createState() => _GigChatActionState();
@@ -108,6 +115,7 @@ class _GigChatActionState extends State<GigChatAction> {
             gigId: widget.gigId,
             peerUid: widget.targetUserId,
             peerName: widget.targetUserName,
+            viewerIsWorker: widget.viewerIsWorker,
           ),
         ),
       ),

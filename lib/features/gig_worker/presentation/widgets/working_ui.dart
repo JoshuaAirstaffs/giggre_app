@@ -1377,7 +1377,9 @@ class _GigHostCard extends StatelessWidget {
                   children: [
                     TextSpan(
                       text: CurrencyFormatter.format(
-                        gig.budget,
+                        gig.payType == 'hourly' && gig.hourlyRate != null
+                            ? gig.hourlyRate!
+                            : gig.budget,
                         gig.currencyCode,
                       ),
                       style: TextStyle(
@@ -1387,7 +1389,11 @@ class _GigHostCard extends StatelessWidget {
                       ),
                     ),
                     TextSpan(
-                      text: gig.isMultiWorker ? ' / you' : ' / gig',
+                      text: gig.payType == 'hourly'
+                          ? ' / hr'
+                          : gig.isMultiWorker
+                          ? ' / you'
+                          : ' / gig',
                       style: TextStyle(
                         color: activeGigTextMuted(isDark),
                         fontSize: 10,
@@ -1520,6 +1526,7 @@ class _GigHostCard extends StatelessWidget {
                     targetUserId: gig.hostId,
                     targetUserName: gig.hostName,
                     iconColor: Colors.white,
+                    viewerIsWorker: true,
                   ),
                 ),
               ],

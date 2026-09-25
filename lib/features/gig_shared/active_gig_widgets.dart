@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import 'active_gig_theme.dart';
@@ -37,13 +38,19 @@ class ActiveGigHeader extends StatelessWidget {
         children: [
           IconButton(
             onPressed: onBack,
-            icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                color: Colors.white, size: 18),
+            icon: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
           ),
           Text(
             title,
             style: const TextStyle(
-                color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const Spacer(),
           Container(
@@ -55,9 +62,10 @@ class ActiveGigHeader extends StatelessWidget {
             child: Text(
               '●  $statusLabel',
               style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700),
+                color: Colors.white,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],
@@ -87,8 +95,7 @@ class StepTracker extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final segment = constraints.maxWidth / total;
-        final fillFraction =
-            total <= 1 ? 1.0 : currentIndex / (total - 1);
+        final fillFraction = total <= 1 ? 1.0 : currentIndex / (total - 1);
         return Column(
           children: [
             SizedBox(
@@ -146,8 +153,8 @@ class StepTracker extends StatelessWidget {
                 final color = isCurrent
                     ? accent.solid
                     : isDone
-                        ? activeGigTextSecondary(isDark)
-                        : activeGigTextDisabled(isDark);
+                    ? activeGigTextSecondary(isDark)
+                    : activeGigTextDisabled(isDark);
                 return Expanded(
                   child: Text(
                     labels[i],
@@ -277,9 +284,16 @@ class ActiveGigProgressCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
             child: StepTracker(
-                currentIndex: stepIndex, accent: accent, labels: stepLabels),
+              currentIndex: stepIndex,
+              accent: accent,
+              labels: stepLabels,
+            ),
           ),
-          Divider(height: 0, thickness: 1, color: activeGigDividerColor(isDark)),
+          Divider(
+            height: 0,
+            thickness: 1,
+            color: activeGigDividerColor(isDark),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
             child: Column(
@@ -302,7 +316,9 @@ class ActiveGigProgressCard extends StatelessWidget {
                     if (elapsed != null)
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: kActiveGigSuccessGreen.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
@@ -323,7 +339,10 @@ class ActiveGigProgressCard extends StatelessWidget {
                 Text(
                   body,
                   style: TextStyle(
-                      color: activeGigTextMuted(isDark), fontSize: 11, height: 1.4),
+                    color: activeGigTextMuted(isDark),
+                    fontSize: 11,
+                    height: 1.4,
+                  ),
                 ),
                 if (arrivedPromptVisible) ...[
                   const SizedBox(height: 14),
@@ -333,20 +352,25 @@ class ActiveGigProgressCard extends StatelessWidget {
                       color: kActiveGigSuccessGreen.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                          color: kActiveGigSuccessGreen.withValues(alpha: 0.3)),
+                        color: kActiveGigSuccessGreen.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.location_on_rounded,
-                            color: kActiveGigSuccessGreen, size: 18),
+                        const Icon(
+                          Icons.location_on_rounded,
+                          color: kActiveGigSuccessGreen,
+                          size: 18,
+                        ),
                         const SizedBox(width: 8),
                         const Expanded(
                           child: Text(
                             "You're at the location — confirm your arrival.",
                             style: TextStyle(
-                                color: kActiveGigSuccessGreen,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600),
+                              color: kActiveGigSuccessGreen,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
@@ -363,11 +387,16 @@ class ActiveGigProgressCard extends StatelessWidget {
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      child: const Text('Confirm Arrival',
-                          style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w700)),
+                      child: const Text(
+                        'Confirm Arrival',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -408,15 +437,20 @@ class ActiveGigProgressCard extends StatelessWidget {
                     child: ElevatedButton.icon(
                       onPressed: onStartGig,
                       icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                      label: const Text('Start Gig',
-                          style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w700)),
+                      label: const Text(
+                        'Start Gig',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: accent.solid,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
                   ),
@@ -428,17 +462,24 @@ class ActiveGigProgressCard extends StatelessWidget {
                     height: 46,
                     child: ElevatedButton.icon(
                       onPressed: onGigComplete,
-                      icon: const Icon(Icons.check_circle_outline_rounded,
-                          size: 20),
-                      label: const Text('Gig Complete',
-                          style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w700)),
+                      icon: const Icon(
+                        Icons.check_circle_outline_rounded,
+                        size: 20,
+                      ),
+                      label: const Text(
+                        'Gig Complete',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: kActiveGigSuccessGreen,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
                   ),
@@ -509,21 +550,30 @@ class MapInfoChip extends StatelessWidget {
           Container(
             width: 6,
             height: 6,
-            decoration: BoxDecoration(color: primaryDotColor, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: primaryDotColor,
+              shape: BoxShape.circle,
+            ),
           ),
           const SizedBox(width: 4),
-          Text(primaryLabel,
-              style: const TextStyle(color: Color(0xFF5A6778), fontSize: 9)),
+          Text(
+            primaryLabel,
+            style: const TextStyle(color: Color(0xFF5A6778), fontSize: 9),
+          ),
           const SizedBox(width: 8),
           Container(
             width: 6,
             height: 6,
-            decoration:
-                BoxDecoration(color: secondaryDotColor, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: secondaryDotColor,
+              shape: BoxShape.circle,
+            ),
           ),
           const SizedBox(width: 4),
-          Text(secondaryLabel,
-              style: const TextStyle(color: Color(0xFF5A6778), fontSize: 9)),
+          Text(
+            secondaryLabel,
+            style: const TextStyle(color: Color(0xFF5A6778), fontSize: 9),
+          ),
         ],
       ),
     );
@@ -600,21 +650,28 @@ class CancelGigSection extends StatelessWidget {
           height: 48,
           child: OutlinedButton.icon(
             onPressed: onPressed,
-            icon: const Icon(Icons.close_rounded,
-                size: 18, color: kActiveGigDestructiveRed),
+            icon: const Icon(
+              Icons.close_rounded,
+              size: 18,
+              color: kActiveGigDestructiveRed,
+            ),
             label: Text(
               label,
               style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: kActiveGigDestructiveRed),
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: kActiveGigDestructiveRed,
+              ),
             ),
             style: OutlinedButton.styleFrom(
               backgroundColor: activeGigCardBg(isDark),
               side: BorderSide(
-                  color: activeGigDestructiveBorder(isDark), width: 1),
-              shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                color: activeGigDestructiveBorder(isDark),
+                width: 1,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
           ),
         ),
@@ -625,6 +682,68 @@ class CancelGigSection extends StatelessWidget {
           style: TextStyle(color: activeGigTextDisabled(isDark), fontSize: 9.5),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Live-ticking "time on the job" counter — shown to the host (and reusable
+//  for the worker) while a gig's status == 'working'. Recomputes from
+//  startedAt (a server timestamp, gig_worker's working_ui.dart writes it as
+//  workStartedAt the moment the worker clocks in) every second rather than
+//  counting locally from zero, so it's correct even if this widget just
+//  mounted mid-shift (e.g. the viewer reopened the app).
+// ─────────────────────────────────────────────────────────────────────────────
+class LiveWorkDuration extends StatefulWidget {
+  final DateTime startedAt;
+  final Color color;
+  const LiveWorkDuration({
+    super.key,
+    required this.startedAt,
+    this.color = kAmber,
+  });
+
+  @override
+  State<LiveWorkDuration> createState() => _LiveWorkDurationState();
+}
+
+class _LiveWorkDurationState extends State<LiveWorkDuration> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String _fmt(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    final s = d.inSeconds % 60;
+    final mm = m.toString().padLeft(2, '0');
+    final ss = s.toString().padLeft(2, '0');
+    return h > 0 ? '${h.toString().padLeft(2, '0')}:$mm:$ss' : '$mm:$ss';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final elapsed = DateTime.now().difference(widget.startedAt);
+    return Text(
+      _fmt(elapsed.isNegative ? Duration.zero : elapsed),
+      style: TextStyle(
+        color: widget.color,
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
     );
   }
 }

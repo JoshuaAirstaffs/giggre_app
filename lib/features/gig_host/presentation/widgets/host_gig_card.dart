@@ -593,10 +593,12 @@ class _HostGigCardState extends State<HostGigCard> {
     final meta = _statusMeta(status);
 
     final title = data['title'] as String? ?? 'Untitled Gig';
-    final pay = CurrencyFormatter.format(
-      (data['budget'] as num?)?.toDouble() ?? 0,
-      (data['currencyCode'] as String?) ?? 'USD',
-    );
+    final payType = data['payType'] as String? ?? 'flat';
+    final hourlyRate = (data['hourlyRate'] as num?)?.toDouble();
+    final currencyCode = (data['currencyCode'] as String?) ?? 'USD';
+    final pay = payType == 'hourly' && hourlyRate != null
+        ? '${CurrencyFormatter.format(hourlyRate, currencyCode)}/hr'
+        : '${CurrencyFormatter.format((data['budget'] as num?)?.toDouble() ?? 0, currencyCode)}/day';
     final category = _categoryText(gigType, data);
     final createdAt = data['createdAt'] != null
         ? (data['createdAt'] as Timestamp).toDate()

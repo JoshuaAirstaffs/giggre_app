@@ -10,7 +10,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/providers/current_user_provider.dart';
@@ -37,6 +37,14 @@ class GigMarkerData {
   final String gigType; // 'quick' | 'open' | 'offered'
   final double budget;
   final String currencyCode;
+  // 'flat' (default) or 'hourly'. For 'hourly' gigs, `budget` is an
+  // ESTIMATE (hourlyRate * the host's estimated hours), not what the
+  // worker actually ends up paid — see quick_gig_model.dart.
+  final String payType;
+  final double? hourlyRate;
+  // Optional, host-entered approximate hours this gig will take. Purely
+  // informational — never used in any pay calculation.
+  final double? workDurationHours;
   final String status;
   final String hostName;
   final String address;
@@ -60,6 +68,9 @@ class GigMarkerData {
     required this.gigType,
     required this.budget,
     this.currencyCode = 'USD',
+    this.payType = 'flat',
+    this.hourlyRate,
+    this.workDurationHours,
     required this.status,
     required this.hostName,
     required this.address,
@@ -78,6 +89,29 @@ class GigMarkerData {
 
   bool get isMultiWorker => workerSlots > 1;
   int get openSlots => (workerSlots - filledSlotCount).clamp(0, workerSlots);
+}
+
+// Downward-pointing tail below the OSM salary pill, matching the triangle
+// drawn onto the Google Maps salary bitmap (_makeSalaryMarkerIcon) — gives
+// the pin a precise tip instead of a plain rounded blob.
+class _PinTailPainter extends CustomPainter {
+  const _PinTailPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PinTailPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -104,6 +138,14 @@ String gigTypeLabel(String type) {
     default:
       return 'Quick';
   }
+}
+
+// Formats an hours estimate compactly, e.g. 4 -> "4 hrs", 1.5 -> "1.5 hrs".
+String _fmtHours(double hours) {
+  final trimmed = hours == hours.roundToDouble()
+      ? hours.toStringAsFixed(0)
+      : hours.toStringAsFixed(1);
+  return '$trimmed hr${hours == 1 ? '' : 's'}';
 }
 
 String formatGigDistance(double meters) {
@@ -149,6 +191,9 @@ GigMarkerData? gigMarkerFromDoc(
     title: data['title'] as String? ?? 'Untitled Gig',
     gigType: type,
     budget: (data['budget'] as num?)?.toDouble() ?? 0,
+    payType: (data['payType'] as String?) ?? 'flat',
+    hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
+    workDurationHours: (data['workDurationHours'] as num?)?.toDouble(),
     status: data['status'] as String? ?? '',
     hostName: data['hostName'] as String? ?? '',
     address: data['address'] as String? ?? '',
@@ -903,7 +948,10 @@ void showFullGigDetailSheet(
                           children: [
                             TextSpan(
                               text: CurrencyFormatter.format(
-                                gig.budget,
+                                gig.payType == 'hourly' &&
+                                        gig.hourlyRate != null
+                                    ? gig.hourlyRate!
+                                    : gig.budget,
                                 gig.currencyCode,
                               ),
                               style: const TextStyle(
@@ -912,9 +960,11 @@ void showFullGigDetailSheet(
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                            const TextSpan(
-                              text: ' / day',
-                              style: TextStyle(color: kSub, fontSize: 10),
+                            TextSpan(
+                              text: gig.payType == 'hourly'
+                                  ? ' / hr'
+                                  : ' / day',
+                              style: const TextStyle(color: kSub, fontSize: 10),
                             ),
                           ],
                         ),
@@ -966,6 +1016,31 @@ void showFullGigDetailSheet(
                             fontSize: 10.5,
                             fontWeight: FontWeight.w500,
                           ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              if (gig.workDurationHours != null) ...[
+                const SizedBox(height: 12),
+                _InfoGridCell(
+                  icon: Icons.hourglass_bottom_rounded,
+                  label: 'WORK DURATION',
+                  child: RichText(
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '~${_fmtHours(gig.workDurationHours!)}',
+                          style: const TextStyle(
+                            color: Color(0xFF2B6FB5),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const TextSpan(
+                          text: ' · estimate only, not a commitment',
+                          style: TextStyle(color: kSub, fontSize: 10.5),
                         ),
                       ],
                     ),
@@ -1268,6 +1343,10 @@ void showFullGigDetailSheet(
 
 enum _SkillFilter { all, mySkills, specific }
 
+enum _PinDisplayMode { default_, salary, distance }
+
+enum _PayTypeFilter { all, hourly, flat }
+
 enum _GigViewMode { map, list }
 
 const String _kGigsViewModePrefKey = 'gigs_view_mode';
@@ -1423,13 +1502,16 @@ class _GigMapSectionState extends State<GigMapSection> {
         .collection('users')
         .doc(widget.uid)
         .snapshots()
-        .listen((doc) {
-          final ids = (doc.data()?['blockedUsers'] as List<dynamic>? ?? [])
-              .map((e) => e.toString())
-              .toSet();
-          if (!mounted) return;
-          setState(() => _blockedHostIds = ids);
-        }, onError: (e) => debugPrint('[GigMap] blockedUsers stream error: $e'));
+        .listen(
+          (doc) {
+            final ids = (doc.data()?['blockedUsers'] as List<dynamic>? ?? [])
+                .map((e) => e.toString())
+                .toSet();
+            if (!mounted) return;
+            setState(() => _blockedHostIds = ids);
+          },
+          onError: (e) => debugPrint('[GigMap] blockedUsers stream error: $e'),
+        );
   }
 
   // ── Country matching (only show gigs in the worker's own country) ─────────
@@ -1445,6 +1527,17 @@ class _GigMapSectionState extends State<GigMapSection> {
   String? _specificSkill;
   double? _radiusKm = 10; // null = no radius limit
   List<String> _allSkillNames = [];
+  // Date-only (time ignored) — null = no schedule filter. A gig with no
+  // scheduledDate at all never matches once this is set (treated as stale
+  // data, not "any date").
+  DateTime? _scheduleDateFilter;
+  // Display preference, not a data filter — doesn't affect _hasActiveFilter
+  // or which gigs show up, only how each marker pin is drawn. Map-only —
+  // hidden from the sheet entirely in list view.
+  _PinDisplayMode _pinDisplayMode = _PinDisplayMode.default_;
+  // A real data filter, unlike _pinDisplayMode — applies to both map and
+  // list view.
+  _PayTypeFilter _payTypeFilter = _PayTypeFilter.all;
 
   // ── Map/List view toggle (compact section only) ────────────────────────
   _GigViewMode _viewMode = _GigViewMode.map;
@@ -1489,14 +1582,25 @@ class _GigMapSectionState extends State<GigMapSection> {
   // ── Custom marker icon cache ─────────────────────────────────────────────
   final Map<String, BitmapDescriptor> _icons = {};
 
+  // Marker bitmaps are drawn once (in logical points) then rasterized to a
+  // fixed pixel size — without accounting for the device's pixel density,
+  // that rasterization is too low-res on any retina/high-DPI phone, so any
+  // text on the marker (salary pill, cluster count) comes out an unreadable
+  // blur. Drawing at this scale, then telling BitmapDescriptor.bytes the
+  // intended on-screen width/height explicitly, keeps the on-map size the
+  // same while giving text enough real pixels to render sharp.
+  double get _markerPixelRatio =>
+      ui.PlatformDispatcher.instance.views.first.devicePixelRatio;
+
   Future<BitmapDescriptor> _makeMarkerIcon(Color color, {String? label}) async {
     const px = 20.0;
     const r = 8.0;
     const cx = px / 2;
     const cy = px / 2;
+    final scale = _markerPixelRatio;
 
     final rec = ui.PictureRecorder();
-    final can = Canvas(rec);
+    final can = Canvas(rec)..scale(scale);
 
     // Fill
     can.drawCircle(const Offset(cx, cy), r, Paint()..color = color);
@@ -1512,29 +1616,36 @@ class _GigMapSectionState extends State<GigMapSection> {
 
     if (label != null) {
       final fs = label.length <= 2 ? 7.0 : 5.5;
-      final pb =
-          ui.ParagraphBuilder(
-              ui.ParagraphStyle(
-                textAlign: TextAlign.center,
-                fontSize: fs,
-                fontWeight: FontWeight.bold,
-              ),
-            )
-            ..pushStyle(
-              ui.TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: fs,
-              ),
-            )
-            ..addText(label);
-      final para = pb.build()..layout(const ui.ParagraphConstraints(width: px));
-      can.drawParagraph(para, Offset(0, cy - para.height / 2));
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: fs,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      textPainter.paint(
+        can,
+        Offset(cx - textPainter.width / 2, cy - textPainter.height / 2),
+      );
     }
 
-    final img = await rec.endRecording().toImage(px.toInt(), px.toInt());
+    final img = await rec.endRecording().toImage(
+      (px * scale).ceil(),
+      (px * scale).ceil(),
+    );
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.bytes(data!.buffer.asUint8List());
+    // Explicit width/height (logical points) rather than imagePixelRatio —
+    // tells the platform view exactly what on-screen size to render at,
+    // instead of relying on a ratio it has to back-calculate itself.
+    return BitmapDescriptor.bytes(
+      data!.buffer.asUint8List(),
+      width: px,
+      height: px,
+    );
   }
 
   Future<void> _loadBaseIcons() async {
@@ -1570,6 +1681,112 @@ class _GigMapSectionState extends State<GigMapSection> {
     });
     return _icons['cluster_default'] ??
         BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
+  }
+
+  // ── Pill pin (Pin Display: Salary / Distance) ────────────────────────────
+  // A pill-shaped bitmap showing a short label (formatted budget or
+  // distance) instead of a plain dot. Sized to the text since labels vary
+  // a lot ("$50" vs "₱12,500", "850 m" vs "12.4 km"). Uses TextPainter (not
+  // the raw dart:ui ParagraphBuilder) to paint the label — TextPainter is
+  // the standard Flutter API for painting styled text onto a Canvas and is
+  // what every Text widget uses internally.
+  Future<BitmapDescriptor> _makePillMarkerIcon(
+    Color color,
+    String label,
+  ) async {
+    const fontSize = 11.0;
+    const paddingH = 8.0;
+    const paddingV = 4.0;
+
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: fontSize,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    const tailWidth = 10.0;
+    const tailHeight = 6.0;
+
+    final width = textPainter.width + paddingH * 2;
+    final pillHeight = textPainter.height + paddingV * 2;
+    final height = pillHeight + tailHeight;
+    final scale = _markerPixelRatio;
+
+    final rec = ui.PictureRecorder();
+    final can = Canvas(rec)..scale(scale);
+    final rrect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, 0, width, pillHeight),
+      Radius.circular(pillHeight / 2),
+    );
+    // Pointer tail, drawn first so the pill's rounded bottom edge sits
+    // cleanly on top of it — points at the marker's actual coordinate.
+    final tailPath = Path()
+      ..moveTo(width / 2 - tailWidth / 2, pillHeight - 1)
+      ..lineTo(width / 2 + tailWidth / 2, pillHeight - 1)
+      ..lineTo(width / 2, height)
+      ..close();
+    can.drawPath(tailPath, Paint()..color = color);
+    can.drawRRect(rrect, Paint()..color = color);
+    can.drawRRect(
+      rrect,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+    textPainter.paint(can, Offset(paddingH, paddingV));
+
+    final img = await rec.endRecording().toImage(
+      (width * scale).ceil(),
+      (height * scale).ceil(),
+    );
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(
+      data!.buffer.asUint8List(),
+      width: width,
+      height: height,
+    );
+  }
+
+  BitmapDescriptor _resolvePillIcon(String gigType, String label) {
+    final key = 'pill_${gigType}_$label';
+    final cached = _icons[key];
+    if (cached != null) return cached;
+    _makePillMarkerIcon(_colorForType(gigType), label).then((icon) {
+      _icons[key] = icon;
+      if (mounted) setState(() {});
+    });
+    // Falls back to the plain dot for this gig type while the pill renders.
+    return _gigIcon(gigType);
+  }
+
+  // null when the worker's own location isn't known yet — callers fall
+  // back to the plain dot rather than showing a meaningless distance.
+  String? _distanceLabel(GigMarkerData gig) {
+    final loc = _myLocation;
+    if (loc == null) return null;
+    final meters = Geolocator.distanceBetween(
+      loc.latitude,
+      loc.longitude,
+      gig.position.latitude,
+      gig.position.longitude,
+    );
+    return _fmtDistance(meters);
+  }
+
+  // "$X/hr" for hourly gigs (the rate), "$X/day" for flat gigs (the total)
+  // — same distinction as the PAY cell in the gig detail sheet.
+  String _salaryLabel(GigMarkerData gig) {
+    if (gig.payType == 'hourly' && gig.hourlyRate != null) {
+      return '${CurrencyFormatter.format(gig.hourlyRate!, gig.currencyCode)}/hr';
+    }
+    return '${CurrencyFormatter.format(gig.budget, gig.currencyCode)}/day';
   }
 
   late final CurrentUserProvider _userProvider;
@@ -2316,9 +2533,10 @@ class _GigMapSectionState extends State<GigMapSection> {
   List<GigMarkerData> get _visibleOfferedGigs =>
       _offeredGigs.where((g) => !_blockedHostIds.contains(g.hostId)).toList();
 
-  List<GigMarkerData> get _unfilteredGigs => [..._openGigs, ..._offeredGigs]
-      .where((g) => !_blockedHostIds.contains(g.hostId))
-      .toList();
+  List<GigMarkerData> get _unfilteredGigs => [
+    ..._openGigs,
+    ..._offeredGigs,
+  ].where((g) => !_blockedHostIds.contains(g.hostId)).toList();
 
   bool _matchesSkill(String skill, String other) =>
       skill.toLowerCase().trim() == other.toLowerCase().trim();
@@ -2366,11 +2584,34 @@ class _GigMapSectionState extends State<GigMapSection> {
       }).toList();
     }
 
+    final scheduleDate = _scheduleDateFilter;
+    if (scheduleDate != null) {
+      gigs = gigs.where((g) {
+        final d = g.scheduledDate;
+        return d != null &&
+            d.year == scheduleDate.year &&
+            d.month == scheduleDate.month &&
+            d.day == scheduleDate.day;
+      }).toList();
+    }
+
+    switch (_payTypeFilter) {
+      case _PayTypeFilter.all:
+        break;
+      case _PayTypeFilter.hourly:
+        gigs = gigs.where((g) => g.payType == 'hourly').toList();
+      case _PayTypeFilter.flat:
+        gigs = gigs.where((g) => g.payType != 'hourly').toList();
+    }
+
     return gigs;
   }
 
   bool get _hasActiveFilter =>
-      _skillFilter != _SkillFilter.all || _radiusKm != null;
+      _skillFilter != _SkillFilter.all ||
+      _radiusKm != null ||
+      _scheduleDateFilter != null ||
+      _payTypeFilter != _PayTypeFilter.all;
 
   static double _gridSize(double zoom) {
     if (zoom < 10) return 0.15;
@@ -2422,10 +2663,23 @@ class _GigMapSectionState extends State<GigMapSection> {
     final markers = _buildClusters().map((cluster) {
       if (cluster.count == 1 && cluster.singleGig != null) {
         final singleGig = cluster.singleGig!;
+        final pillLabel = switch (_pinDisplayMode) {
+          _PinDisplayMode.salary => _salaryLabel(singleGig),
+          _PinDisplayMode.distance => _distanceLabel(singleGig),
+          _PinDisplayMode.default_ => null,
+        };
         return Marker(
           markerId: MarkerId(singleGig.id),
           position: cluster.center,
-          icon: _gigIcon(singleGig.gigType),
+          icon: pillLabel != null
+              ? _resolvePillIcon(singleGig.gigType, pillLabel)
+              : _gigIcon(singleGig.gigType),
+          // The pill has a pointer tail below it — anchor to the tail's
+          // tip (bottom-center of the bitmap) instead of the default
+          // center, so it actually points at the gig's coordinate.
+          anchor: pillLabel != null
+              ? const Offset(0.5, 1.0)
+              : const Offset(0.5, 0.5),
           onTap: () {
             final ctx = _context;
             if (ctx != null) _showGigSheet(ctx, singleGig);
@@ -2498,34 +2752,98 @@ class _GigMapSectionState extends State<GigMapSection> {
       if (cluster.count == 1 && cluster.singleGig != null) {
         final gig = cluster.singleGig!;
         final color = _colorForType(gig.gigType);
-        osmMarkers.add(
-          fm.Marker(
-            point: _toLL(cluster.center),
-            width: 32,
-            height: 32,
-            child: GestureDetector(
-              onTap: () {
-                final ctx = _context;
-                if (ctx != null) _showGigSheet(ctx, gig);
-              },
-              child: Container(
-                decoration: BoxDecoration(
-                  color: color,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black26, blurRadius: 4),
+        void onTapGig() {
+          final ctx = _context;
+          if (ctx != null) _showGigSheet(ctx, gig);
+        }
+
+        final pillLabel = switch (_pinDisplayMode) {
+          _PinDisplayMode.salary => _salaryLabel(gig),
+          _PinDisplayMode.distance => _distanceLabel(gig),
+          _PinDisplayMode.default_ => null,
+        };
+        if (pillLabel != null) {
+          final label = pillLabel;
+          // fm.Marker needs an explicit size (no intrinsic sizing) — estimate
+          // from the label length since it varies a lot ("$50" vs "₱12,500").
+          final width = (label.length * 7.0 + 20).clamp(40.0, 90.0);
+          const pillHeight = 26.0;
+          const tailHeight = 6.0;
+          osmMarkers.add(
+            fm.Marker(
+              point: _toLL(cluster.center),
+              width: width,
+              height: pillHeight + tailHeight,
+              // Anchor to the tail's tip, not the widget's center, so it
+              // actually points at the gig's coordinate.
+              alignment: Alignment.bottomCenter,
+              child: GestureDetector(
+                onTap: onTapGig,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(pillHeight / 2),
+                        border: Border.all(color: Colors.white, width: 2),
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black26, blurRadius: 4),
+                        ],
+                      ),
+                      child: Center(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    CustomPaint(
+                      size: const Size(10, tailHeight),
+                      painter: _PinTailPainter(color),
+                    ),
                   ],
-                ),
-                child: Icon(
-                  _iconForType(gig.gigType),
-                  color: Colors.white,
-                  size: 16,
                 ),
               ),
             ),
-          ),
-        );
+          );
+        } else {
+          osmMarkers.add(
+            fm.Marker(
+              point: _toLL(cluster.center),
+              width: 32,
+              height: 32,
+              child: GestureDetector(
+                onTap: onTapGig,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black26, blurRadius: 4),
+                    ],
+                  ),
+                  child: Icon(
+                    _iconForType(gig.gigType),
+                    color: Colors.white,
+                    size: 16,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
       } else {
         osmMarkers.add(
           fm.Marker(
@@ -2780,11 +3098,6 @@ class _GigMapSectionState extends State<GigMapSection> {
                       : g.gigType == 'offered'
                       ? 'Offered'
                       : 'Quick';
-                  final btnLabel = g.gigType == 'open'
-                      ? 'Take Gig'
-                      : g.gigType == 'offered'
-                      ? "I'm In"
-                      : 'Take It';
                   final missing =
                       g.gigType == 'open' && g.requiredSkills.isNotEmpty
                       ? g.requiredSkills
@@ -2797,13 +3110,15 @@ class _GigMapSectionState extends State<GigMapSection> {
                             )
                             .toList()
                       : <String>[];
-                  final canApply = missing.isEmpty;
-
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 8,
                       vertical: 4,
                     ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _showGigSheet(context, g);
+                    },
                     leading: Container(
                       width: 44,
                       height: 44,
@@ -2847,10 +3162,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              CurrencyFormatter.format(
-                                g.budget,
-                                g.currencyCode,
-                              ),
+                              _salaryLabel(g),
                               style: const TextStyle(
                                 color: kAmber,
                                 fontSize: 12,
@@ -2884,32 +3196,18 @@ class _GigMapSectionState extends State<GigMapSection> {
                         ],
                       ],
                     ),
+                    // Taking/accepting a gig now only happens from the full
+                    // detail sheet (which has its own verification + skill
+                    // checks) — this list is just a quick way to find the
+                    // right gig among the cluster, not to instantly apply.
                     trailing: TextButton(
-                      onPressed: canApply
-                          ? () {
-                              final allowUnverified = context
-                                  .read<CurrentUserProvider>()
-                                  .allowGigAccessForUnverified;
-                              if (widget.isVerified != 'verified' &&
-                                  !allowUnverified) {
-                                Navigator.pop(ctx);
-                                showAccountNotVerifiedModal(context);
-                                return;
-                              }
-                              Navigator.pop(ctx);
-                              if (g.gigType == 'open') {
-                                _applyToOpenGig(g);
-                              } else if (g.gigType == 'offered') {
-                                widget.onOfferedGigAccepted?.call(g);
-                              }
-                            }
-                          : null,
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _showGigSheet(context, g);
+                      },
                       style: TextButton.styleFrom(
-                        backgroundColor: canApply
-                            ? typeColor.withValues(alpha: 0.1)
-                            : Colors.grey.withValues(alpha: 0.1),
-                        foregroundColor: canApply ? typeColor : Colors.grey,
-                        disabledForegroundColor: Colors.grey,
+                        backgroundColor: typeColor.withValues(alpha: 0.1),
+                        foregroundColor: typeColor,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 6,
@@ -2920,9 +3218,9 @@ class _GigMapSectionState extends State<GigMapSection> {
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                      child: Text(
-                        canApply ? btnLabel : 'Locked',
-                        style: const TextStyle(
+                      child: const Text(
+                        'View Gig',
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
                         ),
@@ -3036,11 +3334,17 @@ class _GigMapSectionState extends State<GigMapSection> {
                               _skillFilter = _SkillFilter.all;
                               _specificSkill = null;
                               _radiusKm = null;
+                              _scheduleDateFilter = null;
+                              _pinDisplayMode = _PinDisplayMode.default_;
+                              _payTypeFilter = _PayTypeFilter.all;
                             });
                             setState(() {
                               _skillFilter = _SkillFilter.all;
                               _specificSkill = null;
                               _radiusKm = null;
+                              _scheduleDateFilter = null;
+                              _pinDisplayMode = _PinDisplayMode.default_;
+                              _payTypeFilter = _PayTypeFilter.all;
                             });
                           },
                           child: const Text(
@@ -3175,7 +3479,216 @@ class _GigMapSectionState extends State<GigMapSection> {
                         style: TextStyle(color: kSub, fontSize: 11),
                       ),
                     ],
+                    const SizedBox(height: 18),
+                    sectionTitle('Schedule'),
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () async {
+                            final now = DateTime.now();
+                            final picked = await showDatePicker(
+                              context: ctx,
+                              initialDate: _scheduleDateFilter ?? now,
+                              firstDate: now.subtract(
+                                const Duration(days: 365),
+                              ),
+                              lastDate: now.add(const Duration(days: 365)),
+                              builder: (dctx, child) => Theme(
+                                data: Theme.of(dctx).copyWith(
+                                  colorScheme: Theme.of(dctx).colorScheme
+                                      .copyWith(
+                                        primary: kAmber,
+                                        onPrimary: Colors.white,
+                                      ),
+                                ),
+                                child: child!,
+                              ),
+                            );
+                            if (picked == null) return;
+                            setSheetState(() => _scheduleDateFilter = picked);
+                            setState(() => _scheduleDateFilter = picked);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _scheduleDateFilter != null
+                                  ? kAmber.withValues(alpha: 0.15)
+                                  : (isDark
+                                        ? Colors.white.withValues(alpha: 0.05)
+                                        : Colors.black.withValues(alpha: 0.04)),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: _scheduleDateFilter != null
+                                    ? kAmber
+                                    : Theme.of(ctx).dividerColor,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.event_rounded,
+                                  size: 14,
+                                  color: _scheduleDateFilter != null
+                                      ? kAmber
+                                      : onSurface,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  _scheduleDateFilter != null
+                                      ? DateFormat(
+                                          'EEE, MMM d',
+                                        ).format(_scheduleDateFilter!)
+                                      : 'Any date',
+                                  style: TextStyle(
+                                    color: _scheduleDateFilter != null
+                                        ? kAmber
+                                        : onSurface,
+                                    fontSize: 12,
+                                    fontWeight: _scheduleDateFilter != null
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (_scheduleDateFilter != null) ...[
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () {
+                              setSheetState(() => _scheduleDateFilter = null);
+                              setState(() => _scheduleDateFilter = null);
+                            },
+                            child: Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                              color: kSub,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    sectionTitle('Pay Type'),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        choiceChip(
+                          label: 'All',
+                          selected: _payTypeFilter == _PayTypeFilter.all,
+                          onTap: () {
+                            setSheetState(
+                              () => _payTypeFilter = _PayTypeFilter.all,
+                            );
+                            setState(() => _payTypeFilter = _PayTypeFilter.all);
+                          },
+                        ),
+                        choiceChip(
+                          label: 'Hourly',
+                          selected: _payTypeFilter == _PayTypeFilter.hourly,
+                          onTap: () {
+                            setSheetState(
+                              () => _payTypeFilter = _PayTypeFilter.hourly,
+                            );
+                            setState(
+                              () => _payTypeFilter = _PayTypeFilter.hourly,
+                            );
+                          },
+                        ),
+                        choiceChip(
+                          label: 'Day',
+                          selected: _payTypeFilter == _PayTypeFilter.flat,
+                          onTap: () {
+                            setSheetState(
+                              () => _payTypeFilter = _PayTypeFilter.flat,
+                            );
+                            setState(
+                              () => _payTypeFilter = _PayTypeFilter.flat,
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 20),
+                    // Pin Display only affects how map markers are drawn —
+                    // meaningless in list view, so it's hidden entirely
+                    // there rather than shown as a dead control.
+                    if (_viewMode == _GigViewMode.map) ...[
+                      sectionTitle('Pin Display'),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Text(
+                          'Choose what shows on each map pin — the gig type icon, its pay rate, or how far it is from you.',
+                          style: TextStyle(
+                            color: kSub.withValues(alpha: 0.8),
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          choiceChip(
+                            label: 'Default',
+                            selected:
+                                _pinDisplayMode == _PinDisplayMode.default_,
+                            onTap: () {
+                              setSheetState(
+                                () =>
+                                    _pinDisplayMode = _PinDisplayMode.default_,
+                              );
+                              setState(
+                                () =>
+                                    _pinDisplayMode = _PinDisplayMode.default_,
+                              );
+                            },
+                          ),
+                          choiceChip(
+                            label: 'Salary',
+                            selected: _pinDisplayMode == _PinDisplayMode.salary,
+                            onTap: () {
+                              setSheetState(
+                                () => _pinDisplayMode = _PinDisplayMode.salary,
+                              );
+                              setState(
+                                () => _pinDisplayMode = _PinDisplayMode.salary,
+                              );
+                            },
+                          ),
+                          choiceChip(
+                            label: 'Distance',
+                            selected:
+                                _pinDisplayMode == _PinDisplayMode.distance,
+                            onTap: () {
+                              setSheetState(
+                                () =>
+                                    _pinDisplayMode = _PinDisplayMode.distance,
+                              );
+                              setState(
+                                () =>
+                                    _pinDisplayMode = _PinDisplayMode.distance,
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      if (_pinDisplayMode == _PinDisplayMode.distance &&
+                          _myLocation == null) ...[
+                        const SizedBox(height: 10),
+                        const Text(
+                          'Your location isn\'t available yet — pins will show the default style until located.',
+                          style: TextStyle(color: kSub, fontSize: 11),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                    ],
                     SizedBox(
                       width: double.infinity,
                       height: 46,
@@ -4230,6 +4743,27 @@ class _GigListCard extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (gig.gigType == 'open' && gig.hasApplied) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2E9E6B).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'Applied',
+                      style: TextStyle(
+                        color: Color(0xFF2E9E6B),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 4),
@@ -4251,7 +4785,9 @@ class _GigListCard extends StatelessWidget {
                     children: [
                       TextSpan(
                         text: CurrencyFormatter.format(
-                          gig.budget,
+                          gig.payType == 'hourly' && gig.hourlyRate != null
+                              ? gig.hourlyRate!
+                              : gig.budget,
                           gig.currencyCode,
                         ),
                         style: const TextStyle(
@@ -4260,9 +4796,9 @@ class _GigListCard extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const TextSpan(
-                        text: '/day',
-                        style: TextStyle(
+                      TextSpan(
+                        text: gig.payType == 'hourly' ? '/hr' : '/day',
+                        style: const TextStyle(
                           color: kSub,
                           fontSize: 10.5,
                           fontWeight: FontWeight.w500,

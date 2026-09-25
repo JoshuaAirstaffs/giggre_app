@@ -1,12 +1,22 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter_html/flutter_html.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter_html/flutter_html.dart' hide Marker;
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:video_player/video_player.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/core/services/content_filter_service.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
+import 'package:giggre_app/core/theme/map_style.dart';
 import 'package:giggre_app/core/widgets/content_rejection_modal.dart';
 import 'package:giggre_app/features/reports/models/report_content_type.dart';
 import 'package:giggre_app/features/reports/report_service.dart';
@@ -30,6 +40,20 @@ class _Msg {
   // of removing it. Rendered here as "Message has been removed" too, so a
   // deletion from either platform looks the same on both.
   final bool isDeleted;
+  // Set only for a shared-location message (worker "share location" action).
+  // `text` still carries a "📍 <address or "Shared location">" fallback for
+  // previews/notifications, but the bubble renders a map instead of that
+  // text, plus `locationAddress` (if reverse-geocoding succeeded) as a label.
+  final GeoPoint? location;
+  final String? locationAddress;
+  // Set only for an attachment message (composer paperclip). `text` still
+  // carries a "📷 Photo" / "🎥 Video" / "📎 <filename>" fallback for
+  // previews/notifications, but the bubble renders media/a file card
+  // instead of that text. `attachmentUrl` is null while the optimistic
+  // message is still uploading.
+  final String? attachmentUrl;
+  final String? attachmentType; // 'image' | 'video' | 'file'
+  final String? attachmentName;
 
   const _Msg({
     this.id,
@@ -43,6 +67,11 @@ class _Msg {
     this.time,
     this.pending = false,
     this.isDeleted = false,
+    this.location,
+    this.locationAddress,
+    this.attachmentUrl,
+    this.attachmentType,
+    this.attachmentName,
   });
 
   _Msg copyWith({
@@ -52,6 +81,7 @@ class _Msg {
     bool? hasSeenByPeer,
     DateTime? time,
     bool? isDeleted,
+    String? attachmentUrl,
   }) => _Msg(
     id: id ?? this.id,
     text: text,
@@ -64,6 +94,11 @@ class _Msg {
     time: time ?? this.time,
     pending: pending ?? this.pending,
     isDeleted: isDeleted ?? this.isDeleted,
+    location: location,
+    locationAddress: locationAddress,
+    attachmentUrl: attachmentUrl ?? this.attachmentUrl,
+    attachmentType: attachmentType,
+    attachmentName: attachmentName,
   );
 }
 
@@ -72,11 +107,19 @@ class GigChatParams {
   final String gigId;
   final String peerUid;
   final String peerName;
+  // Statically known at the call site (a host-facing screen passes false, a
+  // worker-facing screen passes true) — threaded through so Chat can show
+  // worker/host-specific UI (quick-reply chips, share-location button)
+  // without a round trip to Firestore. Null when the caller doesn't know
+  // (e.g. reopening a room from the chat list or a push notification) —
+  // Chat then falls back to reading hostUid/workerUid off the room doc.
+  final bool? viewerIsWorker;
 
   const GigChatParams({
     required this.gigId,
     required this.peerUid,
     required this.peerName,
+    this.viewerIsWorker,
   });
 }
 
@@ -98,9 +141,33 @@ class Chat extends StatefulWidget {
 
 class _ChatState extends State<Chat> {
   final _msgController = TextEditingController();
+  // Anchors the quick-reply popup menu to the button that opens it.
+  final _quickReplyButtonKey = GlobalKey();
   final _scrollController = ScrollController();
 
   static const _pageSize = 20;
+  // Senders can only delete a message while it's still fresh — mirrors an
+  // "unsend" window rather than allowing deletion indefinitely.
+  static const _deleteWindow = Duration(minutes: 2);
+
+  // Role-specific canned messages shown as tappable chips above the
+  // composer — mirrors giggre-website's quick-reply chips, gig chats only.
+  static const _workerQuickReplies = [
+    'On my way',
+    "I've arrived",
+    'Running a few minutes late',
+    'On it!',
+    'All done',
+    'Thanks!',
+  ];
+  static const _hostQuickReplies = [
+    'Thanks for the update',
+    'Can you confirm your ETA?',
+    'Sounds good',
+    'Great work, thank you!',
+    'Please see the gig details',
+    'Let me know if anything changes',
+  ];
 
   final List<_Msg> _msgs = [];
   bool _isLoadingInitial = true;
@@ -124,6 +191,16 @@ class _ChatState extends State<Chat> {
   bool _isGigChat = false;
   String? _peerName;
   String? _peerPhotoUrl;
+  // null = role not yet known — role-specific quick replies stay hidden
+  // until this resolves, either from GigChatParams (fresh navigation) or
+  // the room doc's hostUid/workerUid fields (reopened from the chat list /
+  // a notification). Share-location isn't role-gated, so it's unaffected.
+  bool? _viewerIsWorker;
+  // Guards _resolveRoleFromGig so it's only ever kicked off once per Chat
+  // instance — both initState and _listenRoomStatus can trigger it (the
+  // latter for the roomId-only entry point, e.g. main.dart's `/chat/{id}`
+  // route, which carries no GigChatParams at all).
+  bool _roleLookupStarted = false;
   bool _isBlocked = false; // I blocked the peer
   bool _isBlockedByPeer = false; // the peer blocked me
   StreamSubscription<DocumentSnapshot>? _blockedSub;
@@ -150,6 +227,15 @@ class _ChatState extends State<Chat> {
     _scrollController.addListener(_onScroll);
     _isGigChat = widget.isGigChat || widget.gigChatParams != null;
     final params = widget.gigChatParams;
+    _viewerIsWorker = params?.viewerIsWorker;
+    // Most opens of an existing gig chat (from the Gig Chats list, or a
+    // push notification tap) carry a gigId but no viewerIsWorker — resolve
+    // it by looking the gig up directly rather than leaving the
+    // role-specific quick replies hidden for the common case.
+    if (_viewerIsWorker == null && params != null && params.gigId.isNotEmpty) {
+      _roleLookupStarted = true;
+      _resolveRoleFromGig(params.gigId);
+    }
     if (params != null) {
       _roomCreated = false;
       _peerName = params.peerName;
@@ -161,6 +247,85 @@ class _ChatState extends State<Chat> {
     }
     _listenRoomStatus();
     if (_isGigChat && params != null) _listenBlockedStatus(params.peerUid);
+  }
+
+  // A gig lives in exactly one of these — gig_templates is deliberately
+  // excluded, a template isn't a postable/chattable gig.
+  static const _liveGigCollections = [
+    'quick_gigs',
+    'open_gigs',
+    'offered_gigs',
+  ];
+
+  // Fallback role resolution when the caller didn't know (or pass) whether
+  // the viewer is the worker or host — looks the gig up directly by id and
+  // compares its hostId against the current uid. Also backfills the room
+  // doc's hostUid/workerUid so future opens (by either party) resolve
+  // instantly from _listenRoomStatus instead of repeating this lookup.
+  Future<void> _resolveRoleFromGig(
+    String gigId, {
+    String? peerUidOverride,
+  }) async {
+    final uid = _uid;
+    if (uid == null) {
+      debugPrint('[Chat] role lookup skipped: not signed in');
+      return;
+    }
+    debugPrint(
+      '[Chat] role lookup starting: roomId=${widget.roomId} gigId=$gigId uid=$uid',
+    );
+    try {
+      for (final col in _liveGigCollections) {
+        final doc = await FirebaseFirestore.instance
+            .collection(col)
+            .doc(gigId)
+            .get();
+        if (!doc.exists) continue;
+
+        final hostId = doc.data()?['hostId'] as String? ?? '';
+        if (hostId.isEmpty) {
+          debugPrint(
+            '[Chat] role lookup: found $col/$gigId but hostId is empty',
+          );
+          return;
+        }
+        final isWorker = uid != hostId;
+        debugPrint(
+          '[Chat] role lookup: found $col/$gigId, hostId=$hostId → isWorker=$isWorker',
+        );
+
+        if (mounted && _viewerIsWorker == null) {
+          setState(() => _viewerIsWorker = isWorker);
+        }
+
+        // hostId comes straight from the gig doc either way; the gig
+        // models don't reliably expose a workerId, so when the viewer IS
+        // the host, the worker's uid is taken from the chat peer instead.
+        final workerUid = isWorker
+            ? uid
+            : (peerUidOverride ?? widget.gigChatParams?.peerUid ?? '');
+        if (workerUid.isNotEmpty) {
+          await FirebaseFirestore.instance
+              .collection('chat_rooms')
+              .doc(widget.roomId)
+              .set({
+                'workerUid': workerUid,
+                'hostUid': hostId,
+              }, SetOptions(merge: true));
+        } else {
+          debugPrint(
+            '[Chat] role lookup: viewer is host but no peer uid available — '
+            'hostUid/workerUid not persisted to the room doc',
+          );
+        }
+        return;
+      }
+      debugPrint(
+        '[Chat] role lookup: gigId=$gigId not found in any of $_liveGigCollections',
+      );
+    } catch (e) {
+      debugPrint('[Chat] role lookup error: $e');
+    }
   }
 
   // Watches both directions of blocking, to disable the composer and hide
@@ -399,6 +564,101 @@ class _ChatState extends State<Chat> {
             setState(() => _peerName = peer.isNotEmpty ? peer : null);
           }
 
+          // Self-heal _isGigChat too — the roomId-only entry point
+          // (main.dart's `/chat/{roomId}` named route, used e.g. by
+          // home_chat.dart's fallback when peerUid wasn't resolved) never
+          // sets widget.isGigChat/gigChatParams at all, which otherwise
+          // hides every gig-only affordance (quick replies, share location).
+          final roomIsGigChat = data['isGigChat'] as bool? ?? false;
+          if (!_isGigChat && roomIsGigChat) {
+            setState(() => _isGigChat = true);
+          }
+
+          if (_viewerIsWorker == null) {
+            final workerUid = data['workerUid'] as String?;
+            final hostUid = data['hostUid'] as String?;
+            bool? resolvedRole;
+            if (currentUid.isNotEmpty && currentUid == workerUid) {
+              resolvedRole = true;
+            } else if (currentUid.isNotEmpty && currentUid == hostUid) {
+              resolvedRole = false;
+            }
+            if (resolvedRole != null) {
+              setState(() => _viewerIsWorker = resolvedRole);
+            } else if (widget.roomId.startsWith('dm_') &&
+                createdByUid.isNotEmpty) {
+              // Direct messages (directMessageRoomId, worker_message_action.
+              // dart) have no gig to look up at all — but they're only ever
+              // created by WorkerMessageAction, always from the host side,
+              // so whoever created the room IS the host by construction.
+              final isWorker = currentUid != createdByUid;
+              debugPrint(
+                '[Chat] role resolved from DM room creator: '
+                'createdByUid=$createdByUid → isWorker=$isWorker',
+              );
+              setState(() => _viewerIsWorker = isWorker);
+              final participants =
+                  (data['participants'] as List<dynamic>?) ?? [];
+              final peerUid =
+                  participants.firstWhere(
+                        (p) => p != currentUid,
+                        orElse: () => '',
+                      )
+                      as String;
+              final workerUid = isWorker ? currentUid : peerUid;
+              if (workerUid.isNotEmpty) {
+                FirebaseFirestore.instance
+                    .collection('chat_rooms')
+                    .doc(widget.roomId)
+                    .set({
+                      'workerUid': workerUid,
+                      'hostUid': createdByUid,
+                    }, SetOptions(merge: true));
+              }
+            } else if (!_roleLookupStarted && roomIsGigChat) {
+              final paramsGigId = widget.gigChatParams?.gigId ?? '';
+              final roomGigId = data['gigId'] as String? ?? '';
+              // Last resort: GigChatAction always names the room
+              // 'gig_<gigId>' — parse it back out in case the room doc
+              // itself never got a gigId field written.
+              const roomIdPrefix = 'gig_';
+              final roomIdGigId = widget.roomId.startsWith(roomIdPrefix)
+                  ? widget.roomId.substring(roomIdPrefix.length)
+                  : '';
+              final gigId = paramsGigId.isNotEmpty
+                  ? paramsGigId
+                  : roomGigId.isNotEmpty
+                  ? roomGigId
+                  : roomIdGigId;
+              debugPrint(
+                '[Chat] role still unknown for roomId=${widget.roomId} — '
+                'paramsGigId="$paramsGigId" roomGigId="$roomGigId" '
+                'roomIdGigId="$roomIdGigId" → using "$gigId"',
+              );
+              if (gigId.isNotEmpty) {
+                _roleLookupStarted = true;
+                final participants =
+                    (data['participants'] as List<dynamic>?) ?? [];
+                final peerUid =
+                    participants.firstWhere(
+                          (p) => p != currentUid,
+                          orElse: () => '',
+                        )
+                        as String;
+                _resolveRoleFromGig(
+                  gigId,
+                  peerUidOverride: peerUid.isNotEmpty ? peerUid : null,
+                );
+              }
+            }
+          }
+
+          debugPrint(
+            '[Chat] status: roomId=${widget.roomId} currentUid=$currentUid '
+            'isGigChat=$_isGigChat viewerIsWorker=$_viewerIsWorker '
+            'isResolved=$_isResolved chatDisabled=$_chatDisabled',
+          );
+
           if (firstExistingSnapshot) {
             _markSupportMessagesAsSeen();
           }
@@ -427,18 +687,96 @@ class _ChatState extends State<Chat> {
         });
   }
 
+  // Lazy-creates the gig chat room on the first message of the thread —
+  // shared by _sendText and _shareLocation, since either can be the first
+  // message sent. hostUid/workerUid are only written when the role is known
+  // (fresh navigation via GigChatParams.viewerIsWorker) — left unset for an
+  // unknown-role sender, same as older rooms created before this existed.
+  Future<void> _ensureRoomCreated(String? uid, String name) async {
+    if (_roomCreated || widget.gigChatParams == null) return;
+    final p = widget.gigChatParams!;
+    final isWorker = _viewerIsWorker;
+    await FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .doc(widget.roomId)
+        .set({
+          'gigId': p.gigId,
+          'isGigChat': true,
+          'participants': [uid, p.peerUid],
+          'sendTo': p.peerName,
+          'createdByUid': uid,
+          'createdByName': name,
+          'subject': 'Gig Chat',
+          'status': 'open',
+          'lastMessage': '',
+          'lastMessageSender': '',
+          'lastMessageSenderId': '',
+          'lastMessageAt': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
+          if (isWorker != null) 'workerUid': isWorker ? uid : p.peerUid,
+          if (isWorker != null) 'hostUid': isWorker ? p.peerUid : uid,
+        });
+    if (mounted) setState(() => _roomCreated = true);
+  }
+
   // ── Send: optimistic UI ────────────────────────────────────────────────────
   Future<void> _sendMessage() async {
-    if (_isResolved || _chatDisabled) return;
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
+    _msgController.clear();
+    await _sendText(text);
+  }
+
+  // Pops the role-specific canned phrases up over the composer, anchored to
+  // the quick-reply button — showMenu flips it above the anchor automatically
+  // when (as here) there isn't room below it. Picking one sends it as-is,
+  // same as _sendMessage, without touching whatever's already typed.
+  Future<void> _showQuickReplies() async {
+    final replies = _viewerIsWorker == true
+        ? _workerQuickReplies
+        : _hostQuickReplies;
+    final buttonBox =
+        _quickReplyButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlayBox =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (buttonBox == null || overlayBox == null) return;
+
+    final buttonTopLeft = buttonBox.localToGlobal(
+      Offset.zero,
+      ancestor: overlayBox,
+    );
+    final position = RelativeRect.fromLTRB(
+      buttonTopLeft.dx,
+      buttonTopLeft.dy,
+      overlayBox.size.width - buttonTopLeft.dx - buttonBox.size.width,
+      overlayBox.size.height - buttonTopLeft.dy,
+    );
+
+    final selected = await showMenu<String>(
+      context: context,
+      position: position,
+      items: [
+        for (final phrase in replies)
+          PopupMenuItem<String>(
+            value: phrase,
+            child: Text(phrase, style: const TextStyle(fontSize: 13)),
+          ),
+      ],
+    );
+    if (selected != null) _sendText(selected);
+  }
+
+  // Shared by the composer's send button and the quick-reply chips — a chip
+  // tap calls this directly with its preset phrase, without touching
+  // whatever the user has already typed into the composer.
+  Future<void> _sendText(String text) async {
+    if (_isResolved || _chatDisabled) return;
 
     if (ContentFilterService.instance.check(text)) {
       showContentRejectionModal(context);
       return;
     }
 
-    _msgController.clear();
     final uid = _uid;
     final name = context.read<CurrentUserProvider>().currentName ?? '';
 
@@ -455,28 +793,7 @@ class _ChatState extends State<Chat> {
 
     try {
       // 2. Lazy-create gig chat room on first message
-      if (!_roomCreated && widget.gigChatParams != null) {
-        final p = widget.gigChatParams!;
-        await FirebaseFirestore.instance
-            .collection('chat_rooms')
-            .doc(widget.roomId)
-            .set({
-              'gigId': p.gigId,
-              'isGigChat': true,
-              'participants': [uid, p.peerUid],
-              'sendTo': p.peerName,
-              'createdByUid': uid,
-              'createdByName': name,
-              'subject': 'Gig Chat',
-              'status': 'open',
-              'lastMessage': '',
-              'lastMessageSender': '',
-              'lastMessageSenderId': '',
-              'lastMessageAt': FieldValue.serverTimestamp(),
-              'createdAt': FieldValue.serverTimestamp(),
-            });
-        if (mounted) setState(() => _roomCreated = true);
-      }
+      await _ensureRoomCreated(uid, name);
 
       // 3. Write to Firestore
       final docRef = await _messagesRef.add({
@@ -492,19 +809,7 @@ class _ChatState extends State<Chat> {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      await FirebaseFirestore.instance
-          .collection('chat_rooms')
-          .doc(widget.roomId)
-          .update({
-            'lastMessage': text,
-            'lastMessageSender': 'You',
-            // Gig chats are shared between two real participants — 'You' above
-            // is only correct from the sender's own point of view. Gig Chats
-            // tab derives the display label from this uid instead (correctly
-            // showing the peer's name when they're not the one who sent it).
-            'lastMessageSenderId': uid,
-            'lastMessageAt': FieldValue.serverTimestamp(),
-          });
+      await _updateRoomLastMessage(text, uid);
 
       // 4. Confirm: replace optimistic with real doc id + remove pending flag
       if (mounted) {
@@ -530,6 +835,413 @@ class _ChatState extends State<Chat> {
               content: Text('You can no longer message this user.'),
             ),
           );
+        }
+      }
+    }
+  }
+
+  Future<void> _updateRoomLastMessage(String text, String? uid) async {
+    await FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .doc(widget.roomId)
+        .update({
+          'lastMessage': text,
+          'lastMessageSender': 'You',
+          // Gig chats are shared between two real participants — 'You' above
+          // is only correct from the sender's own point of view. Gig Chats
+          // tab derives the display label from this uid instead (correctly
+          // showing the peer's name when they're not the one who sent it).
+          'lastMessageSenderId': uid,
+          'lastMessageAt': FieldValue.serverTimestamp(),
+        });
+  }
+
+  // ── Share location (either side, one-time pin) ──────────────────────────────
+  Future<void> _shareLocation() async {
+    if (_isResolved || _chatDisabled) return;
+
+    try {
+      var enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        _showErrorSnack('Turn on location services to share your location.');
+        return;
+      }
+
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        _showErrorSnack(
+          'Location permission is required to share your location.',
+        );
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      if (!mounted) return;
+      final location = GeoPoint(pos.latitude, pos.longitude);
+
+      // Best-effort reverse geocode — same field concatenation as the gig
+      // address lookup in post_offered_gig_screen.dart. Never blocks the
+      // send: a failure just falls back to the generic label.
+      String? address;
+      try {
+        final placemarks = await placemarkFromCoordinates(
+          pos.latitude,
+          pos.longitude,
+        ).timeout(const Duration(seconds: 10));
+        if (placemarks.isNotEmpty) {
+          final p = placemarks.first;
+          final hasName =
+              p.name != null && p.name!.isNotEmpty && p.name != p.street;
+          final parts = [
+            if (hasName) p.name,
+            if (p.street != null && p.street!.isNotEmpty) p.street,
+            if (p.subLocality != null && p.subLocality!.isNotEmpty)
+              p.subLocality,
+            if (p.locality != null && p.locality!.isNotEmpty) p.locality,
+            if (p.administrativeArea != null &&
+                p.administrativeArea!.isNotEmpty)
+              p.administrativeArea,
+          ];
+          if (parts.isNotEmpty) address = parts.join(', ');
+        }
+      } catch (e) {
+        debugPrint('Reverse geocode error: $e');
+      }
+      // Reverse geocoding is unreliable in some environments (notably the
+      // iOS Simulator) — fall back to raw coordinates rather than leaving
+      // the address row empty every time that happens.
+      address ??=
+          '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
+      if (!mounted) return;
+
+      final text = '📍 $address';
+
+      final uid = _uid;
+      final name = context.read<CurrentUserProvider>().currentName ?? '';
+
+      final optimistic = _Msg(
+        text: text,
+        isMe: true,
+        senderId: uid ?? '',
+        time: DateTime.now(),
+        pending: true,
+        location: location,
+        locationAddress: address,
+      );
+      setState(() => _msgs.add(optimistic));
+      _scrollToBottom();
+
+      try {
+        await _ensureRoomCreated(uid, name);
+
+        final docRef = await _messagesRef.add({
+          'senderId': uid,
+          'isSupport': false,
+          'name': name,
+          'text': text,
+          'location': location,
+          'locationAddress': address,
+          'hasSeen': false,
+          'hasSeenByAdmin': false,
+          if (_isGigChat) 'hasSeenByPeer': false,
+          'isAutoReply': false,
+          'isDeleted': false,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        await _updateRoomLastMessage(text, uid);
+
+        if (mounted) {
+          setState(() {
+            final idx = _msgs.indexWhere(
+              (m) => m.pending && m.isMe && m.location == location,
+            );
+            if (idx != -1) {
+              _msgs[idx] = _msgs[idx].copyWith(id: docRef.id, pending: false);
+            }
+          });
+        }
+      } catch (e) {
+        debugPrint('Share location send error: $e');
+        if (mounted) {
+          setState(
+            () => _msgs.removeWhere((m) => m.pending && m.location == location),
+          );
+          if (e is FirebaseException && e.code == 'permission-denied') {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('You can no longer message this user.'),
+              ),
+            );
+          } else {
+            _showErrorSnack("Couldn't share your location. Please try again.");
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Get location error: $e');
+      _showErrorSnack("Couldn't get your location. Please try again.");
+    }
+  }
+
+  void _showErrorSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // ── Attachments (photo/video/file, either side, no role gate) ──────────────
+  static const _videoExtensions = {
+    '.mp4',
+    '.mov',
+    '.avi',
+    '.mkv',
+    '.3gp',
+    '.webm',
+  };
+  static const _fileExtensions = [
+    'pdf',
+    'doc',
+    'docx',
+    'xls',
+    'xlsx',
+    'txt',
+    'zip',
+  ];
+  static const _imageSizeCap = 10 * 1024 * 1024;
+  static const _videoSizeCap = 50 * 1024 * 1024;
+  static const _fileSizeCap = 20 * 1024 * 1024;
+
+  Future<void> _showAttachmentMenu() async {
+    if (_isResolved || _chatDisabled) return;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(ctx).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined, color: kBlue),
+                title: const Text('Photo or Video'),
+                onTap: () => Navigator.pop(ctx, 'gallery'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined, color: kBlue),
+                title: const Text('Take Photo'),
+                onTap: () => Navigator.pop(ctx, 'camera_photo'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.videocam_outlined, color: kBlue),
+                title: const Text('Record Video'),
+                onTap: () => Navigator.pop(ctx, 'camera_video'),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.insert_drive_file_outlined,
+                  color: kBlue,
+                ),
+                title: const Text('File'),
+                onTap: () => Navigator.pop(ctx, 'file'),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    switch (selected) {
+      case 'gallery':
+        await _pickGalleryMedia();
+      case 'camera_photo':
+        await _pickCameraMedia(video: false);
+      case 'camera_video':
+        await _pickCameraMedia(video: true);
+      case 'file':
+        await _pickFile();
+    }
+  }
+
+  bool _looksLikeVideo(String path) {
+    final lower = path.toLowerCase();
+    return _videoExtensions.any((ext) => lower.endsWith(ext));
+  }
+
+  Future<void> _pickGalleryMedia() async {
+    try {
+      final picked = await ImagePicker().pickMedia();
+      if (picked == null) return;
+      final isVideo = _looksLikeVideo(picked.path);
+      await _sendAttachment(
+        file: File(picked.path),
+        attachmentType: isVideo ? 'video' : 'image',
+        attachmentName: picked.name,
+      );
+    } catch (e) {
+      debugPrint('Pick gallery media error: $e');
+      _showErrorSnack("Couldn't open your photo library. Please try again.");
+    }
+  }
+
+  Future<void> _pickCameraMedia({required bool video}) async {
+    try {
+      final picker = ImagePicker();
+      final picked = video
+          ? await picker.pickVideo(source: ImageSource.camera)
+          : await picker.pickImage(source: ImageSource.camera);
+      if (picked == null) return;
+      await _sendAttachment(
+        file: File(picked.path),
+        attachmentType: video ? 'video' : 'image',
+        attachmentName: picked.name,
+      );
+    } catch (e) {
+      debugPrint('Camera capture error: $e');
+      _showErrorSnack("Couldn't use the camera. Please try again.");
+    }
+  }
+
+  Future<void> _pickFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: _fileExtensions,
+      );
+      final picked = result?.files.single;
+      if (picked?.path == null) return;
+      await _sendAttachment(
+        file: File(picked!.path!),
+        attachmentType: 'file',
+        attachmentName: picked.name,
+      );
+    } catch (e) {
+      debugPrint('Pick file error: $e');
+      _showErrorSnack("Couldn't open the file picker. Please try again.");
+    }
+  }
+
+  Future<void> _sendAttachment({
+    required File file,
+    required String attachmentType,
+    required String attachmentName,
+  }) async {
+    if (_isResolved || _chatDisabled) return;
+
+    final sizeCap = attachmentType == 'image'
+        ? _imageSizeCap
+        : attachmentType == 'video'
+        ? _videoSizeCap
+        : _fileSizeCap;
+    final length = await file.length();
+    if (length > sizeCap) {
+      final capMb = sizeCap ~/ (1024 * 1024);
+      _showErrorSnack('That file is too large — the limit is ${capMb}mb.');
+      return;
+    }
+    if (!mounted) return;
+
+    final text = attachmentType == 'image'
+        ? '📷 Photo'
+        : attachmentType == 'video'
+        ? '🎥 Video'
+        : '📎 $attachmentName';
+
+    final uid = _uid;
+    final name = context.read<CurrentUserProvider>().currentName ?? '';
+
+    final optimistic = _Msg(
+      text: text,
+      isMe: true,
+      senderId: uid ?? '',
+      time: DateTime.now(),
+      pending: true,
+      attachmentType: attachmentType,
+      attachmentName: attachmentName,
+    );
+    setState(() => _msgs.add(optimistic));
+    _scrollToBottom();
+
+    try {
+      await _ensureRoomCreated(uid, name);
+
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ref = FirebaseStorage.instance.ref().child(
+        'chat_attachments/${widget.roomId}/${ts}_$attachmentName',
+      );
+      await ref.putFile(file);
+      final url = await ref.getDownloadURL();
+
+      final docRef = await _messagesRef.add({
+        'senderId': uid,
+        'isSupport': false,
+        'name': name,
+        'text': text,
+        'attachmentUrl': url,
+        'attachmentType': attachmentType,
+        'attachmentName': attachmentName,
+        'hasSeen': false,
+        'hasSeenByAdmin': false,
+        if (_isGigChat) 'hasSeenByPeer': false,
+        'isAutoReply': false,
+        'isDeleted': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      await _updateRoomLastMessage(text, uid);
+
+      if (mounted) {
+        setState(() {
+          final idx = _msgs.indexWhere(
+            (m) =>
+                m.pending &&
+                m.isMe &&
+                m.attachmentType == attachmentType &&
+                m.attachmentName == attachmentName,
+          );
+          if (idx != -1) {
+            _msgs[idx] = _msgs[idx].copyWith(
+              id: docRef.id,
+              pending: false,
+              attachmentUrl: url,
+            );
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Send attachment error: $e');
+      if (mounted) {
+        setState(
+          () => _msgs.removeWhere(
+            (m) =>
+                m.pending &&
+                m.attachmentType == attachmentType &&
+                m.attachmentName == attachmentName,
+          ),
+        );
+        if (e is FirebaseException && e.code == 'permission-denied') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('You can no longer message this user.'),
+            ),
+          );
+        } else {
+          _showErrorSnack("Couldn't send attachment. Please try again.");
         }
       }
     }
@@ -621,6 +1333,11 @@ class _ChatState extends State<Chat> {
       time: ts?.toDate(),
       pending: false,
       isDeleted: data['isDeleted'] as bool? ?? false,
+      location: data['location'] as GeoPoint?,
+      locationAddress: data['locationAddress'] as String?,
+      attachmentUrl: data['attachmentUrl'] as String?,
+      attachmentType: data['attachmentType'] as String?,
+      attachmentName: data['attachmentName'] as String?,
     );
   }
 
@@ -832,9 +1549,7 @@ class _ChatState extends State<Chat> {
                                       .update({
                                         'blockedUsers': block
                                             ? FieldValue.arrayUnion([peerUid])
-                                            : FieldValue.arrayRemove([
-                                                peerUid,
-                                              ]),
+                                            : FieldValue.arrayRemove([peerUid]),
                                       });
                                   setSheetState(() {
                                     submitting = false;
@@ -843,9 +1558,7 @@ class _ChatState extends State<Chat> {
                                 } catch (e) {
                                   setSheetState(() => submitting = false);
                                   if (mounted) {
-                                    ScaffoldMessenger.of(
-                                      context,
-                                    ).showSnackBar(
+                                    ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
                                         content: Text(
                                           'Something went wrong. Please try again.',
@@ -884,9 +1597,7 @@ class _ChatState extends State<Chat> {
                     SizedBox(
                       width: double.infinity,
                       child: TextButton(
-                        onPressed: submitting
-                            ? null
-                            : () => Navigator.pop(ctx),
+                        onPressed: submitting ? null : () => Navigator.pop(ctx),
                         child: const Text(
                           'Cancel',
                           style: TextStyle(color: kSub, fontSize: 15),
@@ -949,8 +1660,37 @@ class _ChatState extends State<Chat> {
   // _MessageBubble on both platforms.
   Future<void> _deleteMessage(_Msg msg) async {
     if (msg.id == null) return;
+    // Re-check the window at delete time, not just when the long-press menu
+    // was opened — time may have passed the 2-minute mark in between.
+    if (msg.time == null ||
+        DateTime.now().difference(msg.time!) > _deleteWindow) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Unable to delete message — the 2-minute window to delete it has passed.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     try {
       await _messagesRef.doc(msg.id).update({'isDeleted': true});
+      // If this was the room's most recent message, the chat list screen
+      // reads its preview straight off `chat_rooms.lastMessage` (a
+      // denormalized copy) rather than the message doc, so it would keep
+      // showing the removed text forever unless we refresh it here too.
+      final latestSnap = await _messagesRef
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .get();
+      if (latestSnap.docs.isNotEmpty && latestSnap.docs.first.id == msg.id) {
+        await FirebaseFirestore.instance
+            .collection('chat_rooms')
+            .doc(widget.roomId)
+            .update({'lastMessage': 'Message has been removed'});
+      }
       // Optimistic local update — _startIncomingStream's listener only
       // watches for messages with createdAt greater than what's already
       // loaded, so it structurally never sees a `modified` event for a
@@ -1020,10 +1760,7 @@ class _ChatState extends State<Chat> {
               const SizedBox(height: 8),
               if (canReport)
                 ListTile(
-                  leading: const Icon(
-                    Icons.flag_rounded,
-                    color: Colors.orange,
-                  ),
+                  leading: const Icon(Icons.flag_rounded, color: Colors.orange),
                   title: const Text('Report message'),
                   onTap: () => Navigator.pop(ctx, 'report'),
                 ),
@@ -1223,7 +1960,11 @@ class _ChatState extends State<Chat> {
                           !msg.isDeleted &&
                           msg.senderId.isNotEmpty;
                       final canDelete =
-                          msg.isMe && msg.id != null && !msg.isDeleted;
+                          msg.isMe &&
+                          msg.id != null &&
+                          !msg.isDeleted &&
+                          msg.time != null &&
+                          DateTime.now().difference(msg.time!) <= _deleteWindow;
                       return GestureDetector(
                         onLongPress: (canReport || canDelete)
                             ? () => _showMessageActions(
@@ -1235,7 +1976,9 @@ class _ChatState extends State<Chat> {
                         child: _MessageBubble(
                           msg: msg,
                           isDark: isDark,
-                          timeStr: msg.time != null ? _formatTime(msg.time!) : '',
+                          timeStr: msg.time != null
+                              ? _formatTime(msg.time!)
+                              : '',
                           isGigChat: _isGigChat,
                           peerPhotoUrl: _peerPhotoUrl,
                         ),
@@ -1400,6 +2143,68 @@ class _ChatState extends State<Chat> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 4),
+                    GestureDetector(
+                      onTap: _showAttachmentMenu,
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.grey.shade900
+                              : Colors.grey.shade100,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.attach_file_rounded,
+                          color: kBlue,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                    if (_isGigChat) ...[
+                      const SizedBox(width: 4),
+                      GestureDetector(
+                        onTap: _shareLocation,
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.grey.shade900
+                                : Colors.grey.shade100,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.location_on_rounded,
+                            color: kBlue,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (_isGigChat &&
+                        _viewerIsWorker != null &&
+                        !_isResolved &&
+                        !_chatDisabled) ...[
+                      const SizedBox(width: 4),
+                      GestureDetector(
+                        key: _quickReplyButtonKey,
+                        onTap: _showQuickReplies,
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.grey.shade900
+                                : Colors.grey.shade100,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.bolt_rounded,
+                            color: kBlue,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(width: 8),
                     GestureDetector(
                       onTap: _sendMessage,
@@ -1443,6 +2248,14 @@ class _MessageBubble extends StatelessWidget {
   final String? peerPhotoUrl;
 
   bool get _isHtml => msg.text.contains('<') && msg.text.contains('>');
+
+  // Image/video (like the location map) render edge-to-edge with no bubble
+  // padding/background — a file attachment keeps the normal padded/colored
+  // bubble, since its content (an icon + filename) reads fine inside one.
+  bool get _isEdgeToEdgeMedia =>
+      msg.location != null ||
+      msg.attachmentType == 'image' ||
+      msg.attachmentType == 'video';
 
   @override
   Widget build(BuildContext context) {
@@ -1497,12 +2310,17 @@ class _MessageBubble extends StatelessWidget {
                   // Slightly dim pending messages like Messenger does
                   opacity: msg.pending ? 0.6 : 1.0,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
+                    padding: _isEdgeToEdgeMedia
+                        ? EdgeInsets.zero
+                        : const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                    clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
-                      border: msg.isDeleted
+                      border: _isEdgeToEdgeMedia
+                          ? null
+                          : msg.isDeleted
                           ? Border.all(
                               color: Colors.grey.withValues(alpha: 0.4),
                               width: 1,
@@ -1517,7 +2335,9 @@ class _MessageBubble extends StatelessWidget {
                                   : kAmber,
                               width: 1.5,
                             ),
-                      color: msg.isDeleted
+                      color: _isEdgeToEdgeMedia
+                          ? Colors.transparent
+                          : msg.isDeleted
                           ? (isDark
                                 ? Colors.grey.shade800.withValues(alpha: 0.4)
                                 : Colors.grey.shade200.withValues(alpha: 0.6))
@@ -1542,64 +2362,80 @@ class _MessageBubble extends StatelessWidget {
                               color: Colors.grey.shade500,
                             ),
                           )
+                        : msg.location != null
+                        ? _LocationBubble(
+                            location: msg.location!,
+                            address: msg.locationAddress,
+                            isDark: isDark,
+                          )
+                        : msg.attachmentType == 'image'
+                        ? _ImageAttachmentBubble(url: msg.attachmentUrl)
+                        : msg.attachmentType == 'video'
+                        ? _VideoAttachmentBubble(url: msg.attachmentUrl)
+                        : msg.attachmentType == 'file'
+                        ? _FileAttachmentBubble(
+                            url: msg.attachmentUrl,
+                            name: msg.attachmentName ?? 'File',
+                            isMe: msg.isMe,
+                          )
                         : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (msg.isAutoReply) ...[
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(
-                                Icons.auto_fix_high,
-                                size: 15,
-                                color: msg.isMe
-                                    ? Colors.white70
-                                    : Colors.grey.shade600,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Auto-Reply',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: msg.isMe
-                                      ? Colors.white70
-                                      : Colors.grey.shade600,
-                                  fontWeight: FontWeight.w500,
+                              if (msg.isAutoReply) ...[
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.auto_fix_high,
+                                      size: 15,
+                                      color: msg.isMe
+                                          ? Colors.white70
+                                          : Colors.grey.shade600,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Auto-Reply',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: msg.isMe
+                                            ? Colors.white70
+                                            : Colors.grey.shade600,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
+                                const SizedBox(height: 8),
+                              ],
+                              _isHtml
+                                  ? Html(
+                                      data: msg.text,
+                                      style: {
+                                        'body': Style(
+                                          fontSize: FontSize(14),
+                                          color: msg.isMe
+                                              ? Colors.white
+                                              : isDark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                          margin: Margins.zero,
+                                          padding: HtmlPaddings.zero,
+                                        ),
+                                        'div': Style(
+                                          margin: Margins.zero,
+                                          padding: HtmlPaddings.zero,
+                                        ),
+                                      },
+                                    )
+                                  : Text(
+                                      msg.text,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: msg.isMe ? Colors.white : null,
+                                      ),
+                                    ),
                             ],
                           ),
-                          const SizedBox(height: 8),
-                        ],
-                        _isHtml
-                            ? Html(
-                                data: msg.text,
-                                style: {
-                                  'body': Style(
-                                    fontSize: FontSize(14),
-                                    color: msg.isMe
-                                        ? Colors.white
-                                        : isDark
-                                        ? Colors.white
-                                        : Colors.black87,
-                                    margin: Margins.zero,
-                                    padding: HtmlPaddings.zero,
-                                  ),
-                                  'div': Style(
-                                    margin: Margins.zero,
-                                    padding: HtmlPaddings.zero,
-                                  ),
-                                },
-                              )
-                            : Text(
-                                msg.text,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: msg.isMe ? Colors.white : null,
-                                ),
-                              ),
-                      ],
-                    ),
                   ),
                 ),
                 const SizedBox(height: 3),
@@ -1633,6 +2469,412 @@ class _MessageBubble extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Location message bubble ───────────────────────────────────────────────────
+// Renders a shared-location message (see Chat._shareLocation) as a small
+// non-interactive Google Map with a pin, the reverse-geocoded address (when
+// available), and a tap-through to open the coordinates in the device's
+// maps app. Neither sending nor viewing is role-gated — either side of a
+// gig chat can share their location.
+class _LocationBubble extends StatelessWidget {
+  const _LocationBubble({
+    required this.location,
+    required this.address,
+    required this.isDark,
+  });
+
+  final GeoPoint location;
+  final String? address;
+  final bool isDark;
+
+  Future<void> _openInMaps() async {
+    final uri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1'
+      '&query=${location.latitude},${location.longitude}',
+    );
+    await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final target = LatLng(location.latitude, location.longitude);
+    return Container(
+      width: 220,
+      color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 130,
+            child: IgnorePointer(
+              child: GoogleMap(
+                style: isDark ? kDarkMapStyle : null,
+                initialCameraPosition: CameraPosition(target: target, zoom: 15),
+                markers: {
+                  Marker(
+                    markerId: const MarkerId('shared_location'),
+                    position: target,
+                  ),
+                },
+                // Small, purely-illustrative preview — every gesture and
+                // control is off, and liteMode (Android only) renders a
+                // static bitmap instead of a live map instance, which
+                // matters here since a long location-sharing thread could
+                // otherwise mount many live GoogleMap controllers at once.
+                liteModeEnabled: true,
+                zoomControlsEnabled: false,
+                zoomGesturesEnabled: false,
+                scrollGesturesEnabled: false,
+                rotateGesturesEnabled: false,
+                tiltGesturesEnabled: false,
+                myLocationButtonEnabled: false,
+                mapToolbarEnabled: false,
+              ),
+            ),
+          ),
+          if (address != null && address!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.location_on,
+                    size: 14,
+                    color: Colors.redAccent,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      address!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _openInMaps,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.map_rounded, color: kBlue, size: 14),
+                    SizedBox(width: 6),
+                    Text(
+                      'Open in Maps',
+                      style: TextStyle(
+                        color: kBlue,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Image attachment bubble ───────────────────────────────────────────────────
+// `url` is null while the optimistic message is still uploading — shows a
+// spinner placeholder until the confirmed doc (with a real download URL)
+// replaces it.
+class _ImageAttachmentBubble extends StatelessWidget {
+  const _ImageAttachmentBubble({required this.url});
+
+  final String? url;
+
+  void _openFullscreen(BuildContext context, String url) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          children: [
+            Center(
+              child: InteractiveViewer(
+                child: Image.network(url, fit: BoxFit.contain),
+              ),
+            ),
+            Positioned(
+              top: 40,
+              right: 16,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                onPressed: () => Navigator.of(ctx).pop(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = this.url;
+    if (url == null) {
+      return Container(
+        width: 220,
+        height: 160,
+        color: Colors.grey.shade300,
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    }
+    return GestureDetector(
+      onTap: () => _openFullscreen(context, url),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 220, maxHeight: 220),
+        child: Image.network(
+          url,
+          fit: BoxFit.cover,
+          loadingBuilder: (_, child, progress) => progress == null
+              ? child
+              : const SizedBox(
+                  width: 220,
+                  height: 160,
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+          errorBuilder: (_, _, _) => Container(
+            width: 220,
+            height: 160,
+            color: Colors.grey.shade300,
+            child: const Icon(Icons.broken_image_outlined),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Video attachment bubble ───────────────────────────────────────────────────
+// No thumbnail-generation package exists in this app, so the "thumbnail"
+// before playback is a plain placeholder with a play icon rather than an
+// actual video frame.
+class _VideoAttachmentBubble extends StatefulWidget {
+  const _VideoAttachmentBubble({required this.url});
+
+  final String? url;
+
+  @override
+  State<_VideoAttachmentBubble> createState() => _VideoAttachmentBubbleState();
+}
+
+class _VideoAttachmentBubbleState extends State<_VideoAttachmentBubble> {
+  VideoPlayerController? _controller;
+  bool _initializing = false;
+
+  Future<void> _initialize() async {
+    final url = widget.url;
+    if (url == null || _controller != null || _initializing) return;
+    setState(() => _initializing = true);
+    final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+    try {
+      await controller.initialize();
+    } catch (e) {
+      debugPrint('Video init error: $e');
+      controller.dispose();
+      if (mounted) setState(() => _initializing = false);
+      return;
+    }
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    setState(() {
+      _controller = controller;
+      _initializing = false;
+    });
+    controller
+      ..setLooping(false)
+      ..play();
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.url == null) {
+      return Container(
+        width: 220,
+        height: 160,
+        color: Colors.black87,
+        child: const Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+
+    final controller = _controller;
+    return SizedBox(
+      width: 220,
+      height: 160,
+      child: controller != null && controller.value.isInitialized
+          ? ClipRect(
+              child: Stack(
+                alignment: Alignment.center,
+                fit: StackFit.expand,
+                children: [
+                  FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: controller.value.size.width,
+                      height: controller.value.size.height,
+                      child: VideoPlayer(controller),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => setState(
+                      () => controller.value.isPlaying
+                          ? controller.pause()
+                          : controller.play(),
+                    ),
+                    child: AnimatedOpacity(
+                      opacity: controller.value.isPlaying ? 0 : 1,
+                      duration: const Duration(milliseconds: 200),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.black38,
+                          shape: BoxShape.circle,
+                        ),
+                        padding: const EdgeInsets.all(12),
+                        child: const Icon(
+                          Icons.play_arrow_rounded,
+                          color: Colors.white,
+                          size: 32,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 8,
+                    right: 8,
+                    bottom: 6,
+                    child: VideoProgressIndicator(
+                      controller,
+                      allowScrubbing: true,
+                      colors: VideoProgressColors(
+                        playedColor: kBlue,
+                        backgroundColor: Colors.white24,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : GestureDetector(
+              onTap: _initialize,
+              child: Container(
+                color: Colors.black87,
+                child: Center(
+                  child: _initializing
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Icon(
+                          Icons.play_circle_fill_rounded,
+                          color: Colors.white,
+                          size: 48,
+                        ),
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+// ── File attachment card ──────────────────────────────────────────────────────
+class _FileAttachmentBubble extends StatelessWidget {
+  const _FileAttachmentBubble({
+    required this.url,
+    required this.name,
+    required this.isMe,
+  });
+
+  final String? url;
+  final String name;
+  final bool isMe;
+
+  IconData get _icon {
+    final ext = name.toLowerCase().split('.').last;
+    switch (ext) {
+      case 'pdf':
+        return Icons.picture_as_pdf_rounded;
+      case 'doc':
+      case 'docx':
+        return Icons.description_rounded;
+      case 'xls':
+      case 'xlsx':
+        return Icons.table_chart_rounded;
+      case 'zip':
+        return Icons.folder_zip_rounded;
+      default:
+        return Icons.insert_drive_file_rounded;
+    }
+  }
+
+  Future<void> _open() async {
+    final url = this.url;
+    if (url == null) return;
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final contentColor = isMe ? Colors.white : null;
+    return InkWell(
+      onTap: url == null ? null : _open,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_icon, color: isMe ? Colors.white : kBlue, size: 22),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                color: contentColor,
+                decoration: url == null ? null : TextDecoration.underline,
+              ),
+            ),
+          ),
+          if (url == null) ...[
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: isMe ? Colors.white : kBlue,
+              ),
+            ),
+          ],
         ],
       ),
     );

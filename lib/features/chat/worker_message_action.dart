@@ -80,6 +80,10 @@ class _WorkerMessageActionState extends State<WorkerMessageAction> {
             gigId: '',
             peerUid: widget.workerId,
             peerName: widget.workerName,
+            // WorkerMessageAction is only ever mounted from host-facing
+            // screens (e.g. FavoriteWorkersSheet) messaging one of their
+            // workers directly.
+            viewerIsWorker: false,
           ),
         ),
       ),

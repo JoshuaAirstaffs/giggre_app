@@ -71,6 +71,44 @@ class _WorkerPaymentConfirmSheetState extends State<WorkerPaymentConfirmSheet> {
   final _codeController = TextEditingController();
   bool _processing = false;
   String? _errorMsg;
+  // Written unconditionally by the host's payment-confirmation flow the
+  // moment they generate the code — the actual amount to pay, whether
+  // that's the hourly-computed figure, the flat budget, or a manual
+  // adjustment. This screen never sees the host's own local calculation
+  // (hourlyRate * duration, or an adjustment), so it has no other way to
+  // know it — widget.budget (an estimate) is only a fallback for the brief
+  // window before this fetch completes, or for a legacy code predating
+  // this field.
+  double? _finalAmount;
+
+  double get _displayAmount => _finalAmount ?? widget.budget;
+
+  DocumentReference<Map<String, dynamic>> get _targetRef {
+    final gigRef = FirebaseFirestore.instance
+        .collection(widget.gigCollection)
+        .doc(widget.gigId);
+    final slotId = widget.slotWorkerId;
+    return slotId == null ? gigRef : gigRef.collection('workers').doc(slotId);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchFinalAmount();
+  }
+
+  Future<void> _fetchFinalAmount() async {
+    try {
+      final snap = await _targetRef.get();
+      final data = snap.data();
+      final amount =
+          (data?['finalAmount'] as num?)?.toDouble() ??
+          (data?['adjustedAmount'] as num?)?.toDouble();
+      if (amount != null && mounted) {
+        setState(() => _finalAmount = amount);
+      }
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
@@ -138,10 +176,19 @@ class _WorkerPaymentConfirmSheetState extends State<WorkerPaymentConfirmSheet> {
 
         final gigSnap = slotId != null ? await tx.get(gigRef) : null;
 
+        // `finalAmount` is what the host's payment flow actually confirmed
+        // (hourly-computed, flat, or manually adjusted) — pay exactly that,
+        // never the estimate this screen was originally constructed with.
+        // `adjustedAmount` is a fallback for a code generated before
+        // `finalAmount` existed.
+        final targetData = targetSnap.data();
+        final finalAmount =
+            (targetData?['finalAmount'] as num?)?.toDouble() ??
+            (targetData?['adjustedAmount'] as num?)?.toDouble();
         await EarningsService.incrementInTransaction(
           tx: tx,
           workerRef: workerRef,
-          budget: widget.budget,
+          budget: finalAmount ?? widget.budget,
           currencyCode: widget.currencyCode,
           currentWeek: currentWeek,
         );
@@ -161,7 +208,8 @@ class _WorkerPaymentConfirmSheetState extends State<WorkerPaymentConfirmSheet> {
           final slots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
           final filled = (gigData['filledSlotCount'] as num?)?.toInt() ?? 0;
           final target = filled > 0 && filled < slots ? filled : slots;
-          final completed = ((gigData['slotsCompleted'] as num?)?.toInt() ?? 0) + 1;
+          final completed =
+              ((gigData['slotsCompleted'] as num?)?.toInt() ?? 0) + 1;
           tx.update(gigRef, {
             'slotsCompleted': completed,
             if (completed >= target) 'status': 'completed',
@@ -288,7 +336,7 @@ class _WorkerPaymentConfirmSheetState extends State<WorkerPaymentConfirmSheet> {
                     const SizedBox(width: 10),
                     Text(
                       CurrencyFormatter.format(
-                        widget.budget,
+                        _displayAmount,
                         widget.currencyCode,
                       ),
                       style: const TextStyle(

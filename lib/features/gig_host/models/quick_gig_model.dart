@@ -10,6 +10,17 @@ class QuickGigModel {
   final double budget;
   final String currencyCode;
   final String duration;
+  // 'flat' (default) or 'hourly'. For 'hourly' gigs, `budget`/`ratePerSlot`
+  // stay an ESTIMATE (hourlyRate * estimatedHours) so every existing
+  // display site that reads budget keeps working unmodified — the actual
+  // amount paid is computed from hourlyRate * real tracked work duration
+  // at payment-confirmation time instead of trusting this estimate.
+  final String payType;
+  final double? hourlyRate;
+  // Optional, host-entered approximate hours this gig will take. Purely
+  // informational (shown to workers so they can gauge time commitment) —
+  // it's never used in any pay calculation and isn't a minimum/commitment.
+  final double? workDurationHours;
   final GeoPoint location;
   final String address;
   final String status;
@@ -42,6 +53,9 @@ class QuickGigModel {
     required this.category,
     required this.budget,
     this.currencyCode = 'USD',
+    this.payType = 'flat',
+    this.hourlyRate,
+    this.workDurationHours,
     required this.duration,
     required this.location,
     required this.address,
@@ -55,31 +69,34 @@ class QuickGigModel {
     double? ratePerSlot,
     this.filledSlotCount = 0,
     this.slotsCompleted = 0,
-  })  : createdAt = createdAt ?? DateTime.now(),
-        workerSlots = workerSlots ?? 1,
-        ratePerSlot = ratePerSlot ?? budget;
+  }) : createdAt = createdAt ?? DateTime.now(),
+       workerSlots = workerSlots ?? 1,
+       ratePerSlot = ratePerSlot ?? budget;
 
   Map<String, dynamic> toMap() => {
-        'hostId': hostId,
-        'hostName': hostName,
-        'title': title,
-        'description': description,
-        'category': category,
-        'budget': budget,
-        'currencyCode': currencyCode,
-        'duration': duration,
-        'location': location,
-        'address': address,
-        'status': status,
-        'gigType': 'quick',
-        'createdAt': Timestamp.fromDate(createdAt),
-        if (scheduledDate != null)
-          'scheduledDate': Timestamp.fromDate(scheduledDate!),
-        'workerSlots': workerSlots,
-        'ratePerSlot': ratePerSlot,
-        'filledSlotCount': filledSlotCount,
-        'slotsCompleted': slotsCompleted,
-      };
+    'hostId': hostId,
+    'hostName': hostName,
+    'title': title,
+    'description': description,
+    'category': category,
+    'budget': budget,
+    'currencyCode': currencyCode,
+    'payType': payType,
+    if (hourlyRate != null) 'hourlyRate': hourlyRate,
+    if (workDurationHours != null) 'workDurationHours': workDurationHours,
+    'duration': duration,
+    'location': location,
+    'address': address,
+    'status': status,
+    'gigType': 'quick',
+    'createdAt': Timestamp.fromDate(createdAt),
+    if (scheduledDate != null)
+      'scheduledDate': Timestamp.fromDate(scheduledDate!),
+    'workerSlots': workerSlots,
+    'ratePerSlot': ratePerSlot,
+    'filledSlotCount': filledSlotCount,
+    'slotsCompleted': slotsCompleted,
+  };
 
   factory QuickGigModel.fromDoc(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
@@ -93,6 +110,9 @@ class QuickGigModel {
       category: d['category'] ?? '',
       budget: budget,
       currencyCode: (d['currencyCode'] as String?) ?? 'USD',
+      payType: (d['payType'] as String?) ?? 'flat',
+      hourlyRate: (d['hourlyRate'] as num?)?.toDouble(),
+      workDurationHours: (d['workDurationHours'] as num?)?.toDouble(),
       duration: d['duration'] ?? '',
       location: d['location'] as GeoPoint,
       address: d['address'] ?? '',

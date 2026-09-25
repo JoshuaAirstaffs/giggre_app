@@ -383,6 +383,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               gigType: 'quick',
               budget: (data['budget'] as num?)?.toDouble() ?? 0,
               currencyCode: data['currencyCode'] as String? ?? 'USD',
+              payType: data['payType'] as String? ?? 'flat',
+              hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
+              workDurationHours: (data['workDurationHours'] as num?)
+                  ?.toDouble(),
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -416,6 +420,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               gigType: 'open',
               budget: (data['budget'] as num?)?.toDouble() ?? 0,
               currencyCode: data['currencyCode'] as String? ?? 'USD',
+              payType: data['payType'] as String? ?? 'flat',
+              hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
+              workDurationHours: (data['workDurationHours'] as num?)
+                  ?.toDouble(),
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -448,6 +456,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               gigType: 'offered',
               budget: (data['budget'] as num?)?.toDouble() ?? 0,
               currencyCode: data['currencyCode'] as String? ?? 'USD',
+              payType: data['payType'] as String? ?? 'flat',
+              hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
+              workDurationHours: (data['workDurationHours'] as num?)
+                  ?.toDouble(),
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -496,6 +508,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   : 'open',
               budget: (slot['rate'] as num?)?.toDouble() ?? 0,
               currencyCode: slot['currencyCode'] as String? ?? 'USD',
+              payType: gigData['payType'] as String? ?? 'flat',
+              hourlyRate: (gigData['hourlyRate'] as num?)?.toDouble(),
+              workDurationHours: (gigData['workDurationHours'] as num?)
+                  ?.toDouble(),
               status: slot['status'] as String? ?? 'navigating',
               hostName:
                   slot['hostName'] as String? ??
@@ -559,6 +575,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 gigType: 'offered',
                 budget: (data['budget'] as num?)?.toDouble() ?? 0,
                 currencyCode: data['currencyCode'] as String? ?? 'USD',
+                payType: data['payType'] as String? ?? 'flat',
+                hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
+                workDurationHours: (data['workDurationHours'] as num?)
+                    ?.toDouble(),
                 status: 'offered',
                 hostName: data['hostName'] as String? ?? '',
                 address: data['address'] as String? ?? '',
@@ -620,6 +640,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   gigType: 'offered',
                   budget: (slot['rate'] as num?)?.toDouble() ?? 0,
                   currencyCode: slot['currencyCode'] as String? ?? 'USD',
+                  payType: gigData['payType'] as String? ?? 'flat',
+                  hourlyRate: (gigData['hourlyRate'] as num?)?.toDouble(),
+                  workDurationHours: (gigData['workDurationHours'] as num?)
+                      ?.toDouble(),
                   status: 'offered',
                   hostName:
                       slot['hostName'] as String? ??
@@ -686,6 +710,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   gigType: 'open',
                   budget: (data['budget'] as num?)?.toDouble() ?? 0,
                   currencyCode: data['currencyCode'] as String? ?? 'USD',
+                  payType: data['payType'] as String? ?? 'flat',
+                  hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
+                  workDurationHours: (data['workDurationHours'] as num?)
+                      ?.toDouble(),
                   status: 'navigating',
                   hostName: data['hostName'] as String? ?? '',
                   address: data['address'] as String? ?? '',
@@ -761,6 +789,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         gigType: gigType,
         budget: (slot['rate'] as num?)?.toDouble() ?? 0,
         currencyCode: slot['currencyCode'] as String? ?? 'USD',
+        payType: gigData['payType'] as String? ?? 'flat',
+        hourlyRate: (gigData['hourlyRate'] as num?)?.toDouble(),
+        workDurationHours: (gigData['workDurationHours'] as num?)?.toDouble(),
         status: 'navigating',
         hostName:
             slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
@@ -1001,6 +1032,9 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             gigType: 'quick',
             budget: (data['budget'] as num?)?.toDouble() ?? 0,
             currencyCode: data['currencyCode'] as String? ?? 'USD',
+            payType: data['payType'] as String? ?? 'flat',
+            hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
+            workDurationHours: (data['workDurationHours'] as num?)?.toDouble(),
             status: 'in_progress',
             hostName: data['hostName'] as String? ?? '',
             address: data['address'] as String? ?? '',
@@ -1055,6 +1089,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 gigType: 'quick',
                 budget: (slot['rate'] as num?)?.toDouble() ?? 0,
                 currencyCode: slot['currencyCode'] as String? ?? 'USD',
+                payType: gigData['payType'] as String? ?? 'flat',
+                hourlyRate: (gigData['hourlyRate'] as num?)?.toDouble(),
+                workDurationHours: (gigData['workDurationHours'] as num?)
+                    ?.toDouble(),
                 status: 'in_progress',
                 hostName:
                     slot['hostName'] as String? ??
