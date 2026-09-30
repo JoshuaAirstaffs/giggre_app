@@ -1,13 +1,18 @@
-class CurrencyFormatter {
-  static String symbol(String currencyCode) => switch (currencyCode) {
-        'PHP' => '₱',
-        'USD' => '\$',
-        _ => '\$',
-      };
+import 'package:intl/intl.dart';
 
-  // Format amount with its stored currency symbol, no decimals.
+class CurrencyFormatter {
+  static final _thousands = NumberFormat('#,##0');
+
+  static String symbol(String currencyCode) => switch (currencyCode) {
+    'PHP' => '₱',
+    'USD' => '\$',
+    _ => '\$',
+  };
+
+  // Format amount with its stored currency symbol, no decimals, comma
+  // thousands separators (e.g. ₱12,345).
   static String format(double amount, String currencyCode) =>
-      '${symbol(currencyCode)}${amount.toStringAsFixed(0)}';
+      '${symbol(currencyCode)}${_thousands.format(amount)}';
 
   // Map a 2-letter ISO country code to a currency code.
   // PH → PHP, everything else → USD.

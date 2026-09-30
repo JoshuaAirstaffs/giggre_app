@@ -19,8 +19,12 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/map_style.dart';
 import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../models/gig_template_model.dart';
 import '../../models/worker_slot_model.dart';
 import '../../services/quick_gig_matching_service.dart';
+import '../post_offered_gig_screen.dart';
+import '../post_open_gig_screen.dart';
+import '../post_quick_gig_screen.dart';
 import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
 import 'quick_gig_search_sheet.dart';
@@ -67,6 +71,25 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
   // gigs — mirrors the same users/{hostId}.favoriteWorkerIds field the
   // Profile > Gig History sheet reads/writes (gig_host_profile_screen.dart).
   Set<String> _favoriteWorkerIds = {};
+
+  // Draggable bottom sheet (single-worker active map underneath) — dragged
+  // down to _sheetMin reveals the map full-screen; the floating arrow-up
+  // button then animates it back to _sheetInitial.
+  final _sheetController = DraggableScrollableController();
+  bool _sheetCollapsed = false;
+  static const _sheetMin = 0.14;
+  static const _sheetInitial = 0.55;
+
+  // Which worker's pin/route is highlighted on the multi-worker map-at-top
+  // layout — shared between the full-bleed map and _MultiWorkerSection's
+  // worker cards (tapping a card here selects the same worker on the map).
+  String? _selectedMultiWorkerId;
+
+  void _toggleMultiWorkerSelection(String id) {
+    setState(
+      () => _selectedMultiWorkerId = _selectedMultiWorkerId == id ? null : id,
+    );
+  }
 
   String get _collection {
     switch (widget.gigType) {
@@ -142,11 +165,29 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           }
         }, onError: (e) => debugPrint('[GigDetailSheet] gig stream error: $e'));
     _loadFavoriteWorkerIds();
+    _sheetController.addListener(_onSheetSizeChanged);
+  }
+
+  void _onSheetSizeChanged() {
+    if (!_sheetController.isAttached) return;
+    final collapsed = _sheetController.size <= _sheetMin + 0.02;
+    if (collapsed != _sheetCollapsed) {
+      setState(() => _sheetCollapsed = collapsed);
+    }
+  }
+
+  void _toggleSheet() {
+    _sheetController.animateTo(
+      _sheetCollapsed ? _sheetInitial : _sheetMin,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   @override
   void dispose() {
     _gigSub?.cancel();
+    _sheetController.dispose();
     super.dispose();
   }
 
@@ -366,6 +407,35 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     } finally {
       controller.dispose();
     }
+  }
+
+  // Reuses everything about a completed/cancelled/no_worker gig except its
+  // schedule — the whole point of reposting is picking a fresh date/time,
+  // which none of the three PostXGigScreens ever populate from a template.
+  void _postAgain() {
+    final data = _data;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (data == null || uid == null) return;
+    final hostName = data['hostName'] as String? ?? '';
+
+    final template = GigTemplateModel.fromGigData(
+      data,
+      hostId: uid,
+      gigType: widget.gigType,
+    );
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => switch (widget.gigType) {
+          'open' => PostOpenGigScreen(hostName: hostName, template: template),
+          'offered' => PostOfferedGigScreen(
+            hostName: hostName,
+            template: template,
+          ),
+          _ => PostQuickGigScreen(hostName: hostName, template: template),
+        },
+      ),
+    );
   }
 
   Future<void> _confirmCompleted() async {
@@ -806,6 +876,11 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           'filledSlotCount': newFilled,
           'status': newFilled >= slots ? 'filled' : 'partially_filled',
           'applicants': FieldValue.arrayRemove([applicant]),
+          // Cleared now that a replacement is actually on the gig — from
+          // here on, allFilledSlotsDone (comparing against the new
+          // filledSlotCount) is what correctly reflects "done" again, not
+          // this temporary override.
+          'awaitingReplacement': FieldValue.delete(),
         });
       });
     } catch (e) {
@@ -815,6 +890,324 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(failureMsg!), backgroundColor: Colors.redAccent),
       );
+    }
+  }
+
+  // Stops a multi-worker Open Gig from accepting any more applicants —
+  // shrinks workerSlots down to whatever's already filled, so
+  // acceptingMoreSlots (filledSlotCount < workerSlots) flips false. Every
+  // already-selected worker keeps running through their own independent
+  // slot lifecycle untouched (_selectWorker/_confirmCompletedForWorker);
+  // this never cancels or force-completes anyone already on the gig.
+  // Pending applicants are dropped silently — no notification, since
+  // "you weren't picked" doesn't need to interrupt anyone.
+  Future<void> _closeRemainingSlots() async {
+    final data = _data;
+    final workerSlots = (data?['workerSlots'] as num?)?.toInt() ?? 1;
+    final filledSlotCount = (data?['filledSlotCount'] as num?)?.toInt() ?? 0;
+    if (filledSlotCount <= 0) return;
+    final remaining = workerSlots - filledSlotCount;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: kHostAccent.solid.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.block_rounded,
+                  color: kHostAccent.solid,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Close remaining spots?',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(ctx).colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "You'll continue with the $filledSlotCount worker"
+                '${filledSlotCount == 1 ? '' : 's'} already on this gig. '
+                'The other $remaining open spot'
+                '${remaining == 1 ? '' : 's'} will stop accepting applicants.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13, color: kSub, height: 1.55),
+              ),
+              const SizedBox(height: 22),
+              const Divider(height: 0.5, thickness: 0.5),
+              IntrinsicHeight(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                              bottomLeft: Radius.circular(20),
+                            ),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(color: kSub, fontSize: 15),
+                        ),
+                      ),
+                    ),
+                    const VerticalDivider(width: 0.5, thickness: 0.5),
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                              bottomRight: Radius.circular(20),
+                            ),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: Text(
+                          'Close spots',
+                          style: TextStyle(
+                            color: kHostAccent.solid,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection(_collection)
+          .doc(widget.gigId)
+          .update({
+            'slotsClosed': true,
+            'applicants': <Map<String, dynamic>>[],
+          });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not close remaining spots. Please try again.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
+  // The decision banner's "Mark Complete" — same permanent-closure shape as
+  // _closeRemainingSlots (confirmation dialog, slotsClosed + cleared
+  // applicants), plus the status write closing the gig actually needs since
+  // the auto-complete transactions deliberately left it alone. No undo,
+  // same as closing early.
+  Future<void> _markGigComplete() async {
+    final data = _data;
+    final workerSlots = (data?['workerSlots'] as num?)?.toInt() ?? 1;
+    final filledSlotCount = (data?['filledSlotCount'] as num?)?.toInt() ?? 0;
+    final remaining = workerSlots - filledSlotCount;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Theme.of(ctx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: kHostAccent.solid.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.check_circle_outline_rounded,
+                  color: kHostAccent.solid,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Mark gig as complete?',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(ctx).colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'The remaining $remaining open spot'
+                '${remaining == 1 ? '' : 's'} will stop accepting '
+                "applicants for good — this can't be undone. To bring "
+                'someone on for this job later, use "Post Again" instead.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13, color: kSub, height: 1.55),
+              ),
+              const SizedBox(height: 22),
+              const Divider(height: 0.5, thickness: 0.5),
+              IntrinsicHeight(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                              bottomLeft: Radius.circular(20),
+                            ),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(color: kSub, fontSize: 15),
+                        ),
+                      ),
+                    ),
+                    const VerticalDivider(width: 0.5, thickness: 0.5),
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.only(
+                              bottomRight: Radius.circular(20),
+                            ),
+                          ),
+                        ),
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: Text(
+                          'Mark Complete',
+                          style: TextStyle(
+                            color: kHostAccent.solid,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection(_collection)
+          .doc(widget.gigId)
+          .update({
+            'slotsClosed': true,
+            'status': 'completed',
+            'applicants': <Map<String, dynamic>>[],
+          });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not mark this gig complete. Please try again.',
+            ),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
+  // The decision banner's "Keep Looking" — the existing schedule may already
+  // be well in the past by the time every filled worker finishes, so a new
+  // one is required up front rather than silently reopening applications
+  // under a stale date/time. awaitingReplacement is what actually flips
+  // acceptingMoreSlots back on (see its own comment) — the new schedule
+  // alone wouldn't, since allFilledSlotsDone stays true until a fresh
+  // worker is selected.
+  Future<void> _keepLookingWithNewSchedule() async {
+    final now = DateTime.now();
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (pickedDate == null || !mounted) return;
+
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+    if (pickedTime == null || !mounted) return;
+
+    final combined = DateTime(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      pickedTime.hour,
+      pickedTime.minute,
+    );
+
+    try {
+      await FirebaseFirestore.instance
+          .collection(_collection)
+          .doc(widget.gigId)
+          .update({
+            'scheduledDate': Timestamp.fromDate(combined),
+            'awaitingReplacement': true,
+          });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Schedule updated — now accepting applicants again.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not update the schedule. Please try again.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     }
   }
 
@@ -855,7 +1248,13 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     );
   }
 
-  Widget _buildApplicantsSection(List<Map<String, dynamic>> applicants) {
+  Widget _buildApplicantsSection(
+    List<Map<String, dynamic>> applicants, {
+    required int workerSlots,
+    required int filledSlotCount,
+    required bool isMultiWorker,
+    required VoidCallback onCloseRemainingSlots,
+  }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final onSurface = activeGigTextPrimary(isDark);
 
@@ -867,11 +1266,12 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           Row(
             children: [
               Text(
-                'Interested Workers',
+                'INTERESTED WORKERS',
                 style: TextStyle(
                   color: onSurface,
-                  fontSize: 14,
+                  fontSize: 12,
                   fontWeight: FontWeight.w800,
+                  letterSpacing: 0.3,
                 ),
               ),
               const SizedBox(width: 8),
@@ -882,7 +1282,9 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  '${applicants.length}',
+                  isMultiWorker
+                      ? '$filledSlotCount of $workerSlots'
+                      : '${applicants.length}',
                   style: TextStyle(
                     color: kHostAccent.onWhiteText,
                     fontSize: 11,
@@ -892,6 +1294,66 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               ),
             ],
           ),
+          if (isMultiWorker) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Text(
+                  'Spots filled',
+                  style: TextStyle(
+                    color: activeGigTextMuted(isDark),
+                    fontSize: 11,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '$filledSlotCount/$workerSlots',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: workerSlots > 0 ? filledSlotCount / workerSlots : 0,
+                minHeight: 8,
+                backgroundColor: _hostSheetNeutralSurface(isDark),
+                color: kHostAccent.solid,
+              ),
+            ),
+            if (filledSlotCount > 0) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: onCloseRemainingSlots,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 4,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    'Close remaining spots',
+                    style: TextStyle(
+                      color: activeGigTextMuted(isDark),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      decoration: TextDecoration.underline,
+                      decorationColor: activeGigTextMuted(isDark),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
           const SizedBox(height: 10),
           if (applicants.isEmpty)
             Container(
@@ -925,7 +1387,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                     key: ValueKey('applicant_$workerId'),
                     workerId: workerId,
                     workerName: name,
-                    accentColor: kActiveGigSuccessGreen,
+                    accentColor: kHostAccent.solid,
                     onSelect: () => _selectWorker(applicant),
                     onViewProfile: () => _showApplicantProfileSheet(applicant),
                   ),
@@ -975,6 +1437,14 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     required String? secondaryLabel,
     required bool showLiveBadge,
     required VoidCallback onOpen,
+    // Hidden for the single-worker active screen's full-bleed map, where a
+    // draggable bottom sheet already lets the host reveal the full map by
+    // dragging — a redundant fullscreen button there would just be clutter.
+    bool showExpandButton = true,
+    // Clears whatever floats above this map (e.g. a back button row) at
+    // the caller's site — defaults to the corner inset used everywhere
+    // else this is called from.
+    double topOffset = 8,
   }) {
     return Stack(
       fit: StackFit.expand,
@@ -983,7 +1453,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         if (primaryLabel != null)
           Positioned(
             left: 8,
-            top: 8,
+            top: topOffset,
             child: MapInfoChip(
               primaryLabel: primaryLabel,
               primaryDotColor: kActiveGigSuccessGreen,
@@ -992,12 +1462,16 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             ),
           ),
         if (showLiveBadge)
-          const Positioned(right: 8, top: 8, child: LiveBadge()),
-        Positioned(
-          left: 10,
-          bottom: 10,
-          child: MapRoundButton(icon: Icons.fullscreen_rounded, onTap: onOpen),
-        ),
+          Positioned(right: 8, top: topOffset, child: const LiveBadge()),
+        if (showExpandButton)
+          Positioned(
+            left: 10,
+            bottom: 10,
+            child: MapRoundButton(
+              icon: Icons.fullscreen_rounded,
+              onTap: onOpen,
+            ),
+          ),
       ],
     );
   }
@@ -1054,7 +1528,20 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         '';
     final workerSlots = (data['workerSlots'] as num?)?.toInt() ?? 1;
     final filledSlotCount = (data['filledSlotCount'] as num?)?.toInt() ?? 0;
+    // Incremented atomically by host_payment_code_sheet.dart /
+    // worker_payment_confirm_sheet.dart each time a worker's slot finishes
+    // — comparing it against filledSlotCount (not workerSlots) is how we
+    // know every *currently-filled* slot is done, regardless of whether
+    // every originally-requested slot ever got filled.
+    final slotsCompleted = (data['slotsCompleted'] as num?)?.toInt() ?? 0;
     final isMultiWorker = workerSlots > 1;
+    // Set by _closeRemainingSlots — stops taking new applicants without
+    // touching workerSlots/status, since shrinking workerSlots down to
+    // filledSlotCount would make a 1-filled multi-worker gig look
+    // single-worker (isMultiWorker false) and drop it out of the
+    // multi-worker active branch below, hiding the selected worker's
+    // tracking entirely.
+    final slotsClosed = data['slotsClosed'] == true;
     // scanning = no worker dispatched yet; in_progress = dispatched, awaiting response
     final isSearching = status == 'scanning' || status == 'in_progress';
     // A multi-worker Offered Gig starts with every named worker already
@@ -1070,10 +1557,29 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         // showing the searching state.
         ? (filledSlotCount > 0 || isSearching || isAwaitingOfferResponses)
         : _activeStatuses.contains(status);
+    // True once every currently-filled slot has finished, even if some
+    // slots were never filled — see host_payment_code_sheet.dart /
+    // worker_payment_confirm_sheet.dart, which leave `status` alone in
+    // exactly this situation (rather than auto-completing) so the decision
+    // banner below can ask the host what to do with the empty slot.
+    final allFilledSlotsDone =
+        filledSlotCount > 0 && slotsCompleted >= filledSlotCount;
+    // Set by "Keep Looking" in the decision banner below — lets the host
+    // resume accepting applicants (under a freshly-picked schedule)
+    // without that immediately looking "done" again the moment a new
+    // worker is selected clears it back out.
+    final awaitingReplacement = data['awaitingReplacement'] == true;
     final acceptingMoreSlots =
         widget.gigType == 'open' &&
+        !slotsClosed &&
         status != 'cancelled' &&
         status != 'cancellation_requested' &&
+        // A multi-worker gig auto-completes once every currently-filled
+        // slot finishes AND there's no open slot left to ask about (see
+        // allFilledSlotsDone's comment). Picking up work on a finished gig
+        // should go through "Post Again" instead — there's no undo here.
+        status != 'completed' &&
+        (!allFilledSlotsDone || awaitingReplacement) &&
         (isMultiWorker ? filledSlotCount < workerSlots : status == 'open');
     final isTaskComplete = status == 'task_complete';
     final isPaymentPending = status == 'payment';
@@ -1134,297 +1640,42 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         ? ' · ${fmtDist(const ll.Distance().as(ll.LengthUnit.Meter, ll.LatLng(gigLocation.latitude, gigLocation.longitude), ll.LatLng(workerLocation.latitude, workerLocation.longitude)))} away'
         : '';
 
-    return Scaffold(
-      backgroundColor: cardColor,
-      appBar: AppBar(
-        backgroundColor: cardColor,
-        elevation: 0,
-        foregroundColor: activeGigTextPrimary(isDark),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+    // ── Single-worker active gig: map full-bleed at top, scrollable
+    // content in a fixed (never-resized) sheet below — same structure as
+    // the worker's WorkingUI. Multi-worker active gigs keep the older
+    // inline-map-card layout for now, since their map lives inside
+    // _MultiWorkerSection (shared across every worker's pin) rather than
+    // being a single tracked person the way this branch is.
+    if (isActive && !isMultiWorker) {
+      final topInset = MediaQuery.of(context).padding.top;
+      final statusLabel = isSearching
+          ? 'Searching for worker…'
+          : _hostStatusChipLabel(hostStep, resolvedWorkerName);
+
+      final contentColumn = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (isActive && isMultiWorker) ...[
-            // ── Multi-worker gig: N independent worker cards instead of
-            // the single-worker map/stepper/payment block below ──────
-            ActiveGigHeader(
-              title: isSearching
-                  ? 'Finding Workers'
-                  : isAwaitingOfferResponses
-                  ? 'Awaiting Responses'
-                  : 'Gig in Progress',
-              statusLabel: isSearching
-                  ? 'Searching for workers… ($filledSlotCount of $workerSlots filled)'
-                  : isAwaitingOfferResponses
-                  ? 'Waiting for workers to respond… ($filledSlotCount of $workerSlots accepted)'
-                  : '$filledSlotCount of $workerSlots workers assigned',
-              onBack: () => Navigator.pop(context),
-              accent: kHostAccent,
-            ),
-            const SizedBox(height: 16),
-
-            // ── Gig info — same "title + status dot" / info-grid layout
-            // as the static (else) branch below, so multi-worker gigs
-            // read the same as Open/Offered while active. _MultiWorkerSection
-            // only covers each worker's own slot, not these shared gig
-            // details, so this would otherwise never be shown.
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      color: activeGigTextPrimary(isDark),
-                      fontSize: 19,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.4,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _maybeStatusAnchor(
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 7,
-                        height: 7,
-                        decoration: BoxDecoration(
-                          color: _gigTypeAccent(widget.gigType),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        _hostSheetStatusLabel(status),
-                        style: TextStyle(
-                          color: _gigTypeAccent(widget.gigType),
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              [
-                _gigTypeLabel(widget.gigType),
-                if (createdAt != null) 'posted ${_timeAgo(createdAt.toDate())}',
-              ].join(' · '),
-              style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 11),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: _InfoGridCell(
-                    icon: Icons.payments_rounded,
-                    label: 'PAY',
-                    isDark: isDark,
-                    child: RichText(
-                      text: TextSpan(
-                        children: [
-                          TextSpan(
-                            text: CurrencyFormatter.format(
-                              payType == 'hourly' && hourlyRate != null
-                                  ? hourlyRate
-                                  : budget,
-                              currencyCode,
-                            ),
-                            style: TextStyle(
-                              color: kHostAccent.onWhiteText,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          TextSpan(
-                            text: payType == 'hourly' ? ' / hr' : ' / worker',
-                            style: TextStyle(
-                              color: activeGigTextMuted(isDark),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _InfoGridCell(
-                    icon: Icons.event_rounded,
-                    label: 'SCHEDULE',
-                    isDark: isDark,
-                    value: scheduledDate != null
-                        ? _fmtScheduleGrid(scheduledDate)
-                        : '—',
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _InfoGridCell(
-              icon: Icons.groups_rounded,
-              label: 'WORKERS NEEDED',
-              isDark: isDark,
-              value: '$filledSlotCount of $workerSlots filled',
-            ),
-            if (workDurationHours != null) ...[
-              const SizedBox(height: 14),
-              _InfoGridCell(
-                icon: Icons.hourglass_bottom_rounded,
-                label: 'WORK DURATION',
-                isDark: isDark,
-                value: '~${_fmtDurationHours(workDurationHours)} (estimate)',
+          // ── Progress card: stepper + host-perspective instructions ──
+          // Hidden while searching — shown only after a worker accepts.
+          if (!isSearching) ...[
+            _maybeTutorialAnchor(
+              ActiveGigProgressCard(
+                stepIndex: hostStepIndex,
+                title: hostCopy.title,
+                body: hostCopy.body,
+                arrivedPromptVisible: false,
+                onConfirmArrival: () {},
+                isCancelPending: false,
+                showStartGig: false,
+                onStartGig: () {},
+                showGigComplete: isTaskComplete,
+                onGigComplete: _confirmCompleted,
+                accent: kHostAccent,
+                stepLabels: kStepLabelsHost,
               ),
-            ],
-            if (address.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              _InfoGridCell(
-                icon: Icons.location_on_outlined,
-                label: 'LOCATION',
-                isDark: isDark,
-                value: dedupedAddress(address),
-              ),
-            ],
-            const SizedBox(height: 16),
-
-            if (acceptingMoreSlots) ...[
-              _buildApplicantsSection(applicantsList),
-              const SizedBox(height: 16),
-            ],
-            _MultiWorkerSection(
-              gigId: widget.gigId,
-              gigCollection: _collection,
-              gigTitle: title,
-              gigLocation: gigLocation,
-              workerSlots: workerSlots,
-              filledSlotCount: filledSlotCount,
-              onMarkPaid: _confirmWorkerSlotCompleted,
-              onRequestCancellation: _requestWorkerSlotCancellation,
-              buildMapArea: _buildMapArea,
             ),
-            if (showCancelGig) ...[
-              const SizedBox(height: 20),
-              CancelGigSection(
-                onPressed: _requestCancellation,
-                caption:
-                    'Cancelling now notifies assigned workers · frequent cancellations affect your host rating',
-              ),
-            ],
-          ] else if (isActive) ...[
-            // ── Gold "Gig in Progress" header (mirrors worker's Figure 9) ──
-            ActiveGigHeader(
-              title: isSearching ? 'Finding a Worker' : 'Gig in Progress',
-              statusLabel: isSearching
-                  ? 'Searching for worker…'
-                  : _hostStatusChipLabel(hostStep, resolvedWorkerName),
-              onBack: () => Navigator.pop(context),
-              accent: kHostAccent,
-            ),
-            const SizedBox(height: 16),
-
-            // ── Live map card ────────────────────────────────────
-            if (gigLocation != null) ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(kActiveGigCardRadius),
-                child: Container(
-                  height: 176,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(kActiveGigCardRadius),
-                    border: Border.all(color: activeGigCardBorder(isDark)),
-                  ),
-                  child: _buildMapArea(
-                    liveMap: _GigTrackingMap(
-                      gigLocation: gigLocation,
-                      workerLocation: workerLocation,
-                      workerId: workerId.isNotEmpty ? workerId : null,
-                      workerName: resolvedWorkerName,
-                    ),
-                    primaryLabel: resolvedWorkerName,
-                    secondaryLabel: 'Your gig$hostMapDistanceText',
-                    showLiveBadge: workerLocation != null,
-                    onOpen: () => _openFullScreenTrackingMap(
-                      context,
-                      gigLocation: gigLocation,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // ── Progress card: stepper + host-perspective instructions ──
-            // Hidden while searching — shown only after a worker accepts.
-            if (!isSearching) ...[
-              _maybeTutorialAnchor(
-                ActiveGigProgressCard(
-                  stepIndex: hostStepIndex,
-                  title: hostCopy.title,
-                  body: hostCopy.body,
-                  arrivedPromptVisible: false,
-                  onConfirmArrival: () {},
-                  isCancelPending: false,
-                  showStartGig: false,
-                  onStartGig: () {},
-                  showGigComplete: isTaskComplete,
-                  onGigComplete: _confirmCompleted,
-                  accent: kHostAccent,
-                  stepLabels: kStepLabelsHost,
-                ),
-              ),
-              if (isWorking && workStartedAt != null) ...[
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: kHostAccent.solid.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: kHostAccent.solid.withValues(alpha: 0.4),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.timer_rounded,
-                        color: kHostAccent.solid,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'Worker is on the job',
-                          style: TextStyle(
-                            color: kHostAccent.solid,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      LiveWorkDuration(
-                        startedAt: workStartedAt,
-                        color: kHostAccent.solid,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              const SizedBox(height: 16),
-            ],
-
-            // ── Total work duration (hourly amount owed) ──────────
-            if (isTaskComplete && durationSeconds != null) ...[
+            if (isWorking && workStartedAt != null) ...[
+              const SizedBox(height: 10),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
@@ -1441,16 +1692,14 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 child: Row(
                   children: [
                     Icon(
-                      Icons.timer_outlined,
+                      Icons.timer_rounded,
                       color: kHostAccent.solid,
                       size: 14,
                     ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        payType == 'hourly'
-                            ? 'Total work duration · ${CurrencyFormatter.format(payableAmount, currencyCode)}'
-                            : 'Total work duration',
+                        'Worker is on the job',
                         style: TextStyle(
                           color: kHostAccent.solid,
                           fontSize: 11,
@@ -1458,262 +1707,121 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                         ),
                       ),
                     ),
-                    Text(
-                      fmtWorkDuration(durationSeconds),
+                    LiveWorkDuration(
+                      startedAt: workStartedAt,
+                      color: kHostAccent.solid,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+          ],
+
+          // ── Total work duration (hourly amount owed) ──────────
+          if (isTaskComplete && durationSeconds != null) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: kHostAccent.solid.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: kHostAccent.solid.withValues(alpha: 0.4),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.timer_outlined,
+                    color: kHostAccent.solid,
+                    size: 14,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      payType == 'hourly'
+                          ? 'Total work duration · ${CurrencyFormatter.format(payableAmount, currencyCode)}'
+                          : 'Total work duration',
                       style: TextStyle(
                         color: kHostAccent.solid,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // ── Reopen payment code (host backed out of it earlier) ──
-            if (isPaymentPending && paymentCode.isNotEmpty) ...[
-              SizedBox(
-                width: double.infinity,
-                height: 46,
-                child: ElevatedButton.icon(
-                  onPressed: () => _reopenPaymentCodeSheet(
-                    paymentCode,
-                    workerId,
-                    workerName,
-                    finalPayableAmount,
-                    currencyCode,
                   ),
-                  icon: const Icon(Icons.qr_code_rounded, size: 20),
-                  label: const Text(
-                    'Show Payment Code',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: kActiveGigSuccessGreen,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                  Text(
+                    fmtWorkDuration(durationSeconds),
+                    style: TextStyle(
+                      color: kHostAccent.solid,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // ── Gig + worker card ────────────────────────────────
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: activeGigCardBg(isDark),
-                borderRadius: BorderRadius.circular(kActiveGigCardRadius),
-                border: Border.all(color: activeGigCardBorder(isDark)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: TextStyle(
-                            color: activeGigTextPrimary(isDark),
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                          ),
-                        ),
-                      ),
-                      RichText(
-                        textAlign: TextAlign.right,
-                        text: TextSpan(
-                          children: [
-                            TextSpan(
-                              text: CurrencyFormatter.format(
-                                payType == 'hourly' && hourlyRate != null
-                                    ? hourlyRate
-                                    : budget,
-                                currencyCode,
-                              ),
-                              style: TextStyle(
-                                color: kHostAccent.onWhiteText,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            TextSpan(
-                              text: payType == 'hourly' ? ' / hr' : ' / gig',
-                              style: TextStyle(
-                                color: activeGigTextMuted(isDark),
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (address.isNotEmpty || scheduledDate != null) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          Icons.location_on_outlined,
-                          color: activeGigTextMuted(isDark),
-                          size: 14,
-                        ),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: Text(
-                            [
-                              if (address.isNotEmpty) dedupedAddress(address),
-                              if (scheduledDate != null)
-                                _fmtScheduledShort(scheduledDate),
-                            ].join(' · '),
-                            style: TextStyle(
-                              color: activeGigTextMuted(isDark),
-                              fontSize: 11,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  // Worker profile only shown after acceptance — not during dispatch.
-                  if (workerId.isNotEmpty && !isSearching) ...[
-                    const SizedBox(height: 14),
-                    Divider(
-                      height: 0,
-                      thickness: 1,
-                      color: activeGigDividerColor(isDark),
-                    ),
-                    const SizedBox(height: 14),
-                    _WorkerProfileCard(
-                      key: ValueKey('worker_$workerId'),
-                      gigId: widget.gigId,
-                      workerId: workerId,
-                      workerName: resolvedWorkerName,
-                    ),
-                  ],
                 ],
               ),
             ),
+            const SizedBox(height: 16),
+          ],
 
-            // ── Cancel gig ────────────────────────────────────────
-            if (showCancelGig) ...[
-              const SizedBox(height: 20),
-              CancelGigSection(
-                onPressed: _requestCancellation,
-                caption:
-                    'Cancelling now notifies $resolvedWorkerName · frequent cancellations affect your host rating',
+          // ── Reopen payment code (host backed out of it earlier) ──
+          if (isPaymentPending && paymentCode.isNotEmpty) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: ElevatedButton.icon(
+                onPressed: () => _reopenPaymentCodeSheet(
+                  paymentCode,
+                  workerId,
+                  workerName,
+                  finalPayableAmount,
+                  currencyCode,
+                ),
+                icon: const Icon(Icons.qr_code_rounded, size: 20),
+                label: const Text(
+                  'Show Payment Code',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kActiveGigSuccessGreen,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
               ),
-            ],
-          ] else ...[
-            // ── Title + status dot ──────────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      color: activeGigTextPrimary(isDark),
-                      fontSize: 19,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.4,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _maybeStatusAnchor(
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 7,
-                        height: 7,
-                        decoration: BoxDecoration(
-                          color: _gigTypeAccent(widget.gigType),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        _hostSheetStatusLabel(status),
-                        style: TextStyle(
-                          color: _gigTypeAccent(widget.gigType),
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              [
-                _gigTypeLabel(widget.gigType),
-                if (createdAt != null) 'posted ${_timeAgo(createdAt.toDate())}',
-                if (widget.gigType == 'open')
-                  '${applicantsList.length} interested worker${applicantsList.length == 1 ? '' : 's'}',
-              ].join(' · '),
-              style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 11),
             ),
             const SizedBox(height: 16),
+          ],
 
-            // ── Map: gig location (no worker yet) ─────────────────
-            if (gigLocation != null) ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Container(
-                  height: 140,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: activeGigCardBorder(isDark)),
-                  ),
-                  child: _buildMapArea(
-                    liveMap: _GigTrackingMap(
-                      gigLocation: gigLocation,
-                      workerLocation: null,
-                      workerId: workerId.isNotEmpty ? workerId : null,
-                      workerName: workerName.isNotEmpty ? workerName : 'Worker',
-                    ),
-                    primaryLabel: null,
-                    secondaryLabel: null,
-                    showLiveBadge: false,
-                    onOpen: () => _openFullScreenTrackingMap(
-                      context,
-                      gigLocation: gigLocation,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // ── Applicants (open gig waiting for host to pick a worker) ──────
-            if (acceptingMoreSlots) ...[
-              _buildApplicantsSection(applicantsList),
-              const SizedBox(height: 16),
-            ],
-
-            // ── Info grid: pay / schedule / location ───────────────
-            Row(
+          // ── Gig + worker card ────────────────────────────────
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: activeGigCardBg(isDark),
+              borderRadius: BorderRadius.circular(kActiveGigCardRadius),
+              border: Border.all(color: activeGigCardBorder(isDark)),
+            ),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: _InfoGridCell(
-                    icon: Icons.payments_rounded,
-                    label: 'PAY',
-                    isDark: isDark,
-                    child: RichText(
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          color: activeGigTextPrimary(isDark),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                    ),
+                    RichText(
+                      textAlign: TextAlign.right,
                       text: TextSpan(
                         children: [
                           TextSpan(
@@ -1725,16 +1833,12 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                             ),
                             style: TextStyle(
                               color: kHostAccent.onWhiteText,
-                              fontSize: 15,
+                              fontSize: 16,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
                           TextSpan(
-                            text: payType == 'hourly'
-                                ? ' / hr'
-                                : isMultiWorker
-                                ? ' / worker'
-                                : ' / gig',
+                            text: payType == 'hourly' ? ' / hr' : ' / gig',
                             style: TextStyle(
                               color: activeGigTextMuted(isDark),
                               fontSize: 10,
@@ -1744,169 +1848,1055 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                         ],
                       ),
                     ),
-                  ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _InfoGridCell(
-                    icon: Icons.event_rounded,
-                    label: 'SCHEDULE',
-                    isDark: isDark,
-                    value: scheduledDate != null
-                        ? _fmtScheduleGrid(scheduledDate)
-                        : '—',
-                  ),
-                ),
-              ],
-            ),
-
-            if (isMultiWorker) ...[
-              const SizedBox(height: 14),
-              _InfoGridCell(
-                icon: Icons.groups_rounded,
-                label: 'WORKERS NEEDED',
-                isDark: isDark,
-                value: '$filledSlotCount of $workerSlots filled',
-              ),
-            ],
-            if (workDurationHours != null) ...[
-              const SizedBox(height: 14),
-              _InfoGridCell(
-                icon: Icons.hourglass_bottom_rounded,
-                label: 'WORK DURATION',
-                isDark: isDark,
-                value: '~${_fmtDurationHours(workDurationHours)} (estimate)',
-              ),
-            ],
-            if (address.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              _InfoGridCell(
-                icon: Icons.location_on_outlined,
-                label: 'LOCATION',
-                isDark: isDark,
-                value: dedupedAddress(address),
-              ),
-            ],
-
-            const SizedBox(height: 16),
-
-            // ── Worker (offered/completed/etc. — the active branch above
-            // shows this same card for in-progress gigs; this branch
-            // covers every other status, so an offered gig still shows
-            // who it was offered to) ────────────────────────────────
-            if (workerId.isNotEmpty) ...[
-              _WorkerProfileCard(
-                key: ValueKey('worker_$workerId'),
-                gigId: widget.gigId,
-                workerId: workerId,
-                workerName: resolvedWorkerName,
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // ── Favorite worker (completed gigs) ────────────────────
-            if (status == 'completed' && workerId.isNotEmpty) ...[
-              Builder(
-                builder: (_) {
-                  final isFavorite = _favoriteWorkerIds.contains(workerId);
-                  return GestureDetector(
-                    onTap: () => _toggleFavoriteWorker(workerId),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 14,
-                        horizontal: 16,
+                if (address.isNotEmpty || scheduledDate != null) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.location_on_outlined,
+                        color: activeGigTextMuted(isDark),
+                        size: 14,
                       ),
-                      decoration: BoxDecoration(
-                        color: isFavorite
-                            ? Colors.redAccent.withValues(alpha: 0.08)
-                            : isDark
-                            ? Colors.white.withValues(alpha: 0.04)
-                            : Colors.grey.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: isFavorite
-                              ? Colors.redAccent.withValues(alpha: 0.4)
-                              : activeGigCardBorder(isDark),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          [
+                            if (address.isNotEmpty) dedupedAddress(address),
+                            if (scheduledDate != null)
+                              _fmtScheduledShort(scheduledDate),
+                          ].join(' · '),
+                          style: TextStyle(
+                            color: activeGigTextMuted(isDark),
+                            fontSize: 11,
+                          ),
                         ),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            isFavorite
-                                ? Icons.favorite_rounded
-                                : Icons.favorite_border_rounded,
-                            color: isFavorite ? Colors.redAccent : kSub,
-                            size: 22,
-                          ),
-                          const SizedBox(width: 10),
-                          Text(
-                            isFavorite
-                                ? 'In Favorites'
-                                : 'Add $resolvedWorkerName to Favorites',
-                            style: TextStyle(
-                              color: isFavorite
-                                  ? Colors.redAccent
-                                  : activeGigTextPrimary(isDark),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
+                    ],
+                  ),
+                ],
+                // Worker profile only shown after acceptance — not during dispatch.
+                if (workerId.isNotEmpty && !isSearching) ...[
+                  const SizedBox(height: 14),
+                  Divider(
+                    height: 0,
+                    thickness: 1,
+                    color: activeGigDividerColor(isDark),
+                  ),
+                  const SizedBox(height: 14),
+                  _WorkerProfileCard(
+                    key: ValueKey('worker_$workerId'),
+                    gigId: widget.gigId,
+                    workerId: workerId,
+                    workerName: resolvedWorkerName,
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          // ── Cancel gig ────────────────────────────────────────
+          if (showCancelGig) ...[
+            const SizedBox(height: 20),
+            CancelGigSection(
+              onPressed: _requestCancellation,
+              caption:
+                  'Cancelling now notifies $resolvedWorkerName · frequent cancellations affect your host rating',
+            ),
+          ],
+        ],
+      );
+
+      Widget scrollableFor(ScrollController? controller) =>
+          SingleChildScrollView(
+            controller: controller,
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: contentColumn,
+          );
+
+      if (gigLocation == null) {
+        // No location on record — fall back to the plain header instead
+        // of a map section with nothing to show.
+        return Scaffold(
+          backgroundColor: activeGigScreenBg(isDark),
+          body: Column(
+            children: [
+              ActiveGigHeader(
+                title: isSearching ? 'Finding a Worker' : 'Gig in Progress',
+                statusLabel: statusLabel,
+                onBack: () => Navigator.pop(context),
+                accent: kHostAccent,
+              ),
+              Expanded(child: scrollableFor(null)),
+            ],
+          ),
+        );
+      }
+
+      return Scaffold(
+        backgroundColor: activeGigScreenBg(isDark),
+        body: Stack(
+          children: [
+            // ── Full-screen map, always underneath ────────────────────
+            Positioned.fill(
+              child: _buildMapArea(
+                liveMap: _GigTrackingMap(
+                  gigLocation: gigLocation,
+                  workerLocation: workerLocation,
+                  workerId: workerId.isNotEmpty ? workerId : null,
+                  workerName: resolvedWorkerName,
+                  // Keeps the fitted route/markers centered in the strip
+                  // still visible above the sheet, instead of behind it.
+                  bottomPadding:
+                      MediaQuery.of(context).size.height *
+                      (_sheetCollapsed ? _sheetMin : _sheetInitial),
+                ),
+                primaryLabel: resolvedWorkerName,
+                secondaryLabel: 'Your gig$hostMapDistanceText',
+                showLiveBadge: workerLocation != null,
+                // Dragging the sheet down already reveals the full map, so
+                // the fullscreen button is redundant here.
+                showExpandButton: false,
+                topOffset: topInset + 56,
+                onOpen: () {},
+              ),
+            ),
+
+            // ── Floating back button over the map ─────────────────────
+            Positioned(
+              top: topInset + 10,
+              left: 12,
+              child: MapRoundButton(
+                icon: Icons.arrow_back_ios_new_rounded,
+                onTap: () => Navigator.pop(context),
+              ),
+            ),
+
+            // ── Draggable bottom sheet — drag down to reveal the full
+            // map, snaps between _sheetMin (collapsed) and _sheetInitial.
+            DraggableScrollableSheet(
+              controller: _sheetController,
+              initialChildSize: _sheetInitial,
+              minChildSize: _sheetMin,
+              maxChildSize: _sheetInitial,
+              snap: true,
+              snapSizes: const [_sheetMin, _sheetInitial],
+              builder: (ctx, scrollController) => Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: activeGigScreenBg(isDark),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(24),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.4 : 0.08,
+                      ),
+                      blurRadius: 16,
+                      offset: const Offset(0, -4),
+                    ),
+                  ],
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    children: [
+                      // Drag handled manually (jumpTo/animateTo) rather
+                      // than relying solely on the sheet's built-in
+                      // scroll-position-driven drag, since that
+                      // coordination can get out-competed by the native
+                      // map view sitting underneath wherever the sheet
+                      // overlaps it.
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onVerticalDragUpdate: (details) {
+                          if (!_sheetController.isAttached) return;
+                          final screenHeight = MediaQuery.of(
+                            context,
+                          ).size.height;
+                          final newSize =
+                              (_sheetController.size -
+                                      details.delta.dy / screenHeight)
+                                  .clamp(_sheetMin, _sheetInitial);
+                          _sheetController.jumpTo(newSize);
+                        },
+                        onVerticalDragEnd: (details) {
+                          if (!_sheetController.isAttached) return;
+                          final current = _sheetController.size;
+                          final mid = (_sheetMin + _sheetInitial) / 2;
+                          final target = current < mid
+                              ? _sheetMin
+                              : _sheetInitial;
+                          _sheetController.animateTo(
+                            target,
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeOut,
+                          );
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          color: Colors.transparent,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Center(
+                            child: Container(
+                              width: 40,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: isDark ? Colors.white24 : Colors.black12,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
                             ),
                           ),
-                        ],
+                        ),
+                      ),
+                      Expanded(child: scrollableFor(scrollController)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Arrow-up button — only while the sheet is collapsed ───
+            if (_sheetCollapsed)
+              Positioned(
+                right: 16,
+                bottom: 24 + MediaQuery.of(context).padding.bottom,
+                child: MapRoundButton(
+                  icon: Icons.keyboard_arrow_up_rounded,
+                  onTap: _toggleSheet,
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    // ── Multi-worker active gig: same map-at-top shell as the
+    // single-worker branch above. The shared map here shows a live,
+    // non-interactive overview of every worker's pin (tap-to-select and
+    // route-drawing still live in the fullscreen tracking view, reached
+    // via _MultiWorkerSection's own expand button inside the sheet).
+    if (isActive && isMultiWorker) {
+      final topInset = MediaQuery.of(context).padding.top;
+      final statusLabel = isSearching
+          ? 'Finding Workers'
+          : isAwaitingOfferResponses
+          ? 'Awaiting Responses'
+          : 'Gig in Progress';
+
+      final contentColumn = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Gig info — same "title + status dot" / info-grid layout
+          // as the static (else) branch below, so multi-worker gigs
+          // read the same as Open/Offered while active. _MultiWorkerSection
+          // only covers each worker's own slot, not these shared gig
+          // details, so this would otherwise never be shown.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: activeGigTextPrimary(isDark),
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _maybeStatusAnchor(
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: _gigTypeAccent(widget.gigType),
+                        shape: BoxShape.circle,
                       ),
                     ),
-                  );
-                },
+                    const SizedBox(width: 5),
+                    Text(
+                      _hostSheetStatusLabel(status),
+                      style: TextStyle(
+                        color: _gigTypeAccent(widget.gigType),
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 10),
-              // Rating is otherwise offered once, inline at payment
-              // confirmation, and that dialog has a Skip button — this is the
-              // only way back to it. Reporting had no post-completion entry
-              // point at all; the worker's profile (where the flag lives) is
-              // only reachable from the applicants list and the live map.
-              PostGigActions(
-                gigId: widget.gigId,
-                gigCollection: _collection,
-                gigTitle: title,
-                rateeId: workerId,
-                rateeName: resolvedWorkerName,
-                rateeRole: RateeRole.worker,
-                surface: 'completed_gig',
-              ),
-              const SizedBox(height: 16),
             ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            [
+              _gigTypeLabel(widget.gigType),
+              if (createdAt != null) 'posted ${_timeAgo(createdAt.toDate())}',
+            ].join(' · '),
+            style: TextStyle(color: activeGigTextMuted(isDark), fontSize: 11),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _InfoGridCell(
+                  icon: Icons.payments_rounded,
+                  label: 'PAY',
+                  isDark: isDark,
+                  child: RichText(
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: CurrencyFormatter.format(
+                            payType == 'hourly' && hourlyRate != null
+                                ? hourlyRate
+                                : budget,
+                            currencyCode,
+                          ),
+                          style: TextStyle(
+                            color: kHostAccent.onWhiteText,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        TextSpan(
+                          text: payType == 'hourly' ? ' / hr' : ' / worker',
+                          style: TextStyle(
+                            color: activeGigTextMuted(isDark),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _InfoGridCell(
+                  icon: Icons.event_rounded,
+                  label: 'SCHEDULE',
+                  isDark: isDark,
+                  value: scheduledDate != null
+                      ? _fmtScheduleGrid(scheduledDate)
+                      : '—',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _InfoGridCell(
+            icon: Icons.groups_rounded,
+            label: 'WORKERS NEEDED',
+            isDark: isDark,
+            value: '$filledSlotCount of $workerSlots filled',
+          ),
+          if (workDurationHours != null) ...[
+            const SizedBox(height: 14),
+            _InfoGridCell(
+              icon: Icons.hourglass_bottom_rounded,
+              label: 'WORK DURATION',
+              isDark: isDark,
+              value: '~${_fmtDurationHours(workDurationHours)} (estimate)',
+            ),
+          ],
+          if (address.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _InfoGridCell(
+              icon: Icons.location_on_outlined,
+              label: 'LOCATION',
+              isDark: isDark,
+              value: dedupedAddress(address),
+            ),
+          ],
+          const SizedBox(height: 16),
 
-            // ── Cancel gig ──────────────────────────────────────────
-            if (showCancelGig) ...[
-              SizedBox(
+          if (acceptingMoreSlots) ...[
+            _buildApplicantsSection(
+              applicantsList,
+              workerSlots: workerSlots,
+              filledSlotCount: filledSlotCount,
+              isMultiWorker: isMultiWorker,
+              onCloseRemainingSlots: _closeRemainingSlots,
+            ),
+            const SizedBox(height: 16),
+          ] else if (isMultiWorker &&
+              filledSlotCount < workerSlots &&
+              !slotsClosed &&
+              status != 'completed' &&
+              allFilledSlotsDone &&
+              !awaitingReplacement) ...[
+            // Every currently-filled slot just finished, but the host never
+            // filled every slot and never closed the rest either — rather
+            // than silently guessing (auto-complete, or keep recruiting
+            // under a schedule that may already be stale), ask directly.
+            // Whichever the host picks here is final: "Mark Complete" is
+            // the same permanent close as _closeRemainingSlots (no undo),
+            // and "Keep Looking" requires a fresh schedule before it
+            // reopens applications, since the original one may have
+            // already passed.
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: _hostSheetNeutralSurface(isDark),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'This gig didn\'t fill all its slots',
+                    style: TextStyle(
+                      color: activeGigTextPrimary(isDark),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Mark it complete, or keep looking for another worker '
+                    'for the remaining ${workerSlots - filledSlotCount} spot'
+                    '${workerSlots - filledSlotCount == 1 ? '' : 's'}?',
+                    style: TextStyle(
+                      color: activeGigTextMuted(isDark),
+                      fontSize: 11.5,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _keepLookingWithNewSchedule,
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                              color: activeGigCardBorder(isDark),
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text(
+                            'Keep Looking',
+                            style: TextStyle(
+                              color: activeGigTextPrimary(isDark),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _markGigComplete,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: kHostAccent.solid,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Mark Complete',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          _MultiWorkerSection(
+            gigId: widget.gigId,
+            gigCollection: _collection,
+            gigTitle: title,
+            gigLocation: gigLocation,
+            workerSlots: workerSlots,
+            filledSlotCount: filledSlotCount,
+            onMarkPaid: _confirmWorkerSlotCompleted,
+            onRequestCancellation: _requestWorkerSlotCancellation,
+            buildMapArea: _buildMapArea,
+            showEmbeddedMap: gigLocation == null,
+            selectedWorkerId: _selectedMultiWorkerId,
+            onSelectWorker: _toggleMultiWorkerSelection,
+          ),
+          if (showCancelGig) ...[
+            const SizedBox(height: 20),
+            CancelGigSection(
+              onPressed: _requestCancellation,
+              caption:
+                  'Cancelling now notifies assigned workers · frequent cancellations affect your host rating',
+            ),
+          ],
+          // ── Post Again — a multi-worker gig still renders via this
+          // active branch even once done (isActive only checks
+          // filledSlotCount > 0, not status), so the plain non-active
+          // branch's status-based Post Again button below is never
+          // reached here. `status` itself reliably reaches 'completed'
+          // on its own now — see host_payment_code_sheet.dart /
+          // worker_payment_confirm_sheet.dart, which mark the gig
+          // completed the moment every currently-filled slot finishes
+          // (whether or not every slot was ever filled), in the same
+          // write that finishes the last slot — so checking it directly
+          // here is enough, no need to re-derive it from the workers
+          // stream.
+          if (status == 'completed')
+            Padding(
+              padding: const EdgeInsets.only(top: 20),
+              child: SizedBox(
                 width: double.infinity,
                 height: 48,
                 child: OutlinedButton.icon(
-                  onPressed: _requestCancellation,
-                  icon: const Icon(
-                    Icons.close_rounded,
-                    size: 18,
-                    color: kActiveGigDestructiveRed,
-                  ),
+                  onPressed: _postAgain,
+                  icon: const Icon(Icons.replay_rounded, size: 18),
                   label: const Text(
-                    'Cancel gig',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: kActiveGigDestructiveRed,
-                    ),
+                    'Post Again',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                   ),
                   style: OutlinedButton.styleFrom(
-                    backgroundColor: activeGigCardBg(isDark),
-                    side: BorderSide(color: activeGigDestructiveBorder(isDark)),
+                    foregroundColor: activeGigTextPrimary(isDark),
+                    side: BorderSide(color: activeGigCardBorder(isDark)),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
                   ),
                 ),
               ),
+            ),
+        ],
+      );
+
+      Widget scrollableFor(ScrollController? controller) =>
+          SingleChildScrollView(
+            controller: controller,
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: contentColumn,
+          );
+
+      if (gigLocation == null) {
+        // No location on record — fall back to the plain header instead
+        // of a map section with nothing to show (_MultiWorkerSection
+        // keeps its own embedded map hidden in this case too, above).
+        return Scaffold(
+          backgroundColor: activeGigScreenBg(isDark),
+          body: Column(
+            children: [
+              ActiveGigHeader(
+                title: statusLabel,
+                statusLabel: '$filledSlotCount of $workerSlots filled',
+                onBack: () => Navigator.pop(context),
+                accent: kHostAccent,
+              ),
+              Expanded(child: scrollableFor(null)),
             ],
+          ),
+        );
+      }
+
+      return Scaffold(
+        backgroundColor: activeGigScreenBg(isDark),
+        body: Stack(
+          children: [
+            // ── Full-screen map, always underneath ────────────────────
+            Positioned.fill(
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: workersRef(_collection, widget.gigId).snapshots(),
+                builder: (context, snap) {
+                  final liveWorkers = (snap.data?.docs ?? const [])
+                      .map((d) => WorkerSlotModel.fromDoc(d))
+                      .where(
+                        (w) =>
+                            w.workerLocation != null &&
+                            _workerIsTrackable(w.status),
+                      )
+                      .toList();
+                  final effectiveSelectedId =
+                      liveWorkers.any(
+                        (w) => w.workerId == _selectedMultiWorkerId,
+                      )
+                      ? _selectedMultiWorkerId
+                      : null;
+                  return _MultiWorkerTrackingMap(
+                    gigLocation: gigLocation,
+                    workers: liveWorkers,
+                    selectedWorkerId: effectiveSelectedId,
+                    onWorkerTap: _toggleMultiWorkerSelection,
+                    // Keeps the fitted worker pins centered in the strip
+                    // still visible above the sheet, instead of behind it.
+                    bottomPadding:
+                        MediaQuery.of(context).size.height *
+                        (_sheetCollapsed ? _sheetMin : _sheetInitial),
+                  );
+                },
+              ),
+            ),
+
+            // ── Floating back button over the map ─────────────────────
+            Positioned(
+              top: topInset + 10,
+              left: 12,
+              child: MapRoundButton(
+                icon: Icons.arrow_back_ios_new_rounded,
+                onTap: () => Navigator.pop(context),
+              ),
+            ),
+
+            // ── Draggable bottom sheet — drag down to reveal the full
+            // map, snaps between _sheetMin (collapsed) and _sheetInitial.
+            DraggableScrollableSheet(
+              controller: _sheetController,
+              initialChildSize: _sheetInitial,
+              minChildSize: _sheetMin,
+              maxChildSize: _sheetInitial,
+              snap: true,
+              snapSizes: const [_sheetMin, _sheetInitial],
+              builder: (ctx, scrollController) => Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: activeGigScreenBg(isDark),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(24),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.4 : 0.08,
+                      ),
+                      blurRadius: 16,
+                      offset: const Offset(0, -4),
+                    ),
+                  ],
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    children: [
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onVerticalDragUpdate: (details) {
+                          if (!_sheetController.isAttached) return;
+                          final screenHeight = MediaQuery.of(
+                            context,
+                          ).size.height;
+                          final newSize =
+                              (_sheetController.size -
+                                      details.delta.dy / screenHeight)
+                                  .clamp(_sheetMin, _sheetInitial);
+                          _sheetController.jumpTo(newSize);
+                        },
+                        onVerticalDragEnd: (details) {
+                          if (!_sheetController.isAttached) return;
+                          final current = _sheetController.size;
+                          final mid = (_sheetMin + _sheetInitial) / 2;
+                          final target = current < mid
+                              ? _sheetMin
+                              : _sheetInitial;
+                          _sheetController.animateTo(
+                            target,
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeOut,
+                          );
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          color: Colors.transparent,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Center(
+                            child: Container(
+                              width: 40,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: isDark ? Colors.white24 : Colors.black12,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(child: scrollableFor(scrollController)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Arrow-up button — only while the sheet is collapsed ───
+            if (_sheetCollapsed)
+              Positioned(
+                right: 16,
+                bottom: 24 + MediaQuery.of(context).padding.bottom,
+                child: MapRoundButton(
+                  icon: Icons.keyboard_arrow_up_rounded,
+                  onTap: _toggleSheet,
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: cardColor,
+      appBar: AppBar(
+        backgroundColor: cardColor,
+        elevation: 0,
+        foregroundColor: activeGigTextPrimary(isDark),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+        children: [
+          // ── Title + status label ────────────────────────────────
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: activeGigTextPrimary(isDark),
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _maybeStatusAnchor(
+                Text(
+                  _hostSheetStatusLabel(status).toUpperCase(),
+                  style: TextStyle(
+                    color: kHostAccent.solid,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── Map: gig location (no worker yet) ─────────────────
+          if (gigLocation != null) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                height: 140,
+                decoration: BoxDecoration(
+                  border: Border.all(color: activeGigCardBorder(isDark)),
+                ),
+                child: _buildMapArea(
+                  liveMap: _GigTrackingMap(
+                    gigLocation: gigLocation,
+                    workerLocation: null,
+                    workerId: workerId.isNotEmpty ? workerId : null,
+                    workerName: workerName.isNotEmpty ? workerName : 'Worker',
+                  ),
+                  primaryLabel: null,
+                  secondaryLabel: null,
+                  showLiveBadge: false,
+                  showExpandButton: false,
+                  onOpen: () => _openFullScreenTrackingMap(
+                    context,
+                    gigLocation: gigLocation,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (address.isNotEmpty) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.location_on_outlined,
+                  size: 16,
+                  color: activeGigTextMuted(isDark),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    dedupedAddress(address),
+                    style: TextStyle(
+                      color: activeGigTextSecondary(isDark),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // ── Applicants (open gig waiting for host to pick a worker) ──────
+          if (acceptingMoreSlots) ...[
+            _buildApplicantsSection(
+              applicantsList,
+              workerSlots: workerSlots,
+              filledSlotCount: filledSlotCount,
+              isMultiWorker: isMultiWorker,
+              onCloseRemainingSlots: _closeRemainingSlots,
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // ── Info grid: pay / duration — boxed ───────────────────
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _HostBoxedCell(
+                  label: 'PAY',
+                  isDark: isDark,
+                  child: RichText(
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: CurrencyFormatter.format(
+                            payType == 'hourly' && hourlyRate != null
+                                ? hourlyRate
+                                : budget,
+                            currencyCode,
+                          ),
+                          style: TextStyle(
+                            color: kHostAccent.onWhiteText,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        TextSpan(
+                          text: payType == 'hourly'
+                              ? ' / hr'
+                              : isMultiWorker
+                              ? ' / worker'
+                              : ' / gig',
+                          style: TextStyle(
+                            color: activeGigTextMuted(isDark),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              if (workDurationHours != null) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _HostBoxedCell(
+                    label: 'DURATION',
+                    isDark: isDark,
+                    child: Text(
+                      '~${_fmtDurationHours(workDurationHours)}',
+                      style: TextStyle(
+                        color: activeGigTextPrimary(isDark),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // ── Schedule — boxed, full width, with a calendar shortcut ──
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _hostSheetNeutralSurface(isDark),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'SCHEDULE',
+                        style: TextStyle(
+                          color: activeGigTextMuted(isDark),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        scheduledDate != null
+                            ? _fmtScheduleWeekday(scheduledDate)
+                            : '—',
+                        style: TextStyle(
+                          color: activeGigTextPrimary(isDark),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (scheduledDate != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Starts at ${_fmtScheduleTimeOnly(scheduledDate)}',
+                          style: TextStyle(
+                            color: activeGigTextMuted(isDark),
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: activeGigCardBg(isDark),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.calendar_today_rounded,
+                    size: 15,
+                    color: activeGigTextMuted(isDark),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── Worker (offered/completed/etc. — the active branch above
+          // shows this same card for in-progress gigs; this branch
+          // covers every other status, so an offered gig still shows
+          // who it was offered to) ────────────────────────────────
+          if (workerId.isNotEmpty) ...[
+            _WorkerProfileCard(
+              key: ValueKey('worker_$workerId'),
+              gigId: widget.gigId,
+              workerId: workerId,
+              workerName: resolvedWorkerName,
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // ── Favorite worker (completed gigs) ────────────────────
+          if (status == 'completed' && workerId.isNotEmpty) ...[
+            Builder(
+              builder: (_) {
+                final isFavorite = _favoriteWorkerIds.contains(workerId);
+                return GestureDetector(
+                  onTap: () => _toggleFavoriteWorker(workerId),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isFavorite
+                          ? Colors.redAccent.withValues(alpha: 0.08)
+                          : isDark
+                          ? Colors.white.withValues(alpha: 0.04)
+                          : Colors.grey.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isFavorite
+                            ? Colors.redAccent.withValues(alpha: 0.4)
+                            : activeGigCardBorder(isDark),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          isFavorite
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          color: isFavorite ? Colors.redAccent : kSub,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          isFavorite
+                              ? 'In Favorites'
+                              : 'Add $resolvedWorkerName to Favorites',
+                          style: TextStyle(
+                            color: isFavorite
+                                ? Colors.redAccent
+                                : activeGigTextPrimary(isDark),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 10),
+            // Rating is otherwise offered once, inline at payment
+            // confirmation, and that dialog has a Skip button — this is the
+            // only way back to it. Reporting had no post-completion entry
+            // point at all; the worker's profile (where the flag lives) is
+            // only reachable from the applicants list and the live map.
+            PostGigActions(
+              gigId: widget.gigId,
+              gigCollection: _collection,
+              gigTitle: title,
+              rateeId: workerId,
+              rateeName: resolvedWorkerName,
+              rateeRole: RateeRole.worker,
+              surface: 'completed_gig',
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // ── Cancel gig ──────────────────────────────────────────
+          if (showCancelGig) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton(
+                onPressed: _requestCancellation,
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: activeGigCardBg(isDark),
+                  side: BorderSide(color: activeGigCardBorder(isDark)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: Text(
+                  'Cancel gig',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: activeGigTextPrimary(isDark),
+                  ),
+                ),
+              ),
+            ),
           ],
 
           // ── Start New Search button (quick gigs with no match found,
@@ -1934,6 +2924,52 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
+                ),
+              ),
+            ),
+          ],
+
+          // ── Post Again (completed / no_worker / cancelled) — the gig is
+          // done for good at this point, so reposting a fresh copy (minus
+          // the schedule, which always starts blank) is the only way
+          // forward ────────────────────────────────────────────────────
+          if (const {
+            'completed',
+            'no_worker',
+            'cancelled',
+          }.contains(status)) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: _postAgain,
+                icon: const Icon(Icons.replay_rounded, size: 18),
+                label: const Text(
+                  'Post Again',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: activeGigTextPrimary(isDark),
+                  side: BorderSide(color: activeGigCardBorder(isDark)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+          ],
+
+          if (createdAt != null) ...[
+            const SizedBox(height: 16),
+            Center(
+              child: Text(
+                'POSTED ${_timeAgo(createdAt.toDate()).toUpperCase()}',
+                style: TextStyle(
+                  color: activeGigTextMuted(isDark),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.5,
                 ),
               ),
             ),
@@ -2038,12 +3074,17 @@ class _GigTrackingMap extends StatefulWidget {
   final LatLng? workerLocation;
   final String? workerId;
   final String workerName;
+  // Extra bottom inset, in logical pixels, matching how much of the map
+  // the draggable bottom sheet currently covers — keeps the fitted
+  // route/markers centered in the visible area instead of behind it.
+  final double bottomPadding;
 
   const _GigTrackingMap({
     required this.gigLocation,
     this.workerLocation,
     this.workerId,
     this.workerName = 'Worker',
+    this.bottomPadding = 0,
   });
 
   @override
@@ -2078,7 +3119,8 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
     super.didUpdateWidget(oldWidget);
     // Re-center when worker location first appears or gig location changes
     if (oldWidget.workerLocation != widget.workerLocation ||
-        oldWidget.gigLocation != widget.gigLocation) {
+        oldWidget.gigLocation != widget.gigLocation ||
+        oldWidget.bottomPadding != widget.bottomPadding) {
       _animateToCenter();
     }
     if (widget.workerLocation != null &&
@@ -2199,7 +3241,7 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
             ll.LatLng(swLat, swLng),
             ll.LatLng(neLat, neLng),
           ),
-          padding: const EdgeInsets.all(60),
+          padding: EdgeInsets.fromLTRB(60, 60, 60, 60 + widget.bottomPadding),
         ),
       );
     }
@@ -2339,6 +3381,7 @@ class _GigTrackingMapState extends State<_GigTrackingMap> {
                 myLocationEnabled: false,
                 myLocationButtonEnabled: false,
                 zoomControlsEnabled: false,
+                padding: EdgeInsets.only(bottom: widget.bottomPadding),
                 markers: _buildGoogleMarkers(),
                 polylines: _routePoints.isNotEmpty
                     ? {
@@ -2565,6 +3608,88 @@ String _fmtScheduleGrid(Timestamp ts) {
   return '${weekdays[dt.weekday]}, ${months[dt.month]} ${dt.day} · $h:$m $period';
 }
 
+// "Wednesday, Sep 30" — full weekday name, no time (the boxed SCHEDULE
+// card's date line pairs this with _fmtScheduleTimeOnly below it).
+String _fmtScheduleWeekday(Timestamp ts) {
+  const weekdays = [
+    '',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
+  const months = [
+    '',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  final dt = ts.toDate().toLocal();
+  return '${weekdays[dt.weekday]}, ${months[dt.month]} ${dt.day}';
+}
+
+// "8:44 AM" — paired with _fmtScheduleWeekday above.
+String _fmtScheduleTimeOnly(Timestamp ts) {
+  final dt = ts.toDate().toLocal();
+  final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+  final m = dt.minute.toString().padLeft(2, '0');
+  final period = dt.hour >= 12 ? 'PM' : 'AM';
+  return '$h:$m $period';
+}
+
+// Boxed PAY/DURATION cell used by the pre-selection sheet — a plain tinted
+// card (no left icon square), matching the worker-side gig detail sheet's
+// _BoxedInfoCell so both roles present these two figures the same way.
+class _HostBoxedCell extends StatelessWidget {
+  final String label;
+  final bool isDark;
+  final Widget child;
+  const _HostBoxedCell({
+    required this.label,
+    required this.isDark,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _hostSheetNeutralSurface(isDark),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: activeGigTextMuted(isDark),
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 4),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
 // Pay/Schedule/Location grid cell used by the pre-selection sheet.
 class _InfoGridCell extends StatelessWidget {
   final IconData icon;
@@ -2653,7 +3778,7 @@ String _hostStatusChipLabel(GigStep step, String workerName) {
     case GigStep.payment:
       return 'Awaiting Payout';
     case GigStep.completed:
-      return 'Wrapped Up';
+      return 'Completed';
   }
 }
 
@@ -3080,9 +4205,16 @@ class _ApplicantTileState extends State<_ApplicantTile> {
                   borderRadius: BorderRadius.circular(16),
                 ),
               ),
-              child: const Text(
-                'Select',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_rounded, size: 14, color: Colors.white),
+                  SizedBox(width: 4),
+                  Text(
+                    'Select',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                  ),
+                ],
               ),
             ),
           ),
@@ -3147,7 +4279,7 @@ String _workerStatusLabel(String status) {
     case 'payment':
       return 'Awaiting Payout';
     case 'completed':
-      return 'Wrapped Up';
+      return 'Completed';
     case 'declined':
       return 'Declined';
     case 'cancelled':
@@ -3194,6 +4326,16 @@ class _MultiWorkerSection extends StatefulWidget {
   // Shared with the parent sheet so the live map here is gated by the same
   // entrance/resize state — see _GigDetailSheetState._buildMapArea.
   final _MapAreaBuilder buildMapArea;
+  // False when the parent already shows a full-bleed map of its own (the
+  // map-at-top active-gig layout) — this section's own embedded map card
+  // would just be a redundant second copy of the same live worker pins.
+  final bool showEmbeddedMap;
+  // When the parent owns a full-bleed map of its own, worker-card taps
+  // need to select on THAT map instead of this section's own (hidden)
+  // one — passing these makes selection controlled from outside rather
+  // than tracked in this State's own _selectedWorkerId.
+  final String? selectedWorkerId;
+  final ValueChanged<String>? onSelectWorker;
 
   const _MultiWorkerSection({
     required this.gigId,
@@ -3205,6 +4347,9 @@ class _MultiWorkerSection extends StatefulWidget {
     required this.onMarkPaid,
     required this.onRequestCancellation,
     required this.buildMapArea,
+    this.showEmbeddedMap = true,
+    this.selectedWorkerId,
+    this.onSelectWorker,
   });
 
   @override
@@ -3214,8 +4359,18 @@ class _MultiWorkerSection extends StatefulWidget {
 class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
   // Which worker's route is drawn on the shared map — at most one at a time
   // so N workers never turns into N crisscrossing polylines. Tapping a
-  // worker's card again clears it.
+  // worker's card again clears it. Only used when the parent doesn't
+  // control selection itself (widget.onSelectWorker == null).
   String? _selectedWorkerId;
+
+  void _toggleSelection(String id, String? effectiveSelectedId) {
+    final onSelectWorker = widget.onSelectWorker;
+    if (onSelectWorker != null) {
+      onSelectWorker(id);
+    } else {
+      setState(() => _selectedWorkerId = effectiveSelectedId == id ? null : id);
+    }
+  }
 
   void _openFullScreenTrackingMap(BuildContext context) {
     final gigLocation = widget.gigLocation;
@@ -3235,7 +4390,9 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
         // that was the "tapping does nothing" bug.
         builder: (ctx) {
           bool workerListVisible = true;
-          String? selectedWorkerId = _selectedWorkerId;
+          String? selectedWorkerId = widget.onSelectWorker != null
+              ? widget.selectedWorkerId
+              : _selectedWorkerId;
           return Scaffold(
             backgroundColor: Colors.black,
             body: SafeArea(
@@ -3437,14 +4594,18 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
             // (paid/declined/cancelled) — treat it as cleared for this
             // render rather than pointing the map at a stale route; the
             // field itself is only ever written via setState in onTap.
+            final rawSelectedId = widget.onSelectWorker != null
+                ? widget.selectedWorkerId
+                : _selectedWorkerId;
             final effectiveSelectedId =
-                trackableWorkers.any((w) => w.workerId == _selectedWorkerId)
-                ? _selectedWorkerId
+                trackableWorkers.any((w) => w.workerId == rawSelectedId)
+                ? rawSelectedId
                 : null;
             return Column(
               children: [
                 ...releasedNotices,
-                if (widget.gigLocation != null &&
+                if (widget.showEmbeddedMap &&
+                    widget.gigLocation != null &&
                     trackableWorkers.isNotEmpty) ...[
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
@@ -3455,11 +4616,8 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
                           gigLocation: widget.gigLocation!,
                           workers: trackableWorkers,
                           selectedWorkerId: effectiveSelectedId,
-                          onWorkerTap: (id) => setState(
-                            () => _selectedWorkerId = effectiveSelectedId == id
-                                ? null
-                                : id,
-                          ),
+                          onWorkerTap: (id) =>
+                              _toggleSelection(id, effectiveSelectedId),
                         ),
                         primaryLabel: null,
                         secondaryLabel: null,
@@ -3485,11 +4643,9 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
                       isSelected: w.workerId == effectiveSelectedId,
                       isTrackable: isTrackable,
                       onTap: isTrackable
-                          ? () => setState(
-                              () => _selectedWorkerId =
-                                  effectiveSelectedId == w.workerId
-                                  ? null
-                                  : w.workerId,
+                          ? () => _toggleSelection(
+                              w.workerId,
+                              effectiveSelectedId,
                             )
                           : null,
                       onMarkPaid: () => widget.onMarkPaid(w),
@@ -3953,12 +5109,17 @@ class _MultiWorkerTrackingMap extends StatefulWidget {
   final List<WorkerSlotModel> workers; // pre-filtered to trackable + located
   final String? selectedWorkerId;
   final ValueChanged<String> onWorkerTap;
+  // Extra bottom inset, in logical pixels, matching how much of the map
+  // the draggable bottom sheet currently covers — keeps the fitted
+  // worker pins centered in the visible area instead of behind it.
+  final double bottomPadding;
 
   const _MultiWorkerTrackingMap({
     required this.gigLocation,
     required this.workers,
     required this.selectedWorkerId,
     required this.onWorkerTap,
+    this.bottomPadding = 0,
   });
 
   @override
@@ -4003,6 +5164,9 @@ class _MultiWorkerTrackingMapState extends State<_MultiWorkerTrackingMap> {
       _animateToSelection();
       _redrawIconRing(oldWidget.selectedWorkerId);
       _redrawIconRing(widget.selectedWorkerId);
+    }
+    if (oldWidget.bottomPadding != widget.bottomPadding) {
+      _animateToSelection();
     }
     _ensureWorkerIcons();
   }
@@ -4159,7 +5323,7 @@ class _MultiWorkerTrackingMapState extends State<_MultiWorkerTrackingMap> {
             ll.LatLng(swLat, swLng),
             ll.LatLng(neLat, neLng),
           ),
-          padding: const EdgeInsets.all(60),
+          padding: EdgeInsets.fromLTRB(60, 60, 60, 60 + widget.bottomPadding),
         ),
       );
     }
@@ -4314,6 +5478,7 @@ class _MultiWorkerTrackingMapState extends State<_MultiWorkerTrackingMap> {
             myLocationEnabled: false,
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
+            padding: EdgeInsets.only(bottom: widget.bottomPadding),
             markers: _buildGoogleMarkers(),
             polylines: _routePoints.isNotEmpty
                 ? {

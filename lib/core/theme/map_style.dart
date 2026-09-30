@@ -9,6 +9,7 @@ const String kDarkMapStyle = '''
   {"featureType": "administrative.country", "elementType": "labels.text.fill", "stylers": [{"color": "#9e9e9e"}]},
   {"featureType": "administrative.land_parcel", "stylers": [{"visibility": "off"}]},
   {"featureType": "administrative.locality", "elementType": "labels.text.fill", "stylers": [{"color": "#bdbdbd"}]},
+  {"featureType": "landscape.man_made", "elementType": "geometry", "stylers": [{"color": "#2a2a2a"}]},
   {"featureType": "landscape.natural", "elementType": "geometry", "stylers": [{"color": "#171717"}]},
   {"featureType": "poi", "elementType": "labels.text.fill", "stylers": [{"color": "#757575"}]},
   {"featureType": "poi.park", "elementType": "geometry", "stylers": [{"color": "#181818"}]},

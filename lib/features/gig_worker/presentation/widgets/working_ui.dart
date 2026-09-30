@@ -2,8 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -195,12 +193,19 @@ class _WorkingUIState extends State<WorkingUI> {
   // Actual road route
   List<LatLng> _routePoints = [];
   LatLng? _lastRouteFetch;
-  double? _routeDistanceM;
   int? _routeEtaSeconds;
   List<_RouteStep> _routeSteps = [];
 
   // Firestore live listener
   StreamSubscription? _gigSub;
+
+  // Draggable bottom sheet (map underneath) — dragged down to _sheetMin
+  // reveals the map full-screen; the floating arrow-up button then
+  // animates it back to _sheetInitial.
+  final _sheetController = DraggableScrollableController();
+  bool _sheetCollapsed = false;
+  static const _sheetMin = 0.14;
+  static const _sheetInitial = 0.55;
 
   // Location status
   String? _locationWarning;
@@ -231,7 +236,24 @@ class _WorkingUIState extends State<WorkingUI> {
         setState(() => _elapsed = _elapsedOffset + _stopwatch.elapsed);
       }
     });
+    _sheetController.addListener(_onSheetSizeChanged);
     _init();
+  }
+
+  void _onSheetSizeChanged() {
+    if (!_sheetController.isAttached) return;
+    final collapsed = _sheetController.size <= _sheetMin + 0.02;
+    if (collapsed != _sheetCollapsed) {
+      setState(() => _sheetCollapsed = collapsed);
+    }
+  }
+
+  void _toggleSheet() {
+    _sheetController.animateTo(
+      _sheetCollapsed ? _sheetInitial : _sheetMin,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   Future<void> _init() async {
@@ -549,7 +571,19 @@ class _WorkingUIState extends State<WorkingUI> {
       // Redirect to the dashboard and close this screen right away — the
       // worker doesn't wait around here for admin approval; onCancel (which
       // tears the gig down for real) only fires once that approval lands.
-      widget.onCancellationRequested?.call();
+      //
+      // Deferred a frame: WorkingUI isn't its own route — it's swapped out
+      // inline by a ternary in gig_worker_screen.dart, so this callback's
+      // setState structurally unmounts WorkingUI's whole subtree. Calling
+      // it synchronously right after the reason dialog's Navigator.pop
+      // (whose Future can resolve before the dialog's own exit
+      // animation/overlay teardown finishes, especially once the Firestore
+      // write above resolves near-instantly from local cache) tore down an
+      // ancestor the still-closing dialog depended on mid-teardown,
+      // tripping Flutter's `_dependents.isEmpty` assertion.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onCancellationRequested?.call();
+      });
     } catch (e) {
       // Previously had no catch: a failed write (permission, network, a bad
       // multi-worker slot ref) surfaced nothing to the user — no error, no
@@ -671,7 +705,6 @@ class _WorkingUIState extends State<WorkingUI> {
       final geometry = route['geometry'] as String;
       final decoded = PolylinePoints().decodePolyline(geometry);
 
-      final distM = (route['distance'] as num?)?.toDouble();
       final durS = (route['duration'] as num?)?.toInt();
 
       final steps = <_RouteStep>[];
@@ -697,7 +730,6 @@ class _WorkingUIState extends State<WorkingUI> {
           _routePoints = decoded
               .map((p) => LatLng(p.latitude, p.longitude))
               .toList();
-          _routeDistanceM = distM;
           _routeEtaSeconds = durS;
           _routeSteps = steps;
         });
@@ -709,6 +741,7 @@ class _WorkingUIState extends State<WorkingUI> {
   void dispose() {
     _timer.cancel();
     _stopwatch.stop();
+    _sheetController.dispose();
     _locationSub?.cancel();
     _locationServiceSub?.cancel();
     _gigSub?.cancel();
@@ -735,178 +768,307 @@ class _WorkingUIState extends State<WorkingUI> {
       currencyCode: widget.gig.currencyCode,
     );
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final topInset = MediaQuery.of(context).padding.top;
 
     return Scaffold(
       backgroundColor: activeGigScreenBg(isDark),
-      body: SafeArea(
-        child: Column(
-          children: [
-            ActiveGigHeader(
-              title: 'Active Gig',
-              statusLabel: kStepLabels[stepIndex],
-              onBack: () => Navigator.of(context).maybePop(),
-              accent: kWorkerAccent,
+      body: Stack(
+        children: [
+          // ── Full-screen map, always underneath ──────────────────────
+          Positioned.fill(
+            child: _ActiveGigMapCard(
+              gig: widget.gig,
+              workerLocation: _workerLocation,
+              // Once arrived there's no more route to travel — drop the
+              // polyline so the map isn't showing stale directions to a
+              // place the worker is already at.
+              routePoints: _step == GigStep.navigating
+                  ? _routePoints
+                  : const [],
+              // Straight-line distance, not the OSRM driving-route distance
+              // — this is what the 40m arrival geofence (_checkGeofence)
+              // actually compares against, so the number shown here always
+              // matches what triggers "arrived" instead of a road-distance
+              // figure that can read as "already within range" while the
+              // geofence (correctly) hasn't fired yet.
+              routeDistanceM:
+                  _step == GigStep.navigating && _workerLocation != null
+                  ? Geolocator.distanceBetween(
+                      _workerLocation!.latitude,
+                      _workerLocation!.longitude,
+                      widget.gig.position.latitude,
+                      widget.gig.position.longitude,
+                    )
+                  : null,
+              // Keeps the fitted route/markers centered in the strip still
+              // visible above the sheet, instead of behind it.
+              bottomPadding:
+                  MediaQuery.of(context).size.height *
+                  (_sheetCollapsed ? _sheetMin : _sheetInitial),
             ),
+          ),
 
-            // ── Location warning ───────────────────────────────────────
-            if (_locationWarning != null)
-              Container(
-                width: double.infinity,
-                color: Colors.orange.shade700,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
+          // ── Floating back button over the map ───────────────────────
+          Positioned(
+            top: topInset + 10,
+            left: 12,
+            child: MapRoundButton(
+              icon: Icons.arrow_back_ios_new_rounded,
+              onTap: () => Navigator.of(context).maybePop(),
+            ),
+          ),
+
+          // ── Draggable bottom sheet — drag down to reveal the full map,
+          // snaps between _sheetMin (collapsed) and _sheetInitial (open).
+          DraggableScrollableSheet(
+            controller: _sheetController,
+            initialChildSize: _sheetInitial,
+            minChildSize: _sheetMin,
+            maxChildSize: _sheetInitial,
+            snap: true,
+            snapSizes: const [_sheetMin, _sheetInitial],
+            builder: (ctx, scrollController) => Container(
+              decoration: BoxDecoration(
+                color: activeGigScreenBg(isDark),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
                 ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.location_off_rounded,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _locationWarning!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                    if (_locationWarning!.contains('settings'))
-                      TextButton(
-                        onPressed: () => Geolocator.openAppSettings(),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: const Text(
-                          'Settings',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
               ),
-
-            // ── Scrollable body ────────────────────────────────────────
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: SafeArea(
+                top: false,
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ActiveGigProgressCard(
-                      stepIndex: stepIndex,
-                      title: copy.title,
-                      body: copy.body,
-                      elapsed: _step == GigStep.working ? _fmt(_elapsed) : null,
-                      arrivedPromptVisible:
-                          !_cancelPending && _arrivedPromptVisible,
-                      onConfirmArrival: _confirmArrival,
-                      isCancelPending: _cancelPending,
-                      cancelRequestedByHost: _cancelRequestedByHost,
-                      showStartGig: !_cancelPending && _step == GigStep.arrived,
-                      onStartGig: _startWork,
-                      showGigComplete:
-                          !_cancelPending && _step == GigStep.working,
-                      onGigComplete: _completeWork,
-                      accent: kWorkerAccent,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ── Reopen payment code entry (worker backed out of it
-                    // earlier). _paymentConfirmShown only ever flips once —
-                    // if the sheet gets dismissed via back press, nothing
-                    // else re-triggers it, so this button calls
-                    // _showWorkerPaymentConfirm directly instead of relying
-                    // on that one-shot flag.
-                    if (_step == GigStep.payment) ...[
-                      SizedBox(
+                    // Drag handle — handled manually (jumpTo/animateTo)
+                    // rather than relying solely on the sheet's built-in
+                    // scroll-position-driven drag, since that coordination
+                    // can get out-competed by the native map view sitting
+                    // underneath wherever the sheet overlaps it.
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onVerticalDragUpdate: (details) {
+                        if (!_sheetController.isAttached) return;
+                        final screenHeight = MediaQuery.of(context).size.height;
+                        final newSize =
+                            (_sheetController.size -
+                                    details.delta.dy / screenHeight)
+                                .clamp(_sheetMin, _sheetInitial);
+                        _sheetController.jumpTo(newSize);
+                      },
+                      onVerticalDragEnd: (details) {
+                        if (!_sheetController.isAttached) return;
+                        final current = _sheetController.size;
+                        final mid = (_sheetMin + _sheetInitial) / 2;
+                        final target = current < mid
+                            ? _sheetMin
+                            : _sheetInitial;
+                        _sheetController.animateTo(
+                          target,
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOut,
+                        );
+                      },
+                      child: Container(
                         width: double.infinity,
-                        height: 46,
-                        child: ElevatedButton.icon(
-                          onPressed: _showWorkerPaymentConfirm,
-                          icon: const Icon(
-                            Icons.qr_code_scanner_rounded,
-                            size: 20,
-                          ),
-                          label: const Text(
-                            'Enter Payment Code',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF22C55E),
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                        color: Colors.transparent,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: isDark ? Colors.white24 : Colors.black12,
+                              borderRadius: BorderRadius.circular(2),
                             ),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 16),
-                    ],
-
-                    _ActiveGigMapCard(
-                      gig: widget.gig,
-                      workerLocation: _workerLocation,
-                      routePoints: _routePoints,
-                      routeDistanceM: _routeDistanceM,
                     ),
-                    const SizedBox(height: 16),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // ── Location warning ─────────────────────
+                            if (_locationWarning != null) ...[
+                              Container(
+                                width: double.infinity,
+                                color: Colors.orange.shade700,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.location_off_rounded,
+                                      color: Colors.white,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _locationWarning!,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ),
+                                    if (_locationWarning!.contains('settings'))
+                                      TextButton(
+                                        onPressed: () =>
+                                            Geolocator.openAppSettings(),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                          ),
+                                          tapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                        ),
+                                        child: const Text(
+                                          'Settings',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
 
-                    _GigHostCard(gig: widget.gig),
+                            ActiveGigProgressCard(
+                              stepIndex: stepIndex,
+                              title: copy.title,
+                              body: copy.body,
+                              elapsed: _step == GigStep.working
+                                  ? _fmt(_elapsed)
+                                  : null,
+                              arrivedPromptVisible:
+                                  !_cancelPending && _arrivedPromptVisible,
+                              onConfirmArrival: _confirmArrival,
+                              isCancelPending: _cancelPending,
+                              cancelRequestedByHost: _cancelRequestedByHost,
+                              showStartGig:
+                                  !_cancelPending && _step == GigStep.arrived,
+                              onStartGig: _startWork,
+                              showGigComplete:
+                                  !_cancelPending && _step == GigStep.working,
+                              onGigComplete: _completeWork,
+                              accent: kWorkerAccent,
+                            ),
+                            const SizedBox(height: 16),
 
-                    const SizedBox(height: 20),
+                            // ── Reopen payment code entry (worker backed out of
+                            // it earlier). _paymentConfirmShown only ever flips
+                            // once — if the sheet gets dismissed via back press,
+                            // nothing else re-triggers it, so this button calls
+                            // _showWorkerPaymentConfirm directly instead of
+                            // relying on that one-shot flag.
+                            if (_step == GigStep.payment) ...[
+                              SizedBox(
+                                width: double.infinity,
+                                height: 46,
+                                child: ElevatedButton.icon(
+                                  onPressed: _showWorkerPaymentConfirm,
+                                  icon: const Icon(
+                                    Icons.qr_code_scanner_rounded,
+                                    size: 20,
+                                  ),
+                                  label: const Text(
+                                    'Enter Payment Code',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF22C55E),
+                                    foregroundColor: Colors.white,
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
 
-                    // ── Cancel gig (only while still on the way / working) ─
-                    if (!_cancelPending &&
-                        (_step == GigStep.navigating ||
-                            _step == GigStep.arrived ||
-                            _step == GigStep.working))
-                      CancelGigSection(
-                        onPressed: _showCancelReasonDialog,
-                        label: 'Cancel Application',
-                        caption:
-                            'Cancelling after being selected may affect your worker rating',
+                            _GigHostCard(gig: widget.gig),
+
+                            const SizedBox(height: 20),
+
+                            // ── Cancel gig (only while still on the way /
+                            // working) ──────────────────────────────────────
+                            if (!_cancelPending &&
+                                (_step == GigStep.navigating ||
+                                    _step == GigStep.arrived ||
+                                    _step == GigStep.working))
+                              CancelGigSection(
+                                onPressed: _showCancelReasonDialog,
+                                label: 'Cancel Application',
+                                caption:
+                                    'Cancelling after being selected may affect your worker rating',
+                              ),
+
+                            const SizedBox(height: 20),
+                          ],
+                        ),
                       ),
-
-                    const SizedBox(height: 20),
+                    ),
                   ],
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+
+          // ── Arrow-up button — only while the sheet is collapsed ─────
+          if (_sheetCollapsed)
+            Positioned(
+              right: 16,
+              bottom: 24 + MediaQuery.of(context).padding.bottom,
+              child: MapRoundButton(
+                icon: Icons.keyboard_arrow_up_rounded,
+                onTap: _toggleSheet,
+              ),
+            ),
+        ],
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Map card — reuses _NavMapCore's existing GoogleMap/OSM instance & config;
-//  only the surrounding container styling and overlays are new.
+//  Full-bleed tracking map shown at the top of the active-gig screen —
+//  edge-to-edge, no card border/radius, since it now fills its own section
+//  instead of sitting embedded inside the scrollable content below.
 // ─────────────────────────────────────────────────────────────────────────────
 class _ActiveGigMapCard extends StatefulWidget {
   final GigMarkerData gig;
   final LatLng? workerLocation;
   final List<LatLng> routePoints;
   final double? routeDistanceM;
+  final double bottomPadding;
 
   const _ActiveGigMapCard({
     required this.gig,
     required this.workerLocation,
     required this.routePoints,
     this.routeDistanceM,
+    this.bottomPadding = 0,
   });
 
   @override
@@ -926,109 +1088,65 @@ class _ActiveGigMapCardState extends State<_ActiveGigMapCard> {
     await launchUrl(dirUri, mode: LaunchMode.inAppBrowserView);
   }
 
-  // Unchanged from the previous _NavigatingSectionState — same fullscreen
-  // map dialog, reusing the same MapRoundButton close control.
-  void _openFullScreenMap() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (ctx) => Scaffold(
-          backgroundColor: Colors.black,
-          body: SafeArea(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: _NavMapCore(
-                    gig: widget.gig,
-                    workerLocation: widget.workerLocation,
-                    routePoints: widget.routePoints,
-                    onDestinationTap: _openNavigation,
-                  ),
-                ),
-                Positioned(
-                  top: 12,
-                  left: 12,
-                  child: MapRoundButton(
-                    icon: Icons.close_rounded,
-                    onTap: () => Navigator.of(ctx).pop(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final distText = widget.routeDistanceM != null
         ? ' · ${fmtDist(widget.routeDistanceM!)}'
         : '';
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(kActiveGigCardRadius),
-      child: Container(
-        height: 312,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(kActiveGigCardRadius),
-          border: Border.all(color: activeGigCardBorder(isDark)),
+    // Below the floating back button / status pill the parent screen draws
+    // over this map, so the legend never sits underneath them.
+    final chipTop = MediaQuery.of(context).padding.top + 56;
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: _NavMapCore(
+            gig: widget.gig,
+            workerLocation: widget.workerLocation,
+            routePoints: widget.routePoints,
+            onDestinationTap: _openNavigation,
+            // Smaller than the default 60 so the fixed padding doesn't eat
+            // too much of the frame and force excess zoom-out.
+            fitPadding: 20,
+            bottomPadding: widget.bottomPadding,
+          ),
         ),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: _NavMapCore(
-                gig: widget.gig,
-                workerLocation: widget.workerLocation,
-                routePoints: widget.routePoints,
-                onDestinationTap: _openNavigation,
-                onExpand: _openFullScreenMap,
-                // Smaller than the default 60 so the fixed padding doesn't
-                // eat too much of the frame and force excess zoom-out.
-                fitPadding: 20,
-              ),
-            ),
-            Positioned(
-              left: 8,
-              top: 8,
-              child: MapInfoChip(
-                primaryLabel: 'You',
-                primaryDotColor: kWorkerAccent.solid,
-                secondaryLabel: 'Gig  - - Route$distText',
-                secondaryDotColor: Colors.red,
-              ),
-            ),
-          ],
+        Positioned(
+          left: 8,
+          top: chipTop,
+          child: MapInfoChip(
+            primaryLabel: 'You',
+            primaryDotColor: kWorkerAccent.solid,
+            secondaryLabel: 'Gig  - - Route$distText',
+            secondaryDotColor: Colors.red,
+          ),
         ),
-      ),
+      ],
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Navigation map core — renders the Google/OSM map with zoom + expand controls.
-//  Used both embedded (fixed height, rounded card) and full screen (height: null).
+//  Navigation map core — renders the Google/OSM map, always full-bleed within
+//  whatever bounds its parent gives it.
 // ─────────────────────────────────────────────────────────────────────────────
 class _NavMapCore extends StatefulWidget {
   final GigMarkerData gig;
   final LatLng? workerLocation;
   final List<LatLng> routePoints;
-  final Color? divider;
-  final double? height;
-  final VoidCallback? onExpand;
   final VoidCallback? onDestinationTap;
   final double fitPadding;
+  // Extra bottom inset, in logical pixels, matching how much of the map
+  // the draggable bottom sheet currently covers — keeps the fitted
+  // route/markers centered in the visible area instead of behind it.
+  final double bottomPadding;
 
   const _NavMapCore({
     required this.gig,
     required this.workerLocation,
     required this.routePoints,
-    this.divider,
-    this.height,
-    this.onExpand,
     this.onDestinationTap,
     this.fitPadding = 60,
+    this.bottomPadding = 0,
   });
 
   @override
@@ -1063,7 +1181,8 @@ class _NavMapCoreState extends State<_NavMapCore> {
     // slightly after the location update that triggered this rebuild), so
     // the polyline itself is never left clipped outside the fitted bounds.
     if (widget.workerLocation != oldWidget.workerLocation ||
-        widget.routePoints.length != oldWidget.routePoints.length) {
+        widget.routePoints.length != oldWidget.routePoints.length ||
+        widget.bottomPadding != oldWidget.bottomPadding) {
       _animateToFit();
     }
   }
@@ -1117,7 +1236,12 @@ class _NavMapCoreState extends State<_NavMapCore> {
             ll.LatLng(swLat, swLng),
             ll.LatLng(neLat, neLng),
           ),
-          padding: EdgeInsets.all(widget.fitPadding),
+          padding: EdgeInsets.fromLTRB(
+            widget.fitPadding,
+            widget.fitPadding,
+            widget.fitPadding,
+            widget.fitPadding + widget.bottomPadding,
+          ),
         ),
       );
     }
@@ -1256,18 +1380,6 @@ class _NavMapCoreState extends State<_NavMapCore> {
     );
   }
 
-  Widget _buildControls() {
-    if (widget.onExpand == null) return const SizedBox.shrink();
-    return Positioned(
-      left: 10,
-      bottom: 10,
-      child: MapRoundButton(
-        icon: Icons.fullscreen_rounded,
-        onTap: widget.onExpand!,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final gigPos = LatLng(
@@ -1294,38 +1406,18 @@ class _NavMapCoreState extends State<_NavMapCore> {
             myLocationEnabled: true,
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
+            padding: EdgeInsets.only(bottom: widget.bottomPadding),
             markers: _buildGoogleMarkers(),
             polylines: _buildPolylines(),
-            gestureRecognizers: {
-              Factory<OneSequenceGestureRecognizer>(
-                () => EagerGestureRecognizer(),
-              ),
-            },
+            // No EagerGestureRecognizer override here — this map is now the
+            // full-screen background behind a DraggableScrollableSheet, and
+            // an eager recognizer on the map would win every gesture arena
+            // contest against the sheet's own drag handling, making the
+            // sheet undraggable wherever it overlaps the map.
           )
         : _buildOsmMap();
 
-    final stack = Stack(
-      children: [
-        Positioned.fill(child: mapWidget),
-        _buildControls(),
-      ],
-    );
-
-    if (widget.height == null) return stack;
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        height: widget.height,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          border: widget.divider != null
-              ? Border.all(color: widget.divider!)
-              : null,
-        ),
-        child: stack,
-      ),
-    );
+    return mapWidget;
   }
 }
 

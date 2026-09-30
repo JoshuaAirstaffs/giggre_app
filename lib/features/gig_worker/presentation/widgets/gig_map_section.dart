@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../../../core/models/rating_summary.dart';
 import '../../../../core/services/rating_service.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -12,6 +13,7 @@ import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -34,6 +36,7 @@ import '../../../tutorial/widgets/tutorial_anchor.dart';
 class GigMarkerData {
   final String id;
   final String title;
+  final String description;
   final String gigType; // 'quick' | 'open' | 'offered'
   final double budget;
   final String currencyCode;
@@ -65,6 +68,7 @@ class GigMarkerData {
   const GigMarkerData({
     required this.id,
     required this.title,
+    this.description = '',
     required this.gigType,
     required this.budget,
     this.currencyCode = 'USD',
@@ -153,22 +157,49 @@ String formatGigDistance(double meters) {
   return '${(meters / 1000).toStringAsFixed(1)} km';
 }
 
-// Same field the host's own profile screen reads
-// (gig_host_profile_screen.dart) — one doc read, shown on the gig sheet's
-// host row. Gracefully returns null (hidden) on any failure.
-Future<double?> fetchHostRating(String hostId) async {
-  if (hostId.isEmpty) return null;
+// One doc read, shown on the gig sheet's host row (avatar + rating).
+// Gracefully returns nulls (hidden/fallback) on any failure.
+Future<({double? rating, String? photoUrl})> fetchHostInfo(
+  String hostId,
+) async {
+  if (hostId.isEmpty) return (rating: null, photoUrl: null);
   try {
     final doc = await FirebaseFirestore.instance
         .collection('users')
         .doc(hostId)
         .get();
-    // Null when the host has no ratings yet — callers already treat null as
-    // "nothing to show" rather than substituting a default.
-    return RatingSummary.fromUserData(doc.data(), RateeRole.host).average;
+    final data = doc.data();
+    // Null rating when the host has no ratings yet — callers already treat
+    // null as "nothing to show" rather than substituting a default.
+    return (
+      rating: RatingSummary.fromUserData(data, RateeRole.host).average,
+      photoUrl: data?['photoUrl'] as String?,
+    );
   } catch (_) {
-    return null;
+    return (rating: null, photoUrl: null);
   }
+}
+
+// Fallback avatar (initial letter) shown while the host's photo loads,
+// fails to load, or when they haven't set one.
+Widget _hostInitialAvatar(GigMarkerData gig) {
+  return Container(
+    width: 38,
+    height: 38,
+    decoration: BoxDecoration(
+      color: kBlue.withValues(alpha: 0.12),
+      shape: BoxShape.circle,
+    ),
+    alignment: Alignment.center,
+    child: Text(
+      gig.hostName.isNotEmpty ? gig.hostName[0].toUpperCase() : '?',
+      style: const TextStyle(
+        color: kBlue,
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+  );
 }
 
 GigMarkerData? gigMarkerFromDoc(
@@ -189,6 +220,7 @@ GigMarkerData? gigMarkerFromDoc(
   return GigMarkerData(
     id: id,
     title: data['title'] as String? ?? 'Untitled Gig',
+    description: data['description'] as String? ?? '',
     gigType: type,
     budget: (data['budget'] as num?)?.toDouble() ?? 0,
     payType: (data['payType'] as String?) ?? 'flat',
@@ -614,6 +646,84 @@ Future<void> cancelGigApplication(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Small, purely-illustrative static map for the gig detail sheet — mirrors
+//  chat.dart's _LocationBubble (liteMode, every gesture off) since this is
+//  never meant to be interacted with beyond the "Open in Maps" pill.
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  Collapsible text for the description section — some hosts write long
+//  descriptions, so this clamps to a few lines with a "Show more"/"Show
+//  less" toggle instead of always taking up unbounded sheet space. The
+//  toggle only appears when the text actually overflows the collapsed
+//  line count.
+// ─────────────────────────────────────────────────────────────────────────────
+class _ExpandableText extends StatefulWidget {
+  const _ExpandableText({required this.text, required this.style});
+
+  final String text;
+  final TextStyle style;
+
+  static const _collapsedMaxLines = 3;
+
+  @override
+  State<_ExpandableText> createState() => _ExpandableTextState();
+}
+
+class _ExpandableTextState extends State<_ExpandableText> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: widget.text, style: widget.style),
+          maxLines: _ExpandableText._collapsedMaxLines,
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: constraints.maxWidth);
+        final overflows = painter.didExceedMaxLines;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.text,
+              style: widget.style,
+              maxLines: _expanded ? null : _ExpandableText._collapsedMaxLines,
+              overflow: _expanded ? null : TextOverflow.ellipsis,
+            ),
+            if (overflows) ...[
+              const SizedBox(height: 4),
+              GestureDetector(
+                onTap: () => setState(() => _expanded = !_expanded),
+                child: Text(
+                  _expanded ? 'Show less' : 'Show more',
+                  style: const TextStyle(
+                    color: kBlue,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+// Opens the gig's coordinates in the device's native Maps app — used by
+// the "View map" link under the LOCATION cell in the gig detail sheet.
+Future<void> _openGigLocationInMaps(LatLng position) async {
+  final uri = Uri.parse(
+    'https://www.google.com/maps/search/?api=1'
+    '&query=${position.latitude},${position.longitude}',
+  );
+  await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+}
+
 void showFullGigDetailSheet(
   BuildContext context, {
   required GigMarkerData gig,
@@ -627,8 +737,6 @@ void showFullGigDetailSheet(
   String? myCountryCode,
   Map<String, String?> countryCodeCache = const {},
   ValueChanged<GigMarkerData>? onOfferedGigAccepted,
-  bool fromList = false,
-  VoidCallback? onSeeOnMap,
 }) {
   final accent = cardAccentForType(gig.gigType);
   final statusLabel = gigTypeLabel(gig.gigType);
@@ -725,104 +833,125 @@ void showFullGigDetailSheet(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 10, bottom: 14),
-                child: Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: isDark ? kBorder : const Color(0xFFD5DCE6),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-              ),
-              // Title row
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Stack(
                 children: [
-                  Expanded(
-                    child: Text(
-                      gig.title,
-                      style: TextStyle(
-                        color: onSurface,
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.4,
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10, bottom: 14),
+                    child: Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: isDark ? kBorder : const Color(0xFFD5DCE6),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 7,
-                        height: 7,
-                        decoration: BoxDecoration(
-                          color: accent,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        statusLabel,
-                        style: TextStyle(
-                          color: accent,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (onToggleBookmark != null)
-                        StatefulBuilder(
-                          builder: (sbCtx, setIconState) => IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            icon: Icon(
-                              isSaved
-                                  ? Icons.bookmark_rounded
-                                  : Icons.bookmark_outline_rounded,
-                              color: kGold,
-                              size: 22,
-                            ),
-                            onPressed: () {
-                              setIconState(() => isSaved = !isSaved);
-                              onToggleBookmark!(gig.id, gig.gigType);
-                            },
-                          ),
-                        ),
-                      if (gig.hostId != uid)
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: const Icon(
-                            Icons.flag_outlined,
-                            color: kSub,
-                            size: 20,
-                          ),
-                          // Close this sheet before opening the report sheet
-                          // instead of stacking one modal bottom sheet on
-                          // top of another — nesting them crashes the
-                          // framework on dismiss (InheritedElement
-                          // _dependents assertion).
-                          onPressed: () {
-                            Navigator.pop(ctx);
-                            ReportService.show(
-                              context,
-                              contentType: ReportContentType.gig,
-                              contentId: gig.id,
-                              contentSnapshot: gig.title,
-                              contentAuthorId: gig.hostId,
-                              surface: 'gig_detail',
-                              gigId: gig.id,
-                            );
-                          },
-                        ),
-                    ],
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      icon: Icon(Icons.close_rounded, color: kSub, size: 22),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
                   ),
                 ],
+              ),
+              // Status pill + actions row
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: accent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          '$statusLabel gig',
+                          style: TextStyle(
+                            color: accent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Spacer(),
+                  if (onToggleBookmark != null)
+                    StatefulBuilder(
+                      builder: (sbCtx, setIconState) => IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        icon: Icon(
+                          isSaved
+                              ? Icons.bookmark_rounded
+                              : Icons.bookmark_outline_rounded,
+                          color: kGold,
+                          size: 22,
+                        ),
+                        onPressed: () {
+                          setIconState(() => isSaved = !isSaved);
+                          onToggleBookmark!(gig.id, gig.gigType);
+                        },
+                      ),
+                    ),
+                  if (gig.hostId != uid)
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      icon: const Icon(
+                        Icons.flag_outlined,
+                        color: kSub,
+                        size: 20,
+                      ),
+                      // Close this sheet before opening the report sheet
+                      // instead of stacking one modal bottom sheet on
+                      // top of another — nesting them crashes the
+                      // framework on dismiss (InheritedElement
+                      // _dependents assertion).
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        ReportService.show(
+                          context,
+                          contentType: ReportContentType.gig,
+                          contentId: gig.id,
+                          contentSnapshot: gig.title,
+                          contentAuthorId: gig.hostId,
+                          surface: 'gig_detail',
+                          gigId: gig.id,
+                        );
+                      },
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                gig.title,
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.4,
+                ),
               ),
               const SizedBox(height: 4),
               if (gig.createdAt != null)
@@ -833,164 +962,101 @@ void showFullGigDetailSheet(
                   style: const TextStyle(color: kSub, fontSize: 11),
                 ),
               const SizedBox(height: 16),
-              // Host row (display only)
-              Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: kBlue.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      gig.hostName.isNotEmpty
-                          ? gig.hostName[0].toUpperCase()
-                          : '?',
-                      style: const TextStyle(
-                        color: kBlue,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          gig.hostName.isNotEmpty ? gig.hostName : '—',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: onSurface,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        FutureBuilder<double?>(
-                          future: fetchHostRating(gig.hostId),
-                          builder: (context, snap) {
-                            final rating = snap.data;
-                            if (rating == null) {
-                              return const SizedBox.shrink();
-                            }
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: RichText(
-                                text: TextSpan(
-                                  style: const TextStyle(
-                                    color: kSub,
-                                    fontSize: 10.5,
-                                  ),
-                                  children: [
-                                    const TextSpan(
-                                      text: '★ ',
-                                      style: TextStyle(
-                                        color: Color(0xFFF0A830),
-                                      ),
-                                    ),
-                                    TextSpan(
-                                      text:
-                                          '${rating.toStringAsFixed(1)} host rating',
-                                    ),
-                                  ],
+              // Pay / Work duration — boxed, since these are the two
+              // figures a worker weighs most before taking the gig.
+              // IntrinsicHeight + stretch keeps both boxes the same
+              // height even though WORK DURATION has an extra caption
+              // line that PAY doesn't.
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _BoxedInfoCell(
+                        label: 'PAY',
+                        color: kBlue.withValues(alpha: isDark ? 0.16 : 0.1),
+                        child: RichText(
+                          text: TextSpan(
+                            children: [
+                              TextSpan(
+                                text: CurrencyFormatter.format(
+                                  gig.payType == 'hourly' &&
+                                          gig.hourlyRate != null
+                                      ? gig.hourlyRate!
+                                      : gig.budget,
+                                  gig.currencyCode,
+                                ),
+                                style: const TextStyle(
+                                  color: Color(0xFF2B6FB5),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  TextButton(
-                    // Close this sheet before opening the profile sheet
-                    // instead of stacking one modal bottom sheet on top of
-                    // another — nesting them here caused every open sheet
-                    // to disappear together once the profile sheet's Block
-                    // action triggered a rebuild.
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      UserProfileScreen.push(
-                        context,
-                        uid: gig.hostId,
-                        fallbackName: gig.hostName,
-                        surface: 'gig_detail',
-                        // Viewing the host, so this is their host-side
-                        // reputation — not the worker rating they'd have
-                        // from gigs they've worked themselves.
-                        role: RateeRole.host,
-                      );
-                    },
-                    child: const Text('View'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Divider(
-                height: 0,
-                thickness: 1,
-                color: Theme.of(ctx).dividerColor,
-              ),
-              const SizedBox(height: 14),
-              // Info grid
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _InfoGridCell(
-                      icon: Icons.attach_money_rounded,
-                      label: 'PAY',
-                      child: RichText(
-                        text: TextSpan(
-                          children: [
-                            TextSpan(
-                              text: CurrencyFormatter.format(
-                                gig.payType == 'hourly' &&
-                                        gig.hourlyRate != null
-                                    ? gig.hourlyRate!
-                                    : gig.budget,
-                                gig.currencyCode,
+                              TextSpan(
+                                text: gig.payType == 'hourly'
+                                    ? ' / hr'
+                                    : ' / day',
+                                style: const TextStyle(
+                                  color: kSub,
+                                  fontSize: 10,
+                                ),
                               ),
-                              style: const TextStyle(
-                                color: Color(0xFF2B6FB5),
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            TextSpan(
-                              text: gig.payType == 'hourly'
-                                  ? ' / hr'
-                                  : ' / day',
-                              style: const TextStyle(color: kSub, fontSize: 10),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _InfoGridCell(
-                      icon: Icons.calendar_today_rounded,
-                      label: 'SCHEDULE',
-                      child: Text(
-                        gig.scheduledDate != null
-                            ? DateFormat(
-                                'EEE, MMM d · h:mm a',
-                              ).format(gig.scheduledDate!)
-                            : '—',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
+                    if (gig.workDurationHours != null) ...[
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _BoxedInfoCell(
+                          label: 'WORK DURATION',
+                          color: _neutralSurface(isDark),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '~${_fmtHours(gig.workDurationHours!)}',
+                                style: TextStyle(
+                                  color: onSurface,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  'Estimate, not a commitment',
+                                  style: TextStyle(
+                                    color: kSub.withValues(alpha: 0.9),
+                                    fontSize: 10.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _InfoGridCell(
+                icon: Icons.calendar_today_rounded,
+                label: 'SCHEDULE',
+                child: Text(
+                  gig.scheduledDate != null
+                      ? DateFormat(
+                          'EEE, MMM d · h:mm a',
+                        ).format(gig.scheduledDate!)
+                      : '—',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
                   ),
-                ],
+                ),
               ),
               if (gig.isMultiWorker) ...[
                 const SizedBox(height: 12),
@@ -1022,63 +1088,66 @@ void showFullGigDetailSheet(
                   ),
                 ),
               ],
-              if (gig.workDurationHours != null) ...[
-                const SizedBox(height: 12),
-                _InfoGridCell(
-                  icon: Icons.hourglass_bottom_rounded,
-                  label: 'WORK DURATION',
-                  child: RichText(
-                    text: TextSpan(
-                      children: [
-                        TextSpan(
-                          text: '~${_fmtHours(gig.workDurationHours!)}',
-                          style: const TextStyle(
-                            color: Color(0xFF2B6FB5),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const TextSpan(
-                          text: ' · estimate only, not a commitment',
-                          style: TextStyle(color: kSub, fontSize: 10.5),
-                        ),
-                      ],
-                    ),
+              const SizedBox(height: 12),
+              _InfoGridCell(
+                icon: Icons.location_on_outlined,
+                label: locationLabel,
+                child: Text(
+                  gig.address.isNotEmpty ? dedupAddress(gig.address) : '—',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-              ],
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _InfoGridCell(
-                      icon: Icons.location_on_outlined,
-                      label: locationLabel,
-                      child: Text(
-                        gig.address.isNotEmpty
-                            ? dedupAddress(gig.address)
-                            : '—',
+              ),
+              const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.only(left: 38),
+                child: GestureDetector(
+                  onTap: () => _openGigLocationInMaps(gig.position),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.map_rounded, color: kBlue, size: 14),
+                      SizedBox(width: 4),
+                      Text(
+                        'View map',
                         style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
+                          color: kBlue,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _InfoGridCell(
-                      icon: Icons.bar_chart_rounded,
-                      label: 'EXPERIENCE',
-                      value: gig.experienceLevel.isNotEmpty
-                          ? gig.experienceLevel
-                          : '—',
-                    ),
-                  ),
-                ],
+                ),
               ),
+              const SizedBox(height: 12),
+              _InfoGridCell(
+                icon: Icons.bar_chart_rounded,
+                label: 'EXPERIENCE',
+                value: gig.experienceLevel.isNotEmpty
+                    ? gig.experienceLevel
+                    : '—',
+              ),
+              if (gig.description.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const Text(
+                  'DESCRIPTION',
+                  style: TextStyle(
+                    color: kSub,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _ExpandableText(
+                  text: gig.description,
+                  style: TextStyle(color: onSurface, fontSize: 13, height: 1.4),
+                ),
+              ],
               if (gig.requiredSkills.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 const Text(
@@ -1101,23 +1170,136 @@ void showFullGigDetailSheet(
                     return Container(
                       height: 28,
                       padding: const EdgeInsets.symmetric(horizontal: 12),
-                      alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: has
                             ? const Color(0xFF2E9E6B).withValues(alpha: 0.12)
                             : neutralSurface,
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: Text(
-                        s,
-                        style: TextStyle(
-                          color: has ? const Color(0xFF2E9E6B) : kSub,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
+                      child: Center(
+                        widthFactor: 1,
+                        child: Text(
+                          s,
+                          style: TextStyle(
+                            color: has ? const Color(0xFF2E9E6B) : kSub,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     );
                   }).toList(),
+                ),
+                const SizedBox(height: 18),
+                Divider(
+                  height: 0,
+                  thickness: 1,
+                  color: Theme.of(ctx).dividerColor,
+                ),
+                const SizedBox(height: 14),
+                // Host card (display only)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _neutralSurface(isDark),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: FutureBuilder<({double? rating, String? photoUrl})>(
+                    future: fetchHostInfo(gig.hostId),
+                    builder: (context, snap) {
+                      final photoUrl = snap.data?.photoUrl;
+                      final rating = snap.data?.rating;
+                      return Row(
+                        children: [
+                          if (photoUrl != null && photoUrl.isNotEmpty)
+                            ClipOval(
+                              child: CachedNetworkImage(
+                                imageUrl: photoUrl,
+                                width: 38,
+                                height: 38,
+                                fit: BoxFit.cover,
+                                placeholder: (_, _) => _hostInitialAvatar(gig),
+                                errorWidget: (_, _, _) =>
+                                    _hostInitialAvatar(gig),
+                              ),
+                            )
+                          else
+                            _hostInitialAvatar(gig),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  gig.hostName.isNotEmpty ? gig.hostName : '—',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: onSurface,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                if (rating != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2),
+                                    child: RichText(
+                                      text: TextSpan(
+                                        style: const TextStyle(
+                                          color: kSub,
+                                          fontSize: 10.5,
+                                        ),
+                                        children: [
+                                          const TextSpan(
+                                            text: '★ ',
+                                            style: TextStyle(
+                                              color: Color(0xFFF0A830),
+                                            ),
+                                          ),
+                                          TextSpan(
+                                            text:
+                                                '${rating.toStringAsFixed(1)} host rating',
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          TextButton(
+                            // Close this sheet before opening the profile
+                            // sheet instead of stacking one modal bottom
+                            // sheet on top of another — nesting them here
+                            // caused every open sheet to disappear together
+                            // once the profile sheet's Block action
+                            // triggered a rebuild.
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              UserProfileScreen.push(
+                                context,
+                                uid: gig.hostId,
+                                fallbackName: gig.hostName,
+                                surface: 'gig_detail',
+                                // Viewing the host, so this is their
+                                // host-side reputation — not the worker
+                                // rating they'd have from gigs they've
+                                // worked themselves.
+                                role: RateeRole.host,
+                              );
+                            },
+                            child: const Text(
+                              'Visit',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ),
                 if (isActive && missing.isNotEmpty) ...[
                   const SizedBox(height: 10),
@@ -1155,48 +1337,6 @@ void showFullGigDetailSheet(
                   ),
                 ],
               ],
-              const SizedBox(height: 18),
-              // See on map row
-              if (onSeeOnMap != null)
-                GestureDetector(
-                  onTap: () {
-                    // Pop the sheet first — onSeeOnMap may itself push a new
-                    // route (Saved tab's fullscreen map), and popping after
-                    // would immediately dismiss that instead of this sheet.
-                    Navigator.pop(ctx);
-                    onSeeOnMap();
-                  },
-                  child: Container(
-                    height: 44,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: neutralSurface,
-                      border: Border.all(color: Theme.of(ctx).dividerColor),
-                      borderRadius: BorderRadius.circular(13),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.map_outlined, size: 18, color: kSub),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'See this gig on the map',
-                            style: TextStyle(
-                              color: kSub,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          size: 18,
-                          color: kSub,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
               const SizedBox(height: 16),
               if (isActive) ...[
                 // Apply / Withdraw button
@@ -2062,12 +2202,21 @@ class _GigMapSectionState extends State<GigMapSection> {
   void _startOpenSub(FirebaseFirestore db) {
     _openSub = db
         .collection('open_gigs')
-        .where('status', isEqualTo: 'open')
+        // A multi-worker gig moves to 'partially_filled' the moment its
+        // first slot is taken — it still needs to show up here for every
+        // other worker as long as it has open slots left (openSlots > 0
+        // below), so 'open' alone would wrongly hide it after slot 1.
+        .where('status', whereIn: ['open', 'partially_filled'])
         .snapshots()
         .listen(
           (s) {
             final all = s.docs
                 .where((d) => (d.data()['hostId'] as String?) != widget.uid)
+                // Host closed remaining spots (_closeRemainingSlots) — that
+                // only sets this flag, deliberately leaving workerSlots/
+                // status untouched so the host's own tracking view keeps
+                // treating the gig as multi-worker/active.
+                .where((d) => d.data()['slotsClosed'] != true)
                 .map(
                   (d) => gigMarkerFromDoc(
                     d.id,
@@ -2077,6 +2226,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                   ),
                 )
                 .whereType<GigMarkerData>()
+                .where((g) => g.openSlots > 0)
                 .toList();
             setState(() {
               _openGigs = all;
@@ -2940,11 +3090,7 @@ class _GigMapSectionState extends State<GigMapSection> {
   // ─────────────────────────────────────────────────────────────────────────
   //  Bottom sheet: single gig
   // ─────────────────────────────────────────────────────────────────────────
-  void _showGigSheet(
-    BuildContext context,
-    GigMarkerData gig, {
-    bool fromList = false,
-  }) {
+  void _showGigSheet(BuildContext context, GigMarkerData gig) {
     showFullGigDetailSheet(
       context,
       gig: gig,
@@ -2958,17 +3104,11 @@ class _GigMapSectionState extends State<GigMapSection> {
       myCountryCode: _myCountryCode,
       countryCodeCache: _countryCodeCache,
       onOfferedGigAccepted: widget.onOfferedGigAccepted,
-      fromList: fromList,
-      onSeeOnMap: fromList
-          ? () => _openFullScreenMap(context, focus: gig.position)
-          : null,
     );
   }
 
-  // Same fullscreen map the "expand" button opens, optionally pre-focused on
-  // one gig's location — used by that button and by the list sheet's "See
-  // this gig on the map" row.
-  void _openFullScreenMap(BuildContext context, {LatLng? focus}) {
+  // Same fullscreen map the "expand" button opens.
+  void _openFullScreenMap(BuildContext context) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -2986,7 +3126,6 @@ class _GigMapSectionState extends State<GigMapSection> {
             workerSkills: widget.workerSkills,
             bookmarkedGigIds: widget.bookmarkedGigIds,
             onToggleBookmark: widget.onToggleBookmark,
-            externalFocusRequest: focus != null ? ValueNotifier(focus) : null,
           ),
         ),
       ),
@@ -4244,8 +4383,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                             entry.value.id,
                             entry.value.gigType,
                           ),
-                    onTap: () =>
-                        _showGigSheet(context, entry.value, fromList: true),
+                    onTap: () => _showGigSheet(context, entry.value),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -4859,6 +4997,47 @@ class _LegendDot extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Gig detail sheet — 2x2 info grid cell (icon + micro-label + value)
 // ─────────────────────────────────────────────────────────────────────────────
+// Boxed variant used for PAY / WORK DURATION — the two figures a worker
+// weighs most before taking the gig, so they get a tinted background
+// instead of the plain icon-square rows used elsewhere in this grid.
+class _BoxedInfoCell extends StatelessWidget {
+  final String label;
+  final Color color;
+  final Widget child;
+  const _BoxedInfoCell({
+    required this.label,
+    required this.color,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: kSub,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 4),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
 class _InfoGridCell extends StatelessWidget {
   final IconData? icon;
   final String label;

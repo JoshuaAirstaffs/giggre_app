@@ -9,8 +9,15 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../gig_shared/active_gig_step.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
 import '../../services/quick_gig_matching_service.dart';
+import '../post_offered_gig_screen.dart';
+import '../post_open_gig_screen.dart';
+import '../post_quick_gig_screen.dart';
 import 'gig_detail_sheet.dart';
 import 'quick_gig_search_sheet.dart';
+
+// Gigs that can no longer go anywhere on their own — reposting is the only
+// way forward, so HostGigCard/GigDetailSheet both offer "Post Again" here.
+const _kRepostableStatuses = {'completed', 'no_worker', 'cancelled'};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Host Gig Card — single reusable list-item widget for every place the
@@ -76,7 +83,7 @@ _StatusMeta _statusMeta(String status) {
     case 'cancellation_requested':
       return const _StatusMeta('Cancellation requested', _kCancelColor);
     case 'completed':
-      return const _StatusMeta('Wrapped Up', _kMutedColor);
+      return const _StatusMeta('Completed', _kMutedColor);
     case 'cancelled':
       return const _StatusMeta('Cancelled', _kMutedColor);
     default:
@@ -153,7 +160,7 @@ String? _sublineFor({
       case GigStep.payment:
         return 'Awaiting Payout';
       case GigStep.completed:
-        return 'Wrapped Up';
+        return 'Completed';
     }
   }
 
@@ -432,6 +439,35 @@ class _HostGigCardState extends State<HostGigCard> {
     );
   }
 
+  // Reuses everything about a completed/cancelled/no_worker gig except its
+  // schedule — the whole point of reposting is picking a fresh date/time,
+  // which none of the three PostXGigScreens ever populate from a template.
+  void _postAgain() {
+    final gigType = widget.data['gigType'] as String? ?? 'quick';
+    final hostName = widget.data['hostName'] as String? ?? '';
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final template = GigTemplateModel.fromGigData(
+      widget.data,
+      hostId: uid,
+      gigType: gigType,
+    );
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => switch (gigType) {
+          'open' => PostOpenGigScreen(hostName: hostName, template: template),
+          'offered' => PostOfferedGigScreen(
+            hostName: hostName,
+            template: template,
+          ),
+          _ => PostQuickGigScreen(hostName: hostName, template: template),
+        },
+      ),
+    );
+  }
+
   Future<void> _saveAsTemplate() async {
     final gigType = widget.data['gigType'] as String? ?? 'quick';
     final gigInfo = widget.data;
@@ -464,6 +500,11 @@ class _HostGigCardState extends State<HostGigCard> {
               currencyCode: gigInfo['currencyCode'] as String? ?? 'USD',
               skillRequired: skillRequired,
               experienceLevel: gigInfo['experienceLevel'] as String? ?? '',
+              payType: gigInfo['payType'] as String? ?? 'flat',
+              hourlyRate: (gigInfo['hourlyRate'] as num?)?.toDouble(),
+              workDurationHours: (gigInfo['workDurationHours'] as num?)
+                  ?.toDouble(),
+              workerSlots: (gigInfo['workerSlots'] as num?)?.toInt() ?? 1,
               createdAt: DateTime.now(),
             ).toMap(),
           );
@@ -528,6 +569,7 @@ class _HostGigCardState extends State<HostGigCard> {
     final isActiveGig = activeGigStatusesForMenu.contains(status);
     final canDispatch =
         !isClosed && gigType == 'quick' && status == 'no_worker';
+    final canRepost = _kRepostableStatuses.contains(status);
 
     showModalBottomSheet(
       context: context,
@@ -538,6 +580,15 @@ class _HostGigCardState extends State<HostGigCard> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (canRepost)
+              ListTile(
+                leading: const Icon(Icons.replay_rounded, color: kAmber),
+                title: const Text('Post Again'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _postAgain();
+                },
+              ),
             if (canDispatch)
               ListTile(
                 leading: const Icon(Icons.send_rounded, color: kAmber),

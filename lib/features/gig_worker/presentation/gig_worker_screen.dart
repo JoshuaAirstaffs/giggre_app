@@ -387,6 +387,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
               workDurationHours: (data['workDurationHours'] as num?)
                   ?.toDouble(),
+              description: (data['description'] as String?) ?? '',
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -424,6 +425,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
               workDurationHours: (data['workDurationHours'] as num?)
                   ?.toDouble(),
+              description: (data['description'] as String?) ?? '',
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -460,6 +462,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
               workDurationHours: (data['workDurationHours'] as num?)
                   ?.toDouble(),
+              description: (data['description'] as String?) ?? '',
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -512,6 +515,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               hourlyRate: (gigData['hourlyRate'] as num?)?.toDouble(),
               workDurationHours: (gigData['workDurationHours'] as num?)
                   ?.toDouble(),
+              description: (gigData['description'] as String?) ?? '',
               status: slot['status'] as String? ?? 'navigating',
               hostName:
                   slot['hostName'] as String? ??
@@ -579,6 +583,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
                 workDurationHours: (data['workDurationHours'] as num?)
                     ?.toDouble(),
+                description: (data['description'] as String?) ?? '',
                 status: 'offered',
                 hostName: data['hostName'] as String? ?? '',
                 address: data['address'] as String? ?? '',
@@ -644,6 +649,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   hourlyRate: (gigData['hourlyRate'] as num?)?.toDouble(),
                   workDurationHours: (gigData['workDurationHours'] as num?)
                       ?.toDouble(),
+                  description: (gigData['description'] as String?) ?? '',
                   status: 'offered',
                   hostName:
                       slot['hostName'] as String? ??
@@ -714,6 +720,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
                   workDurationHours: (data['workDurationHours'] as num?)
                       ?.toDouble(),
+                  description: (data['description'] as String?) ?? '',
                   status: 'navigating',
                   hostName: data['hostName'] as String? ?? '',
                   address: data['address'] as String? ?? '',
@@ -792,6 +799,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         payType: gigData['payType'] as String? ?? 'flat',
         hourlyRate: (gigData['hourlyRate'] as num?)?.toDouble(),
         workDurationHours: (gigData['workDurationHours'] as num?)?.toDouble(),
+        description: (gigData['description'] as String?) ?? '',
         status: 'navigating',
         hostName:
             slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
@@ -928,7 +936,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     if (currentUid == null) return;
     final pendingBy = await workerPendingCancellationRequestedBy(currentUid);
     if (pendingBy != null) {
-      if (mounted) _showAlreadyActiveGigDialog(pendingCancellationBy: pendingBy);
+      if (mounted)
+        _showAlreadyActiveGigDialog(pendingCancellationBy: pendingBy);
       return;
     }
     if (await workerHasActiveGig(currentUid)) {
@@ -1035,6 +1044,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             payType: data['payType'] as String? ?? 'flat',
             hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
             workDurationHours: (data['workDurationHours'] as num?)?.toDouble(),
+            description: (data['description'] as String?) ?? '',
             status: 'in_progress',
             hostName: data['hostName'] as String? ?? '',
             address: data['address'] as String? ?? '',
@@ -1093,6 +1103,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 hourlyRate: (gigData['hourlyRate'] as num?)?.toDouble(),
                 workDurationHours: (gigData['workDurationHours'] as num?)
                     ?.toDouble(),
+                description: (gigData['description'] as String?) ?? '',
                 status: 'in_progress',
                 hostName:
                     slot['hostName'] as String? ??
@@ -1185,7 +1196,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
         ? null
         : await workerPendingCancellationRequestedBy(currentUid);
     if (pendingBy != null) {
-      if (mounted) _showAlreadyActiveGigDialog(pendingCancellationBy: pendingBy);
+      if (mounted)
+        _showAlreadyActiveGigDialog(pendingCancellationBy: pendingBy);
       return;
     }
     if (currentUid != null && await workerHasActiveGig(currentUid)) {
@@ -1288,7 +1300,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     if (uid == null) return;
     final pendingBy = await workerPendingCancellationRequestedBy(uid);
     if (pendingBy != null) {
-      if (mounted) _showAlreadyActiveGigDialog(pendingCancellationBy: pendingBy);
+      if (mounted)
+        _showAlreadyActiveGigDialog(pendingCancellationBy: pendingBy);
       return;
     }
     if (await workerHasActiveGig(uid)) {

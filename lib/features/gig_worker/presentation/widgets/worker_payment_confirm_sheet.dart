@@ -202,17 +202,25 @@ class _WorkerPaymentConfirmSheetState extends State<WorkerPaymentConfirmSheet> {
 
         if (gigSnap != null) {
           final gigData = gigSnap.data() ?? {};
-          // Only filledSlotCount workers ever accepted — a partially filled
-          // gig never reaches workerSlots, so gating on workerSlots leaves a
-          // fully-worked, fully-paid gig stuck at 'partially_filled' forever.
           final slots = (gigData['workerSlots'] as num?)?.toInt() ?? 1;
           final filled = (gigData['filledSlotCount'] as num?)?.toInt() ?? 0;
-          final target = filled > 0 && filled < slots ? filled : slots;
+          final slotsClosed = gigData['slotsClosed'] == true;
           final completed =
               ((gigData['slotsCompleted'] as num?)?.toInt() ?? 0) + 1;
+          // Every currently-filled slot is done once completed reaches
+          // filled (not workerSlots) — a partially filled gig never
+          // reaches workerSlots on its own. But only auto-complete it
+          // outright when there's no open slot left to ask about: either
+          // every slot got filled, or the host already closed the rest
+          // themselves. Otherwise leave status alone and let
+          // gig_detail_sheet.dart's decision banner ask the host whether
+          // to mark it complete or keep looking, rather than silently
+          // deciding for them.
+          final allFilledDone = completed >= filled;
+          final noOpenSlotLeft = filled >= slots || slotsClosed;
           tx.update(gigRef, {
             'slotsCompleted': completed,
-            if (completed >= target) 'status': 'completed',
+            if (allFilledDone && noOpenSlotLeft) 'status': 'completed',
           });
         }
       });

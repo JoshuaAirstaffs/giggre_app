@@ -114,9 +114,24 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     if (t != null) {
       _titleCtrl.text = t.title;
       _descCtrl.text = t.description;
-      if (t.budget > 0) _budgetCtrl.text = t.budget.toStringAsFixed(0);
+      _payType = t.payType;
+      // Same on-screen field either way — its label just flips between
+      // "Amount" and "Hourly Rate" depending on _payType above.
+      final amount = t.payType == 'hourly' ? t.hourlyRate : t.budget;
+      if (amount != null && amount > 0) {
+        _budgetCtrl.text = amount.toStringAsFixed(0);
+      }
+      if (t.workDurationHours != null) {
+        _workDurationCtrl.text = t.workDurationHours!.toStringAsFixed(
+          t.workDurationHours! == t.workDurationHours!.roundToDouble() ? 0 : 1,
+        );
+      }
+      _workerSlots = t.workerSlots.clamp(1, 50);
       if (t.skillRequired.isNotEmpty) _selectedSkill = t.skillRequired;
       if (t.experienceLevel.isNotEmpty) _experienceLevel = t.experienceLevel;
+      // Deliberately not carrying over scheduledDate/scheduledTime — a
+      // reposted gig always starts with a blank schedule so the host picks
+      // a fresh one.
     }
   }
 
@@ -545,6 +560,10 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
               currencyCode: currency,
               skillRequired: _selectedSkill ?? '',
               experienceLevel: _experienceLevel,
+              payType: _payType,
+              hourlyRate: _payType == 'hourly' ? budgetVal : null,
+              workDurationHours: double.tryParse(_workDurationCtrl.text.trim()),
+              workerSlots: _workerSlots,
               createdAt: DateTime.now(),
             ).toMap(),
           );

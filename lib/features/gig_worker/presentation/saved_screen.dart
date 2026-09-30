@@ -111,11 +111,11 @@ class _SavedScreenState extends State<SavedScreen> {
         });
   }
 
-  CollectionReference<Map<String, dynamic>> get _savedRef =>
-      FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.uid)
-          .collection('savedGigs');
+  CollectionReference<Map<String, dynamic>> get _savedRef => FirebaseFirestore
+      .instance
+      .collection('users')
+      .doc(widget.uid)
+      .collection('savedGigs');
 
   void _unsave(String gigId) {
     _savedRef.doc(gigId).delete();
@@ -272,8 +272,12 @@ class _SavedScreenState extends State<SavedScreen> {
       );
       return;
     }
-    final gig = gigMarkerFromDoc(gigId, snap.data()!, gigType,
-        workerUid: widget.uid);
+    final gig = gigMarkerFromDoc(
+      gigId,
+      snap.data()!,
+      gigType,
+      workerUid: widget.uid,
+    );
     if (gig == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("This gig's location is missing.")),
@@ -286,8 +290,8 @@ class _SavedScreenState extends State<SavedScreen> {
     final userProvider = context.read<CurrentUserProvider>();
     final myLocation =
         (userProvider.lastLat != null && userProvider.lastLng != null)
-            ? LatLng(userProvider.lastLat!, userProvider.lastLng!)
-            : null;
+        ? LatLng(userProvider.lastLat!, userProvider.lastLng!)
+        : null;
     showFullGigDetailSheet(
       context,
       gig: gig,
@@ -299,30 +303,6 @@ class _SavedScreenState extends State<SavedScreen> {
       onToggleBookmark: (id, type) => _toggleBookmark(id, type, savedIds),
       myLocation: myLocation,
       onOfferedGigAccepted: _acceptOfferedGig,
-      onSeeOnMap: () => _openFullScreenMap(context, gig.position),
-    );
-  }
-
-  // Opens the same fullscreen map view as the Home tab's "expand" button,
-  // seeded to open already centered on this gig.
-  void _openFullScreenMap(BuildContext context, LatLng focus) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => Scaffold(
-          body: GigMapSection(
-            fullScreen: true,
-            uid: widget.uid,
-            workerName: _workerName,
-            seekingQuickGigs: false,
-            isVerified: _isVerified,
-            workerSkills: _workerSkills,
-            onOfferedGigAccepted: _acceptOfferedGig,
-            externalFocusRequest: ValueNotifier(focus),
-          ),
-        ),
-      ),
     );
   }
 
@@ -366,8 +346,11 @@ class _SavedScreenState extends State<SavedScreen> {
                           color: kGold.withValues(alpha: 0.12),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.bookmark_outline_rounded,
-                            color: kGold, size: 28),
+                        child: const Icon(
+                          Icons.bookmark_outline_rounded,
+                          color: kGold,
+                          size: 28,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       Text(
@@ -413,9 +396,8 @@ class _SavedScreenState extends State<SavedScreen> {
                 // no hostId left to check.
                 final visibleDocs = docs
                     .where(
-                      (d) => !_blockedHostIds.contains(
-                        gigsById[d.id]?['hostId'],
-                      ),
+                      (d) =>
+                          !_blockedHostIds.contains(gigsById[d.id]?['hostId']),
                     )
                     .toList();
                 return ListView.builder(
@@ -431,7 +413,8 @@ class _SavedScreenState extends State<SavedScreen> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                           side: BorderSide(
-                              color: Theme.of(context).dividerColor),
+                            color: Theme.of(context).dividerColor,
+                          ),
                         ),
                         elevation: 0,
                         child: ListTile(
@@ -475,54 +458,62 @@ class _SavedScreenState extends State<SavedScreen> {
                             color: kGold.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child:
-                              const Icon(Icons.bookmark_rounded, color: kGold),
+                          child: const Icon(
+                            Icons.bookmark_rounded,
+                            color: kGold,
+                          ),
                         ),
                         title: Text(
                           title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              color: onSurface, fontWeight: FontWeight.w700, fontSize: 14.5),
+                            color: onSurface,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14.5,
+                          ),
                         ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Row(children: [
-                            Text(
-                              hostName.isNotEmpty ? hostName : '—',
-                              style: const TextStyle(
-                                fontSize: 12,
-                              ),
+                            Row(
+                              children: [
+                                Text(
+                                  hostName.isNotEmpty ? hostName : '—',
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                                Text(
+                                  ' • ',
+                                  style: TextStyle(
+                                    color: onSurface.withValues(alpha: 0.5),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                Text(
+                                  CurrencyFormatter.format(
+                                    budget,
+                                    currencyCode,
+                                  ),
+                                  style: const TextStyle(
+                                    color: Color(0xFF2B6FB5),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
                             ),
-                            Text(
-                              ' • ',
-                              style: TextStyle(
-                                color: onSurface.withValues(alpha: 0.5),
-                                fontSize: 12,
-                              ),
-                            ),
-                            Text(
-                              CurrencyFormatter.format(budget, currencyCode),
-                              style: const TextStyle(
-                                color: Color(0xFF2B6FB5),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            )
-                            ],),
 
                             Text(
                               address.isNotEmpty ? address : '—',
-                              style: const TextStyle(
-                                fontSize: 12,
-                              ),
+                              style: const TextStyle(fontSize: 12),
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
-                              _fmtScheduleGrid(data['scheduledDate'] as Timestamp? ??
-                                  Timestamp.now()),
+                              _fmtScheduleGrid(
+                                data['scheduledDate'] as Timestamp? ??
+                                    Timestamp.now(),
+                              ),
                               style: TextStyle(
                                 color: onSurface.withValues(alpha: 0.5),
                                 fontSize: 11,

@@ -31,7 +31,7 @@ const kStepLabels = [
   'On the Job',
   'All Done',
   'Getting Paid',
-  'Wrapped Up',
+  'Completed',
 ];
 const kStepLabelsHost = [
   "Worker's on the Way",
@@ -39,7 +39,7 @@ const kStepLabelsHost = [
   'On the Job',
   'All Done',
   'Awaiting Payout',
-  'Wrapped Up',
+  'Completed',
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
