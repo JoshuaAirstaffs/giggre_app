@@ -491,10 +491,20 @@ Future<void> applyToOpenGig(
     final workerSlots = (snap.data()?['workerSlots'] as num?)?.toInt() ?? 1;
     final filledSlotCount =
         (snap.data()?['filledSlotCount'] as num?)?.toInt() ?? 0;
-    final stillAcceptingApplicants = workerSlots > 1
-        ? (currentStatus == 'open' || currentStatus == 'partially_filled') &&
-              filledSlotCount < workerSlots
-        : currentStatus == 'open';
+    // _closeRemainingSlots (gig_detail_sheet.dart) deliberately leaves
+    // status/workerSlots/filledSlotCount untouched when the host closes a
+    // multi-worker gig's remaining spots — slotsClosed is the only signal
+    // that applications have actually stopped, so it must be checked here
+    // too, not just in the browse-list query this apply can be reached
+    // from a stale/bookmarked copy of (e.g. the Saved tab).
+    final slotsClosed = snap.data()?['slotsClosed'] == true;
+    final stillAcceptingApplicants =
+        !slotsClosed &&
+        (workerSlots > 1
+            ? (currentStatus == 'open' ||
+                      currentStatus == 'partially_filled') &&
+                  filledSlotCount < workerSlots
+            : currentStatus == 'open');
     if (!stillAcceptingApplicants) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1190,152 +1200,154 @@ void showFullGigDetailSheet(
                     );
                   }).toList(),
                 ),
-                const SizedBox(height: 18),
-                Divider(
-                  height: 0,
-                  thickness: 1,
-                  color: Theme.of(ctx).dividerColor,
+              ],
+              const SizedBox(height: 18),
+              Divider(
+                height: 0,
+                thickness: 1,
+                color: Theme.of(ctx).dividerColor,
+              ),
+              const SizedBox(height: 14),
+              // Host card (display only) — unconditional: this must render
+              // regardless of whether the gig has any required skills (e.g.
+              // every Quick Gig has an empty requiredSkills list), so it's
+              // a sibling of the skills block above, not nested inside it.
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
                 ),
-                const SizedBox(height: 14),
-                // Host card (display only)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _neutralSurface(isDark),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: FutureBuilder<({double? rating, String? photoUrl})>(
-                    future: fetchHostInfo(gig.hostId),
-                    builder: (context, snap) {
-                      final photoUrl = snap.data?.photoUrl;
-                      final rating = snap.data?.rating;
-                      return Row(
-                        children: [
-                          if (photoUrl != null && photoUrl.isNotEmpty)
-                            ClipOval(
-                              child: CachedNetworkImage(
-                                imageUrl: photoUrl,
-                                width: 38,
-                                height: 38,
-                                fit: BoxFit.cover,
-                                placeholder: (_, _) => _hostInitialAvatar(gig),
-                                errorWidget: (_, _, _) =>
-                                    _hostInitialAvatar(gig),
-                              ),
-                            )
-                          else
-                            _hostInitialAvatar(gig),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  gig.hostName.isNotEmpty ? gig.hostName : '—',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: onSurface,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                decoration: BoxDecoration(
+                  color: _neutralSurface(isDark),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: FutureBuilder<({double? rating, String? photoUrl})>(
+                  future: fetchHostInfo(gig.hostId),
+                  builder: (context, snap) {
+                    final photoUrl = snap.data?.photoUrl;
+                    final rating = snap.data?.rating;
+                    return Row(
+                      children: [
+                        if (photoUrl != null && photoUrl.isNotEmpty)
+                          ClipOval(
+                            child: CachedNetworkImage(
+                              imageUrl: photoUrl,
+                              width: 38,
+                              height: 38,
+                              fit: BoxFit.cover,
+                              placeholder: (_, _) => _hostInitialAvatar(gig),
+                              errorWidget: (_, _, _) => _hostInitialAvatar(gig),
+                            ),
+                          )
+                        else
+                          _hostInitialAvatar(gig),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                gig.hostName.isNotEmpty ? gig.hostName : '—',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: onSurface,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
                                 ),
-                                if (rating != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2),
-                                    child: RichText(
-                                      text: TextSpan(
-                                        style: const TextStyle(
-                                          color: kSub,
-                                          fontSize: 10.5,
-                                        ),
-                                        children: [
-                                          const TextSpan(
-                                            text: '★ ',
-                                            style: TextStyle(
-                                              color: Color(0xFFF0A830),
-                                            ),
-                                          ),
-                                          TextSpan(
-                                            text:
-                                                '${rating.toStringAsFixed(1)} host rating',
-                                          ),
-                                        ],
+                              ),
+                              if (rating != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: RichText(
+                                    text: TextSpan(
+                                      style: const TextStyle(
+                                        color: kSub,
+                                        fontSize: 10.5,
                                       ),
+                                      children: [
+                                        const TextSpan(
+                                          text: '★ ',
+                                          style: TextStyle(
+                                            color: Color(0xFFF0A830),
+                                          ),
+                                        ),
+                                        TextSpan(
+                                          text:
+                                              '${rating.toStringAsFixed(1)} host rating',
+                                        ),
+                                      ],
                                     ),
                                   ),
-                              ],
-                            ),
+                                ),
+                            ],
                           ),
-                          TextButton(
-                            // Close this sheet before opening the profile
-                            // sheet instead of stacking one modal bottom
-                            // sheet on top of another — nesting them here
-                            // caused every open sheet to disappear together
-                            // once the profile sheet's Block action
-                            // triggered a rebuild.
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              UserProfileScreen.push(
-                                context,
-                                uid: gig.hostId,
-                                fallbackName: gig.hostName,
-                                surface: 'gig_detail',
-                                // Viewing the host, so this is their
-                                // host-side reputation — not the worker
-                                // rating they'd have from gigs they've
-                                // worked themselves.
-                                role: RateeRole.host,
-                              );
-                            },
-                            child: const Text(
-                              'Visit',
-                              style: TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                ),
-                if (isActive && missing.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.07),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: Colors.red.withValues(alpha: 0.25),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.info_outline_rounded,
-                          color: Colors.red,
-                          size: 15,
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Missing ${missing.length == 1 ? 'skill' : 'skills'}: ${missing.join(', ')}',
-                            style: const TextStyle(
-                              color: Colors.red,
-                              fontSize: 12,
-                            ),
+                        TextButton(
+                          // Close this sheet before opening the profile
+                          // sheet instead of stacking one modal bottom
+                          // sheet on top of another — nesting them here
+                          // caused every open sheet to disappear together
+                          // once the profile sheet's Block action
+                          // triggered a rebuild.
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            UserProfileScreen.push(
+                              context,
+                              uid: gig.hostId,
+                              fallbackName: gig.hostName,
+                              surface: 'gig_detail',
+                              // Viewing the host, so this is their
+                              // host-side reputation — not the worker
+                              // rating they'd have from gigs they've
+                              // worked themselves.
+                              role: RateeRole.host,
+                            );
+                          },
+                          child: const Text(
+                            'Visit',
+                            style: TextStyle(fontSize: 12),
                           ),
                         ),
                       ],
+                    );
+                  },
+                ),
+              ),
+              if (isActive && missing.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.07),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Colors.red.withValues(alpha: 0.25),
                     ),
                   ),
-                ],
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.info_outline_rounded,
+                        color: Colors.red,
+                        size: 15,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Missing ${missing.length == 1 ? 'skill' : 'skills'}: ${missing.join(', ')}',
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
               const SizedBox(height: 16),
               if (isActive) ...[
