@@ -1178,10 +1178,10 @@ class _WelcomeContent extends StatelessWidget {
                 Image.asset('assets/images/logo.png', height: 48),
                 const SizedBox(height: 22),
                 Text(
-                  'Every gig, right in your area.',
+                  'Need Help? Giggre it.\nCan Help? Giggre it.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 22,
+                    fontSize: 20,
                     fontWeight: FontWeight.w900,
                     color: tokens.textPrimary,
                     height: 1.25,
@@ -1189,7 +1189,7 @@ class _WelcomeContent extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Find work or get trusted help near you fast, fair, and local.',
+                  'Find work or get trusted help near you. Fast, fair, and local.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: tokens.textMuted),
                 ),

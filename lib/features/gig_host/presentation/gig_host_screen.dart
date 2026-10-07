@@ -18,7 +18,6 @@ import '../../../core/providers/current_user_provider.dart';
 import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/map_style.dart';
-import '../../../core/widgets/account_not_verified_modal.dart';
 import '../../../core/widgets/entrance_animation.dart';
 import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
@@ -30,28 +29,6 @@ import 'widgets/notifications_sheet.dart';
 import 'widgets/gig_detail_sheet.dart';
 import 'widgets/host_gig_card.dart';
 import 'host_gigs_screen.dart';
-
-// Mirrors HostShell._requireVerified — Saved Templates and the "Offer a Gig"
-// shortcuts (in _TemplatesSheet/_WorkerMapSectionState/_ClusterWorkerTileState
-// below) navigate straight to a post-gig screen without going through
-// HostShell's speed dial, so they need their own copy of the same gate rather
-// than silently bypassing it. Top-level (not a method) since those are three
-// separate classes with no shared base.
-void _requireVerified(BuildContext context, VoidCallback onVerified) {
-  final provider = context.read<CurrentUserProvider>();
-  if (provider.isVerified == 'verified' ||
-      provider.allowGigAccessForUnverified) {
-    onVerified();
-    return;
-  }
-  showAccountNotVerifiedModal(
-    context,
-    onStatusRechecked: (status) {
-      provider.updateVerificationStatus(status);
-      if (status == 'verified') onVerified();
-    },
-  );
-}
 
 class GigHostScreen extends StatefulWidget {
   // True when hosted as the Home tab root inside HostShell — suppresses the
@@ -2130,17 +2107,15 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                       child: ElevatedButton.icon(
                         onPressed: () {
                           Navigator.pop(ctx);
-                          _requireVerified(context, () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => PostOfferedGigScreen(
-                                  hostName: widget.hostName,
-                                  preselectedWorkerId: worker.id,
-                                  preselectedWorkerName: worker.name,
-                                ),
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => PostOfferedGigScreen(
+                                hostName: widget.hostName,
+                                preselectedWorkerId: worker.id,
+                                preselectedWorkerName: worker.name,
                               ),
-                            );
-                          });
+                            ),
+                          );
                         },
                         icon: const Icon(Icons.send_rounded, size: 16),
                         label: const Text(
@@ -2274,17 +2249,15 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                       w: w,
                       onOffer: () {
                         Navigator.pop(ctx);
-                        _requireVerified(context, () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => PostOfferedGigScreen(
-                                hostName: widget.hostName,
-                                preselectedWorkerId: w.id,
-                                preselectedWorkerName: w.name,
-                              ),
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => PostOfferedGigScreen(
+                              hostName: widget.hostName,
+                              preselectedWorkerId: w.id,
+                              preselectedWorkerName: w.name,
                             ),
-                          );
-                        });
+                          ),
+                        );
                       },
                     );
                   },
@@ -2891,36 +2864,32 @@ class _TemplatesSheet extends StatelessWidget {
 
   void _useTemplate(BuildContext context, GigTemplateModel t) {
     Navigator.pop(context);
-    _requireVerified(context, () {
-      switch (t.gigType) {
-        case 'open':
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) =>
-                  PostOpenGigScreen(hostName: hostName, template: t),
-            ),
-          );
-          break;
-        case 'offered':
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) =>
-                  PostOfferedGigScreen(hostName: hostName, template: t),
-            ),
-          );
-          break;
-        default:
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) =>
-                  PostQuickGigScreen(hostName: hostName, template: t),
-            ),
-          );
-      }
-    });
+    switch (t.gigType) {
+      case 'open':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PostOpenGigScreen(hostName: hostName, template: t),
+          ),
+        );
+        break;
+      case 'offered':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                PostOfferedGigScreen(hostName: hostName, template: t),
+          ),
+        );
+        break;
+      default:
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PostQuickGigScreen(hostName: hostName, template: t),
+          ),
+        );
+    }
   }
 
   @override

@@ -7,9 +7,7 @@ import '../../../core/services/rating_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import 'package:provider/provider.dart';
-import '../../../core/providers/current_user_provider.dart';
 import '../../../core/services/sign_out_service.dart';
-import '../../../core/widgets/account_not_verified_modal.dart';
 import '../../../core/widgets/entrance_animation.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
@@ -1872,9 +1870,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                         setState(() => _availableForGigs = v);
                                         _setToggle('availableForGigs', v);
                                       },
-                                      isVerified: _isVerified,
-                                      onVerificationRequired: () =>
-                                          _showVerificationModal(context),
                                     ),
                                   ),
                                 ),
@@ -1941,9 +1936,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                     setState(() => _autoAccept = v);
                                     _setToggle('autoAccept', v);
                                   },
-                                  isVerified: _isVerified,
-                                  onVerificationRequired: () =>
-                                      _showVerificationModal(context),
                                 ),
                               ),
                               const SizedBox(height: 20),
@@ -1977,16 +1969,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                         bottom: 0,
                         child: DispatchOfferCard(
                           gig: _dispatchedGig!,
-                          onAccept: () {
-                            if (_isVerified == 'verified' ||
-                                context
-                                    .read<CurrentUserProvider>()
-                                    .allowGigAccessForUnverified) {
-                              _acceptDispatch(_dispatchedGig!);
-                            } else {
-                              _showVerificationModal(context);
-                            }
-                          },
+                          onAccept: () => _acceptDispatch(_dispatchedGig!),
                           onDecline: () => _declineDispatch(_dispatchedGig!),
                         ),
                       ),
@@ -1999,16 +1982,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                           gig: _pendingOfferedGig!,
                           description: _pendingOfferedGigDesc,
                           skillRequired: _pendingOfferedGigSkill,
-                          onAccept: () {
-                            if (_isVerified == 'verified' ||
-                                context
-                                    .read<CurrentUserProvider>()
-                                    .allowGigAccessForUnverified) {
-                              _acceptOfferedGig(_pendingOfferedGig!);
-                            } else {
-                              _showVerificationModal(context);
-                            }
-                          },
+                          onAccept: () =>
+                              _acceptOfferedGig(_pendingOfferedGig!),
                           onDecline: () =>
                               _declineOfferedGig(_pendingOfferedGig!),
                           // Dismiss locally only — leaves the offer's
@@ -2030,19 +2005,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 );
               },
             ),
-    );
-  }
-
-  // The profile snapshot listener (_listenToProfile) already reacts to a
-  // status change in real time, but that update can lag slightly behind the
-  // user's own navigation — so also recheck explicitly the moment they leave
-  // VerificationScreen, and reflect it in local state immediately.
-  void _showVerificationModal(BuildContext context) {
-    showAccountNotVerifiedModal(
-      context,
-      onStatusRechecked: (status) {
-        if (mounted) setState(() => _isVerified = status);
-      },
     );
   }
 }

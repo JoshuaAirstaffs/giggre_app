@@ -120,6 +120,15 @@ service cloud.firestore {
         allow read: if isUser(uid) || isAdmin();
         allow write: if isAuth();
       }
+
+      // ─── Badges ──────────────────────────────────────────────
+      // Monthly Best host / Best worker awards, written only by the
+      // awardMonthlyBadges Cloud Function (Admin SDK). Public to signed-in
+      // users so profiles can show them.
+      match /badges/{badgeId} {
+        allow read: if isAuth();
+        allow write: if false;
+      }
     }
 
       match /{path=**}/referrals_list/{referredId} {
@@ -296,6 +305,14 @@ service cloud.firestore {
     match /app_content/{docId}/items/{itemId} {
       allow read: if true;
         allow write: if isAdmin();
+    }
+
+    // ─── Badge awards ──────────────────────────────────────────
+    // One doc per month with that month's winners — written only by the
+    // awardMonthlyBadges Cloud Function, read by giggre-admin's Analytics.
+    match /badge_awards/{monthId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // ─── Activity Logs ─────────────────────────────────────────

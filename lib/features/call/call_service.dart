@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'agora_token_service.dart';
+import 'call_log.dart';
 
-Future<void> initiateCall({
+// Returns how the call ended (from the call screen's Navigator.pop), or null
+// if it never got as far as the call screen.
+Future<CallResult?> initiateCall({
   required BuildContext context,
   required String targetUserId,
   required String channelName,
@@ -12,7 +15,7 @@ Future<void> initiateCall({
   required Widget Function(String channelName, String token) buildScreen,
 }) async {
   final me = FirebaseAuth.instance.currentUser;
-  if (me == null) return;
+  if (me == null) return null;
 
   final myDoc = await FirebaseFirestore.instance
       .collection('users')
@@ -37,7 +40,7 @@ Future<void> initiateCall({
           const SnackBar(content: Text('User not found')),
         );
       }
-      return;
+      return null;
     }
 
     // One token generated for uid 0 ("any uid") covers both ends of the
@@ -78,9 +81,9 @@ Future<void> initiateCall({
 
     await batch.commit();
 
-    if (!context.mounted) return;
+    if (!context.mounted) return null;
 
-    await Navigator.push(
+    return await Navigator.push<CallResult>(
       context,
       MaterialPageRoute(builder: (_) => buildScreen(channelName, token)),
     );
@@ -91,6 +94,7 @@ Future<void> initiateCall({
         SnackBar(content: Text('Failed to start call: $e')),
       );
     }
+    return null;
   } finally {
     final cleanupBatch = firestore.batch();
 

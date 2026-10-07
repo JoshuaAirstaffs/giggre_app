@@ -15,15 +15,11 @@ import '../../../tutorial/widgets/tutorial_anchor.dart';
 class AvailabilityCard extends StatelessWidget {
   final bool isOnline;
   final ValueChanged<bool> onChanged;
-  final String isVerified;
-  final VoidCallback onVerificationRequired;
 
   const AvailabilityCard({
     super.key,
     required this.isOnline,
     required this.onChanged,
-    required this.isVerified,
-    required this.onVerificationRequired,
   });
 
   @override
@@ -86,16 +82,7 @@ class AvailabilityCard extends StatelessWidget {
             scale: 0.75,
             child: Switch(
               value: isOnline,
-              onChanged: (v) {
-                final allowUnverified = context
-                    .read<CurrentUserProvider>()
-                    .allowGigAccessForUnverified;
-                if (isVerified == 'verified' || allowUnverified) {
-                  onChanged(v);
-                } else {
-                  onVerificationRequired();
-                }
-              },
+              onChanged: onChanged,
               activeThumbColor: const Color(0xFF2BB673),
             ),
           ),
@@ -190,8 +177,6 @@ class WorkPreferencesCard extends StatelessWidget {
   final ValueChanged<bool> onQuickGigsChanged;
   final bool autoAccept;
   final ValueChanged<bool> onAutoAcceptChanged;
-  final String isVerified;
-  final VoidCallback onVerificationRequired;
 
   const WorkPreferencesCard({
     super.key,
@@ -199,19 +184,7 @@ class WorkPreferencesCard extends StatelessWidget {
     required this.onQuickGigsChanged,
     required this.autoAccept,
     required this.onAutoAcceptChanged,
-    required this.isVerified,
-    required this.onVerificationRequired,
   });
-
-  void _guarded(BuildContext context, ValueChanged<bool> onChanged, bool value) {
-    final allowUnverified =
-        context.read<CurrentUserProvider>().allowGigAccessForUnverified;
-    if (isVerified == 'verified' || allowUnverified) {
-      onChanged(value);
-    } else {
-      onVerificationRequired();
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -231,7 +204,7 @@ class WorkPreferencesCard extends StatelessWidget {
               description: 'Get instant offers while online',
               value: seekingQuickGigs,
               activeColor: const Color(0xFF2BB673),
-              onChanged: (v) => _guarded(context, onQuickGigsChanged, v),
+              onChanged: onQuickGigsChanged,
             ),
           ),
           Divider(height: 1, color: dividerColor),
@@ -240,7 +213,7 @@ class WorkPreferencesCard extends StatelessWidget {
             description: 'Auto-book gigs matching your skills',
             value: autoAccept,
             activeColor: kGold,
-            onChanged: (v) => _guarded(context, onAutoAcceptChanged, v),
+            onChanged: onAutoAcceptChanged,
           ),
         ],
       ),

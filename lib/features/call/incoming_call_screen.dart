@@ -73,7 +73,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
       if (_secondsLeft <= 0) {
         debugPrint('[Timeout] 🔴 Zero reached — calling _declineCall()');
         timer.cancel();
-        _declineCall();
+        _declineCall(timedOut: true);
       }
     });
     debugPrint('[Timeout] Timer object: $_timeoutTimer');
@@ -156,7 +156,10 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
         .update({'incomingCall': FieldValue.delete()});
   }
 
-  Future<void> _declineCall() async {
+  // timedOut: nobody answered before the ringing timeout — reported to the
+  // caller as 'missed' rather than 'declined', so their call log (see
+  // call_log.dart) records a missed call instead of a declined one.
+  Future<void> _declineCall({bool timedOut = false}) async {
     if (_isHandled) return;
     _isHandled = true;
     _timeoutTimer?.cancel();
@@ -178,7 +181,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     );
     batch.update(
       firestore.collection('users').doc(widget.callerId),
-      {'outgoingCall.status': 'declined'},
+      {'outgoingCall.status': timedOut ? 'missed' : 'declined'},
     );
 
     await batch.commit();

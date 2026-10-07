@@ -32,9 +32,9 @@ class MockWelcomeScene extends StatelessWidget {
           DemoFadeIn(
             delay: const Duration(milliseconds: 600),
             child: const Text(
-              'Every gig, right in your area.',
+              'Need Help? Giggre it.\nCan Help? Giggre it.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: kGold, fontSize: 15, fontWeight: FontWeight.w700),
+              style: TextStyle(color: kGold, fontSize: 15, fontWeight: FontWeight.w700, height: 1.4),
             ),
           ),
           const SizedBox(height: 8),
@@ -43,7 +43,7 @@ class MockWelcomeScene extends StatelessWidget {
             child: const Padding(
               padding: EdgeInsets.symmetric(horizontal: 32),
               child: Text(
-                'Find work or get trusted help near you — fast, fair, and local.',
+                'Find work or get trusted help near you. Fast, fair, and local.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: dBody, fontSize: 13, height: 1.4),
               ),

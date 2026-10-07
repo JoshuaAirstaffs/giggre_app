@@ -893,20 +893,31 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     }
   }
 
-  // Stops a multi-worker Open Gig from accepting any more applicants —
-  // shrinks workerSlots down to whatever's already filled, so
-  // acceptingMoreSlots (filledSlotCount < workerSlots) flips false. Every
+  // Stops a multi-worker Open Gig from accepting any more applicants — sets
+  // slotsClosed without touching workerSlots/filledSlotCount (shrinking
+  // workerSlots used to be how this worked, but that made a 1-filled gig
+  // look single-worker — see slotsClosed's own doc comment above). Every
   // already-selected worker keeps running through their own independent
-  // slot lifecycle untouched (_selectWorker/_confirmCompletedForWorker);
+  // slot lifecycle untouched (_selectWorker/_confirmWorkerSlotCompleted);
   // this never cancels or force-completes anyone already on the gig.
   // Pending applicants are dropped silently — no notification, since
   // "you weren't picked" doesn't need to interrupt anyone.
+  //
+  // If every currently-filled slot is already done at this point (reached
+  // via "Keep Looking" on the decision banner, then backing out before a
+  // replacement was ever selected), this also finishes the job the same
+  // way "Mark Complete" would — otherwise the gig would get stuck with
+  // slotsClosed:true but status never reaching 'completed' (nothing else
+  // would ever set it, since there's no remaining slot left to complete),
+  // leaving no "Post Again" and no decision banner either.
   Future<void> _closeRemainingSlots() async {
     final data = _data;
     final workerSlots = (data?['workerSlots'] as num?)?.toInt() ?? 1;
     final filledSlotCount = (data?['filledSlotCount'] as num?)?.toInt() ?? 0;
+    final slotsCompleted = (data?['slotsCompleted'] as num?)?.toInt() ?? 0;
     if (filledSlotCount <= 0) return;
     final remaining = workerSlots - filledSlotCount;
+    final allFilledSlotsDone = slotsCompleted >= filledSlotCount;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -942,10 +953,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               ),
               const SizedBox(height: 8),
               Text(
-                "You'll continue with the $filledSlotCount worker"
-                '${filledSlotCount == 1 ? '' : 's'} already on this gig. '
-                'The other $remaining open spot'
-                '${remaining == 1 ? '' : 's'} will stop accepting applicants.',
+                allFilledSlotsDone
+                    ? 'Every worker on this gig is already done, so this '
+                          "will also mark the gig as complete — it can't "
+                          'be undone.'
+                    : "You'll continue with the $filledSlotCount worker"
+                          '${filledSlotCount == 1 ? '' : 's'} already on '
+                          'this gig. The other $remaining open spot'
+                          '${remaining == 1 ? '' : 's'} will stop accepting '
+                          'applicants.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 13, color: kSub, height: 1.55),
               ),
@@ -1010,6 +1026,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           .update({
             'slotsClosed': true,
             'applicants': <Map<String, dynamic>>[],
+            if (allFilledSlotsDone) 'status': 'completed',
           });
     } catch (e) {
       if (mounted) {
@@ -3966,6 +3983,8 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
             targetUserId: widget.workerId,
             targetUserName: widget.workerName,
             iconColor: kHostAccent.solid,
+            gigId: widget.gigId,
+            viewerIsWorker: false,
           ),
         ),
         const SizedBox(width: 8),
@@ -3976,6 +3995,8 @@ class _WorkerProfileCardState extends State<_WorkerProfileCard> {
             targetUserId: widget.workerId,
             targetUserName: widget.workerName,
             iconColor: kHostAccent.solid,
+            gigId: widget.gigId,
+            viewerIsWorker: false,
           ),
         ),
         const SizedBox(width: 8),

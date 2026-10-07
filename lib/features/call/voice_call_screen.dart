@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'call_log.dart';
 
 class VoiceCallScreen extends StatefulWidget {
   final String channelName;
@@ -39,6 +40,11 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
   bool _remoteUserJoined = false;
   bool _isConnecting = true;
   bool _isEnding = false;
+  // Outcome for the caller's call log (see call_log.dart) — _remoteUserJoined
+  // itself flips back to false in onUserOffline, so it can't answer
+  // "was this call ever picked up?" by the time _endCall runs.
+  bool _wasAnswered = false;
+  bool _wasDeclined = false;
 
   int _callSeconds = 0;
   Timer? _callTimer;
@@ -99,7 +105,11 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
         .listen((snap) {
       if (!mounted || _isEnding) return;
       final data = snap.data();
-      if (data?['outgoingCall']?['status'] == 'declined') {
+      final outgoingStatus = data?['outgoingCall']?['status'];
+      if (outgoingStatus == 'declined' || outgoingStatus == 'missed') {
+        // 'missed' = the callee's ringing timed out unanswered (see
+        // IncomingCallScreen._declineCall) — logged as missed, not declined.
+        _wasDeclined = outgoingStatus == 'declined';
         _endCall();
         return;
       }
@@ -147,6 +157,7 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
           _timeoutTimer = null;
           _stopRingback();
           setState(() => _remoteUserJoined = true);
+          _wasAnswered = true;
           _startTimer();
         }
       },
@@ -220,7 +231,16 @@ class _VoiceCallScreenState extends State<VoiceCallScreen>
       await _engine?.release().timeout(const Duration(seconds: 3));
     } catch (_) {}
 
-    if (mounted) Navigator.pop(context);
+    if (mounted) {
+      Navigator.pop(
+        context,
+        CallResult(
+          answered: _wasAnswered,
+          declined: _wasDeclined,
+          durationSeconds: _callSeconds,
+        ),
+      );
+    }
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;

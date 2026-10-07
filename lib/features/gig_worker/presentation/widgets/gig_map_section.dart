@@ -24,7 +24,6 @@ import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/worker_active_gig.dart';
-import '../../../../core/widgets/account_not_verified_modal.dart';
 import '../../../gig_shared/user_profile_screen.dart';
 import '../../../reports/models/report_content_type.dart';
 import '../../../reports/report_service.dart';
@@ -1380,10 +1379,6 @@ void showFullGigDetailSheet(
                         borderRadius: BorderRadius.circular(15),
                         onTap: canTapApply
                             ? () {
-                                if (isVerified != 'verified') {
-                                  showAccountNotVerifiedModal(context);
-                                  return;
-                                }
                                 Navigator.pop(ctx);
                                 if (gig.gigType == 'open') {
                                   applyToOpenGig(

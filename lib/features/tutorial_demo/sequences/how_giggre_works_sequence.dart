@@ -25,8 +25,8 @@ final howGiggreWorksSequence = DemoSequence(
       id: 'welcome',
       duration: readingDurationFor(const [
         'Welcome to Giggre',
-        'Every gig, right in your area.',
-        'Find work or get trusted help near you — fast, fair, and local.',
+        'Need Help? Giggre it.\nCan Help? Giggre it.',
+        'Find work or get trusted help near you. Fast, fair, and local.',
       ]),
       builder: (_) => const MockWelcomeScene(),
     ),

@@ -672,13 +672,12 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   // ── Gig visibility rules (remote feature flag) ────────────────────────────
 
-  // Admin-controlled kill switch: while true, the verification gates on
-  // going online, the work-preference toggles, applying to a gig, and
-  // posting a gig (see host_shell.dart/gig_map_section.dart/
-  // dashboard_summary_card.dart) are bypassed entirely — used to let
-  // unverified users through during a rollout or an admin backlog, without
-  // a build. Live listener (not a one-time fetch) so a toggle takes effect
-  // for already-open screens immediately, the same as _MaintenanceGate.
+  // Admin-controlled flag. Unverified users are no longer gated from going
+  // online, applying, accepting or posting gigs, so this now only affects
+  // how they're labelled on profiles — "Provisional" while it's on,
+  // "Unverified" otherwise (see profile_header.dart/user_profile_sheet.dart).
+  // Live listener (not a one-time fetch) so a toggle takes effect for
+  // already-open screens immediately, the same as _MaintenanceGate.
   void _listenToGigVisibilityRules() {
     _gigVisibilityRulesSubscription = FirebaseFirestore.instance
         .collection('general_config')

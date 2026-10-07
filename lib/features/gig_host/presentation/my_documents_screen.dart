@@ -223,7 +223,104 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
     );
   }
 
+  // Asked on every upload, before the source picker — the user explicitly
+  // agrees to share the ID/document with Giggre for verification.
+  Future<bool> _confirmShareConsent() async {
+    final agreed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final cardColor = Theme.of(ctx).cardColor;
+        final onSurface = Theme.of(ctx).colorScheme.onSurface;
+
+        return AlertDialog(
+          backgroundColor: cardColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          contentPadding: const EdgeInsets.all(24),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: _indeedBlue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.verified_user_outlined,
+                    color: _indeedBlue, size: 32),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Share Your Document?',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'By continuing, you agree to share this ID or document with '
+                'Giggre. It will be stored securely and reviewed by our team '
+                'only to verify your account.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: onSurface.withOpacity(0.55)),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _indeedBlue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: const Text(
+                    'I Agree',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: onSurface.withOpacity(0.15)),
+                    ),
+                  ),
+                  child: Text(
+                    'I Changed My Mind',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                      color: onSurface.withOpacity(0.55),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    return agreed == true;
+  }
+
   Future<void> _pickAndUpload(_DocCategory category) async {
+    if (!await _confirmShareConsent()) return;
+    if (!mounted) return;
+
     final choice = await showDialog<_UploadSource>(
       context: context,
       builder: (ctx) => AlertDialog(

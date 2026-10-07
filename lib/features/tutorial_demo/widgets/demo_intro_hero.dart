@@ -27,9 +27,9 @@ class DemoIntroHero extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Every gig, right in your area.',
+          'Need Help? Giggre it.\nCan Help? Giggre it.',
           textAlign: TextAlign.center,
-          style: TextStyle(color: dTitle, fontSize: 14, fontWeight: FontWeight.w700),
+          style: TextStyle(color: dTitle, fontSize: 14, fontWeight: FontWeight.w700, height: 1.4),
         ),
         const SizedBox(height: 4),
         const Padding(

@@ -341,6 +341,10 @@ class _GigChatsTab extends StatefulWidget {
 
 class _GigChatsTabState extends State<_GigChatsTab> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+  // "Missed calls" filter — rooms where the peer's last call to me went
+  // unanswered and hasn't been followed up by another call since (see
+  // missedCallFor in call_log.dart).
+  bool _missedOnly = false;
 
   @override
   void initState() {
@@ -377,7 +381,10 @@ class _GigChatsTabState extends State<_GigChatsTab> {
         // Blocking a peer no longer hides this room from the list — the
         // conversation stays visible (with history), it's just no longer
         // possible to send/receive messages in it. See Chat's _isBlocked.
-        final docs = List.of(snap.data?.docs ?? []);
+        final docs = List.of(
+          snap.data?.docs ??
+              const <QueryDocumentSnapshot<Map<String, dynamic>>>[],
+        );
         docs.sort((a, b) {
           final aTime = a.data()['lastMessageAt'] as Timestamp?;
           final bTime = b.data()['lastMessageAt'] as Timestamp?;
@@ -407,64 +414,140 @@ class _GigChatsTabState extends State<_GigChatsTab> {
           );
         }
 
-        return RefreshIndicator(
-          onRefresh: () async => setState(() {}),
-          child: ListView.builder(
-            padding: const EdgeInsets.all(8),
-            itemCount: docs.length,
-            itemBuilder: (context, i) {
-              final data = docs[i].data();
-              final rawDate = data['lastMessageAt'] ?? data['createdAt'];
-              final date = rawDate != null
-                  ? (rawDate as Timestamp).toDate()
-                  : null;
+        final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+        final missedDocs =
+            docs.where((d) => d.data()['missedCallFor'] == myUid).toList()
+              ..sort((a, b) {
+                final aTime = a.data()['missedCallAt'] as Timestamp?;
+                final bTime = b.data()['missedCallAt'] as Timestamp?;
+                if (aTime == null && bTime == null) return 0;
+                if (aTime == null) return 1;
+                if (bTime == null) return -1;
+                return bTime.compareTo(aTime);
+              });
+        final shown = _missedOnly ? missedDocs : docs;
 
-              final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-              final participants =
-                  (data['participants'] as List<dynamic>?) ?? [];
-              final peerUid =
-                  participants.firstWhere((p) => p != uid, orElse: () => '')
-                      as String;
-
-              // Resolve the correct display name for the peer.
-              // If the current user created the room, the peer is sendTo.
-              // If the current user is the receiver, the peer is createdByName.
-              final createdByUid = data['createdByUid'] as String? ?? '';
-              final createdByName = data['createdByName'] as String? ?? '';
-              final sendTo = data['sendTo'] as String? ?? 'Gig Chat';
-              final peerDisplayName =
-                  (createdByUid.isNotEmpty && uid != createdByUid)
-                  ? (createdByName.isNotEmpty ? createdByName : sendTo)
-                  : sendTo;
-
-              // Gig chats are stored as plain text (never HTML), and the room
-              // doc is shared by both participants — 'You' is only correct
-              // from the sender's own point of view, so the label is derived
-              // here from who actually sent it rather than trusted verbatim.
-              final senderId = data['lastMessageSenderId'] as String? ?? '';
-              final sender = senderId.isEmpty
-                  ? ''
-                  : (senderId == uid ? 'You' : peerDisplayName);
-              final lastMessage = data['lastMessage'] as String? ?? '';
-              final displayMessage = sender.isNotEmpty
-                  ? '$sender: $lastMessage'
-                  : lastMessage;
-
-              return _ChatHomeItem(
-                roomId: docs[i].id,
-                sendTo: peerDisplayName,
-                subject: data['subject'] as String? ?? 'Gig Chat',
-                message: displayMessage,
-                status: data['status'] as String? ?? 'open',
-                date: date,
-                isGigChat: true,
-                gigId: data['gigId'] as String? ?? '',
-                peerUid: peerUid,
-              );
-            },
-          ),
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Row(
+                children: [
+                  ChoiceChip(
+                    showCheckmark: false,
+                    label: const Text('All'),
+                    selected: !_missedOnly,
+                    onSelected: (_) => setState(() => _missedOnly = false),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    showCheckmark: false,
+                    avatar: Icon(
+                      Icons.call_missed_rounded,
+                      size: 16,
+                      color: missedDocs.isEmpty ? null : Colors.red,
+                    ),
+                    label: Text(
+                      missedDocs.isEmpty
+                          ? 'Missed calls'
+                          : 'Missed calls (${missedDocs.length})',
+                    ),
+                    selected: _missedOnly,
+                    onSelected: (_) => setState(() => _missedOnly = true),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: shown.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.call_missed_rounded,
+                            size: 48,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No missed calls',
+                            style: TextStyle(
+                              color: Colors.grey.shade400,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : _buildList(shown),
+            ),
+          ],
         );
       },
+    );
+  }
+
+  Widget _buildList(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    return RefreshIndicator(
+      onRefresh: () async => setState(() {}),
+      child: ListView.builder(
+        padding: const EdgeInsets.all(8),
+        itemCount: docs.length,
+        itemBuilder: (context, i) {
+          final data = docs[i].data();
+          final rawDate = _missedOnly
+              ? (data['missedCallAt'] ?? data['lastMessageAt'])
+              : (data['lastMessageAt'] ?? data['createdAt']);
+          final date = rawDate != null ? (rawDate as Timestamp).toDate() : null;
+
+          final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+          final participants = (data['participants'] as List<dynamic>?) ?? [];
+          final peerUid =
+              participants.firstWhere((p) => p != uid, orElse: () => '')
+                  as String;
+
+          // Resolve the correct display name for the peer.
+          // If the current user created the room, the peer is sendTo.
+          // If the current user is the receiver, the peer is createdByName.
+          final createdByUid = data['createdByUid'] as String? ?? '';
+          final createdByName = data['createdByName'] as String? ?? '';
+          final sendTo = data['sendTo'] as String? ?? 'Gig Chat';
+          final peerDisplayName =
+              (createdByUid.isNotEmpty && uid != createdByUid)
+              ? (createdByName.isNotEmpty ? createdByName : sendTo)
+              : sendTo;
+
+          // Gig chats are stored as plain text (never HTML), and the room
+          // doc is shared by both participants — 'You' is only correct
+          // from the sender's own point of view, so the label is derived
+          // here from who actually sent it rather than trusted verbatim.
+          final senderId = data['lastMessageSenderId'] as String? ?? '';
+          final sender = senderId.isEmpty
+              ? ''
+              : (senderId == uid ? 'You' : peerDisplayName);
+          final lastMessage = data['lastMessage'] as String? ?? '';
+          final displayMessage = _missedOnly
+              ? (data['missedCallType'] == 'video'
+                    ? '🎥 Missed video call'
+                    : '📞 Missed voice call')
+              : sender.isNotEmpty
+              ? '$sender: $lastMessage'
+              : lastMessage;
+
+          return _ChatHomeItem(
+            roomId: docs[i].id,
+            sendTo: peerDisplayName,
+            subject: data['subject'] as String? ?? 'Gig Chat',
+            message: displayMessage,
+            status: data['status'] as String? ?? 'open',
+            date: date,
+            isGigChat: true,
+            gigId: data['gigId'] as String? ?? '',
+            peerUid: peerUid,
+          );
+        },
+      ),
     );
   }
 }

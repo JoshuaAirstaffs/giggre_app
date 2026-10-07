@@ -20,6 +20,9 @@ import 'package:giggre_app/core/theme/map_style.dart';
 import 'package:giggre_app/core/widgets/content_rejection_modal.dart';
 import 'package:giggre_app/features/reports/models/report_content_type.dart';
 import 'package:giggre_app/features/reports/report_service.dart';
+import 'package:giggre_app/features/call/call_helper.dart';
+import 'package:giggre_app/helpers/snackbar_helper.dart';
+import 'package:giggre_app/features/call/call_log.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:provider/provider.dart';
 
@@ -54,6 +57,15 @@ class _Msg {
   final String? attachmentUrl;
   final String? attachmentType; // 'image' | 'video' | 'file'
   final String? attachmentName;
+  // Set only for a call-log message (see call_log.dart), written by the
+  // caller once a voice/video call ends. `text` still carries a plain
+  // fallback ("📞 Missed voice call", …) for previews/notifications, but the
+  // bubble renders _CallLogBubble instead of that text.
+  final String? callType; // 'voice' | 'video'
+  final String? callStatus; // 'completed' | 'declined' | 'missed'
+  final int callDuration; // seconds; 0 unless completed
+
+  bool get isCallLog => callType != null;
 
   const _Msg({
     this.id,
@@ -72,6 +84,9 @@ class _Msg {
     this.attachmentUrl,
     this.attachmentType,
     this.attachmentName,
+    this.callType,
+    this.callStatus,
+    this.callDuration = 0,
   });
 
   _Msg copyWith({
@@ -99,6 +114,9 @@ class _Msg {
     attachmentUrl: attachmentUrl ?? this.attachmentUrl,
     attachmentType: attachmentType,
     attachmentName: attachmentName,
+    callType: callType,
+    callStatus: callStatus,
+    callDuration: callDuration,
   );
 }
 
@@ -239,7 +257,9 @@ class _ChatState extends State<Chat> {
     if (params != null) {
       _roomCreated = false;
       _peerName = params.peerName;
-      _isLoadingInitial = false;
+      // Stays true until _listenRoomStatus's first snapshot says whether the
+      // room exists — clearing it here showed the "Say hello" empty state
+      // for a moment before every existing conversation loaded.
       _fetchPeerPhoto(params.peerUid);
     } else {
       _loadInitial();
@@ -502,8 +522,10 @@ class _ChatState extends State<Chat> {
             continue;
           }
 
-          // It's a new message from support
-          if (!msg.isMe) {
+          // It's a new message from support/the peer — or a call log, which
+          // the caller writes from CallUserAction (not through this
+          // screen's optimistic send path), so it arrives here as "mine".
+          if (!msg.isMe || msg.isCallLog) {
             _msgs.add(msg);
             changed = true;
           }
@@ -536,107 +558,72 @@ class _ChatState extends State<Chat> {
         .collection('chat_rooms')
         .doc(widget.roomId)
         .snapshots()
-        .listen((snap) {
-          if (!mounted) return;
+        .listen(
+          (snap) {
+            if (!mounted) return;
 
-          if (!snap.exists) {
-            if (_roomCreated) setState(() => _roomCreated = false);
-            return;
-          }
-
-          // Room now exists — if it just appeared (other user sent first), start streams.
-          if (!_roomCreated) {
-            setState(() => _roomCreated = true);
-            _loadInitial();
-            _listenAndMarkSeen();
-          }
-
-          final data = snap.data() as Map<String, dynamic>;
-          final resolved = (data['status'] as String? ?? '') == 'resolved';
-          final createdByUid = data['createdByUid'] as String? ?? '';
-          final createdByName = data['createdByName'] as String? ?? '';
-          final sendTo = data['sendTo'] as String? ?? '';
-          final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-          final peer = (createdByUid.isNotEmpty && currentUid != createdByUid)
-              ? (createdByName.isNotEmpty ? createdByName : sendTo)
-              : sendTo;
-          if (peer != _peerName) {
-            setState(() => _peerName = peer.isNotEmpty ? peer : null);
-          }
-
-          // Self-heal _isGigChat too — the roomId-only entry point
-          // (main.dart's `/chat/{roomId}` named route, used e.g. by
-          // home_chat.dart's fallback when peerUid wasn't resolved) never
-          // sets widget.isGigChat/gigChatParams at all, which otherwise
-          // hides every gig-only affordance (quick replies, share location).
-          final roomIsGigChat = data['isGigChat'] as bool? ?? false;
-          if (!_isGigChat && roomIsGigChat) {
-            setState(() => _isGigChat = true);
-          }
-
-          if (_viewerIsWorker == null) {
-            final workerUid = data['workerUid'] as String?;
-            final hostUid = data['hostUid'] as String?;
-            bool? resolvedRole;
-            if (currentUid.isNotEmpty && currentUid == workerUid) {
-              resolvedRole = true;
-            } else if (currentUid.isNotEmpty && currentUid == hostUid) {
-              resolvedRole = false;
+            if (!snap.exists) {
+              // Brand-new gig chat with no messages yet — nothing to load.
+              setState(() {
+                _roomCreated = false;
+                _isLoadingInitial = false;
+              });
+              return;
             }
-            if (resolvedRole != null) {
-              setState(() => _viewerIsWorker = resolvedRole);
-            } else if (widget.roomId.startsWith('dm_') &&
-                createdByUid.isNotEmpty) {
-              // Direct messages (directMessageRoomId, worker_message_action.
-              // dart) have no gig to look up at all — but they're only ever
-              // created by WorkerMessageAction, always from the host side,
-              // so whoever created the room IS the host by construction.
-              final isWorker = currentUid != createdByUid;
-              debugPrint(
-                '[Chat] role resolved from DM room creator: '
-                'createdByUid=$createdByUid → isWorker=$isWorker',
-              );
-              setState(() => _viewerIsWorker = isWorker);
-              final participants =
-                  (data['participants'] as List<dynamic>?) ?? [];
-              final peerUid =
-                  participants.firstWhere(
-                        (p) => p != currentUid,
-                        orElse: () => '',
-                      )
-                      as String;
-              final workerUid = isWorker ? currentUid : peerUid;
-              if (workerUid.isNotEmpty) {
-                FirebaseFirestore.instance
-                    .collection('chat_rooms')
-                    .doc(widget.roomId)
-                    .set({
-                      'workerUid': workerUid,
-                      'hostUid': createdByUid,
-                    }, SetOptions(merge: true));
+
+            // Room now exists — if it just appeared (other user sent first), start streams.
+            if (!_roomCreated) {
+              setState(() => _roomCreated = true);
+              _loadInitial();
+              _listenAndMarkSeen();
+            }
+
+            final data = snap.data() as Map<String, dynamic>;
+            final resolved = (data['status'] as String? ?? '') == 'resolved';
+            final createdByUid = data['createdByUid'] as String? ?? '';
+            final createdByName = data['createdByName'] as String? ?? '';
+            final sendTo = data['sendTo'] as String? ?? '';
+            final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+            final peer = (createdByUid.isNotEmpty && currentUid != createdByUid)
+                ? (createdByName.isNotEmpty ? createdByName : sendTo)
+                : sendTo;
+            if (peer != _peerName) {
+              setState(() => _peerName = peer.isNotEmpty ? peer : null);
+            }
+
+            // Self-heal _isGigChat too — the roomId-only entry point
+            // (main.dart's `/chat/{roomId}` named route, used e.g. by
+            // home_chat.dart's fallback when peerUid wasn't resolved) never
+            // sets widget.isGigChat/gigChatParams at all, which otherwise
+            // hides every gig-only affordance (quick replies, share location).
+            final roomIsGigChat = data['isGigChat'] as bool? ?? false;
+            if (!_isGigChat && roomIsGigChat) {
+              setState(() => _isGigChat = true);
+            }
+
+            if (_viewerIsWorker == null) {
+              final workerUid = data['workerUid'] as String?;
+              final hostUid = data['hostUid'] as String?;
+              bool? resolvedRole;
+              if (currentUid.isNotEmpty && currentUid == workerUid) {
+                resolvedRole = true;
+              } else if (currentUid.isNotEmpty && currentUid == hostUid) {
+                resolvedRole = false;
               }
-            } else if (!_roleLookupStarted && roomIsGigChat) {
-              final paramsGigId = widget.gigChatParams?.gigId ?? '';
-              final roomGigId = data['gigId'] as String? ?? '';
-              // Last resort: GigChatAction always names the room
-              // 'gig_<gigId>' — parse it back out in case the room doc
-              // itself never got a gigId field written.
-              const roomIdPrefix = 'gig_';
-              final roomIdGigId = widget.roomId.startsWith(roomIdPrefix)
-                  ? widget.roomId.substring(roomIdPrefix.length)
-                  : '';
-              final gigId = paramsGigId.isNotEmpty
-                  ? paramsGigId
-                  : roomGigId.isNotEmpty
-                  ? roomGigId
-                  : roomIdGigId;
-              debugPrint(
-                '[Chat] role still unknown for roomId=${widget.roomId} — '
-                'paramsGigId="$paramsGigId" roomGigId="$roomGigId" '
-                'roomIdGigId="$roomIdGigId" → using "$gigId"',
-              );
-              if (gigId.isNotEmpty) {
-                _roleLookupStarted = true;
+              if (resolvedRole != null) {
+                setState(() => _viewerIsWorker = resolvedRole);
+              } else if (widget.roomId.startsWith('dm_') &&
+                  createdByUid.isNotEmpty) {
+                // Direct messages (directMessageRoomId, worker_message_action.
+                // dart) have no gig to look up at all — but they're only ever
+                // created by WorkerMessageAction, always from the host side,
+                // so whoever created the room IS the host by construction.
+                final isWorker = currentUid != createdByUid;
+                debugPrint(
+                  '[Chat] role resolved from DM room creator: '
+                  'createdByUid=$createdByUid → isWorker=$isWorker',
+                );
+                setState(() => _viewerIsWorker = isWorker);
                 final participants =
                     (data['participants'] as List<dynamic>?) ?? [];
                 final peerUid =
@@ -645,46 +632,93 @@ class _ChatState extends State<Chat> {
                           orElse: () => '',
                         )
                         as String;
-                _resolveRoleFromGig(
-                  gigId,
-                  peerUidOverride: peerUid.isNotEmpty ? peerUid : null,
+                final workerUid = isWorker ? currentUid : peerUid;
+                if (workerUid.isNotEmpty) {
+                  FirebaseFirestore.instance
+                      .collection('chat_rooms')
+                      .doc(widget.roomId)
+                      .set({
+                        'workerUid': workerUid,
+                        'hostUid': createdByUid,
+                      }, SetOptions(merge: true));
+                }
+              } else if (!_roleLookupStarted && roomIsGigChat) {
+                final paramsGigId = widget.gigChatParams?.gigId ?? '';
+                final roomGigId = data['gigId'] as String? ?? '';
+                // Last resort: GigChatAction always names the room
+                // 'gig_<gigId>' — parse it back out in case the room doc
+                // itself never got a gigId field written.
+                const roomIdPrefix = 'gig_';
+                final roomIdGigId = widget.roomId.startsWith(roomIdPrefix)
+                    ? widget.roomId.substring(roomIdPrefix.length)
+                    : '';
+                final gigId = paramsGigId.isNotEmpty
+                    ? paramsGigId
+                    : roomGigId.isNotEmpty
+                    ? roomGigId
+                    : roomIdGigId;
+                debugPrint(
+                  '[Chat] role still unknown for roomId=${widget.roomId} — '
+                  'paramsGigId="$paramsGigId" roomGigId="$roomGigId" '
+                  'roomIdGigId="$roomIdGigId" → using "$gigId"',
                 );
+                if (gigId.isNotEmpty) {
+                  _roleLookupStarted = true;
+                  final participants =
+                      (data['participants'] as List<dynamic>?) ?? [];
+                  final peerUid =
+                      participants.firstWhere(
+                            (p) => p != currentUid,
+                            orElse: () => '',
+                          )
+                          as String;
+                  _resolveRoleFromGig(
+                    gigId,
+                    peerUidOverride: peerUid.isNotEmpty ? peerUid : null,
+                  );
+                }
               }
             }
-          }
 
-          debugPrint(
-            '[Chat] status: roomId=${widget.roomId} currentUid=$currentUid '
-            'isGigChat=$_isGigChat viewerIsWorker=$_viewerIsWorker '
-            'isResolved=$_isResolved chatDisabled=$_chatDisabled',
-          );
-
-          if (firstExistingSnapshot) {
-            _markSupportMessagesAsSeen();
-          }
-
-          if (resolved && firstExistingSnapshot) {
-            setState(() => _isResolved = true);
-          } else if (resolved && !_resolvedNotified) {
-            setState(() {
-              _isResolved = true;
-              _resolvedNotified = true;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'This conversation has been resolved and closed.',
-                ),
-                duration: Duration(seconds: 3),
-              ),
+            debugPrint(
+              '[Chat] status: roomId=${widget.roomId} currentUid=$currentUid '
+              'isGigChat=$_isGigChat viewerIsWorker=$_viewerIsWorker '
+              'isResolved=$_isResolved chatDisabled=$_chatDisabled',
             );
-            Future.delayed(const Duration(seconds: 2), () {
-              if (mounted) Navigator.of(context).pop();
-            });
-          }
 
-          firstExistingSnapshot = false;
-        });
+            if (firstExistingSnapshot) {
+              _markSupportMessagesAsSeen();
+            }
+
+            if (resolved && firstExistingSnapshot) {
+              setState(() => _isResolved = true);
+            } else if (resolved && !_resolvedNotified) {
+              setState(() {
+                _isResolved = true;
+                _resolvedNotified = true;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'This conversation has been resolved and closed.',
+                  ),
+                  duration: Duration(seconds: 3),
+                ),
+              );
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) Navigator.of(context).pop();
+              });
+            }
+
+            firstExistingSnapshot = false;
+          },
+          onError: (Object e) {
+            debugPrint('Room status stream error: $e');
+            if (mounted && _isLoadingInitial) {
+              setState(() => _isLoadingInitial = false);
+            }
+          },
+        );
   }
 
   // Lazy-creates the gig chat room on the first message of the thread —
@@ -1059,6 +1093,12 @@ class _ChatState extends State<Chat> {
                 title: const Text('File'),
                 onTap: () => Navigator.pop(ctx, 'file'),
               ),
+              if (_isGigChat)
+                ListTile(
+                  leading: const Icon(Icons.location_on_outlined, color: kBlue),
+                  title: const Text('Share Location'),
+                  onTap: () => Navigator.pop(ctx, 'location'),
+                ),
               const SizedBox(height: 8),
             ],
           ),
@@ -1075,6 +1115,8 @@ class _ChatState extends State<Chat> {
         await _pickCameraMedia(video: true);
       case 'file':
         await _pickFile();
+      case 'location':
+        await _shareLocation();
     }
   }
 
@@ -1338,6 +1380,9 @@ class _ChatState extends State<Chat> {
       attachmentUrl: data['attachmentUrl'] as String?,
       attachmentType: data['attachmentType'] as String?,
       attachmentName: data['attachmentName'] as String?,
+      callType: data['callType'] as String?,
+      callStatus: data['callStatus'] as String?,
+      callDuration: (data['callDuration'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -1785,19 +1830,21 @@ class _ChatState extends State<Chat> {
     if (selected == 'delete') _confirmDeleteMessage(msg);
   }
 
-  String _formatTime(DateTime dt) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final msgDay = DateTime(dt.year, dt.month, dt.day);
-    final diff = today.difference(msgDay).inDays;
+  // Time under a message — the day itself is shown by the date divider.
+  String _formatClock(DateTime dt) {
     final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
     final m = dt.minute.toString().padLeft(2, '0');
     final period = dt.hour >= 12 ? 'PM' : 'AM';
-    final timeStr = '$h:$m $period';
-    if (diff == 0) return timeStr;
-    if (diff == 1) return 'Yesterday $timeStr';
-    if (diff < 7)
-      return '${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][dt.weekday - 1]} $timeStr';
+    return '$h:$m $period';
+  }
+
+  // Label for the date divider above the first message of each day.
+  String _formatDay(DateTime dt) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final diff = today.difference(DateTime(dt.year, dt.month, dt.day)).inDays;
+    if (diff == 0) return 'Today';
+    if (diff == 1) return 'Yesterday';
     const mo = [
       'Jan',
       'Feb',
@@ -1812,7 +1859,61 @@ class _ChatState extends State<Chat> {
       'Nov',
       'Dec',
     ];
-    return '${mo[dt.month - 1]} ${dt.day} $timeStr';
+    return '${mo[dt.month - 1]} ${dt.day}, ${dt.year}';
+  }
+
+  static bool _sameDay(DateTime? a, DateTime? b) =>
+      a != null &&
+      b != null &&
+      a.year == b.year &&
+      a.month == b.month &&
+      a.day == b.day;
+
+  // Whether _msgs[j] and the message after it form one visual group:
+  // same sender, same day, sent within a few minutes of each other. Call
+  // logs never group with regular messages.
+  bool _groupsWithNext(int j) {
+    if (j + 1 >= _msgs.length) return false;
+    final a = _msgs[j];
+    final b = _msgs[j + 1];
+    if (a.isCallLog || b.isCallLog) return false;
+    if (a.isMe != b.isMe || a.senderId != b.senderId) return false;
+    final at = a.time;
+    final bt = b.time;
+    if (at == null || bt == null) return true;
+    return _sameDay(at, bt) && bt.difference(at).inMinutes.abs() < 5;
+  }
+
+  String get _composerHint {
+    final first = (_peerName ?? '').trim().split(' ').first;
+    return _isGigChat && first.isNotEmpty
+        ? 'Message $first...'
+        : 'Type a message...';
+  }
+
+  bool get _canCallPeer =>
+      _isGigChat &&
+      widget.gigChatParams != null &&
+      !_chatDisabled &&
+      !_isResolved;
+
+  Future<void> _callPeer({required bool isVideo}) async {
+    final p = widget.gigChatParams;
+    if (p == null) return;
+    final busy = await CallHelper.getCallStatus(p.peerUid);
+    if (!mounted) return;
+    if (busy != null) {
+      SnackbarHelper.showWarning(context, busy);
+      return;
+    }
+    await placeCall(
+      context: context,
+      targetUserId: p.peerUid,
+      targetUserName: p.peerName,
+      isVideo: isVideo,
+      gigId: p.gigId,
+      viewerIsWorker: _viewerIsWorker,
+    );
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -1890,11 +1991,15 @@ class _ChatState extends State<Chat> {
                     targetUserId: widget.gigChatParams!.peerUid,
                     targetUserName: widget.gigChatParams!.peerName,
                     callType: CallType.voice,
+                    gigId: widget.gigChatParams!.gigId,
+                    viewerIsWorker: _viewerIsWorker,
                   ),
                   CallUserAction(
                     targetUserId: widget.gigChatParams!.peerUid,
                     targetUserName: widget.gigChatParams!.peerName,
                     callType: CallType.video,
+                    gigId: widget.gigChatParams!.gigId,
+                    viewerIsWorker: _viewerIsWorker,
                   ),
                 ],
                 PopupMenuButton<String>(
@@ -1951,8 +2056,43 @@ class _ChatState extends State<Chat> {
                           ),
                         );
                       }
-                      final msg = _msgs[_isLoadingMore ? i - 1 : i];
+                      final j = _isLoadingMore ? i - 1 : i;
+                      final msg = _msgs[j];
+                      final prev = j > 0 ? _msgs[j - 1] : null;
+
+                      final showDate =
+                          msg.time != null &&
+                          (prev == null || !_sameDay(prev.time, msg.time));
+
+                      Widget withDate(Widget child) => showDate
+                          ? Column(
+                              children: [
+                                _DateDivider(
+                                  label: _formatDay(msg.time!),
+                                  isDark: isDark,
+                                ),
+                                child,
+                              ],
+                            )
+                          : child;
+
+                      if (msg.isCallLog) {
+                        return withDate(
+                          _CallLogCard(
+                            call: msg,
+                            isDark: isDark,
+                            formatClock: _formatClock,
+                            onCall: _canCallPeer
+                                ? () => _callPeer(
+                                    isVideo: msg.callType == 'video',
+                                  )
+                                : null,
+                          ),
+                        );
+                      }
+
                       final canReport =
+                          !msg.isCallLog &&
                           !msg.isMe &&
                           !msg.isSupport &&
                           !msg.isAutoReply &&
@@ -1960,27 +2100,31 @@ class _ChatState extends State<Chat> {
                           !msg.isDeleted &&
                           msg.senderId.isNotEmpty;
                       final canDelete =
+                          !msg.isCallLog &&
                           msg.isMe &&
                           msg.id != null &&
                           !msg.isDeleted &&
                           msg.time != null &&
                           DateTime.now().difference(msg.time!) <= _deleteWindow;
-                      return GestureDetector(
-                        onLongPress: (canReport || canDelete)
-                            ? () => _showMessageActions(
-                                msg,
-                                canReport: canReport,
-                                canDelete: canDelete,
-                              )
-                            : null,
-                        child: _MessageBubble(
-                          msg: msg,
-                          isDark: isDark,
-                          timeStr: msg.time != null
-                              ? _formatTime(msg.time!)
-                              : '',
-                          isGigChat: _isGigChat,
-                          peerPhotoUrl: _peerPhotoUrl,
+                      return withDate(
+                        GestureDetector(
+                          onLongPress: (canReport || canDelete)
+                              ? () => _showMessageActions(
+                                  msg,
+                                  canReport: canReport,
+                                  canDelete: canDelete,
+                                )
+                              : null,
+                          child: _MessageBubble(
+                            msg: msg,
+                            isDark: isDark,
+                            timeStr: msg.time != null
+                                ? _formatClock(msg.time!)
+                                : '',
+                            isGigChat: _isGigChat,
+                            peerPhotoUrl: _peerPhotoUrl,
+                            isLastInGroup: !_groupsWithNext(j),
+                          ),
                         ),
                       );
                     },
@@ -2117,33 +2261,10 @@ class _ChatState extends State<Chat> {
               ),
               child: SafeArea(
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.grey.shade900
-                              : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: TextField(
-                          controller: _msgController,
-                          minLines: 1,
-                          maxLines: 4,
-                          textCapitalization: TextCapitalization.sentences,
-                          style: TextStyle(fontSize: 14, color: onSurface),
-                          decoration: const InputDecoration(
-                            hintText: 'Type a message...',
-                            border: InputBorder.none,
-                            isDense: true,
-                            contentPadding: EdgeInsets.symmetric(vertical: 10),
-                          ),
-                          onSubmitted: (_) => _sendMessage(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
+                    // Attachments + share location (gig chats) live behind
+                    // this one button — see _showAttachmentMenu.
                     GestureDetector(
                       onTap: _showAttachmentMenu,
                       child: Container(
@@ -2155,56 +2276,68 @@ class _ChatState extends State<Chat> {
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
-                          Icons.attach_file_rounded,
-                          color: kBlue,
-                          size: 20,
+                          Icons.add_rounded,
+                          color: onSurface.withValues(alpha: 0.7),
+                          size: 22,
                         ),
                       ),
                     ),
-                    if (_isGigChat) ...[
-                      const SizedBox(width: 4),
-                      GestureDetector(
-                        onTap: _shareLocation,
-                        child: Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.grey.shade900
-                                : Colors.grey.shade100,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            Icons.location_on_rounded,
-                            color: kBlue,
-                            size: 20,
-                          ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.only(left: 16, right: 4),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.grey.shade900
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _msgController,
+                                minLines: 1,
+                                maxLines: 4,
+                                textCapitalization:
+                                    TextCapitalization.sentences,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: onSurface,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: _composerHint,
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                ),
+                                onSubmitted: (_) => _sendMessage(),
+                              ),
+                            ),
+                            if (_isGigChat &&
+                                _viewerIsWorker != null &&
+                                !_isResolved &&
+                                !_chatDisabled)
+                              IconButton(
+                                key: _quickReplyButtonKey,
+                                onPressed: _showQuickReplies,
+                                tooltip: 'Quick replies',
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(
+                                  Icons.bolt_rounded,
+                                  color: kBlue,
+                                  size: 20,
+                                ),
+                              )
+                            else
+                              const SizedBox(width: 12),
+                          ],
                         ),
                       ),
-                    ],
-                    if (_isGigChat &&
-                        _viewerIsWorker != null &&
-                        !_isResolved &&
-                        !_chatDisabled) ...[
-                      const SizedBox(width: 4),
-                      GestureDetector(
-                        key: _quickReplyButtonKey,
-                        onTap: _showQuickReplies,
-                        child: Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.grey.shade900
-                                : Colors.grey.shade100,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            Icons.bolt_rounded,
-                            color: kBlue,
-                            size: 20,
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                     const SizedBox(width: 8),
                     GestureDetector(
                       onTap: _sendMessage,
@@ -2217,7 +2350,7 @@ class _ChatState extends State<Chat> {
                         child: const Icon(
                           Icons.send_rounded,
                           color: Colors.white,
-                          size: 20,
+                          size: 22,
                         ),
                       ),
                     ),
@@ -2239,6 +2372,7 @@ class _MessageBubble extends StatelessWidget {
     required this.timeStr,
     required this.isGigChat,
     this.peerPhotoUrl,
+    this.isLastInGroup = true,
   });
 
   final _Msg msg;
@@ -2246,6 +2380,10 @@ class _MessageBubble extends StatelessWidget {
   final String timeStr;
   final bool isGigChat;
   final String? peerPhotoUrl;
+  // Consecutive messages from the same sender are grouped (see
+  // _ChatState._groupsWithNext): only the last one in a group shows the
+  // avatar, the time/seen row and the bubble's tail corner.
+  final bool isLastInGroup;
 
   bool get _isHtml => msg.text.contains('<') && msg.text.contains('>');
 
@@ -2260,7 +2398,7 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.only(bottom: isLastInGroup ? 10 : 2),
       child: Row(
         mainAxisAlignment: msg.isMe
             ? MainAxisAlignment.end
@@ -2268,36 +2406,42 @@ class _MessageBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!msg.isMe) ...[
-            isGigChat
-                ? CircleAvatar(
-                    radius: 12,
-                    backgroundColor: const Color(
-                      0xFF3B82F6,
-                    ).withValues(alpha: 0.15),
-                    backgroundImage:
-                        (peerPhotoUrl != null && peerPhotoUrl!.isNotEmpty)
-                        ? CachedNetworkImageProvider(peerPhotoUrl!)
-                        : null,
-                    child: (peerPhotoUrl == null || peerPhotoUrl!.isEmpty)
-                        ? const Icon(
-                            Icons.person_rounded,
-                            color: Color(0xFF3B82F6),
-                            size: 14,
-                          )
-                        : null,
-                  )
-                : Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFBBF24),
-                      borderRadius: BorderRadius.circular(6),
+            Visibility(
+              visible: isLastInGroup,
+              maintainSize: true,
+              maintainAnimation: true,
+              maintainState: true,
+              child: isGigChat
+                  ? CircleAvatar(
+                      radius: 12,
+                      backgroundColor: const Color(
+                        0xFF3B82F6,
+                      ).withValues(alpha: 0.15),
+                      backgroundImage:
+                          (peerPhotoUrl != null && peerPhotoUrl!.isNotEmpty)
+                          ? CachedNetworkImageProvider(peerPhotoUrl!)
+                          : null,
+                      child: (peerPhotoUrl == null || peerPhotoUrl!.isEmpty)
+                          ? const Icon(
+                              Icons.person_rounded,
+                              color: Color(0xFF3B82F6),
+                              size: 14,
+                            )
+                          : null,
+                    )
+                  : Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFBBF24),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Icon(
+                        Icons.support_agent,
+                        color: Colors.white,
+                        size: 14,
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.support_agent,
-                      color: Colors.white,
-                      size: 14,
-                    ),
-                  ),
+            ),
             const SizedBox(width: 6),
           ],
           Flexible(
@@ -2349,8 +2493,12 @@ class _MessageBubble extends StatelessWidget {
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(16),
                         topRight: const Radius.circular(16),
-                        bottomLeft: Radius.circular(msg.isMe ? 16 : 4),
-                        bottomRight: Radius.circular(msg.isMe ? 4 : 16),
+                        bottomLeft: Radius.circular(
+                          !msg.isMe && isLastInGroup ? 4 : 16,
+                        ),
+                        bottomRight: Radius.circular(
+                          msg.isMe && isLastInGroup ? 4 : 16,
+                        ),
                       ),
                     ),
                     child: msg.isDeleted
@@ -2438,34 +2586,38 @@ class _MessageBubble extends StatelessWidget {
                           ),
                   ),
                 ),
-                const SizedBox(height: 3),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  spacing: 4,
-                  children: [
-                    if (msg.pending)
-                      Icon(
-                        Icons.access_time,
-                        size: 10,
-                        color: Colors.grey.shade400,
-                      )
-                    else
-                      Text(
-                        timeStr,
-                        style: TextStyle(
-                          fontSize: 10,
+                if (isLastInGroup || msg.pending) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    spacing: 4,
+                    children: [
+                      if (msg.pending)
+                        Icon(
+                          Icons.access_time,
+                          size: 10,
+                          color: Colors.grey.shade400,
+                        )
+                      else
+                        Text(
+                          timeStr,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey.shade400,
+                          ),
+                        ),
+                      if (msg.isMe &&
+                          (isGigChat
+                              ? msg.hasSeenByPeer
+                              : msg.hasSeenBySupport))
+                        Icon(
+                          Icons.done_all,
+                          size: 12,
                           color: Colors.grey.shade400,
                         ),
-                      ),
-                    if (msg.isMe &&
-                        (isGigChat ? msg.hasSeenByPeer : msg.hasSeenBySupport))
-                      Icon(
-                        Icons.done_all,
-                        size: 12,
-                        color: Colors.grey.shade400,
-                      ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -2681,132 +2833,527 @@ class _VideoAttachmentBubble extends StatefulWidget {
   State<_VideoAttachmentBubble> createState() => _VideoAttachmentBubbleState();
 }
 
+// Shows the video's first frame as its preview (there's no separate
+// thumbnail upload, so this also works for videos sent before this
+// existed). Never plays inline — tapping opens _FullscreenVideoPage.
 class _VideoAttachmentBubbleState extends State<_VideoAttachmentBubble> {
-  VideoPlayerController? _controller;
-  bool _initializing = false;
+  VideoPlayerController? _preview;
 
-  Future<void> _initialize() async {
+  @override
+  void initState() {
+    super.initState();
+    _loadPreview();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoAttachmentBubble oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // An optimistic message gets its url once the upload finishes.
+    if (oldWidget.url != widget.url) {
+      _preview?.dispose();
+      _preview = null;
+      _loadPreview();
+    }
+  }
+
+  Future<void> _loadPreview() async {
     final url = widget.url;
-    if (url == null || _controller != null || _initializing) return;
-    setState(() => _initializing = true);
+    if (url == null) return;
     final controller = VideoPlayerController.networkUrl(Uri.parse(url));
     try {
       await controller.initialize();
+      // iOS can stay black until a frame is explicitly requested.
+      await controller.seekTo(const Duration(milliseconds: 1));
     } catch (e) {
-      debugPrint('Video init error: $e');
-      controller.dispose();
-      if (mounted) setState(() => _initializing = false);
-      return;
-    }
-    if (!mounted) {
+      debugPrint('Video preview error: $e');
       controller.dispose();
       return;
     }
-    setState(() {
-      _controller = controller;
-      _initializing = false;
-    });
-    controller
-      ..setLooping(false)
-      ..play();
+    if (!mounted || widget.url != url) {
+      controller.dispose();
+      return;
+    }
+    setState(() => _preview = controller);
   }
 
   @override
   void dispose() {
-    _controller?.dispose();
+    _preview?.dispose();
     super.dispose();
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes;
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
   }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.url == null) {
-      return Container(
-        width: 220,
-        height: 160,
-        color: Colors.black87,
-        child: const Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
-      );
-    }
+    final url = widget.url;
+    final preview = _preview;
+    final ready = preview != null && preview.value.isInitialized;
 
-    final controller = _controller;
-    return SizedBox(
-      width: 220,
-      height: 160,
-      child: controller != null && controller.value.isInitialized
-          ? ClipRect(
-              child: Stack(
-                alignment: Alignment.center,
-                fit: StackFit.expand,
-                children: [
-                  FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: controller.value.size.width,
-                      height: controller.value.size.height,
-                      child: VideoPlayer(controller),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () => setState(
-                      () => controller.value.isPlaying
-                          ? controller.pause()
-                          : controller.play(),
-                    ),
-                    child: AnimatedOpacity(
-                      opacity: controller.value.isPlaying ? 0 : 1,
-                      duration: const Duration(milliseconds: 200),
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          color: Colors.black38,
-                          shape: BoxShape.circle,
-                        ),
-                        padding: const EdgeInsets.all(12),
-                        child: const Icon(
-                          Icons.play_arrow_rounded,
-                          color: Colors.white,
-                          size: 32,
-                        ),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 8,
-                    right: 8,
-                    bottom: 6,
-                    child: VideoProgressIndicator(
-                      controller,
-                      allowScrubbing: true,
-                      colors: VideoProgressColors(
-                        playedColor: kBlue,
-                        backgroundColor: Colors.white24,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : GestureDetector(
-              onTap: _initialize,
-              child: Container(
-                color: Colors.black87,
-                child: Center(
-                  child: _initializing
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Icon(
-                          Icons.play_circle_fill_rounded,
-                          color: Colors.white,
-                          size: 48,
-                        ),
-                ),
+    const width = 220.0;
+    final height = ready
+        ? (width / preview.value.aspectRatio).clamp(140.0, 300.0)
+        : 160.0;
+
+    return GestureDetector(
+      onTap: url == null
+          ? null
+          : () => Navigator.of(context).push(
+              MaterialPageRoute(
+                fullscreenDialog: true,
+                builder: (_) => _FullscreenVideoPage(url: url),
               ),
             ),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Container(color: Colors.black87),
+            if (ready)
+              FittedBox(
+                fit: BoxFit.cover,
+                clipBehavior: Clip.hardEdge,
+                child: SizedBox(
+                  width: preview.value.size.width,
+                  height: preview.value.size.height,
+                  child: VideoPlayer(preview),
+                ),
+              ),
+            Center(
+              child: url == null
+                  ? const CircularProgressIndicator(color: Colors.white)
+                  : Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: const BoxDecoration(
+                        color: Colors.black45,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+            ),
+            if (ready)
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    _fmt(preview.value.duration),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Fullscreen video player ───────────────────────────────────────────────────
+class _FullscreenVideoPage extends StatefulWidget {
+  const _FullscreenVideoPage({required this.url});
+
+  final String url;
+
+  @override
+  State<_FullscreenVideoPage> createState() => _FullscreenVideoPageState();
+}
+
+class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
+  late final VideoPlayerController _controller;
+  bool _failed = false;
+  bool _showControls = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url))
+      ..addListener(_onTick);
+    _controller
+        .initialize()
+        .then((_) {
+          if (!mounted) return;
+          setState(() {});
+          _controller.play();
+        })
+        .catchError((Object e) {
+          debugPrint('Video init error: $e');
+          if (mounted) setState(() => _failed = true);
+        });
+  }
+
+  void _onTick() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _controller
+      ..removeListener(_onTick)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _togglePlay() {
+    final v = _controller.value;
+    if (v.isPlaying) {
+      _controller.pause();
+    } else {
+      // Replay from the start once it has finished.
+      if (v.position >= v.duration) _controller.seekTo(Duration.zero);
+      _controller.play();
+    }
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes;
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _controller.value;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showControls = !_showControls),
+        child: Stack(
+          children: [
+            Center(
+              child: _failed
+                  ? const Text(
+                      "Couldn't play this video.",
+                      style: TextStyle(color: Colors.white70),
+                    )
+                  : v.isInitialized
+                  ? AspectRatio(
+                      aspectRatio: v.aspectRatio,
+                      child: VideoPlayer(_controller),
+                    )
+                  : const CircularProgressIndicator(color: Colors.white),
+            ),
+            if (v.isInitialized && !_failed && _showControls) ...[
+              Center(
+                child: GestureDetector(
+                  onTap: _togglePlay,
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: const BoxDecoration(
+                      color: Colors.black45,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      v.isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      color: Colors.white,
+                      size: 40,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 0,
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        Text(
+                          _fmt(v.position),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: VideoProgressIndicator(
+                            _controller,
+                            allowScrubbing: true,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            colors: const VideoProgressColors(
+                              playedColor: kBlue,
+                              bufferedColor: Colors.white38,
+                              backgroundColor: Colors.white24,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          _fmt(v.duration),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            if (_showControls || _failed)
+              Positioned(
+                top: 0,
+                left: 8,
+                child: SafeArea(
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
 
 // ── File attachment card ──────────────────────────────────────────────────────
+// ── Date divider ───────────────────────────────────────────────────────────────
+class _DateDivider extends StatelessWidget {
+  const _DateDivider({required this.label, required this.isDark});
+
+  final String label;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: isDark ? Colors.grey.shade900 : Colors.grey.shade200,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Call log card ──────────────────────────────────────────────────────────────
+// One call log (see call_log.dart). Sits on the caller's side of the
+// conversation — right if I called, left if the peer did — and is worded
+// from the viewer's point of view ("Missed" for the one who was called,
+// "Unanswered" for the caller).
+class _CallLogCard extends StatefulWidget {
+  const _CallLogCard({
+    required this.call,
+    required this.isDark,
+    required this.formatClock,
+    this.onCall,
+  });
+
+  final _Msg call;
+  final bool isDark;
+  final String Function(DateTime) formatClock;
+  // Null hides the Call back / Call again button (e.g. chat disabled).
+  final Future<void> Function()? onCall;
+
+  @override
+  State<_CallLogCard> createState() => _CallLogCardState();
+}
+
+class _CallLogCardState extends State<_CallLogCard> {
+  bool _calling = false;
+
+  Future<void> _call() async {
+    if (_calling || widget.onCall == null) return;
+    setState(() => _calling = true);
+    try {
+      await widget.onCall!();
+    } finally {
+      if (mounted) setState(() => _calling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final first = widget.call;
+    final isMe = first.isMe;
+    final isVideo = first.callType == 'video';
+    final status = first.callStatus ?? 'missed';
+    final kind = isVideo ? 'Video Call' : 'Voice Call';
+
+    final String title;
+    final IconData icon;
+    final Color accent;
+    switch (status) {
+      case 'completed':
+        title = kind;
+        icon = isVideo ? Icons.videocam_rounded : Icons.call_rounded;
+        accent = kBlue;
+      case 'declined':
+        title = 'Declined $kind';
+        icon = Icons.call_end_rounded;
+        accent = Colors.grey;
+      default:
+        final word = isMe ? 'Unanswered' : 'Missed';
+        title = '$word $kind';
+        icon = isMe
+            ? Icons.call_made_rounded
+            : (isVideo
+                  ? Icons.missed_video_call_rounded
+                  : Icons.call_missed_rounded);
+        accent = isMe ? Colors.grey : Colors.red;
+    }
+
+    final times = first.time != null ? widget.formatClock(first.time!) : '';
+    final subtitle = status == 'completed'
+        ? [
+            if (times.isNotEmpty) times,
+            formatCallDuration(first.callDuration),
+          ].join(' · ')
+        : times;
+
+    final showButton = widget.onCall != null && status != 'completed';
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Align(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.85,
+          ),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            decoration: BoxDecoration(
+              color: widget.isDark
+                  ? Colors.grey.shade900
+                  : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: onSurface.withValues(alpha: 0.08)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: accent, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: onSurface,
+                        ),
+                      ),
+                      if (subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: onSurface.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (showButton) ...[
+                  const SizedBox(width: 12),
+                  InkWell(
+                    onTap: _calling ? null : _call,
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: kBlue.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: kBlue.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: _calling
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: kBlue,
+                              ),
+                            )
+                          : Text(
+                              isMe ? 'Call again' : 'Call back',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: kBlue,
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _FileAttachmentBubble extends StatelessWidget {
   const _FileAttachmentBubble({
     required this.url,

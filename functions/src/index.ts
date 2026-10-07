@@ -1418,3 +1418,7 @@ export {
   revealStaleRatings,
   onRatingWordFilter,
 } from "./ratings";
+
+// ── Badges ──────────────────────────────────────────────────────────────────
+// Monthly Best host / Best worker awards. See functions/src/badges.ts.
+export { awardMonthlyBadges } from "./badges";

@@ -60,25 +60,6 @@ class QuickGigMatchingService {
   // Prevent duplicate concurrent searches for the same gig
   static final Set<String> _activeSearches = {};
 
-  // Admin kill switch (general_config/gig_visibility_rules). Toggling a
-  // worker's seekingQuickGigs/autoAccept fields on only ever gets checked
-  // against verification status at flip time (see dashboard_summary_card.dart)
-  // — this matching loop is what actually decides who gets dispatched a gig,
-  // so it has to make the same check itself, or a worker who flipped those
-  // fields on before verification was revoked (or before this flag existed)
-  // would keep being matched indefinitely.
-  static Future<bool> _fetchAllowUnverified() async {
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('general_config')
-          .doc('gig_visibility_rules')
-          .get();
-      return doc.data()?['allowGigAccessForUnverified'] == true;
-    } catch (_) {
-      return false;
-    }
-  }
-
   // ── Haversine distance in km ────────────────────────────────────────────────
   static double _distanceKm(GeoPoint a, GeoPoint b) {
     const R = 6371.0;
@@ -109,7 +90,6 @@ class QuickGigMatchingService {
     required GeoPoint gigLocation,
     required List<String> exclude,
     required double maxSearchRadiusKm,
-    required bool allowUnverified,
     required String hostId,
   }) async {
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance
@@ -118,9 +98,6 @@ class QuickGigMatchingService {
         .where('availableForGigs', isEqualTo: true)
         .where('seekingQuickGigs', isEqualTo: true)
         .where('slot', isEqualTo: 'AVAILABLE');
-    if (!allowUnverified) {
-      query = query.where('isVerified', isEqualTo: 'verified');
-    }
     final snap = await query.get();
 
     Map<String, dynamic>? best;
@@ -293,7 +270,6 @@ class QuickGigMatchingService {
   }) async {
     final db = FirebaseFirestore.instance;
     final config = await _fetchConfig();
-    final allowUnverified = await _fetchAllowUnverified();
 
     int dispatchAttempts = 0;
 
@@ -385,7 +361,6 @@ class QuickGigMatchingService {
           gigLocation: gigLocation,
           exclude: excluded,
           maxSearchRadiusKm: config.maxSearchRadiusKm,
-          allowUnverified: allowUnverified,
           hostId: hostId,
         );
 
@@ -498,7 +473,6 @@ class QuickGigMatchingService {
   }) async {
     final db = FirebaseFirestore.instance;
     final config = await _fetchConfig();
-    final allowUnverified = await _fetchAllowUnverified();
 
     int dispatchAttempts = 0;
 
@@ -575,7 +549,6 @@ class QuickGigMatchingService {
           gigLocation: gigLocation,
           exclude: excluded,
           maxSearchRadiusKm: config.maxSearchRadiusKm,
-          allowUnverified: allowUnverified,
           hostId: hostId,
         );
 
@@ -735,7 +708,6 @@ class QuickGigMatchingService {
   }) async {
     final db = FirebaseFirestore.instance;
     final config = await _fetchConfig();
-    final allowUnverified = await _fetchAllowUnverified();
     final searchDeadline = DateTime.now().add(config.searchTimeout);
     int dispatchAttempts = 0;
 
@@ -771,7 +743,6 @@ class QuickGigMatchingService {
           gigLocation: gigLocation,
           exclude: excluded,
           maxSearchRadiusKm: config.maxSearchRadiusKm,
-          allowUnverified: allowUnverified,
           hostId: gigData['hostId'] as String? ?? '',
         );
 
