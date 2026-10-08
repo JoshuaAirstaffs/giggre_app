@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:giggre_app/core/widgets/account_not_verified_modal.dart';
 import 'package:giggre_app/core/services/sign_out_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:giggre_app/screens/app_contents/contact_us.dart';
@@ -30,7 +31,6 @@ import '../../auth/presentation/welcome_screen.dart';
 import '../../../screens/host/host_shell.dart';
 import '../../../screens/worker/worker_shell.dart';
 import '../../../widgets/active_gig_bar.dart';
-import '../../gig_worker/presentation/verification_screen.dart';
 import 'profile_tab.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -66,6 +66,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _hasUpdate = AppUpdateChecker.updateAvailable.value;
     AppUpdateChecker.updateAvailable.addListener(_onUpdateAvailableChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeShowVerifyPrompt();
       _initLocationServiceListener();
       _checkInternet();
       _internetCheckTimer = Timer.periodic(
@@ -73,6 +74,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         (_) => _checkInternet(),
       );
     });
+  }
+
+  // Replaces the old always-on "not verified" banner: shown once, right after
+  // a fresh login (never on a restored session), only if still unverified.
+  void _maybeShowVerifyPrompt() {
+    final provider = context.read<CurrentUserProvider>();
+    if (!provider.takeVerifyPromptAfterLogin()) return;
+    showAccountNotVerifiedModal(
+      context,
+      onStatusRechecked: provider.updateVerificationStatus,
+    );
   }
 
   void _onUpdateAvailableChanged() {
@@ -590,7 +602,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isVerified = context.watch<CurrentUserProvider>().isVerified;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
 
     return Scaffold(
@@ -685,7 +696,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 _buildHomeContent(
                   context,
                   bottomPadding: activeGig != null ? 16 + 86 : 16,
-                  isVerified: isVerified,
                 ),
                 if (activeGig != null)
                   Positioned(
@@ -705,7 +715,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildHomeContent(
     BuildContext context, {
     required double bottomPadding,
-    required String? isVerified,
   }) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final firstName = _userName.split(' ').first;
@@ -814,68 +823,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-
-            // ── Verification banner ───────────────────────
-            if (isVerified != 'verified') ...[
-              const SizedBox(height: 14),
-              GestureDetector(
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const VerificationScreen()),
-                ),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.amber.withValues(alpha: 0.4),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.verified_user_outlined,
-                        color: Colors.amber,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Text(
-                          'Your account is not yet verified.',
-                          style: TextStyle(
-                            color: Colors.amber,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.amber,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text(
-                          'Verify Now',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
                         ),

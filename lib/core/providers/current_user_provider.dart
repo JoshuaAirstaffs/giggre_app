@@ -26,6 +26,11 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   String? _userId;
   String? _isVerified;
   bool _allowGigAccessForUnverified = false;
+  // The account that was already signed in when the app launched (a restored
+  // session, not a login). Cleared on sign-out, so any later sign-in —
+  // including the same account again — counts as a fresh login.
+  String? _restoredSessionUid = FirebaseAuth.instance.currentUser?.uid;
+  bool _verifyPromptHandled = false;
   StreamSubscription? _callSubscription;
   StreamSubscription? _gigVisibilityRulesSubscription;
 
@@ -58,6 +63,17 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   String? get userId => _userId;
   String? get isVerified => _isVerified;
   bool get allowGigAccessForUnverified => _allowGigAccessForUnverified;
+
+  /// True exactly once per fresh login (never for a session restored at app
+  /// launch) when the account isn't verified — HomeScreen uses it to show the
+  /// "Account Not Verified" modal right after login instead of a permanent
+  /// banner.
+  bool takeVerifyPromptAfterLogin() {
+    if (_verifyPromptHandled) return false;
+    if (_uid == null || _uid == _restoredSessionUid) return false;
+    _verifyPromptHandled = true;
+    return _isVerified != 'verified';
+  }
   bool get isLoggedIn => _uid != null;
   String get currencyCode => _currencyCode;
   double? get lastLat => _lastLat;
@@ -622,6 +638,8 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   // in on this device keeps receiving this account's pushes too.
   Future<void> clearUser() async {
     final previousUid = _uid;
+    _restoredSessionUid = null;
+    _verifyPromptHandled = false;
     _currentEmail = null;
     _currentName = null;
     _uid = null;

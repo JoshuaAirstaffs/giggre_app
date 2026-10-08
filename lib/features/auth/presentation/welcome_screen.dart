@@ -16,6 +16,7 @@ import '../../../core/theme/profile_tab_theme.dart';
 import '../../../utils/user_utils.dart';
 import '../../../main.dart';
 import 'dashboard_screen.dart';
+import 'phone_autofill.dart';
 import 'register_screen.dart';
 import '../../../services/sound_service.dart';
 
@@ -80,7 +81,7 @@ const List<_Country> _kCountries = [
   _Country('New Zealand', '🇳🇿', '+64'),
 ];
 
-const _kDefaultCountry = _Country('Philippines', '🇵🇭', '+63');
+const _kDefaultCountry = _Country('United States', '🇺🇸', '+1');
 
 enum _PanelState { welcome, login, signup }
 
@@ -110,7 +111,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   // ── Signup state (unchanged from the original RegisterScreen) ──────────
   final _signupNameController = TextEditingController();
-  final _signupAgeController = TextEditingController();
   final _signupPhoneController = TextEditingController();
   final _signupEmailController = TextEditingController();
   final _signupPasswordController = TextEditingController();
@@ -124,8 +124,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   bool _signupObscurePassword = true;
   bool _signupObscureConfirmPassword = true;
   bool _agreedToTerms = false;
+  bool _confirmedLegalAge = false;
   String _signupError = '';
-  String _signupAgeError = '';
 
   void _navigateByRole(String? role) {
     if (role == 'gigworker') {
@@ -652,30 +652,22 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final password = _signupPasswordController.text.trim();
     final confirmPassword = _signupConfirmPasswordController.text.trim();
     final name = _signupNameController.text.trim();
-    final ageText = _signupAgeController.text.trim();
-    final phone = _signupPhoneController.text.trim();
+    final phone = normalizePhoneDigits(_signupPhoneController.text);
     final referralCode = _signupReferralController.text.trim().toUpperCase();
-
-    setState(() => _signupAgeError = '');
 
     if (email.isEmpty ||
         password.isEmpty ||
         confirmPassword.isEmpty ||
         name.isEmpty ||
-        phone.isEmpty ||
-        ageText.isEmpty) {
+        phone.isEmpty) {
       setState(() => _signupError = 'All fields are required');
       return;
     }
 
-    final age = int.tryParse(ageText);
-    if (age == null) {
-      setState(() => _signupAgeError = 'Enter a valid age');
-      return;
-    }
-    if (age < 18) {
+    if (!_confirmedLegalAge) {
       setState(
-        () => _signupAgeError = 'You must be at least 18 years old to register',
+        () => _signupError =
+            'Please confirm that you are of legal age to continue.',
       );
       return;
     }
@@ -757,7 +749,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         'userId': userId,
         'email': email,
         'name': name,
-        'age': age,
+        'legalAgeConfirmed': true,
+        'legalAgeConfirmedAt': Timestamp.now(),
         'phone': fullPhone,
         'balance': 0,
         'createdAt': Timestamp.now(),
@@ -917,7 +910,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     emailController.dispose();
     passwordController.dispose();
     _signupNameController.dispose();
-    _signupAgeController.dispose();
     _signupPhoneController.dispose();
     _signupEmailController.dispose();
     _signupPasswordController.dispose();
@@ -1029,8 +1021,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                                     key: const ValueKey('signup'),
                                     tokens: tokens,
                                     nameController: _signupNameController,
-                                    ageController: _signupAgeController,
-                                    ageError: _signupAgeError,
                                     phoneController: _signupPhoneController,
                                     emailController: _signupEmailController,
                                     passwordController: _signupPasswordController,
@@ -1054,6 +1044,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                                     agreedToTerms: _agreedToTerms,
                                     onAgreedToTermsChanged: (v) =>
                                         setState(() => _agreedToTerms = v),
+                                    confirmedLegalAge: _confirmedLegalAge,
+                                    onConfirmedLegalAgeChanged: (v) =>
+                                        setState(() => _confirmedLegalAge = v),
                                     error: _signupError,
                                     isLoading: _signupIsLoading,
                                     isGoogleLoading: _signupIsGoogleLoading,
@@ -1698,8 +1691,6 @@ class _LoginPanel extends StatelessWidget {
 class _SignupPanel extends StatelessWidget {
   final ProfileTabTokens tokens;
   final TextEditingController nameController;
-  final TextEditingController ageController;
-  final String ageError;
   final TextEditingController phoneController;
   final TextEditingController emailController;
   final TextEditingController passwordController;
@@ -1713,6 +1704,8 @@ class _SignupPanel extends StatelessWidget {
   final VoidCallback onToggleObscureConfirm;
   final bool agreedToTerms;
   final ValueChanged<bool> onAgreedToTermsChanged;
+  final bool confirmedLegalAge;
+  final ValueChanged<bool> onConfirmedLegalAgeChanged;
   final String error;
   final bool isLoading;
   final bool isGoogleLoading;
@@ -1726,8 +1719,6 @@ class _SignupPanel extends StatelessWidget {
     super.key,
     required this.tokens,
     required this.nameController,
-    required this.ageController,
-    required this.ageError,
     required this.phoneController,
     required this.emailController,
     required this.passwordController,
@@ -1741,6 +1732,8 @@ class _SignupPanel extends StatelessWidget {
     required this.onToggleObscureConfirm,
     required this.agreedToTerms,
     required this.onAgreedToTermsChanged,
+    required this.confirmedLegalAge,
+    required this.onConfirmedLegalAgeChanged,
     required this.error,
     required this.isLoading,
     required this.isGoogleLoading,
@@ -1809,15 +1802,6 @@ class _SignupPanel extends StatelessWidget {
             controller: nameController,
             hintText: 'Full Name',
             icon: Icons.person_outline,
-          ),
-          const SizedBox(height: 12),
-          _AuthField(
-            tokens: tokens,
-            controller: ageController,
-            hintText: 'Age',
-            icon: Icons.cake_outlined,
-            keyboardType: TextInputType.number,
-            errorText: ageError.isNotEmpty ? ageError : null,
           ),
           const SizedBox(height: 12),
           _SignupPhoneRow(
@@ -1919,6 +1903,12 @@ class _SignupPanel extends StatelessWidget {
             ),
             const SizedBox(height: 14),
           ],
+
+          // ─── LEGAL AGE ───
+          _LegalAgeLine(
+            confirmed: confirmedLegalAge,
+            onChanged: onConfirmedLegalAgeChanged,
+          ),
 
           // ─── TERMS & CONDITIONS ───
           _ConsentLine(
@@ -2128,6 +2118,38 @@ class _ReferralField extends StatelessWidget {
   }
 }
 
+class _LegalAgeLine extends StatelessWidget {
+  final bool confirmed;
+  final ValueChanged<bool> onChanged;
+
+  const _LegalAgeLine({required this.confirmed, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // Same default padded tap target as _ConsentLine's checkbox.
+        Checkbox(
+          value: confirmed,
+          onChanged: (v) => onChanged(v ?? false),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => onChanged(!confirmed),
+            child: const Text(
+              'I confirm that I am of legal age and legally allowed to work and accept gigs.',
+              style: TextStyle(fontSize: 9.5, color: _kMuted2),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _ConsentLine extends StatefulWidget {
   final bool agreed;
   final ValueChanged<bool> onChanged;
@@ -2213,7 +2235,7 @@ class _ConsentLineState extends State<_ConsentLine> {
 //  Phone row — country prefix box + phone field, same controller/behavior as
 //  the old signup screen's country picker.
 // ─────────────────────────────────────────────────────────────────────────────
-class _SignupPhoneRow extends StatelessWidget {
+class _SignupPhoneRow extends StatefulWidget {
   final ProfileTabTokens tokens;
   final TextEditingController controller;
   final _Country selectedCountry;
@@ -2227,22 +2249,76 @@ class _SignupPhoneRow extends StatelessWidget {
   });
 
   @override
+  State<_SignupPhoneRow> createState() => _SignupPhoneRowState();
+}
+
+class _SignupPhoneRowState extends State<_SignupPhoneRow> {
+  final _focusNode = FocusNode();
+  bool _simHintRequested = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  // Autofill / paste / SIM hint give a full "+1 555…" number — move the dial
+  // code into the country picker and keep only the national part here.
+  void _applyInternationalNumber(String raw) {
+    final split =
+        splitInternationalNumber(raw, _kCountries.map((c) => c.dialCode));
+    if (split == null) return;
+    // Keep the current pick when it shares the code (e.g. US vs Canada, +1).
+    final current = widget.selectedCountry;
+    final country = current.dialCode == split.dialCode
+        ? current
+        : _kCountries.firstWhere((c) => c.dialCode == split.dialCode);
+    widget.onCountryChanged(country);
+    widget.controller.value = TextEditingValue(
+      text: split.national,
+      selection: TextSelection.collapsed(offset: split.national.length),
+    );
+  }
+
+  // First focus on an empty field: offer the SIM's number (Android only).
+  Future<void> _onFocusChanged() async {
+    if (!_focusNode.hasFocus ||
+        _simHintRequested ||
+        widget.controller.text.isNotEmpty) {
+      return;
+    }
+    _simHintRequested = true;
+    final number = await requestSimPhoneNumber();
+    if (number != null && mounted) _applyInternationalNumber(number);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final tokens = widget.tokens;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _CountryPrefixBox(
           tokens: tokens,
-          selected: selectedCountry,
-          onChanged: onCountryChanged,
+          selected: widget.selectedCountry,
+          onChanged: widget.onCountryChanged,
         ),
         const SizedBox(width: 10),
         Expanded(
           child: SizedBox(
             height: 48,
             child: TextField(
-              controller: controller,
+              controller: widget.controller,
+              focusNode: _focusNode,
               keyboardType: TextInputType.phone,
+              autofillHints: const [AutofillHints.telephoneNumber],
+              onChanged: _applyInternationalNumber,
               style: TextStyle(fontSize: 14, color: tokens.textPrimary),
               decoration: InputDecoration(
                 isDense: true,

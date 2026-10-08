@@ -36,10 +36,14 @@ Future<void> showAccountNotVerifiedModal(
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.1),
+              color: Colors.orange.shade700.withValues(alpha: 0.12),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.error_outline, color: Colors.red, size: 40),
+            child: Icon(
+              Icons.warning_amber_rounded,
+              color: Colors.orange.shade700,
+              size: 40,
+            ),
           ),
           const SizedBox(height: 16),
           const Text(
@@ -49,8 +53,7 @@ Future<void> showAccountNotVerifiedModal(
           ),
           const SizedBox(height: 8),
           Text(
-            'Your account needs to be verified before you can continue. '
-            'Please request verification from the admin.',
+            'Get verified so hosts and workers know they can trust you.',
             style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
             textAlign: TextAlign.center,
           ),
@@ -59,7 +62,7 @@ Future<void> showAccountNotVerifiedModal(
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
+                backgroundColor: Colors.orange.shade700,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),

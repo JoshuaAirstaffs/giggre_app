@@ -11,6 +11,7 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import '../../../main.dart';
 import '../../../utils/user_utils.dart';
 import 'dashboard_screen.dart';
+import 'phone_autofill.dart';
 import 'welcome_screen.dart';
 import '../../../services/sound_service.dart';
 import 'dart:math';
@@ -54,8 +55,7 @@ const List<_Country> _kCountries = [
   _Country('New Zealand', '🇳🇿', '+64'),
 ];
 
-// Default to Philippines
-const _kDefaultCountry = _Country('Philippines', '🇵🇭', '+63');
+const _kDefaultCountry = _Country('United States', '🇺🇸', '+1');
 
 // ─────────────────────────────────────────────
 //  Country Code Picker Widget
@@ -274,6 +274,54 @@ class _PhoneField extends StatefulWidget {
 
 class _PhoneFieldState extends State<_PhoneField> {
   _Country _selected = _kDefaultCountry;
+  final _focusNode = FocusNode();
+  bool _simHintRequested = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _selectCountry(_Country c) {
+    setState(() => _selected = c);
+    widget.onCountryChanged?.call(c);
+  }
+
+  // Autofill / paste / SIM hint give a full "+1 555…" number — move the dial
+  // code into the country picker and keep only the national part here.
+  void _applyInternationalNumber(String raw) {
+    final split =
+        splitInternationalNumber(raw, _kCountries.map((c) => c.dialCode));
+    if (split == null) return;
+    // Keep the current pick when it shares the code (e.g. US vs Canada, +1).
+    final country = _selected.dialCode == split.dialCode
+        ? _selected
+        : _kCountries.firstWhere((c) => c.dialCode == split.dialCode);
+    _selectCountry(country);
+    widget.controller.value = TextEditingValue(
+      text: split.national,
+      selection: TextSelection.collapsed(offset: split.national.length),
+    );
+  }
+
+  // First focus on an empty field: offer the SIM's number (Android only).
+  Future<void> _onFocusChanged() async {
+    if (!_focusNode.hasFocus ||
+        _simHintRequested ||
+        widget.controller.text.isNotEmpty) {
+      return;
+    }
+    _simHintRequested = true;
+    final number = await requestSimPhoneNumber();
+    if (number != null && mounted) _applyInternationalNumber(number);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -283,15 +331,15 @@ class _PhoneFieldState extends State<_PhoneField> {
         _CountryCodePicker(
           selected: _selected,
           isDark: widget.isDark,
-          onChanged: (c) {
-            setState(() => _selected = c);
-            widget.onCountryChanged?.call(c);
-          },
+          onChanged: _selectCountry,
         ),
         Expanded(
           child: TextField(
             controller: widget.controller,
+            focusNode: _focusNode,
             keyboardType: TextInputType.phone,
+            autofillHints: const [AutofillHints.telephoneNumber],
+            onChanged: _applyInternationalNumber,
             decoration: InputDecoration(
               hintText: 'Phone number',
               hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
@@ -378,14 +426,13 @@ class CompleteProfileScreen extends StatefulWidget {
 
 class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
   final _nameController = TextEditingController();
-  final _ageController = TextEditingController();
   final _phoneController = TextEditingController();
   final _referralCodeController = TextEditingController();
   _Country _selectedCountry = _kDefaultCountry;
   bool _isLoading = false;
   bool _agreedToTerms = false;
+  bool _confirmedLegalAge = false;
   String _error = '';
-  String _ageError = '';
   late final TapGestureRecognizer _termsTap;
   late final TapGestureRecognizer _privacyTap;
 
@@ -484,24 +531,16 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
 
   Future<void> _saveProfile() async {
     final name = _nameController.text.trim();
-    final ageText = _ageController.text.trim();
-    final phone = _phoneController.text.trim();
+    final phone = normalizePhoneDigits(_phoneController.text);
     final referralCode = _referralCodeController.text.trim().toUpperCase();
 
-    setState(() => _ageError = '');
-
-    if (name.isEmpty || phone.isEmpty || ageText.isEmpty) {
-      setState(() => _error = 'Name, age, and phone number are required.');
+    if (name.isEmpty || phone.isEmpty) {
+      setState(() => _error = 'Name and phone number are required.');
       return;
     }
 
-    final age = int.tryParse(ageText);
-    if (age == null) {
-      setState(() => _ageError = 'Enter a valid age');
-      return;
-    }
-    if (age < 18) {
-      setState(() => _ageError = 'You must be at least 18 years old to register');
+    if (!_confirmedLegalAge) {
+      setState(() => _error = 'Please confirm that you are of legal age to continue.');
       return;
     }
 
@@ -622,7 +661,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         'userId'          : userId,
         'email'           : authUser.email ?? '',
         'name'            : name,
-        'age'             : age,
+        'legalAgeConfirmed'  : true,
+        'legalAgeConfirmedAt': Timestamp.now(),
         'phone'           : fullPhone,
         'photoUrl'        : authUser.photoURL ?? widget.pendingPhotoUrl ?? '',
         'balance'         : 0,
@@ -735,7 +775,6 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       GoogleSignIn().signOut();
     }
     _nameController.dispose();
-    _ageController.dispose();
     _phoneController.dispose();
     _referralCodeController.dispose();
     _termsTap.dispose();
@@ -850,18 +889,6 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: _ageController,
-                        keyboardType: TextInputType.number,
-                        decoration: _inputDecoration(
-                          hint: 'Age',
-                          icon: Icons.cake_outlined,
-                          isDark: isDark,
-                        ).copyWith(
-                          errorText: _ageError.isNotEmpty ? _ageError : null,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
                       _PhoneField(
                         controller: _phoneController,
                         isDark: isDark,
@@ -901,6 +928,12 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                 ),
 
                 const SizedBox(height: 16),
+
+                // ─── LEGAL AGE ───
+                _LegalAgeCheckbox(
+                  value: _confirmedLegalAge,
+                  onChanged: (v) => setState(() => _confirmedLegalAge = v),
+                ),
 
                 // ─── TERMS & CONDITIONS ───
                 Row(
@@ -1027,7 +1060,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _nameController = TextEditingController();
-  final _ageController = TextEditingController();
   final _phoneController = TextEditingController();
   final _referralCode = TextEditingController();
   _Country _selectedCountry = _kDefaultCountry;
@@ -1037,8 +1069,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool isAppleLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _confirmedLegalAge = false;
   String error = '';
-  String _ageError = '';
 
   static const _blue = Color(0xFF1B6CA8);
   static const _yellow = Color(0xFFF5A623);
@@ -1224,29 +1256,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final password = _passwordController.text.trim();
     final confirmPassword = _confirmPasswordController.text.trim();
     final name = _nameController.text.trim();
-    final ageText = _ageController.text.trim();
-    final phone = _phoneController.text.trim();
+    final phone = normalizePhoneDigits(_phoneController.text);
     final referralCode = _referralCode.text.trim().toUpperCase();
-
-    setState(() => _ageError = '');
 
     if (email.isEmpty ||
         password.isEmpty ||
         confirmPassword.isEmpty ||
         name.isEmpty ||
-        phone.isEmpty ||
-        ageText.isEmpty) {
+        phone.isEmpty) {
       setState(() => error = 'All fields are required');
       return;
     }
 
-    final age = int.tryParse(ageText);
-    if (age == null) {
-      setState(() => _ageError = 'Enter a valid age');
-      return;
-    }
-    if (age < 18) {
-      setState(() => _ageError = 'You must be at least 18 years old to register');
+    if (!_confirmedLegalAge) {
+      setState(() => error = 'Please confirm that you are of legal age to continue.');
       return;
     }
 
@@ -1313,7 +1336,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'userId'          : userId,
         'email'           : email,
         'name'            : name,
-        'age'             : age,
+        'legalAgeConfirmed'  : true,
+        'legalAgeConfirmedAt': Timestamp.now(),
         'phone'           : fullPhone,
         'balance'         : 0,
         'createdAt'       : Timestamp.now(),
@@ -1439,7 +1463,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     _nameController.dispose();
-    _ageController.dispose();
     _phoneController.dispose();
     _referralCode.dispose();
     super.dispose();
@@ -1567,18 +1590,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         isDark: isDark,
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: _ageController,
-                        keyboardType: TextInputType.number,
-                        decoration: _inputDecoration(
-                          hint: 'Age',
-                          icon: Icons.cake_outlined,
-                          isDark: isDark,
-                        ).copyWith(
-                          errorText: _ageError.isNotEmpty ? _ageError : null,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
                       _PhoneField(
                         controller: _phoneController,
                         isDark: isDark,
@@ -1676,6 +1687,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
 
                 const SizedBox(height: 16),
+
+                // ─── LEGAL AGE ───
+                _LegalAgeCheckbox(
+                  value: _confirmedLegalAge,
+                  onChanged: (v) => setState(() => _confirmedLegalAge = v),
+                ),
+                const SizedBox(height: 12),
 
                 // ─── ERROR ───
                 if (error.isNotEmpty)
@@ -1795,6 +1813,43 @@ class _RegisterScreenState extends State<RegisterScreen> {
 // Live password-strength feedback, shown only under the Password field —
 // rebuilds off the controller directly so it updates per keystroke without
 // needing a parent setState.
+class _LegalAgeCheckbox extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _LegalAgeCheckbox({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // Explicit 44x44 tap target, matching the terms checkbox.
+        SizedBox(
+          width: 44,
+          height: 44,
+          child: Checkbox(
+            value: value,
+            onChanged: (v) => onChanged(v ?? false),
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => onChanged(!value),
+            child: Text(
+              'I confirm that I am of legal age and legally allowed to work and accept gigs.',
+              style: TextStyle(fontSize: 9.5, color: Colors.grey[500]),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _PasswordRequirementsChecklist extends StatelessWidget {
   final TextEditingController passwordController;
   final bool isDark;
