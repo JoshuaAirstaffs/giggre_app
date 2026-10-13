@@ -28,7 +28,10 @@ class _GiggreUpdatesState extends State<GiggreUpdates> {
           .collection('items')
           .get();
 
-      final items = response.docs.map((doc) {
+      // sortNumber 0 = hidden/unpublished in giggre-admin.
+      final items = response.docs
+          .where((doc) => ((doc.data()['sortNumber'] as num?) ?? 0) > 0)
+          .map((doc) {
           final data = doc.data();
           if (data['dateUpdated'] is Timestamp) {
             data['dateUpdated'] = (data['dateUpdated'] as Timestamp).toDate();

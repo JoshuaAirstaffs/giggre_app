@@ -338,7 +338,13 @@ class _PhoneFieldState extends State<_PhoneField> {
             controller: widget.controller,
             focusNode: _focusNode,
             keyboardType: TextInputType.phone,
-            autofillHints: const [AutofillHints.telephoneNumber],
+            // Off on iOS: accepting the QuickType phone suggestion aborts
+            // inside UIKit (_UITextChoiceAccelerationAssistant) on iOS 18,
+            // even with autocorrect off. Android keeps Google autofill.
+            autofillHints: kIsWeb || !Platform.isIOS
+                ? const [AutofillHints.telephoneNumber]
+                : null,
+            autocorrect: false,
             onChanged: _applyInternationalNumber,
             decoration: InputDecoration(
               hintText: 'Phone number',
@@ -552,10 +558,16 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       return;
     }
 
-    // Build full phone with country code and validate
-    final fullPhone = '${_selectedCountry.dialCode}$phone';
-    if (!phoneRegex.hasMatch(fullPhone) && !RegExp(r'^\+\d{6,15}$').hasMatch(fullPhone)) {
-      setState(() => _error = 'Enter a valid phone number.');
+    // Validated against the selected country, so a number in another
+    // country's format (e.g. PH "0917…" with +1 selected) is rejected.
+    final fullPhone = buildFullPhone(_selectedCountry.dialCode, phone);
+    if (fullPhone == null) {
+      setState(
+        () => _error =
+            "That doesn't look like a valid ${_selectedCountry.name} "
+            '(${_selectedCountry.dialCode}) phone number. Check the number '
+            'or change the country code.',
+      );
       return;
     }
 
@@ -1286,10 +1298,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    final fullPhone = '${_selectedCountry.dialCode}$phone';
-    if (!phoneRegex.hasMatch(fullPhone) &&
-        !RegExp(r'^\+\d{6,15}$').hasMatch(fullPhone)) {
-      setState(() => error = 'Enter a valid phone number.');
+    // Validated against the selected country, so a number in another
+    // country's format (e.g. PH "0917…" with +1 selected) is rejected.
+    final fullPhone = buildFullPhone(_selectedCountry.dialCode, phone);
+    if (fullPhone == null) {
+      setState(
+        () => error =
+            "That doesn't look like a valid ${_selectedCountry.name} "
+            '(${_selectedCountry.dialCode}) phone number. Check the number '
+            'or change the country code.',
+      );
       return;
     }
 

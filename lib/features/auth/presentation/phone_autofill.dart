@@ -37,3 +37,30 @@ Future<String?> requestSimPhoneNumber() async {
   final result = await SmartAuth.instance.requestPhoneNumberHint();
   return result.hasData ? result.data : null;
 }
+
+/// Builds the E.164 number for [national] under the selected [dialCode], or
+/// returns null when the digits don't fit that country's format — e.g. a
+/// Philippine "0917…" number entered while +1 (US/Canada) is selected.
+/// Known formats are checked strictly; other countries only get a length
+/// check after dropping a single leading trunk '0'.
+String? buildFullPhone(String dialCode, String national) {
+  var digits = normalizePhoneDigits(national);
+  if (!RegExp(r'^\d+$').hasMatch(digits)) return null;
+  switch (dialCode) {
+    case '+1':
+      // Tolerate the national "1" prefix (1 555 123 4567).
+      if (digits.length == 11 && digits.startsWith('1')) {
+        digits = digits.substring(1);
+      }
+      if (!RegExp(r'^[2-9]\d{2}[2-9]\d{6}$').hasMatch(digits)) return null;
+    case '+63':
+      // Mobile only: 09XX XXX XXXX locally, 9XX XXX XXXX after +63.
+      if (digits.startsWith('0')) digits = digits.substring(1);
+      if (!RegExp(r'^9\d{9}$').hasMatch(digits)) return null;
+    default:
+      if (digits.startsWith('0')) digits = digits.substring(1);
+      final codeLength = dialCode.length - 1;
+      if (digits.length < 6 || digits.length + codeLength > 15) return null;
+  }
+  return '$dialCode$digits';
+}

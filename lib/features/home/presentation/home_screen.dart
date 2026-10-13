@@ -143,7 +143,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           .collection('items')
           .get();
 
-      final items = response.docs.map((doc) {
+      // sortNumber 0 = hidden/unpublished in giggre-admin.
+      final items = response.docs
+          .where((doc) => ((doc.data()['sortNumber'] as num?) ?? 0) > 0)
+          .map((doc) {
         final data = doc.data();
         if (data['dateCreated'] is Timestamp) {
           data['dateCreated'] = (data['dateCreated'] as Timestamp).toDate();
@@ -1744,6 +1747,9 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
 
     if (_slides.isEmpty) return const SizedBox.shrink();
 
+    // A lone slide stays put — no auto-advance, looping, swipe or dots.
+    final hasMultiple = _slides.length > 1;
+
     return Column(
       children: [
         SizedBox(
@@ -1754,7 +1760,11 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
               viewportFraction: 1.0,
               padEnds: false,
               enlargeCenterPage: false,
-              autoPlay: true,
+              autoPlay: hasMultiple,
+              enableInfiniteScroll: hasMultiple,
+              scrollPhysics: hasMultiple
+                  ? null
+                  : const NeverScrollableScrollPhysics(),
               autoPlayInterval: const Duration(seconds: 5),
               autoPlayAnimationDuration: const Duration(milliseconds: 600),
               autoPlayCurve: Curves.easeInOut,
@@ -1765,19 +1775,21 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
             },
           ),
         ),
-        const SizedBox(height: 12),
-        AnimatedSmoothIndicator(
-          activeIndex: _current,
-          count: _slides.length,
-          effect: const ExpandingDotsEffect(
-            activeDotColor: kGold,
-            dotColor: Color(0x5994A3B8), // kSub @ 35% opacity
-            dotHeight: 6,
-            dotWidth: 6,
-            expansionFactor: 3.5,
-            spacing: 6,
+        if (hasMultiple) ...[
+          const SizedBox(height: 12),
+          AnimatedSmoothIndicator(
+            activeIndex: _current,
+            count: _slides.length,
+            effect: const ExpandingDotsEffect(
+              activeDotColor: kGold,
+              dotColor: Color(0x5994A3B8), // kSub @ 35% opacity
+              dotHeight: 6,
+              dotWidth: 6,
+              expansionFactor: 3.5,
+              spacing: 6,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }

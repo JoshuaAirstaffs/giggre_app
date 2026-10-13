@@ -692,10 +692,16 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       return;
     }
 
-    final fullPhone = '${_selectedCountry.dialCode}$phone';
-    if (!phoneRegex.hasMatch(fullPhone) &&
-        !RegExp(r'^\+\d{6,15}$').hasMatch(fullPhone)) {
-      setState(() => _signupError = 'Enter a valid phone number.');
+    // Validated against the selected country, so a number in another
+    // country's format (e.g. PH "0917…" with +1 selected) is rejected.
+    final fullPhone = buildFullPhone(_selectedCountry.dialCode, phone);
+    if (fullPhone == null) {
+      setState(
+        () => _signupError =
+            "That doesn't look like a valid ${_selectedCountry.name} "
+            '(${_selectedCountry.dialCode}) phone number. Check the number '
+            'or change the country code.',
+      );
       return;
     }
 
@@ -2057,62 +2063,38 @@ class _ReferralField extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       height: 48,
-      child: Stack(
-        alignment: Alignment.centerRight,
-        children: [
-          TextField(
-            controller: controller,
-            textCapitalization: TextCapitalization.characters,
-            style: TextStyle(fontSize: 14, color: tokens.textPrimary),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'e.g. GX82KL19',
-              hintStyle: TextStyle(color: tokens.textMuted, fontSize: 14),
-              prefixIcon: Icon(
-                Icons.card_giftcard_outlined,
-                color: tokens.textMuted,
-                size: 19,
-              ),
-              filled: true,
-              fillColor: tokens.insetBg,
-              contentPadding: const EdgeInsets.only(top: 14, bottom: 14, right: 104),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: tokens.cardBorder, width: 1),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: tokens.cardBorder, width: 1),
-              ),
-              focusedBorder: const OutlineInputBorder(
-                borderRadius: BorderRadius.all(Radius.circular(14)),
-                borderSide: BorderSide(color: _kBlueAccent, width: 1.4),
-              ),
-            ),
+      child: TextField(
+        controller: controller,
+        textCapitalization: TextCapitalization.characters,
+        style: TextStyle(fontSize: 14, color: tokens.textPrimary),
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'e.g. GX82KL19',
+          hintStyle: TextStyle(color: tokens.textMuted, fontSize: 14),
+          prefixIcon: Icon(
+            Icons.card_giftcard_outlined,
+            color: tokens.textMuted,
+            size: 19,
           ),
-          // Decorative badge only — IgnorePointer keeps it from ever
-          // stealing taps meant for the field underneath.
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: IgnorePointer(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color.fromRGBO(240, 168, 48, 0.14),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: const Text(
-                  'Earn rewards',
-                  style: TextStyle(
-                    color: _kSignupGoldLight,
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
+          filled: true,
+          fillColor: tokens.insetBg,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
           ),
-        ],
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(color: tokens.cardBorder, width: 1),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(color: tokens.cardBorder, width: 1),
+          ),
+          focusedBorder: const OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(14)),
+            borderSide: BorderSide(color: _kBlueAccent, width: 1.4),
+          ),
+        ),
       ),
     );
   }
@@ -2317,7 +2299,13 @@ class _SignupPhoneRowState extends State<_SignupPhoneRow> {
               controller: widget.controller,
               focusNode: _focusNode,
               keyboardType: TextInputType.phone,
-              autofillHints: const [AutofillHints.telephoneNumber],
+              // Off on iOS: accepting the QuickType phone suggestion aborts
+              // inside UIKit (_UITextChoiceAccelerationAssistant) on iOS 18,
+              // even with autocorrect off. Android keeps Google autofill.
+              autofillHints: kIsWeb || !Platform.isIOS
+                  ? const [AutofillHints.telephoneNumber]
+                  : null,
+              autocorrect: false,
               onChanged: _applyInternationalNumber,
               style: TextStyle(fontSize: 14, color: tokens.textPrimary),
               decoration: InputDecoration(
