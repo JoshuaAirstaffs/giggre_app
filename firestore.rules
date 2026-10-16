@@ -27,6 +27,62 @@ service cloud.firestore {
       return isAdmin() && adminData().role == 'super_admin';
     }
 
+    // ─── Gig Points helpers ────────────────────────────────────
+    // A valid reward is a non-negative integer (functions/src/gigPoints.ts
+    // rejects anything else too — it never rounds).
+    function isValidReward(v) {
+      return v is int && v >= 0;
+    }
+
+    // `gigPointsReward` on a gig doc is that task's own reward and takes
+    // precedence over the task-type reward. Admin-only (so neither a host
+    // nor the worker can set their own reward) and must be valid or null.
+    function setsGigPointsReward() {
+      return request.resource.data.keys().hasAny(['gigPointsReward']);
+    }
+
+    function changesGigPointsReward() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['gigPointsReward']);
+    }
+
+    function canWriteGigPointsReward() {
+      return isAdmin() && (
+        request.resource.data.get('gigPointsReward', null) == null ||
+        isValidReward(request.resource.data.gigPointsReward)
+      );
+    }
+
+    // general_config/gig_points: only the known gig types, each a valid
+    // reward; optional cap valid or null; enabled a bool.
+    function isValidGigPointsConfig(d) {
+      let byType = d.get('pointsByGigType', {});
+      return byType is map &&
+        byType.keys().hasOnly(['quick', 'open', 'offered']) &&
+        (!('quick' in byType) || isValidReward(byType.quick)) &&
+        (!('open' in byType) || isValidReward(byType.open)) &&
+        (!('offered' in byType) || isValidReward(byType.offered)) &&
+        (d.get('maxPointsPerGig', null) == null || isValidReward(d.maxPointsPerGig)) &&
+        d.get('enabled', true) is bool;
+    }
+
+    // The host's approval of a worker's job: gig_detail_sheet.dart sets
+    // status 'payment' + paymentCode + paymentInitiatedAt when the host
+    // confirms the work. Gig Points (functions/src/gigPoints.ts) are only
+    // credited on completion of a doc carrying paymentInitiatedAt. Workers
+    // can otherwise update their own gig/slot docs, so without this they
+    // could approve their own job. Gig and slot docs both carry hostId.
+    function writesHostApprovalAsNonHost() {
+      return resource.data.get('hostId', '') != request.auth.uid &&
+        (
+          (request.resource.data.get('status', '') == 'payment' &&
+            resource.data.get('status', '') != 'payment') ||
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['paymentInitiatedAt', 'paymentCode'])
+        ) &&
+        !isAdmin();
+    }
+
     // Gig chat rooms have a 2-uid `participants` array (support tickets use
     // `userId` instead and are never blockable through this). True if the
     // *other* participant has senderUid in their own blockedUsers list.
@@ -307,6 +363,34 @@ service cloud.firestore {
         allow write: if isAdmin();
     }
 
+    // ─── Gig Points ────────────────────────────────────────────
+    // Balance doc + immutable ledger, written ONLY by the gigPoints Cloud
+    // Functions (Admin SDK). Kept out of users/{uid} on purpose: that doc is
+    // client-writable, so a balance there could be edited by a modified app.
+    match /gig_points/{uid} {
+      allow read: if isUser(uid) || isAdmin();
+      allow write: if false;
+
+      match /transactions/{txId} {
+        allow read: if isUser(uid) || isAdmin();
+        allow write: if false;
+      }
+    }
+
+    // ─── Gig Points config issues ──────────────────────────────
+    // Raised by the gigPoints Cloud Functions when a task has no valid
+    // reward configured (its points are held, not awarded) — admin-only.
+    // Resolved via the retryGigPointsAwards callable.
+    match /gig_points_config_issues/{issueId} {
+      allow read: if isAdmin();
+      allow write: if false;
+
+      match /tasks/{taskId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+
     // ─── Badge awards ──────────────────────────────────────────
     // One doc per month with that month's winners — written only by the
     // awardMonthlyBadges Cloud Function, read by giggre-admin's Analytics.
@@ -335,8 +419,10 @@ service cloud.firestore {
     // ─── Quick Gigs ────────────────────────────────────────────
     match /quick_gigs/{gigId} {
       allow read: if isAuth();
-      allow create: if isAuth() && request.resource.data.hostId == request.auth.uid;
-      allow update: if isAuth() && (
+      allow create: if isAuth() && request.resource.data.hostId == request.auth.uid &&
+        (!setsGigPointsReward() || canWriteGigPointsReward());
+      allow update: if (!changesGigPointsReward() || canWriteGigPointsReward()) && isAuth() &&
+        !writesHostApprovalAsNonHost() && (
         resource.data.hostId == request.auth.uid ||
         resource.data.workerId == request.auth.uid ||
         (resource.data.assignedWorkerId == request.auth.uid && resource.data.hostId != request.auth.uid) ||
@@ -361,7 +447,7 @@ service cloud.firestore {
           request.auth.uid == workerId ||
           isAdmin()
         );
-        allow update: if isAuth() && (
+        allow update: if isAuth() && !writesHostApprovalAsNonHost() && (
           request.auth.uid == workerId ||
           resource.data.hostId == request.auth.uid ||
           isAdmin()
@@ -374,8 +460,10 @@ service cloud.firestore {
    match /open_gigs/{gigId} {
     allow read: if isAuth();
     allow create: if isAuth() &&
-      request.resource.data.hostId == request.auth.uid;
-    allow update: if isAuth() && (
+      request.resource.data.hostId == request.auth.uid &&
+      (!setsGigPointsReward() || canWriteGigPointsReward());
+    allow update: if (!changesGigPointsReward() || canWriteGigPointsReward()) && isAuth() &&
+        !writesHostApprovalAsNonHost() && (
       resource.data.hostId == request.auth.uid ||
       resource.data.workerId == request.auth.uid ||
       resource.data.assignedWorkerId == request.auth.uid ||
@@ -407,7 +495,7 @@ service cloud.firestore {
         request.auth.uid == workerId ||
         isAdmin()
       );
-      allow update: if isAuth() && (
+      allow update: if isAuth() && !writesHostApprovalAsNonHost() && (
         request.auth.uid == workerId ||
         resource.data.hostId == request.auth.uid ||
         isAdmin()
@@ -420,8 +508,10 @@ service cloud.firestore {
     match /offered_gigs/{gigId} {
       allow read: if isAuth();
       allow create: if isAuth() &&
-        request.resource.data.hostId == request.auth.uid;
-      allow update: if isAuth() && (
+        request.resource.data.hostId == request.auth.uid &&
+        (!setsGigPointsReward() || canWriteGigPointsReward());
+      allow update: if (!changesGigPointsReward() || canWriteGigPointsReward()) && isAuth() &&
+        !writesHostApprovalAsNonHost() && (
         resource.data.hostId == request.auth.uid ||
         resource.data.workerId == request.auth.uid ||
         resource.data.assignedWorkerId == request.auth.uid ||
@@ -444,7 +534,7 @@ service cloud.firestore {
           request.auth.uid == workerId ||
           isAdmin()
         );
-        allow update: if isAuth() && (
+        allow update: if isAuth() && !writesHostApprovalAsNonHost() && (
           request.auth.uid == workerId ||
           resource.data.hostId == request.auth.uid ||
           isAdmin()
@@ -486,9 +576,20 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // Gig Points reward config — read by the app to show the configured
+    // reward per gig type; only the gigPoints Cloud Functions act on it.
+    match /general_config/gig_points {
+      allow read: if isAuth();
+      allow create, update: if isSuperAdmin() &&
+        isValidGigPointsConfig(request.resource.data);
+      allow delete: if isSuperAdmin();
+    }
+
     match /general_config/{docId} {
       allow read: if isAdmin();
-      allow write: if isSuperAdmin();
+      // gig_points has its own validated rule above; rules OR together, so
+      // it must be excluded here or this would bypass that validation.
+      allow write: if isSuperAdmin() && docId != 'gig_points';
     }
 
     // ─── Account Delete Requests ────────────────────────────────

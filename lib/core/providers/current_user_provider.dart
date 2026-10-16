@@ -8,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:giggre_app/features/call/incoming_call_screen.dart';
 import 'package:giggre_app/features/call/incoming_video_call_screen.dart';
 import 'package:giggre_app/features/gig_host/presentation/widgets/gig_detail_sheet.dart';
+import 'package:giggre_app/features/gig_points/presentation/gig_points_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/widgets/toolchest_sheet.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
@@ -402,6 +403,16 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
         sound: gigSound,
       ),
     );
+    // Gig Points awarded on a confirmed gig completion — see
+    // functions/src/gigPoints.ts (channelId 'gig_points_v1').
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'gig_points_v1',
+        'Gig Points',
+        description: 'Notifications when you earn Gig Points for a completed gig',
+        importance: Importance.high,
+      ),
+    );
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
         'gig_cancellation_approved_v1',
@@ -522,6 +533,16 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
         Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const VerificationScreen()),
+        );
+      });
+      return;
+    }
+
+    if (data['type'] == 'gig_points_awarded') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const GigPointsScreen()),
         );
       });
       return;

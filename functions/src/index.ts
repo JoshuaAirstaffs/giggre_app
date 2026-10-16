@@ -1422,3 +1422,17 @@ export {
 // ── Badges ──────────────────────────────────────────────────────────────────
 // Monthly Best host / Best worker awards. See functions/src/badges.ts.
 export { awardMonthlyBadges } from "./badges";
+
+// ── Gig Points ──────────────────────────────────────────────────────────────
+// Awards points to workers on host-approved gig completion, plus admin-only
+// adjustment and blocked-award retry callables. See functions/src/gigPoints.ts.
+export {
+  onQuickGigPointsAward,
+  onOpenGigPointsAward,
+  onOfferedGigPointsAward,
+  onQuickGigSlotPointsAward,
+  onOpenGigSlotPointsAward,
+  onOfferedGigSlotPointsAward,
+  adjustGigPoints,
+  retryGigPointsAwards,
+} from "./gigPoints";
