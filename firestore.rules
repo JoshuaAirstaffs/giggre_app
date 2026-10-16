@@ -30,8 +30,10 @@ service cloud.firestore {
     // ─── Gig Points helpers ────────────────────────────────────
     // A valid reward is a non-negative integer (functions/src/gigPoints.ts
     // rejects anything else too — it never rounds).
+    // Whole-number floats (10.0) are accepted too: the Firebase console and
+    // some SDKs store "10" that way. 12.5 is still rejected.
     function isValidReward(v) {
-      return v is int && v >= 0;
+      return (v is int || (v is float && v == math.floor(v))) && v >= 0;
     }
 
     // `gigPointsReward` on a gig doc is that task's own reward and takes

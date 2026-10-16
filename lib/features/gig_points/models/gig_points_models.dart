@@ -140,9 +140,17 @@ enum RewardBasis {
   };
 }
 
-/// A valid reward is a non-negative integer — anything else is rejected,
-/// never rounded (same rule as rewardInt() in functions/src/gigPoints.ts).
-int? validReward(Object? v) => v is int && v >= 0 ? v : null;
+/// A valid reward is a non-negative whole number — anything else is
+/// rejected, never rounded (same rule as rewardInt() in
+/// functions/src/gigPoints.ts). A whole-number double (10.0) is accepted
+/// because the Firebase console can store "10" that way; 12.5 is not.
+int? validReward(Object? v) {
+  if (v is int) return v >= 0 ? v : null;
+  if (v is double && v.isFinite && v >= 0 && v == v.truncateToDouble()) {
+    return v.toInt();
+  }
+  return null;
+}
 
 String gigTypeLabel(String? gigType) => switch (gigType) {
   'quick' => 'Quick Gig',
