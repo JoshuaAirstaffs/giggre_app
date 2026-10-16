@@ -92,6 +92,21 @@ service cloud.firestore {
 // }
 
     // ─── Users ─────────────────────────────────────────────────
+    // ─── Gig Wallet ────────────────────────────────────────────
+    // Balance + ledger. Owner and admins can read; NOBODY can write from a
+    // client. Every change goes through postLedgerEntry() in
+    // functions/src/wallet.ts (Admin SDK bypasses these rules).
+    // The legacy users/{uid}.balance field is no longer used by the app.
+    match /wallets/{uid} {
+      allow read: if isUser(uid) || isAdmin();
+      allow write: if false;
+
+      match /transactions/{txId} {
+        allow read: if isUser(uid) || isAdmin();
+        allow write: if false;
+      }
+    }
+
     match /users/{uid} {
       // Public read — allows unauthenticated referral code lookup during registration
       allow read: if true;
@@ -119,14 +134,6 @@ service cloud.firestore {
       match /referrals_list/{referredId} {
         allow read: if isUser(uid) || isAdmin();
         allow write: if isAuth();
-      }
-
-      // ─── Wallet Transactions ─────────────────────────────────
-      // Owner and admins can read. Written only by the backend
-      // (Cloud Functions / Admin SDK bypass these rules).
-      match /wallet_transactions/{txId} {
-        allow read: if isUser(uid) || isAdmin();
-        allow write: if false;
       }
 
       // ─── Badges ──────────────────────────────────────────────

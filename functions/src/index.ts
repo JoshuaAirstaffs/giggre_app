@@ -1422,3 +1422,7 @@ export {
 // ── Badges ──────────────────────────────────────────────────────────────────
 // Monthly Best host / Best worker awards. See functions/src/badges.ts.
 export { awardMonthlyBadges } from "./badges";
+
+// ── Gig Wallet ──────────────────────────────────────────────────────────────
+// Server-only ledger for wallets/{uid}. See functions/src/wallet.ts.
+export { adminAdjustWallet } from "./wallet";

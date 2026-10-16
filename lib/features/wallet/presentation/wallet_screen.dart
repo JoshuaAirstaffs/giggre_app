@@ -11,6 +11,9 @@ import '../../../core/utils/currency_formatter.dart';
 import 'cash_in_methods_screen.dart';
 import 'choose_recipient_screen.dart';
 import 'security_privacy_centre_screen.dart';
+import 'transaction_details_screen.dart';
+import 'transaction_history_screen.dart';
+import 'widgets/wallet_transaction.dart';
 
 // Hidden until payment methods exist. Flip to true to bring the
 // "Set as default payment method" row back.
@@ -125,7 +128,7 @@ class WalletScreen extends StatelessWidget {
                   const SizedBox(height: 16),
 
                   // ── Transaction history ────────────────────────────────────
-                  _TransactionHistory(uid: uid, tokens: tokens),
+                  _TransactionHistory(uid: uid, role: role, tokens: tokens),
                   ],
                 ),
               ),
@@ -147,7 +150,6 @@ class _WalletHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = _WalletAccent.of(context);
     final currencyCode = context.watch<CurrentUserProvider>().currencyCode;
-    final symbol = CurrencyFormatter.symbol(currencyCode);
     final number = NumberFormat.currency(symbol: '', decimalDigits: 2);
 
     return ClipRect(
@@ -222,8 +224,11 @@ class _WalletHero extends StatelessWidget {
                               >(
                                 stream: uid == null
                                     ? null
+                                    // Server-only wallet doc (see
+                                    // functions/src/wallet.ts). Missing doc
+                                    // = no transactions yet = 0.
                                     : FirebaseFirestore.instance
-                                          .collection('users')
+                                          .collection('wallets')
                                           .doc(uid)
                                           .snapshots(),
                                 builder: (context, snap) {
@@ -245,10 +250,17 @@ class _WalletHero extends StatelessWidget {
                                       ),
                                     );
                                   }
+                                  final wallet = snap.data?.data();
                                   final balance =
-                                      (snap.data?.data()?['balance'] as num?)
+                                      (wallet?['balance'] as num?)
                                           ?.toDouble() ??
                                       0;
+                                  // The wallet's own currency wins once it
+                                  // exists; until then, the user's location.
+                                  final symbol = CurrencyFormatter.symbol(
+                                    wallet?['currencyCode'] as String? ??
+                                        currencyCode,
+                                  );
                                   return FittedBox(
                                     fit: BoxFit.scaleDown,
                                     alignment: Alignment.centerLeft,
@@ -472,231 +484,163 @@ class _SecurityBanner extends StatelessWidget {
 // ─────────────────────────────────────────────
 //  Transaction history
 //
-//  Reads users/{uid}/wallet_transactions, newest first. Expected fields:
+//  Reads wallets/{uid}/transactions, newest first (written only by
+//  postLedgerEntry in functions/src/wallet.ts). Fields:
 //    title        String     e.g. "Top Up via GCash", "Payment for Gig #123"
 //    amount       num        signed: positive = money in, negative = money out
-//    type         String     top_up | transfer | send | earning | withdraw | refund
+//    type         String     top_up | withdraw | send | receive | gig_payment |
+//                            earning | refund | fee | adjustment
 //    currencyCode String?    defaults to the user's currency
 //    status       String?    completed | pending | failed (default completed)
 //    createdAt    Timestamp
 //  Only the backend (Cloud Functions / Admin SDK) should write these.
 // ─────────────────────────────────────────────
 class _TransactionHistory extends StatelessWidget {
-  const _TransactionHistory({required this.uid, required this.tokens});
+  const _TransactionHistory({
+    required this.uid,
+    required this.role,
+    required this.tokens,
+  });
 
   final String? uid;
+  final String? role;
   final ProfileTabTokens tokens;
+
+  /// Rows shown here; the rest are on the "See all" screen.
+  static const int _kPreview = 5;
+
+  void _openDetails(BuildContext context, WalletTx tx, String currency) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TransactionDetailsScreen(
+          tx: tx,
+          fallbackCurrency: currency,
+          role: role,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final userCurrency = context.watch<CurrentUserProvider>().currencyCode;
+    final accent = _WalletAccent.of(context);
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(
         color: tokens.cardSurface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: tokens.cardBorder),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Transaction History',
-            style: TextStyle(
-              color: tokens.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: uid == null
-                ? null
-                : FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(uid)
-                      .collection('wallet_transactions')
-                      .orderBy('createdAt', descending: true)
-                      .limit(50)
-                      .snapshots(),
-            builder: (context, snap) {
-              if (snap.hasError) {
-                debugPrint('[Wallet] history error: ${snap.error}');
-                return _HistoryMessage(
-                  icon: Icons.error_outline_rounded,
-                  text: "Couldn't load transactions.",
-                  tokens: tokens,
-                );
-              }
-              if (!snap.hasData) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 28),
-                  child: Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        color: _WalletAccent.of(context).fill,
-                        strokeWidth: 2,
-                      ),
-                    ),
-                  ),
-                );
-              }
-              final docs = snap.data!.docs;
-              if (docs.isEmpty) {
-                return _HistoryMessage(
-                  icon: Icons.receipt_long_rounded,
-                  text: 'No transactions yet.',
-                  tokens: tokens,
-                );
-              }
-              return Column(
-                children: [
-                  for (var i = 0; i < docs.length; i++) ...[
-                    if (i > 0) Divider(height: 1, color: tokens.divider),
-                    _TransactionRow(
-                      data: docs[i].data(),
-                      fallbackCurrency: userCurrency,
-                      tokens: tokens,
-                    ),
-                  ],
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
+      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: uid == null
+            ? null
+            : FirebaseFirestore.instance
+                  .collection('wallets')
+                  .doc(uid)
+                  .collection('transactions')
+                  .orderBy('createdAt', descending: true)
+                  .limit(_kPreview)
+                  .snapshots(),
+        builder: (context, snap) {
+          final txs = snap.data?.docs.map(WalletTx.fromDoc).toList() ?? [];
 
-class _HistoryMessage extends StatelessWidget {
-  const _HistoryMessage({
-    required this.icon,
-    required this.text,
-    required this.tokens,
-  });
-
-  final IconData icon;
-  final String text;
-  final ProfileTabTokens tokens;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28),
-      child: Center(
-        child: Column(
-          children: [
-            Icon(icon, size: 36, color: tokens.textMuted),
-            const SizedBox(height: 8),
-            Text(
-              text,
-              style: TextStyle(color: tokens.textSecondary, fontSize: 13),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TransactionRow extends StatelessWidget {
-  const _TransactionRow({
-    required this.data,
-    required this.fallbackCurrency,
-    required this.tokens,
-  });
-
-  final Map<String, dynamic> data;
-  final String fallbackCurrency;
-  final ProfileTabTokens tokens;
-
-  static const _kIn = Color(0xFF2BB673);
-  static const _kOut = Colors.redAccent;
-
-  static IconData _iconFor(String type) => switch (type) {
-    'top_up' => Icons.add_card_rounded,
-    'transfer' => Icons.swap_horiz_rounded,
-    'send' => Icons.north_east_rounded,
-    'withdraw' => Icons.account_balance_rounded,
-    'earning' => Icons.work_outline_rounded,
-    'refund' => Icons.replay_rounded,
-    _ => Icons.receipt_long_rounded,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final amount = (data['amount'] as num?)?.toDouble() ?? 0;
-    final type = data['type'] as String? ?? '';
-    final title = data['title'] as String? ?? 'Transaction';
-    final status = data['status'] as String? ?? 'completed';
-    final code = data['currencyCode'] as String? ?? fallbackCurrency;
-    final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
-
-    final isIn = amount >= 0;
-    final color = isIn ? _kIn : _kOut;
-    final formatted = NumberFormat.currency(
-      symbol: '${CurrencyFormatter.symbol(code)} ',
-      decimalDigits: 2,
-    ).format(amount.abs());
-
-    final subtitle = [
-      if (createdAt != null) DateFormat('MMM d, yyyy · h:mm a').format(createdAt),
-      if (status != 'completed') status[0].toUpperCase() + status.substring(1),
-    ].join(' · ');
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(_iconFor(type), size: 19, color: color),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: tokens.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+          final Widget body;
+          if (snap.hasError) {
+            debugPrint('[Wallet] history error: ${snap.error}');
+            body = WalletHistoryMessage(
+              icon: Icons.error_outline_rounded,
+              text: "Couldn't load transactions.",
+              tokens: tokens,
+            );
+          } else if (!snap.hasData) {
+            body = Padding(
+              padding: const EdgeInsets.symmetric(vertical: 28),
+              child: Center(
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    color: accent.fill,
+                    strokeWidth: 2,
                   ),
                 ),
-                if (subtitle.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: TextStyle(color: tokens.textMuted, fontSize: 12),
+              ),
+            );
+          } else if (txs.isEmpty) {
+            body = WalletHistoryMessage(
+              icon: Icons.receipt_long_rounded,
+              text: 'No transactions yet.',
+              tokens: tokens,
+            );
+          } else {
+            body = Column(
+              children: [
+                for (var i = 0; i < txs.length; i++) ...[
+                  if (i > 0) Divider(height: 1, color: tokens.divider),
+                  WalletTransactionRow(
+                    tx: txs[i],
+                    fallbackCurrency: userCurrency,
+                    tokens: tokens,
+                    onTap: () => _openDetails(context, txs[i], userCurrency),
                   ),
                 ],
               ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '${isIn ? '+' : '−'} $formatted',
-            style: TextStyle(
-              color: color,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Header: title + See all ────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Transaction History',
+                        style: TextStyle(
+                          color: tokens.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (uid != null && txs.isNotEmpty)
+                      TextButton(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => TransactionHistoryScreen(
+                              uid: uid!,
+                              role: role,
+                            ),
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: accent.fg,
+                        ),
+                        child: const Text(
+                          'See all',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      )
+                    else
+                      const SizedBox(height: 48),
+                  ],
+                ),
+              ),
+              body,
+            ],
+          );
+        },
       ),
     );
   }
