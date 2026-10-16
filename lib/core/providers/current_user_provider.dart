@@ -46,6 +46,9 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   static GlobalKey<NavigatorState>? navigatorKey;
 
   String _currencyCode = 'USD';
+  // 2-letter ISO country of the device's GPS location, detected alongside
+  // the currency below. Null until known.
+  String? _countryCode;
   bool _currencyInitialized = false;
   bool _currencyRefreshing = false;
 
@@ -76,8 +79,39 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
   bool get isLoggedIn => _uid != null;
   String get currencyCode => _currencyCode;
+  String? get countryCode => _countryCode;
   double? get lastLat => _lastLat;
   double? get lastLng => _lastLng;
+
+  bool _countryDetecting = false;
+
+  /// Detects and saves the device's country when it isn't known yet — for
+  /// sessions where the login-time detection in initCurrencyCode never
+  /// produced one (e.g. accounts created before countryCode was stored).
+  /// Screens that depend on the country call this; it no-ops otherwise.
+  Future<void> ensureCountryCode() async {
+    final uid = _uid;
+    if (_countryCode != null || uid == null || _countryDetecting) return;
+    _countryDetecting = true;
+    try {
+      String? country;
+      await CurrencyService.detectCurrency(
+        onPosition: setLastLocation,
+        onCountry: (code) => country = code,
+      );
+      if (country == null || _uid != uid) return;
+      _countryCode = country;
+      notifyListeners();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({'countryCode': country});
+    } catch (e) {
+      debugPrint('[CurrentUserProvider] country detection failed: $e');
+    } finally {
+      _countryDetecting = false;
+    }
+  }
 
   void setLastLocation(double lat, double lng) {
     _lastLat = lat;
@@ -107,14 +141,21 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (_currencyInitialized) return;
     _currencyInitialized = true;
     final existing = userDoc['currencyCode'] as String?;
-    if (existing != null) {
-      _currencyCode = existing;
+    final existingCountry = userDoc['countryCode'] as String?;
+    if (existing != null || existingCountry != null) {
+      _currencyCode = existing ?? _currencyCode;
+      _countryCode = existingCountry;
       notifyListeners();
     }
     final code = await CurrencyService.initForUser(
       uid,
       userDoc,
       onPosition: setLastLocation,
+      onCountry: (country) {
+        if (country == _countryCode) return;
+        _countryCode = country;
+        notifyListeners();
+      },
       onDetectionFailed: () => _showLocationDetectionFailedDialog(uid),
     );
     if (code != _currencyCode) {
@@ -644,6 +685,7 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentName = null;
     _uid = null;
     _currencyCode = 'USD';
+    _countryCode = null;
     _currencyInitialized = false;
     _lastLat = null;
     _lastLng = null;

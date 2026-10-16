@@ -32,7 +32,7 @@ class MockWelcomeScene extends StatelessWidget {
           DemoFadeIn(
             delay: const Duration(milliseconds: 600),
             child: const Text(
-              'Need Help? Giggre it.\nCan Help? Giggre it.',
+              'Need Help? Giggre it.\nWant Cash? Giggre it.',
               textAlign: TextAlign.center,
               style: TextStyle(color: kGold, fontSize: 15, fontWeight: FontWeight.w700, height: 1.4),
             ),

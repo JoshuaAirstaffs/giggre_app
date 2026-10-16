@@ -1422,3 +1422,7 @@ export {
 // ── Badges ──────────────────────────────────────────────────────────────────
 // Monthly Best host / Best worker awards. See functions/src/badges.ts.
 export { awardMonthlyBadges } from "./badges";
+
+// ── Referral tree ───────────────────────────────────────────────────────────
+// The app's My Referrals → Referral tree. See functions/src/referralTree.ts.
+export { getMyReferralTree } from "./referralTree";

@@ -20,8 +20,9 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
   // code/status live on `{gigCollection}/{gigId}/workers/{slotWorkerId}`
   // instead of the gig doc directly. Null == legacy single-worker gig.
   final String? slotWorkerId;
-  // Called after Firestore update succeeds — parent owns the pop + rating flow.
-  final VoidCallback? onConfirmed;
+  // Called after Firestore update succeeds with the amount actually paid —
+  // parent owns the pop + rating flow.
+  final ValueChanged<double>? onConfirmed;
 
   const WorkerPaymentConfirmSheet({
     super.key,
@@ -42,7 +43,7 @@ class WorkerPaymentConfirmSheet extends StatefulWidget {
     String currencyCode = 'USD',
     required String hostName,
     String? slotWorkerId,
-    VoidCallback? onConfirmed,
+    ValueChanged<double>? onConfirmed,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -164,6 +165,7 @@ class _WorkerPaymentConfirmSheetState extends State<WorkerPaymentConfirmSheet> {
       final workerId = FirebaseAuth.instance.currentUser!.uid;
       final workerRef = db.collection('users').doc(workerId);
       final currentWeek = EarningsService.currentWeekLabel();
+      var paidAmount = _displayAmount;
 
       await db.runTransaction((tx) async {
         // Firestore transactions require every read before any write in the
@@ -185,10 +187,11 @@ class _WorkerPaymentConfirmSheetState extends State<WorkerPaymentConfirmSheet> {
         final finalAmount =
             (targetData?['finalAmount'] as num?)?.toDouble() ??
             (targetData?['adjustedAmount'] as num?)?.toDouble();
+        paidAmount = finalAmount ?? widget.budget;
         await EarningsService.incrementInTransaction(
           tx: tx,
           workerRef: workerRef,
-          budget: finalAmount ?? widget.budget,
+          budget: paidAmount,
           currencyCode: widget.currencyCode,
           currentWeek: currentWeek,
         );
@@ -227,7 +230,7 @@ class _WorkerPaymentConfirmSheetState extends State<WorkerPaymentConfirmSheet> {
       // Let the parent (WorkingUI) own the pop + rating dialog flow so there
       // is no race between this Navigator.pop and the Firestore stream firing.
       if (widget.onConfirmed != null) {
-        widget.onConfirmed!();
+        widget.onConfirmed!(paidAmount);
       } else if (mounted) {
         Navigator.pop(context);
       }

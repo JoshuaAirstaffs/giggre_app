@@ -636,7 +636,7 @@ class _WorkingUIState extends State<WorkingUI> {
   // Called by WorkerPaymentConfirmSheet after Firestore update succeeds.
   // WorkingUI owns the pop so it always closes the right route, then shows
   // the rating dialog without any race against the Firestore stream.
-  void _onPaymentConfirmed() {
+  void _onPaymentConfirmed(double paidAmount) {
     if (!mounted || _ratingShown) return;
     _ratingShown = true;
     // Pop the payment sheet — this context owns the navigator that holds it.
@@ -644,17 +644,18 @@ class _WorkingUIState extends State<WorkingUI> {
     // Wait a frame so the sheet's pop transition fully settles before pushing
     // the celebration dialog on the same navigator.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showThankYouThenRating();
+      _showThankYouThenRating(paidAmount);
     });
   }
 
-  Future<void> _showThankYouThenRating() async {
+  Future<void> _showThankYouThenRating(double paidAmount) async {
     if (mounted) {
       try {
         await GigCompletionCelebration.show(
           context: context,
           title: 'Thank You!',
-          subtitle: 'Payment received — great work getting this gig done!',
+          subtitle:
+              'You have received ${CurrencyFormatter.format(paidAmount, widget.gig.currencyCode)} — great job getting this gig done!',
           icon: Icons.celebration_rounded,
         );
       } catch (e, st) {

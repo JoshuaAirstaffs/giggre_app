@@ -132,6 +132,20 @@ Color cardAccentForType(String type) {
   }
 }
 
+// TESTING ONLY: hides street/place/POI labels on the worker map.
+// Set back to false (or delete this and _workerMapStyle) before release.
+const bool _kHideMapLabels = false;
+
+String? _workerMapStyle(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  if (!_kHideMapLabels) return isDark ? kDarkMapStyle : null;
+  const hideLabels =
+      '{"elementType": "labels", "stylers": [{"visibility": "off"}]}';
+  if (!isDark) return '[$hideLabels]';
+  final base = kDarkMapStyle.trim();
+  return '${base.substring(0, base.length - 1)},$hideLabels]';
+}
+
 String gigTypeLabel(String type) {
   switch (type) {
     case 'open':
@@ -4041,9 +4055,7 @@ class _GigMapSectionState extends State<GigMapSection> {
             ),
             child: _useGoogleMaps
                 ? GoogleMap(
-                    style: Theme.of(context).brightness == Brightness.dark
-                        ? kDarkMapStyle
-                        : null,
+                    style: _workerMapStyle(context),
                     gestureRecognizers: _mapInteractive
                         ? <Factory<OneSequenceGestureRecognizer>>{
                             Factory<OneSequenceGestureRecognizer>(
@@ -4467,9 +4479,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         Positioned.fill(
           child: _useGoogleMaps
               ? GoogleMap(
-                  style: Theme.of(context).brightness == Brightness.dark
-                      ? kDarkMapStyle
-                      : null,
+                  style: _workerMapStyle(context),
                   gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
                     Factory<OneSequenceGestureRecognizer>(
                       () => EagerGestureRecognizer(),

@@ -11,8 +11,10 @@ class CurrencyService {
   // [onPosition] reports the raw GPS fix back to the caller (e.g. so it can
   // be cached for other screens, like the gig map, to reuse as an instant
   // initial center instead of each doing their own separate GPS wait).
+  // [onCountry] reports the detected 2-letter ISO country code.
   static Future<String?> detectCurrency({
     void Function(double lat, double lng)? onPosition,
+    void Function(String countryCode)? onCountry,
   }) async {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -39,6 +41,7 @@ class CurrencyService {
       final countryCode =
           await countryCodeFromCoordinates(pos.latitude, pos.longitude);
       if (countryCode == null) return null;
+      onCountry?.call(countryCode);
       return CurrencyFormatter.countryToCurrency(countryCode);
     } catch (_) {
       return null;
@@ -56,21 +59,33 @@ class CurrencyService {
     String uid,
     Map<String, dynamic> userDoc, {
     void Function(double lat, double lng)? onPosition,
+    void Function(String countryCode)? onCountry,
     void Function()? onDetectionFailed,
   }) async {
     final existing = userDoc['currencyCode'] as String?;
-    final detected = await detectCurrency(onPosition: onPosition);
+    final existingCountry = userDoc['countryCode'] as String?;
+    String? detectedCountry;
+    final detected = await detectCurrency(
+      onPosition: onPosition,
+      onCountry: (code) {
+        detectedCountry = code;
+        onCountry?.call(code);
+      },
+    );
 
     if (detected == null) {
       if (existing == null) onDetectionFailed?.call();
       return existing ?? 'USD';
     }
 
-    if (detected != existing) {
+    if (detected != existing || detectedCountry != existingCountry) {
       await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .update({'currencyCode': detected});
+          .update({
+        'currencyCode': detected,
+        if (detectedCountry != null) 'countryCode': detectedCountry,
+      });
     }
     return detected;
   }

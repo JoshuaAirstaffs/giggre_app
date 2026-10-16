@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:giggre_app/screens/referrals/referral_tree_screen.dart';
+import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:provider/provider.dart';
 
 class MyReferralScreen extends StatefulWidget {
   const MyReferralScreen({super.key});
@@ -633,10 +636,19 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
   static const _pageSize = 15;
   final _scrollController = ScrollController();
 
+  // Countries (2-letter ISO codes) where the Referral Tree is offered, from
+  // referral_settings/tree. Empty — tree hidden — until loaded, or if unset.
+  Set<String> _treeCountries = const {};
+
   @override
   void initState() {
     super.initState();
     _loadMore();
+    _loadTreeCountries();
+    // The tree is shown by country, so make sure it's been detected
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<CurrentUserProvider>().ensureCountryCode();
+    });
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=
               _scrollController.position.maxScrollExtent - 200 &&
@@ -719,6 +731,25 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
     }
   }
 
+  Future<void> _loadTreeCountries() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('referral_settings')
+          .doc('tree')
+          .get();
+      final countries = snap.data()?['countries'];
+      if (countries is! List || !mounted) return;
+      setState(() {
+        _treeCountries = countries
+            .whereType<String>()
+            .map((c) => c.toUpperCase())
+            .toSet();
+      });
+    } catch (e) {
+      debugPrint('Error loading referral tree settings: $e');
+    }
+  }
+
   Future<void> _refresh() async {
     setState(() {
       _referrals.clear();
@@ -726,7 +757,7 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
       _hasMore = true;
       _isLoading = true;
     });
-    await _loadMore();
+    await Future.wait([_loadMore(), _loadTreeCountries()]);
   }
 
   String _formatDate(dynamic timestamp) {
@@ -749,10 +780,10 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
   }
 
- String _initials(String name) {
-  final trimmed = name.trim();
-  return trimmed.isNotEmpty ? trimmed[0].toUpperCase() : '?';
-}
+  String _initials(String name) {
+    final trimmed = name.trim();
+    return trimmed.isNotEmpty ? trimmed[0].toUpperCase() : '?';
+  }
 
   Color _avatarColor(String name) {
     const colors = [
@@ -1006,6 +1037,87 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
               ),
             ),
           ),
+
+          // ── Referral tree ────────────────────────────────────
+          // Only in the countries listed in referral_settings/tree, by the
+          // device's GPS-detected country.
+          if (_treeCountries.contains(
+            context.watch<CurrentUserProvider>().countryCode,
+          ))
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Material(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const ReferralTreeScreen(),
+                      ),
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: primaryColor.withOpacity(0.25),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: primaryColor.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.account_tree_rounded,
+                              size: 18,
+                              color: primaryColor,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Referral Tree',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: onSurface,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'See who your referrals invited and what you\'ve earned',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: onSurface.withOpacity(0.5),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: onSurface.withOpacity(0.35),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
 
           // ── Section label ────────────────────────────────────
           SliverToBoxAdapter(

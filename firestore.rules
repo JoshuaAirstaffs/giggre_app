@@ -91,6 +91,21 @@ service cloud.firestore {
 //     request.auth.uid in request.resource.data.applicantIds;
 // }
 
+    // ─── Gig Wallet ────────────────────────────────────────────
+    // Balance + ledger. Owner and admins can read; NOBODY can write from a
+    // client. Every change goes through postLedgerEntry() in
+    // functions/src/wallet.ts (Admin SDK bypasses these rules).
+    // The legacy users/{uid}.balance field is no longer used by the app.
+    match /wallets/{uid} {
+      allow read: if isUser(uid) || isAdmin();
+      allow write: if false;
+
+      match /transactions/{txId} {
+        allow read: if isUser(uid) || isAdmin();
+        allow write: if false;
+      }
+    }
+
     // ─── Users ─────────────────────────────────────────────────
     match /users/{uid} {
       // Public read — allows unauthenticated referral code lookup during registration
@@ -305,6 +320,17 @@ service cloud.firestore {
     match /app_content/{docId}/items/{itemId} {
       allow read: if true;
         allow write: if isAdmin();
+    }
+
+    // ─── Referral settings ─────────────────────────────────────
+    // Reward rates per referral level (default rate, time-limited rate and
+    // date range, maximum earnings), edited in giggre-admin's
+    // Referrals → Referral settings. Readable by any signed-in user so the
+    // app can show the current rates.
+    match /referral_settings/{docId} {
+      allow read: if isAuth();
+      allow write: if isSuperAdmin() ||
+        (isAdmin() && 'referrals' in adminData().get('permissions', []));
     }
 
     // ─── Badge awards ──────────────────────────────────────────
