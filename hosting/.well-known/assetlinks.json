@@ -1,0 +1,24 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.giggre.mobile",
+      "sha256_cert_fingerprints": [
+        "4C:E5:EF:ED:C2:B9:BE:4E:8A:D8:1C:A5:16:6B:29:0E:B2:36:02:E4:41:6E:94:18:11:A5:71:61:46:BB:90:DF",
+        "14:FE:7D:D1:F8:77:1B:8A:B3:FD:60:8B:42:E3:D1:8D:52:B9:E4:64:23:BE:E3:A2:E9:DA:F6:DD:8D:DD:4D:E8",
+        "B1:C0:BA:4A:A8:5A:AC:10:92:11:01:D7:36:96:12:A6:12:ED:53:9E:7B:54:13:70:05:8C:D9:6A:06:C1:39:4E"
+      ]
+    }
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.giggre.mobile.dev",
+      "sha256_cert_fingerprints": [
+        "B1:C0:BA:4A:A8:5A:AC:10:92:11:01:D7:36:96:12:A6:12:ED:53:9E:7B:54:13:70:05:8C:D9:6A:06:C1:39:4E"
+      ]
+    }
+  }
+]

@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   agora_rtc_engine
+  app_links
   audioplayers_windows
   cloud_firestore
   file_selector_windows
@@ -13,6 +14,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   geolocator_windows
   iris_method_channel
   permission_handler_windows
+  share_plus
   url_launcher_windows
 )
 

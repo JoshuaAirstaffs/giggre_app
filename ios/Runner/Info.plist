@@ -93,5 +93,9 @@
 		</array>
 	</dict>
 	</array>
+	<!-- Referral invite links are delivered by app_links (ReferralLinkService);
+	     without this Flutter would also push them as Navigator routes. -->
+	<key>FlutterDeepLinkingEnabled</key>
+	<false/>
 </dict>
 </plist>

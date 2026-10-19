@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["7QU3M2XMJS.com.giggre.mobile"],
+        "components": [{ "/": "/r/*", "comment": "Referral invite links" }]
+      }
+    ]
+  }
+}

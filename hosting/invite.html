@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Join me on Giggre</title>
+  <meta name="description" content="Need Help? Giggre it. Want Cash? Giggre it. Find work or get trusted help near you.">
+  <!-- Link preview card in Messenger, SMS, Viber, WhatsApp. Every /r/<code>
+       URL serves this same file (firebase.json rewrite), so it stays generic. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Giggre">
+  <meta property="og:title" content="Join me on Giggre">
+  <meta property="og:description" content="Need Help? Giggre it. Want Cash? Giggre it. Sign up with my referral code.">
+  <meta property="og:image" content="https://go.giggre.com/img/logo.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/img/icon.png">
+  <link rel="apple-touch-icon" href="/img/icon.png">
+  <style>
+    :root {
+      --bg: #F4F6FA;
+      --card: #FFFFFF;
+      --ink: #1A2B4C;
+      --muted: #6B7A90;
+      --line: #E3E8EF;
+      --blue: #1B6CA8;
+      --orange-1: #F5A623;
+      --orange-2: #E08A12;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+    main {
+      width: 100%;
+      max-width: 420px;
+      text-align: center;
+    }
+    .logo { width: 180px; height: auto; margin: 0 auto 20px; display: block; }
+    h1 { font-size: 26px; line-height: 1.25; margin: 0 0 8px; }
+    .sub { color: var(--muted); font-size: 15px; line-height: 1.5; margin: 0 0 24px; }
+    .code-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px 16px;
+      margin: 0 0 24px;
+    }
+    .code-label { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+    .code {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 5px;
+      margin: 0 0 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .copy {
+      background: none;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 14px;
+      font: inherit;
+      font-size: 13px;
+      color: var(--blue);
+      cursor: pointer;
+    }
+    .btn {
+      display: block;
+      width: 100%;
+      border: 0;
+      border-radius: 999px;
+      padding: 16px;
+      font: inherit;
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      margin: 0 0 12px;
+    }
+    .btn-primary {
+      color: #fff;
+      background: linear-gradient(90deg, var(--orange-1), var(--orange-2));
+    }
+    .btn-secondary {
+      color: var(--ink);
+      background: var(--card);
+      border: 1px solid var(--line);
+    }
+    .note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 12px 0 0; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <img class="logo" src="/img/logo.png" alt="Giggre">
+    <h1>Need Help? Giggre it.<br>Want Cash? Giggre it.</h1>
+    <p class="sub">You've been invited to Giggre. Find work or get trusted help near you.</p>
+
+    <div class="code-card" id="codeCard" hidden>
+      <p class="code-label">Your referral code</p>
+      <p class="code" id="code"></p>
+      <button class="copy" id="copyCode" type="button">Copy code</button>
+    </div>
+
+    <a class="btn btn-primary" id="android" href="#" hidden>Get Giggre on Google Play</a>
+    <button class="btn btn-primary" id="ios" type="button" hidden>Get Giggre on the App Store</button>
+    <a class="btn btn-secondary" id="androidAlt" href="#" hidden>Google Play</a>
+    <a class="btn btn-secondary" id="iosAlt" href="#" hidden>App Store</a>
+
+    <p class="note" id="note" hidden>Your code will be filled in when you sign up. If it isn't, enter it on the sign-up screen.</p>
+  </main>
+
+  <script>
+    (function () {
+      // Keep in sync with ReferralLinkService (lib/core/services/referral_link_service.dart).
+      var LINK_BASE = 'https://go.giggre.com/r/';
+      var APP_STORE = 'https://apps.apple.com/app/id6806056370';
+      var PACKAGE = 'com.giggre.mobile';
+
+      var match = location.pathname.match(/^\/r\/([A-Za-z0-9]{8})\/?$/);
+      var code = match ? match[1].toUpperCase() : null;
+
+      var ua = navigator.userAgent || '';
+      var isAndroid = /Android/i.test(ua);
+      var isIOS = /iPhone|iPad|iPod/i.test(ua) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+      // The Play Store hands `referrer` back to the app on first launch
+      // (Install Referrer API), which is how Android fills the code.
+      var playUrl = 'https://play.google.com/store/apps/details?id=' + PACKAGE +
+        (code ? '&referrer=' + encodeURIComponent('ref=' + code) : '');
+
+      function $(id) { return document.getElementById(id); }
+
+      function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          return navigator.clipboard.writeText(text).catch(function () { legacyCopy(text); });
+        }
+        legacyCopy(text);
+        return Promise.resolve();
+      }
+
+      function legacyCopy(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+
+      if (code) {
+        $('code').textContent = code;
+        $('codeCard').hidden = false;
+        $('note').hidden = false;
+        $('copyCode').addEventListener('click', function () {
+          copyText(code).then(function () { $('copyCode').textContent = 'Copied!'; });
+        });
+      }
+
+      if (isAndroid) {
+        $('android').href = playUrl;
+        $('android').hidden = false;
+        // Straight to the Play Store; the button stays as a fallback for
+        // in-app browsers that block the automatic redirect.
+        setTimeout(function () { location.href = playUrl; }, 700);
+      } else if (isIOS) {
+        // The App Store passes nothing through to the app, so copy the invite
+        // link first; the app reads it the first time a sign-up form opens.
+        // Clipboard writes need a tap, so no automatic redirect here.
+        $('ios').hidden = false;
+        $('ios').addEventListener('click', function () {
+          var go = function () { location.href = APP_STORE; };
+          if (code) {
+            copyText(LINK_BASE + code).then(go, go);
+          } else {
+            go();
+          }
+        });
+      } else {
+        $('androidAlt').href = playUrl;
+        $('iosAlt').href = APP_STORE;
+        $('androidAlt').hidden = false;
+        $('iosAlt').hidden = false;
+      }
+    })();
+  </script>
+</body>
+</html>

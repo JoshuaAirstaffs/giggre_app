@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:giggre_app/core/services/referral_link_service.dart';
 import 'package:giggre_app/screens/app_contents/privacy_policy.dart';
 import 'package:giggre_app/screens/app_contents/terms_and_conditions.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -447,9 +448,14 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
 
   String get _providerLabel => widget.pendingProvider == 'apple' ? 'Apple' : 'Google';
 
+  late final VoidCallback _unbindReferralLink;
+
   @override
   void initState() {
     super.initState();
+    _unbindReferralLink =
+        ReferralLinkService.instance.bindField(_referralCodeController);
+    ReferralLinkService.instance.checkClipboardOnce();
     _termsTap = TapGestureRecognizer()
       ..onTap = () => Navigator.push(
         context,
@@ -786,6 +792,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
     if (widget.pendingCredential != null && widget.pendingProvider == 'google') {
       GoogleSignIn().signOut();
     }
+    _unbindReferralLink();
     _nameController.dispose();
     _phoneController.dispose();
     _referralCodeController.dispose();
@@ -1086,6 +1093,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   static const _blue = Color(0xFF1B6CA8);
   static const _yellow = Color(0xFFF5A623);
+
+  late final VoidCallback _unbindReferralLink;
+
+  @override
+  void initState() {
+    super.initState();
+    _unbindReferralLink = ReferralLinkService.instance.bindField(_referralCode);
+    ReferralLinkService.instance.checkClipboardOnce();
+  }
 
   Future<void> signInWithGoogle() async {
     setState(() {
@@ -1482,6 +1498,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _confirmPasswordController.dispose();
     _nameController.dispose();
     _phoneController.dispose();
+    _unbindReferralLink();
     _referralCode.dispose();
     super.dispose();
   }

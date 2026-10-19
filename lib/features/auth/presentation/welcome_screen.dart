@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
+import 'package:giggre_app/core/services/referral_link_service.dart';
 import 'package:giggre_app/screens/app_contents/privacy_policy.dart';
 import 'package:giggre_app/screens/app_contents/terms_and_conditions.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
@@ -887,13 +888,21 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   void _goToLogin() => setState(() => _panelState = _PanelState.login);
-  void _goToSignup() => setState(() => _panelState = _PanelState.signup);
+  void _goToSignup() {
+    setState(() => _panelState = _PanelState.signup);
+    ReferralLinkService.instance.checkClipboardOnce();
+  }
+
   void _goToWelcome() => setState(() => _panelState = _PanelState.welcome);
+
+  late final VoidCallback _unbindReferralLink;
 
   @override
   void initState() {
     super.initState();
     _error = widget.errorMessage ?? '';
+    _unbindReferralLink =
+        ReferralLinkService.instance.bindField(_signupReferralController);
     if (!kIsWeb) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         await Permission.notification.request();
@@ -920,6 +929,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     _signupEmailController.dispose();
     _signupPasswordController.dispose();
     _signupConfirmPasswordController.dispose();
+    _unbindReferralLink();
     _signupReferralController.dispose();
     super.dispose();
   }

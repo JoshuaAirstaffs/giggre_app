@@ -46,6 +46,21 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- Referral invite links (https://go.giggre.com/r/<code>) open the
+                 app directly when installed. Verified against
+                 hosting/.well-known/assetlinks.json; handled in Dart by
+                 ReferralLinkService via app_links. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="go.giggre.com" android:pathPrefix="/r/"/>
+            </intent-filter>
+
+            <!-- app_links delivers incoming links; without this Flutter would
+                 also push "/r/<code>" as a Navigator route, which has no match. -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
         </activity>
 
         <!-- Remove screen sharing service since it's not used -->

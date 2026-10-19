@@ -11,6 +11,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/core/services/content_filter_service.dart';
 import 'package:giggre_app/core/services/push_notification_service.dart';
+import 'package:giggre_app/core/services/referral_link_service.dart';
 import 'package:giggre_app/core/services/sign_out_service.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
 import 'package:giggre_app/screens/maintenance_screen.dart';
@@ -97,6 +98,7 @@ void main() async {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     await CurrentUserProvider.initNotifications();
     await ContentFilterService.instance.initialize();
+    await ReferralLinkService.instance.initialize();
     FilePicker.platform;
     CurrentUserProvider.navigatorKey = navigatorKey;
   } catch (e) {
@@ -370,6 +372,13 @@ class _AuthGateState extends State<AuthGate> {
         // pendingDeletion check always runs before we open the home screen.
         if (provider.isLoggedIn &&
             _restoredForUid == FirebaseAuth.instance.currentUser?.uid) {
+          // Signed in — any invite code has done its job (or this account
+          // predates it), so don't carry it into a later sign-up.
+          if (ReferralLinkService.instance.pendingCode.value != null) {
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => ReferralLinkService.instance.clear(),
+            );
+          }
           return const MainNavigation();
         }
 

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:giggre_app/core/services/referral_link_service.dart';
 import 'package:giggre_app/screens/referrals/referral_tree_screen.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:provider/provider.dart';
@@ -229,6 +231,26 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
     );
     await Future.delayed(const Duration(seconds: 2));
     if (mounted) setState(() => _justCopied = false);
+  }
+
+  // Opens the system share sheet (Messenger, SMS, Viber, ...). The link's
+  // landing page routes to the right store and carries the code into sign-up
+  // — see ReferralLinkService.
+  Future<void> _shareInvite(BuildContext buttonContext) async {
+    final box = buttonContext.findRenderObject() as RenderBox?;
+    await SharePlus.instance.share(
+      ShareParams(
+        text:
+            'Join me on Giggre! Need help or want extra cash? Sign up with my '
+            'referral code $_referralCode:\n'
+            '${ReferralLinkService.linkFor(_referralCode)}',
+        subject: 'Join me on Giggre',
+        // Required on iPad, where the share sheet is a popover anchored here.
+        sharePositionOrigin: box == null
+            ? null
+            : box.localToGlobal(Offset.zero) & box.size,
+      ),
+    );
   }
 
   @override
@@ -503,9 +525,36 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 14),
+                Builder(
+                  builder: (buttonContext) => SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _referralCode.isEmpty
+                          ? null
+                          : () => _shareInvite(buttonContext),
+                      icon: const Icon(Icons.share_rounded, size: 20),
+                      label: const Text(
+                        'Share Invite Link',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: activeColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Text(
-                  'Share this code with friends to earn referral rewards.',
+                  'Share your invite link with friends to earn referral rewards.',
                   style: TextStyle(
                     fontSize: 12,
                     color: onSurface.withOpacity(0.5),
@@ -574,7 +623,9 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
                       ],
                     ),
                     child: QrImageView(
-                      data: _referralCode,
+                      // The invite link, not the bare code, so a phone
+                      // camera scan opens the store / app directly.
+                      data: ReferralLinkService.linkFor(_referralCode),
                       version: QrVersions.auto,
                       size: 180,
                       backgroundColor: Colors.white,
@@ -600,7 +651,7 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
                   ),
                 const SizedBox(height: 16),
                 Text(
-                  'Ask friends to scan this to use your referral code.',
+                  'Friends can scan this with their phone camera to download Giggre with your code.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 12,
