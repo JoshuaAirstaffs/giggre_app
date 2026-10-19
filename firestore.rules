@@ -68,6 +68,31 @@ service cloud.firestore {
         d.get('enabled', true) is bool;
     }
 
+    // general_config/gig_points_requests: request limits per type. Each of
+    // min / max / dailyMax is a positive whole number or null (= no limit);
+    // gigPointsRequests.ts treats anything else as no limit, this keeps junk out.
+    function isValidLimit(v) {
+      return v == null || ((v is int || (v is float && v == math.floor(v))) && v > 0);
+    }
+
+    function isValidTypeLimits(m) {
+      return m is map &&
+        m.keys().hasOnly(['enabled', 'min', 'max', 'dailyMax']) &&
+        m.get('enabled', false) is bool &&
+        isValidLimit(m.get('min', null)) &&
+        isValidLimit(m.get('max', null)) &&
+        isValidLimit(m.get('dailyMax', null)) &&
+        (m.get('min', null) == null || m.get('max', null) == null || m.min <= m.max);
+    }
+
+    function isValidGigPointsRequestLimits(d) {
+      return d.keys().hasOnly(['enabled', 'deposit', 'withdraw', 'transfer', 'updatedAt', 'updatedBy']) &&
+        d.get('enabled', true) is bool &&
+        (!('deposit' in d) || isValidTypeLimits(d.deposit)) &&
+        (!('withdraw' in d) || isValidTypeLimits(d.withdraw)) &&
+        (!('transfer' in d) || isValidTypeLimits(d.transfer));
+    }
+
     // The host's approval of a worker's job: gig_detail_sheet.dart sets
     // status 'payment' + paymentCode + paymentInitiatedAt when the host
     // confirms the work. Gig Points (functions/src/gigPoints.ts) are only
@@ -394,6 +419,16 @@ service cloud.firestore {
       }
     }
 
+    // ─── Gig Points requests ───────────────────────────────────
+    // Deposit / withdraw / transfer requests (functions/src/gigPointsRequests.ts).
+    // Created, cancelled and decided ONLY through callables, which hold
+    // points, enforce limits and notify admins. The owner and admins read.
+    // gig_points/{uid}/daily/* (daily-cap counters) has no rule → no access.
+    match /gig_points_requests/{requestId} {
+      allow read: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
     // ─── Gig Points config issues ──────────────────────────────
     // Raised by the gigPoints Cloud Functions when a task has no valid
     // reward configured (its points are held, not awarded) — admin-only.
@@ -613,11 +648,21 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // Gig Points request limits — read by the app to show min/max/daily cap;
+    // enforced by the gigPointsRequests Cloud Functions.
+    match /general_config/gig_points_requests {
+      allow read: if isAuth();
+      allow create, update: if isSuperAdmin() &&
+        isValidGigPointsRequestLimits(request.resource.data);
+      allow delete: if isSuperAdmin();
+    }
+
     match /general_config/{docId} {
       allow read: if isAdmin();
-      // gig_points has its own validated rule above; rules OR together, so
-      // it must be excluded here or this would bypass that validation.
-      allow write: if isSuperAdmin() && docId != 'gig_points';
+      // gig_points / gig_points_requests have their own validated rules above;
+      // rules OR together, so they must be excluded here or this would
+      // bypass that validation.
+      allow write: if isSuperAdmin() && !(docId in ['gig_points', 'gig_points_requests']);
     }
 
     // ─── Account Delete Requests ────────────────────────────────

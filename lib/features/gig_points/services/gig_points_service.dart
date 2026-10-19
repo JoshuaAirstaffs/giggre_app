@@ -1,13 +1,31 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
+import 'package:giggre_app/main.dart' show flavor;
 
 import '../models/gig_points_models.dart';
+import '../models/gig_points_request_models.dart';
 
-/// Read-only access to a user's Gig Points.
+// Callables live in the same region as the project's Firestore triggers
+// (see functions/src/region.ts).
+final _functionsRegion = flavor == 'prod' ? 'us-central1' : 'asia-east2';
+
+/// A request the server refused, with a message fit to show the user.
+class GigPointsRequestException implements Exception {
+  final String message;
+  const GigPointsRequestException(this.message);
+  @override
+  String toString() => message;
+}
+
+/// Access to a user's Gig Points.
 ///
 /// Points are recorded exclusively by Cloud Functions
-/// (functions/src/gigPoints.ts) — this service intentionally has no way to
-/// change a balance or a ledger entry.
+/// (functions/src/gigPoints.ts, gigPointsRequests.ts). Nothing here writes a
+/// balance or a ledger entry: deposit / withdraw / transfer are REQUESTS sent
+/// through callables, which an admin then approves or rejects.
 class GigPointsService {
   GigPointsService._();
 
@@ -46,13 +64,19 @@ class GigPointsService {
       .map((s) => s.data());
 
   /// Newest-first ledger query, used by GigPointsHistoryController.
+  /// [types] narrows it to those ledger types (needs the type+createdAt
+  /// index in firestore.indexes.json).
   static Query<Map<String, dynamic>> transactionsQuery(
     String uid, {
     required int limit,
-  }) => _balanceRef(uid)
-      .collection('transactions')
-      .orderBy('createdAt', descending: true)
-      .limit(limit);
+    List<String>? types,
+  }) {
+    Query<Map<String, dynamic>> q = _balanceRef(uid).collection('transactions');
+    if (types != null && types.isNotEmpty) {
+      q = q.where('type', whereIn: types);
+    }
+    return q.orderBy('createdAt', descending: true).limit(limit);
+  }
 
   /// The centrally configured reward values, for display. A missing doc
   /// reads as [GigPointsConfig.notConfigured]; a failed read returns null
@@ -69,4 +93,96 @@ class GigPointsService {
       return null;
     }
   }
+
+  // ── Requests ─────────────────────────────────────────────────────────────
+
+  /// The user's newest requests (owner-readable; see firestore.rules).
+  static Stream<List<GigPointsRequest>> requestsStream(
+    String uid, {
+    int limit = 20,
+  }) => _db
+      .collection('gig_points_requests')
+      .where('userId', isEqualTo: uid)
+      .orderBy('createdAt', descending: true)
+      .limit(limit)
+      .snapshots()
+      .map(
+        (s) => s.docs
+            .map(GigPointsRequest.fromSnapshot)
+            .whereType<GigPointsRequest>()
+            .toList(),
+      );
+
+  /// Live request limits. A missing doc (or a failed read) = closed.
+  static Stream<PointsRequestLimits> limitsStream() => _db
+      .collection('general_config')
+      .doc('gig_points_requests')
+      .snapshots()
+      .map((s) => PointsRequestLimits.fromMap(s.data()))
+      .handleError((Object e) {
+        debugPrint('[GigPointsService] limits read failed: $e');
+      });
+
+  static HttpsCallable _fn(String name) =>
+      FirebaseFunctions.instanceFor(region: _functionsRegion)
+          .httpsCallable(name);
+
+  static Future<T> _guard<T>(Future<T> Function() run) async {
+    try {
+      return await run();
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint('[GigPointsService] ${e.code}: ${e.message}');
+      final msg = switch (e.code) {
+        'unavailable' || 'deadline-exceeded' =>
+          "Couldn't reach Giggre. Check your connection and try again.",
+        'internal' || 'unknown' => 'Something went wrong. Please try again.',
+        _ => e.message ?? 'Something went wrong. Please try again.',
+      };
+      throw GigPointsRequestException(msg);
+    }
+  }
+
+  /// Resolves a Giggre ID or phone number to a transfer recipient.
+  static Future<PointsRecipient> lookupRecipient(String query) => _guard(
+    () async {
+      final res = await _fn('lookupGigPointsRecipient').call({'query': query});
+      final d = Map<String, dynamic>.from(res.data as Map);
+      return PointsRecipient(
+        id: d['recipientId'] as String,
+        name: d['name'] as String? ?? 'Giggre user',
+        code: d['code'] as String?,
+        photoUrl: d['photoUrl'] as String?,
+      );
+    },
+  );
+
+  /// A fresh id per request attempt, so a retried call can't create two.
+  static String newClientRequestId() {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    final rng = Random.secure();
+    return List.generate(20, (_) => chars[rng.nextInt(chars.length)]).join();
+  }
+
+  /// Sends a request for admin review. Returns the request id.
+  static Future<String> createRequest({
+    required PointsRequestType type,
+    required int points,
+    required String clientRequestId,
+    String? note,
+    String? recipientId,
+  }) => _guard(() async {
+    final res = await _fn('createGigPointsRequest').call({
+      'type': type.name,
+      'points': points,
+      'clientRequestId': clientRequestId,
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      'recipientId': ?recipientId,
+    });
+    return (res.data as Map)['requestId'] as String;
+  });
+
+  /// Cancels the user's own pending request (held points are returned).
+  static Future<void> cancelRequest(String requestId) => _guard(
+    () => _fn('cancelGigPointsRequest').call({'requestId': requestId}),
+  );
 }

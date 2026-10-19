@@ -237,7 +237,7 @@ const quoteFields = (q: RewardQuote, config: GigPointsConfig) => ({
 //   task-level:  task__{collection}__{gigId}      (invalid per-task reward)
 //   .../tasks/{ledgerId}  every award blocked by this issue, for the retry.
 // A new (or re-opened) issue also drops an admin_notifications entry, which
-// giggre-admin's notification bell shows to admins holding "settings".
+// giggre-admin's notification bell shows to admins holding "gig-points".
 
 interface BlockedTask {
   action: LedgerAction;
@@ -287,12 +287,12 @@ async function recordConfigProblems(
       if (opened) {
         await db().collection("admin_notifications").add({
           type: "gig_points_config_issue",
-          requiredPermission: "settings",
+          requiredPermission: "gig-points",
           title: "Gig Points reward not configured",
           message: p.blocking
             ? `${p.detail} Points were NOT awarded for "${task.gigTitle}". Fix the reward, then retry the award.`
             : `${p.detail} The task-type reward was used instead.`,
-          link: "/settings",
+          link: "/gig-points?tab=issues",
           sourceCollection: "gig_points_config_issues",
           sourceId: issueRef.id,
           meta: { userId: task.workerId, name: null, email: null },

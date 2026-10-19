@@ -22,6 +22,10 @@ class GigPointsHistoryController extends ChangeNotifier {
   }
 
   int _limit;
+
+  /// Ledger types to show; null = everything.
+  List<String>? _types;
+  List<String>? get types => _types;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sub;
 
   List<GigPointsTransaction> _items = const [];
@@ -45,7 +49,7 @@ class GigPointsHistoryController extends ChangeNotifier {
 
   void _listen() {
     _sub?.cancel();
-    _sub = GigPointsService.transactionsQuery(uid, limit: _limit)
+    _sub = GigPointsService.transactionsQuery(uid, limit: _limit, types: _types)
         .snapshots(includeMetadataChanges: true)
         .listen(_onData, onError: _onError);
   }
@@ -80,6 +84,20 @@ class GigPointsHistoryController extends ChangeNotifier {
     if (_loadingMore || !_hasMore || _error != null) return;
     _loadingMore = true;
     _limit += pageSize;
+    notifyListeners();
+    _listen();
+  }
+
+  /// Switches the filter and starts again from the first page.
+  void setTypes(List<String>? types) {
+    if (listEquals(types, _types)) return;
+    _types = types;
+    _limit = pageSize;
+    _items = const [];
+    _loading = true;
+    _loadingMore = false;
+    _hasMore = false;
+    _error = null;
     notifyListeners();
     _listen();
   }

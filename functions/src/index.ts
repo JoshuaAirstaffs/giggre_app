@@ -1440,3 +1440,15 @@ export {
   adjustGigPoints,
   retryGigPointsAwards,
 } from "./gigPoints";
+
+// ── Gig Points requests ─────────────────────────────────────────────────────
+// Deposit / withdraw / transfer requests reviewed by admins, request limits,
+// and admin direct actions. See functions/src/gigPointsRequests.ts.
+export {
+  lookupGigPointsRecipient,
+  createGigPointsRequest,
+  cancelGigPointsRequest,
+  decideGigPointsRequest,
+  adminGigPointsAction,
+  adminFindGigPointsUser,
+} from "./gigPointsRequests";

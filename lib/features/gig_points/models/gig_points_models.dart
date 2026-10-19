@@ -17,6 +17,11 @@ class GigPointsBalance {
   final int pendingPoints;
   final int lifetimeEarned;
 
+  /// Points reserved by withdraw / transfer requests waiting for admin
+  /// review. Already taken out of [balance]; returned if the request is
+  /// rejected or cancelled.
+  final int heldPoints;
+
   /// Tasks whose points have been credited.
   final int gigsRewarded;
   final DateTime? lastAwardedAt;
@@ -30,6 +35,7 @@ class GigPointsBalance {
     required this.pendingPoints,
     required this.lifetimeEarned,
     required this.gigsRewarded,
+    this.heldPoints = 0,
     this.lastAwardedAt,
     this.fromCache = false,
   });
@@ -45,6 +51,7 @@ class GigPointsBalance {
       pendingPoints: pending < 0 ? 0 : pending,
       lifetimeEarned: _int(d['lifetimeEarned']),
       gigsRewarded: _int(d['gigsRewarded']),
+      heldPoints: _int(d['heldPoints']) < 0 ? 0 : _int(d['heldPoints']),
       lastAwardedAt: _date(d['lastAwardedAt']),
       fromCache: snap.metadata.isFromCache,
     );
@@ -190,7 +197,9 @@ String _voidReasonText(String? reason) => switch (reason) {
 class GigPointsTransaction {
   final String id;
 
-  /// 'earn' (a task) or 'adjustment' (admin correction).
+  /// 'earn' (a task), 'adjustment' (admin correction), or a points
+  /// movement: 'deposit', 'withdraw', 'transfer_out', 'transfer_in'
+  /// (functions/src/gigPointsRequests.ts).
   final String type;
   final GigPointsStatus status;
   final int points;
@@ -209,6 +218,15 @@ class GigPointsTransaction {
   final int? configuredPoints;
   final int? rewardCappedAt;
   final String? voidReason;
+
+  /// Movement entries only: the request it belongs to, the other user of a
+  /// transfer, and 'admin' when Giggre made it directly.
+  final String? requestId;
+  final String? counterpartyName;
+  final String? counterpartyCode;
+  final String? source;
+  final String? note;
+  final String? reference;
 
   const GigPointsTransaction({
     required this.id,
@@ -230,7 +248,24 @@ class GigPointsTransaction {
     this.configuredPoints,
     this.rewardCappedAt,
     this.voidReason,
+    this.requestId,
+    this.counterpartyName,
+    this.counterpartyCode,
+    this.source,
+    this.note,
+    this.reference,
   });
+
+  static const movementTypes = {
+    'deposit',
+    'withdraw',
+    'transfer_out',
+    'transfer_in',
+  };
+
+  /// A deposit / withdrawal / transfer rather than a task reward.
+  bool get isMovement => movementTypes.contains(type);
+  bool get byAdmin => source == 'admin';
 
   bool get isAdjustment => type == 'adjustment';
   bool get isCredited => status == GigPointsStatus.credited;
@@ -241,8 +276,53 @@ class GigPointsTransaction {
     GigPointsStatus.voided => RewardStage.notEligible,
   };
 
+  /// Status as worded for this entry — movements aren't rewards, so they
+  /// get request wording instead of the reward stages.
+  String get statusLabel {
+    if (!isMovement) return stage.label;
+    return switch (status) {
+      GigPointsStatus.pending => 'Pending review',
+      GigPointsStatus.credited => 'Completed',
+      GigPointsStatus.voided =>
+        voidReason == 'cancelled' ? 'Cancelled' : 'Rejected',
+    };
+  }
+
+  String get statusExplanation {
+    if (isAdjustment) return 'Adjusted by Giggre support.';
+    if (!isMovement) return stage.explanation;
+    final held = type == 'withdraw' || type == 'transfer_out';
+    return switch (status) {
+      GigPointsStatus.pending => held
+          ? 'Waiting for a Giggre admin to review it. The points are on hold '
+                'and come back to you if it is rejected or you cancel it.'
+          : 'Waiting for a Giggre admin to confirm your payment. The points '
+                'are added once it is approved.',
+      GigPointsStatus.credited => byAdmin
+          ? 'Made by Giggre.'
+          : 'Approved by Giggre and applied to your balance.',
+      GigPointsStatus.voided => voidReason == 'cancelled'
+          ? 'You cancelled this request.${held ? ' The held points were returned.' : ''}'
+          : 'Giggre rejected this request.${held ? ' The held points were returned.' : ''}',
+    };
+  }
+
   /// Why the user received (or would have received) this amount.
   String get amountExplanation {
+    if (isMovement) {
+      final who = counterpartyName == null
+          ? ''
+          : ' ${type == 'transfer_in' ? 'from' : 'to'} $counterpartyName'
+                '${counterpartyCode == null ? '' : ' ($counterpartyCode)'}';
+      final base = switch (type) {
+        'deposit' => 'Points deposited to your balance.',
+        'withdraw' => 'Points withdrawn from your balance.',
+        'transfer_out' => 'Points you sent$who.',
+        _ => 'Points you received$who.',
+      };
+      final n = note?.isNotEmpty == true ? ' Note: $note' : '';
+      return '$base$n';
+    }
     if (isAdjustment) {
       final why = description?.isNotEmpty == true ? ': $description' : '.';
       return 'Manual adjustment by Giggre support$why';
@@ -265,11 +345,29 @@ class GigPointsTransaction {
   }
 
   String get title {
+    if (isMovement) {
+      return switch (type) {
+        'deposit' => 'Deposit',
+        'withdraw' => 'Withdrawal',
+        'transfer_out' => counterpartyName == null
+            ? 'Transfer sent'
+            : 'Sent to $counterpartyName',
+        _ => counterpartyName == null
+            ? 'Transfer received'
+            : 'From $counterpartyName',
+      };
+    }
     if (isAdjustment) return points >= 0 ? 'Bonus from Giggre' : 'Points adjustment';
     return gigTitle?.isNotEmpty == true ? gigTitle! : 'Completed gig';
   }
 
-  String get typeLabel => isAdjustment ? 'Adjustment' : gigTypeLabel(gigType);
+  String get typeLabel => switch (type) {
+    'adjustment' => 'Adjustment',
+    'deposit' => 'Deposit',
+    'withdraw' => 'Withdraw',
+    'transfer_out' || 'transfer_in' => 'Transfer',
+    _ => gigTypeLabel(gigType),
+  };
 
   /// The date that matters for the entry's current state.
   DateTime? get statusDate => switch (status) {
@@ -279,9 +377,10 @@ class GigPointsTransaction {
   };
 
   String get statusDateLabel => switch (status) {
-    GigPointsStatus.credited => isAdjustment ? 'Adjusted' : 'Credited',
-    GigPointsStatus.pending => 'Approved',
-    GigPointsStatus.voided => 'Voided',
+    GigPointsStatus.credited =>
+      isAdjustment ? 'Adjusted' : (isMovement ? 'Completed' : 'Credited'),
+    GigPointsStatus.pending => isMovement ? 'Requested' : 'Approved',
+    GigPointsStatus.voided => isMovement ? statusLabel : 'Voided',
   };
 
   /// Works for query results and single-doc reads alike. Callers reading a
@@ -314,6 +413,12 @@ class GigPointsTransaction {
           ? (d['rewardCappedAt'] as num).toInt()
           : null,
       voidReason: d['voidReason'] as String?,
+      requestId: d['requestId'] as String?,
+      counterpartyName: d['counterpartyName'] as String?,
+      counterpartyCode: d['counterpartyCode'] as String?,
+      source: d['source'] as String?,
+      note: d['note'] as String?,
+      reference: d['reference'] as String?,
     );
   }
 }
