@@ -61,7 +61,10 @@ class _GigPointsScreenState extends State<GigPointsScreen> {
   // dropped connection), matching gig_history_screen.dart.
   Future<void> _refresh() async {
     final config = GigPointsService.fetchConfig();
-    setState(() => _config = config);
+    // Block body: an arrow would return the Future, which setState rejects
+    setState(() {
+      _config = config;
+    });
     _retryBalance();
     _history?.retry();
     await config;

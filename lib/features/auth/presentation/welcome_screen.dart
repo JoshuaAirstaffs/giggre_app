@@ -1177,7 +1177,7 @@ class _WelcomeContent extends StatelessWidget {
                 Image.asset('assets/images/logo.png', height: 48),
                 const SizedBox(height: 22),
                 Text(
-                  'Need Help? Giggre it.\nCan Help? Giggre it.',
+                  'Need Help? Giggre it.\nWant Cash? Giggre it.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 20,
