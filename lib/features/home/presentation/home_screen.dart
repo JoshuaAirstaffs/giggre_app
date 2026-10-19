@@ -32,6 +32,8 @@ import '../../../screens/host/host_shell.dart';
 import '../../../screens/worker/worker_shell.dart';
 import '../../../widgets/active_gig_bar.dart';
 import 'profile_tab.dart';
+import '../../gig_points/presentation/gig_points_button.dart';
+import '../../gig_points/presentation/gig_points_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -483,6 +485,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _openGigPoints() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const GigPointsScreen()),
+    );
+  }
+
   Future<void> _logout() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -683,6 +692,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Image.asset('assets/images/logo.png', height: 32),
         ),
         actions: [
+          // Gig Points sits directly beside the profile (ProfileTab) button.
+          GigPointsButton(onTap: _openGigPoints),
+          const SizedBox(width: 8),
           _IconSquareButton(icon: Icons.person_rounded, onTap: _openProfile),
           const SizedBox(width: 16),
           _IconSquareButton(icon: Icons.logout_rounded, onTap: _logout),

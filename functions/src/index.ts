@@ -1426,3 +1426,17 @@ export { awardMonthlyBadges } from "./badges";
 // ── Referral tree ───────────────────────────────────────────────────────────
 // The app's My Referrals → Referral tree. See functions/src/referralTree.ts.
 export { getMyReferralTree } from "./referralTree";
+
+// ── Gig Points ──────────────────────────────────────────────────────────────
+// Awards points to workers on host-approved gig completion, plus admin-only
+// adjustment and blocked-award retry callables. See functions/src/gigPoints.ts.
+export {
+  onQuickGigPointsAward,
+  onOpenGigPointsAward,
+  onOfferedGigPointsAward,
+  onQuickGigSlotPointsAward,
+  onOpenGigSlotPointsAward,
+  onOfferedGigSlotPointsAward,
+  adjustGigPoints,
+  retryGigPointsAwards,
+} from "./gigPoints";
