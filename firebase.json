@@ -32,6 +32,15 @@
     ],
     "headers": [
       {
+        "source": "/r/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
         "source": "/.well-known/apple-app-site-association",
         "headers": [
           {

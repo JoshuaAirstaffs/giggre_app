@@ -134,8 +134,15 @@
 
       // The Play Store hands `referrer` back to the app on first launch
       // (Install Referrer API), which is how Android fills the code.
-      var playUrl = 'https://play.google.com/store/apps/details?id=' + PACKAGE +
-        (code ? '&referrer=' + encodeURIComponent('ref=' + code) : '');
+      var referrerParam = code ? '&referrer=' + encodeURIComponent('ref=' + code) : '';
+      var playUrl = 'https://play.google.com/store/apps/details?id=' + PACKAGE + referrerParam;
+      // On Android, target the Play Store app itself: the https URL can stay
+      // in Chrome as Google Play's website (no tap = no app handoff), and
+      // installs from there don't carry the referrer. Falls back to the
+      // website if the Play Store app is missing.
+      var playIntentUrl = 'intent://details?id=' + PACKAGE + referrerParam +
+        '#Intent;scheme=market;package=com.android.vending;' +
+        'S.browser_fallback_url=' + encodeURIComponent(playUrl) + ';end';
 
       function $(id) { return document.getElementById(id); }
 
@@ -169,11 +176,18 @@
       }
 
       if (isAndroid) {
-        $('android').href = playUrl;
+        // Copy the invite link first, then open the Play Store app. The
+        // referrer only survives production installs, so the clipboard backs
+        // it up (and makes testing-track builds work). Clipboard writes need
+        // a tap, so no automatic redirect.
+        $('android').href = playIntentUrl;
         $('android').hidden = false;
-        // Straight to the Play Store; the button stays as a fallback for
-        // in-app browsers that block the automatic redirect.
-        setTimeout(function () { location.href = playUrl; }, 700);
+        $('android').addEventListener('click', function (e) {
+          if (!code) return;
+          e.preventDefault();
+          var go = function () { location.href = playIntentUrl; };
+          copyText(LINK_BASE + code).then(go, go);
+        });
       } else if (isIOS) {
         // The App Store passes nothing through to the app, so copy the invite
         // link first; the app reads it the first time a sign-up form opens.

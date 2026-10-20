@@ -5,6 +5,7 @@ import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:play_install_referrer/play_install_referrer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,10 +18,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///    tap opens the app directly and app_links delivers the URL.
 ///  - Android new installs: the landing page passes `referrer=ref=<code>` to
 ///    the Play Store, which hands it back through the Install Referrer API on
-///    first launch.
-///  - iOS new installs: the App Store passes nothing through, so the landing
-///    page copies the invite link to the clipboard and [checkClipboardOnce]
-///    reads it the first time a sign-up form opens (iOS shows "Allow Paste").
+///    first launch. Play only does this for production installs — testing
+///    tracks report "(not set)" — so the clipboard path below backs it up.
+///  - New installs on both platforms: the landing page copies the invite link
+///    to the clipboard when the store button is tapped, and
+///    [checkClipboardOnce] reads it the first time a sign-up form opens. The
+///    App Store passes nothing through, so this is iOS's only path (iOS shows
+///    "Allow Paste"; Android 12+ shows a brief "pasted from clipboard" toast).
 ///
 /// Whichever arrives is held in [pendingCode] (persisted, so it survives the
 /// app being killed between install and sign-up) until the user reaches the
@@ -40,7 +44,9 @@ class ReferralLinkService {
   // SharedPreferences on reinstall, so the flag from a previous install
   // would skip the new install's referrer.
   static const _prefsReferrerInstallKey = 'referral_link_install_referrer_install_ts';
-  static const _prefsClipboardCheckedKey = 'referral_link_clipboard_checked';
+  // Install time of the install whose clipboard was last checked — keyed to
+  // the install for the same Auto Backup reason as above.
+  static const _prefsClipboardInstallKey = 'referral_link_clipboard_install_ts';
 
   // A stale code from a link tapped weeks ago shouldn't silently credit that
   // referrer on an unrelated later sign-up.
@@ -140,19 +146,21 @@ class ReferralLinkService {
     }
   }
 
-  /// iOS only, at most once per install: reads an invite link the landing
-  /// page copied to the clipboard. Call when a sign-up form opens — reading
-  /// triggers iOS's "Allow Paste" prompt, which makes sense there and not
-  /// on a cold start.
+  /// At most once per install: reads an invite link the landing page copied
+  /// to the clipboard. Call when a sign-up form opens — on iOS reading
+  /// triggers the "Allow Paste" prompt, which makes sense there and not on a
+  /// cold start.
   Future<void> checkClipboardOnce() async {
-    if (kIsWeb || !Platform.isIOS || pendingCode.value != null) return;
+    if (kIsWeb || pendingCode.value != null) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (prefs.getBool(_prefsClipboardCheckedKey) == true) return;
+      final installTs =
+          (await PackageInfo.fromPlatform()).installTime?.millisecondsSinceEpoch ?? 0;
+      if (prefs.getInt(_prefsClipboardInstallKey) == installTs) return;
       // hasStrings doesn't prompt, so an empty clipboard never shows the
       // dialog — and doesn't use up the one check either.
       if (!await Clipboard.hasStrings()) return;
-      await prefs.setBool(_prefsClipboardCheckedKey, true);
+      await prefs.setInt(_prefsClipboardInstallKey, installTs);
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final text = data?.text;
       if (text != null) _offer(text);
