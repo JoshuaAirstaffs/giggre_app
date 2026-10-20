@@ -1452,3 +1452,7 @@ export {
   adminGigPointsAction,
   adminFindGigPointsUser,
 } from "./gigPointsRequests";
+
+// ── Gig Wallet ──────────────────────────────────────────────────────────────
+// Server-only ledger for wallets/{uid}. See functions/src/wallet.ts.
+export { adminAdjustWallet } from "./wallet";

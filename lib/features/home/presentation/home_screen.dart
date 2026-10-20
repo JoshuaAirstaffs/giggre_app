@@ -31,6 +31,7 @@ import '../../auth/presentation/welcome_screen.dart';
 import '../../../screens/host/host_shell.dart';
 import '../../../screens/worker/worker_shell.dart';
 import '../../../widgets/active_gig_bar.dart';
+import '../../wallet/presentation/wallet_screen.dart';
 import 'profile_tab.dart';
 import '../../gig_points/presentation/gig_points_button.dart';
 import '../../gig_points/presentation/gig_points_screen.dart';
@@ -492,6 +493,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _openWallet() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => WalletScreen(role: _selectedRole)),
+    );
+  }
+
   Future<void> _logout() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -696,6 +704,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           GigPointsButton(onTap: _openGigPoints),
           const SizedBox(width: 8),
           _IconSquareButton(icon: Icons.person_rounded, onTap: _openProfile),
+          const SizedBox(width: 8),
+          _IconSquareButton(
+            icon: Icons.account_balance_wallet_rounded,
+            onTap: _openWallet,
+          ),
           const SizedBox(width: 16),
           _IconSquareButton(icon: Icons.logout_rounded, onTap: _logout),
           const SizedBox(width: 10),

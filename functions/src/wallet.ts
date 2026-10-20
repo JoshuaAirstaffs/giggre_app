@@ -1,0 +1,186 @@
+import { onCall, HttpsError } from "firebase-functions/v2/https";
+import * as admin from "firebase-admin";
+import { firestoreTriggerRegion } from "./region";
+
+// ── Gig Wallet ledger ───────────────────────────────────────────────────────
+// Storage:
+//   wallets/{uid}                         { balance, currencyCode, updatedAt }
+//   wallets/{uid}/transactions/{txId}     one entry per balance change
+//
+// firestore.rules lets the owner (and admins) READ these and nobody WRITE
+// them, so every balance change has to come through postLedgerEntry() below,
+// running with Admin SDK privileges. The old users/{uid}.balance field is
+// public-read and client-writable, so the app no longer reads it.
+//
+// Every entry carries an idempotency key that doubles as its doc id. Posting
+// the same key twice (a retried call, a webhook PayMongo re-sends) is a no-op
+// that returns the original entry instead of moving money twice.
+
+// Pinned per-function (see ratings.ts): setGlobalOptions in index.ts runs too
+// late for functions defined in a separately-imported module.
+const REGION = firestoreTriggerRegion();
+
+export type LedgerType =
+  | "top_up"
+  | "withdraw"
+  | "send"
+  | "receive"
+  | "gig_payment"
+  | "earning"
+  | "refund"
+  | "fee"
+  | "adjustment";
+
+export interface LedgerEntryInput {
+  uid: string;
+  /** Signed, in major units (pesos/dollars): + money in, − money out. */
+  amount: number;
+  type: LedgerType;
+  title: string;
+  /** Unique per real-world event, e.g. `topup_<paymentIntentId>`. */
+  idempotencyKey: string;
+  currencyCode?: string;
+  status?: "completed" | "pending" | "failed";
+  /** Free-form references (gigId, paymentIntentId, adminUid, reason…). */
+  meta?: Record<string, unknown>;
+}
+
+export interface LedgerEntryResult {
+  txId: string;
+  balance: number;
+  duplicate: boolean;
+}
+
+/** Round to centavos/cents so float drift never accumulates in the ledger. */
+function toMoney(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+const ID_RE = /^[A-Za-z0-9_\-]{1,120}$/;
+
+/**
+ * The only code path that changes a wallet balance. Runs in a Firestore
+ * transaction: reads the wallet, refuses to go negative, updates the balance
+ * and writes the ledger entry atomically.
+ */
+export async function postLedgerEntry(
+  input: LedgerEntryInput
+): Promise<LedgerEntryResult> {
+  const db = admin.firestore();
+  const amount = toMoney(input.amount);
+
+  if (!input.uid) throw new HttpsError("invalid-argument", "Missing uid.");
+  if (!Number.isFinite(amount) || amount === 0) {
+    throw new HttpsError("invalid-argument", "Amount must be non-zero.");
+  }
+  if (!ID_RE.test(input.idempotencyKey)) {
+    throw new HttpsError("invalid-argument", "Bad idempotency key.");
+  }
+
+  const walletRef = db.collection("wallets").doc(input.uid);
+  const txRef = walletRef.collection("transactions").doc(input.idempotencyKey);
+
+  return db.runTransaction(async (tx) => {
+    const [walletSnap, existingTx] = await Promise.all([
+      tx.get(walletRef),
+      tx.get(txRef),
+    ]);
+
+    const current = toMoney((walletSnap.get("balance") as number) ?? 0);
+
+    if (existingTx.exists) {
+      return { txId: txRef.id, balance: current, duplicate: true };
+    }
+
+    const next = toMoney(current + amount);
+    if (next < 0) {
+      throw new HttpsError("failed-precondition", "Insufficient GigCash.");
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const currencyCode =
+      input.currencyCode ??
+      (walletSnap.get("currencyCode") as string | undefined) ??
+      "PHP";
+
+    tx.set(
+      walletRef,
+      {
+        balance: next,
+        currencyCode,
+        updatedAt: now,
+        ...(walletSnap.exists ? {} : { createdAt: now }),
+      },
+      { merge: true }
+    );
+    tx.set(txRef, {
+      amount,
+      type: input.type,
+      title: input.title,
+      currencyCode,
+      status: input.status ?? "completed",
+      balanceAfter: next,
+      meta: input.meta ?? {},
+      createdAt: now,
+    });
+
+    return { txId: txRef.id, balance: next, duplicate: false };
+  });
+}
+
+async function assertAdmin(uid: string | undefined): Promise<string> {
+  if (!uid) throw new HttpsError("unauthenticated", "Must be signed in.");
+  const snap = await admin.firestore().collection("admins").doc(uid).get();
+  const d = snap.data();
+  // Same definition as isAdmin() in firestore.rules.
+  if (!d || d.isActive !== true || d.isPending !== false) {
+    throw new HttpsError("permission-denied", "Admins only.");
+  }
+  return uid;
+}
+
+// ── Admin: manual adjustment ────────────────────────────────────────────────
+// For testing now (credit a tester's wallet) and for support later (refunds,
+// corrections). A reason is mandatory and the admin's uid is stored on the
+// entry, so every manual change is traceable.
+//
+// data: { uid, amount, reason, requestId }
+//   requestId — generated by the caller once per click, so a double-tap or
+//   network retry can't apply the adjustment twice.
+export const adminAdjustWallet = onCall({ region: REGION }, async (request) => {
+  const adminUid = await assertAdmin(request.auth?.uid);
+
+  const uid = request.data?.uid;
+  const amount = Number(request.data?.amount);
+  const reason = String(request.data?.reason ?? "").trim();
+  const requestId = String(request.data?.requestId ?? "");
+
+  if (typeof uid !== "string" || !uid) {
+    throw new HttpsError("invalid-argument", "Missing 'uid'.");
+  }
+  if (!Number.isFinite(amount) || amount === 0 || Math.abs(amount) > 100000) {
+    throw new HttpsError(
+      "invalid-argument",
+      "'amount' must be non-zero and at most 100,000."
+    );
+  }
+  if (reason.length < 3) {
+    throw new HttpsError("invalid-argument", "A reason is required.");
+  }
+  if (!ID_RE.test(requestId)) {
+    throw new HttpsError("invalid-argument", "Missing or bad 'requestId'.");
+  }
+
+  const user = await admin.firestore().collection("users").doc(uid).get();
+  if (!user.exists) throw new HttpsError("not-found", "No such user.");
+
+  return postLedgerEntry({
+    uid,
+    amount,
+    type: "adjustment",
+    title: amount > 0 ? "Adjustment by Giggre" : "Correction by Giggre",
+    idempotencyKey: `adj_${requestId}`,
+    currencyCode: (user.get("currencyCode") as string | undefined) ?? "PHP",
+    meta: { adminUid, reason },
+  });
+});
