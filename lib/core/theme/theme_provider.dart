@@ -42,7 +42,7 @@ class ThemeProvider extends ChangeNotifier {
         scaffoldBackgroundColor: const Color(0xFFF1F5F9),
         cardColor: Colors.white,
         dividerColor: const Color(0xFFE2E8F0),
-        fontFamily: GoogleFonts.inter().fontFamily,
+        fontFamily: GoogleFonts.plusJakartaSans().fontFamily,
         extensions: const [ProfileTabTokens.light],
       );
 
@@ -55,7 +55,7 @@ class ThemeProvider extends ChangeNotifier {
         scaffoldBackgroundColor: kBg,
         cardColor: kCard,
         dividerColor: kBorder,
-        fontFamily: GoogleFonts.inter().fontFamily,
+        fontFamily: GoogleFonts.plusJakartaSans().fontFamily,
         extensions: const [ProfileTabTokens.dark],
       );
 }
