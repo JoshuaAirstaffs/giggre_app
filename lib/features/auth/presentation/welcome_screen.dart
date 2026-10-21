@@ -1186,14 +1186,21 @@ class _WelcomeContent extends StatelessWidget {
               children: [
                 Image.asset('assets/images/logo.png', height: 48),
                 const SizedBox(height: 22),
-                Text(
-                  'Need Help? Giggre it.\nWant Cash? Giggre it.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                    color: tokens.textPrimary,
-                    height: 1.25,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Column(
+                    children: [
+                      _SloganLine(
+                        lead: 'Need Help? ',
+                        alignment: Alignment.centerLeft,
+                        tokens: tokens,
+                      ),
+                      _SloganLine(
+                        lead: 'Want Cash? ',
+                        alignment: Alignment.centerRight,
+                        tokens: tokens,
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1273,6 +1280,42 @@ class _WelcomeContent extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _SloganLine extends StatelessWidget {
+  final String lead;
+  final Alignment alignment;
+  final ProfileTabTokens tokens;
+  const _SloganLine({
+    required this.lead,
+    required this.alignment,
+    required this.tokens,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: alignment,
+      child: Text.rich(
+        TextSpan(
+          style: const TextStyle(fontSize: 20, height: 1.25),
+          children: [
+            TextSpan(
+              text: lead,
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: tokens.textPrimary,
+              ),
+            ),
+            const TextSpan(
+              text: 'Giggre it!',
+              style: TextStyle(fontWeight: FontWeight.w900, color: _kGold),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

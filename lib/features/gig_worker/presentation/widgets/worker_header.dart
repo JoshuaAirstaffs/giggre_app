@@ -91,7 +91,7 @@ class WorkerHeader extends StatelessWidget {
                     ],
                     const Expanded(
                       child: Text(
-                        'Worker Dashboard',
+                        'Gig Worker Dashboard',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

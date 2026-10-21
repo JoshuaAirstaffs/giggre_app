@@ -268,7 +268,7 @@ class _HostHeader extends StatelessWidget {
                                 const SizedBox(width: 10),
                               ],
                               const Text(
-                                'Host Dashboard',
+                                'Gig Host Dashboard',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 17,
