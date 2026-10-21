@@ -8,6 +8,7 @@ import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/profile_tab_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../services/wallet_requests_service.dart';
 import 'cash_in_methods_screen.dart';
 import 'choose_recipient_screen.dart';
 import 'security_privacy_centre_screen.dart';
@@ -32,7 +33,8 @@ class WalletScreen extends StatelessWidget {
   /// Anything else (e.g. null) falls back to worker blue.
   final String? role;
 
-  // TODO: replace with the real Top Up / Transfer / Send flows.
+  // Withdraw (cash out) is not available yet; Top Up and Send are requests
+  // reviewed by a Giggre admin (functions/src/walletRequests.ts).
   void _comingSoon(BuildContext context, String action) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$action is coming soon.')),
@@ -83,10 +85,10 @@ class WalletScreen extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: _WalletActionButton(
-                          label: 'Transfer',
-                          icon: Icons.swap_horiz_rounded,
+                          label: 'Withdraw',
+                          icon: Icons.account_balance_rounded,
                           tokens: tokens,
-                          onTap: () => _comingSoon(context, 'Transfer'),
+                          onTap: () => _comingSoon(context, 'Withdraw'),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -106,6 +108,9 @@ class WalletScreen extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
+
+                  // ── Request waiting for review (one at a time) ─────────────
+                  if (uid != null) _PendingWalletRequestCard(uid: uid, tokens: tokens),
 
                   // ── Default payment toggle (hidden for now) ────────────────
                   if (_kShowDefaultPaymentToggle) ...[
@@ -678,4 +683,112 @@ class _WalletAccentScope extends InheritedWidget {
   @override
   bool updateShouldNotify(_WalletAccentScope old) =>
       old.accent.fill != accent.fill || old.accent.fg != accent.fg;
+}
+
+/// The user's top up / send request that's waiting for a Giggre admin, with
+/// Cancel. Renders nothing when there isn't one.
+class _PendingWalletRequestCard extends StatelessWidget {
+  const _PendingWalletRequestCard({required this.uid, required this.tokens});
+
+  final String uid;
+  final ProfileTabTokens tokens;
+
+  Future<void> _cancel(BuildContext context, WalletRequest r) async {
+    final money = NumberFormat.currency(symbol: '₱', decimalDigits: 2);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Cancel this ${r.label.toLowerCase()}?'),
+        content: Text(
+          r.type == 'transfer'
+              ? '${money.format(r.amount)} goes back to your Gig Wallet.'
+              : 'Giggre will no longer review this top up. If you already '
+                    'paid, contact support instead.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep it'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Cancel request',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await WalletRequestsService.cancel(r.id);
+      messenger.showSnackBar(const SnackBar(content: Text('Request cancelled.')));
+    } on WalletRequestException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final money = NumberFormat.currency(symbol: '₱', decimalDigits: 2);
+    const amber = Color(0xFFF0A830);
+    return StreamBuilder<WalletRequest?>(
+      stream: WalletRequestsService.pendingStream(uid),
+      builder: (context, snap) {
+        final r = snap.data;
+        if (r == null) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+            decoration: BoxDecoration(
+              color: amber.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: amber.withValues(alpha: 0.35)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.hourglass_top_rounded, color: amber, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${r.label} of ${money.format(r.amount)} in review',
+                        style: TextStyle(
+                          color: tokens.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        r.type == 'transfer'
+                            ? 'To ${r.recipientName ?? 'recipient'} · on hold until Giggre reviews it'
+                            : 'Ref ${r.reference ?? '—'} · Giggre is confirming your payment',
+                        style: TextStyle(
+                          color: tokens.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _cancel(context, r),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.redAccent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

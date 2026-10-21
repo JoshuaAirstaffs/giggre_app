@@ -397,7 +397,7 @@ Future<void> showGigPointsInfoSheet(BuildContext context) {
             const SizedBox(height: 14),
             para(
               'Available balance',
-              'Only credited points. You can withdraw or transfer these.',
+              'Only credited points. You can convert these to GigCash.',
             ),
             para(
               'Processing',
@@ -406,15 +406,16 @@ Future<void> showGigPointsInfoSheet(BuildContext context) {
             ),
             para(
               'On hold',
-              'Points reserved by a withdrawal or transfer that a Giggre admin '
+              'Points reserved by a conversion to GigCash that a Giggre admin '
                   'is reviewing. They come back if it is rejected or you '
                   'cancel it.',
             ),
             para(
-              'Requests',
-              'Deposits, withdrawals and transfers are reviewed by a Giggre '
-                  'admin before they go through. You are notified of the '
-                  'result.',
+              'Conversion',
+              'Turn points into GigCash in your Gig Wallet, or GigCash into '
+                  'points, at the rates Giggre sets. Each conversion is '
+                  'reviewed by a Giggre admin before it goes through, and you '
+                  'can have one waiting at a time.',
             ),
             const SizedBox(height: 4),
             const RewardStageLegend(),

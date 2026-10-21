@@ -4,6 +4,7 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { sendPushToUser } from "./push";
 import { firestoreTriggerRegion } from "./region";
+import { requireGigPointsAdmin } from "./gigPointsRequests";
 
 // Pinned here rather than inherited from setGlobalOptions in index.ts: this
 // module is evaluated (imports are hoisted) before that call runs. Same
@@ -653,7 +654,8 @@ export const retryGigPointsAwards = onCall(OPTS, async (request) => {
 // For support corrections (fraud reversal, goodwill credit). Active admins
 // only, mirrors isAdmin() in firestore.rules. Balance never goes negative.
 export const adjustGigPoints = onCall(OPTS, async (request) => {
-  const callerUid = await requireActiveAdmin(request.auth?.uid);
+  const actor = await requireGigPointsAdmin(request.auth?.uid);
+  const callerUid = actor.uid;
 
   const { userId, points, reason } = (request.data ?? {}) as Record<string, unknown>;
   if (typeof userId !== "string" || !userId) throw new HttpsError("invalid-argument", "userId is required.");
@@ -698,13 +700,36 @@ export const adjustGigPoints = onCall(OPTS, async (request) => {
     return current + points;
   });
 
+  // Same shape giggre-admin's writeLog() uses, so it shows in Activity Logs.
   await db().collection("activityLogs").add({
     type: "gig_points_adjusted",
+    actorId: callerUid,
+    actorName: actor.name,
+    actorEmail: actor.email,
+    module: "gig_points",
+    action: "gig_points_adjusted",
+    description: `${points > 0 ? "Added" : "Removed"} ${Math.abs(points).toLocaleString("en-US")} points ${points > 0 ? "to" : "from"} user ${userId} — ${reason.trim()}`,
+    targetSection: null,
+    targetId: userId,
+    targetName: userId,
+    affectedFiles: [],
+    meta: { from: null, to: null, other: { points, reason: reason.trim(), balance: newBalance } },
     adminId: callerUid,
     targetUserId: userId,
     points,
     reason: reason.trim(),
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
+  try {
+    const abs = Math.abs(points).toLocaleString("en-US");
+    await sendPushToUser(userId, {
+      title: points > 0 ? `+${abs} Gig Points` : `${abs} Gig Points removed`,
+      body: `${points > 0 ? `${abs} points were added to` : `${abs} points were removed from`} your balance by Giggre: ${reason.trim()}`,
+      channelId: "gig_points_v1",
+      data: { type: "gig_points_adjusted", points: String(points) },
+    });
+  } catch (err) {
+    logger.warn("[gigPoints] adjustment push failed", { error: String(err) });
+  }
   return { balance: newBalance, transactionId: txRef.id };
 });

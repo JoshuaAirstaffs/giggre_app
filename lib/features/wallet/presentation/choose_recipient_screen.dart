@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/theme/profile_tab_theme.dart';
+import '../services/wallet_requests_service.dart';
+import 'send_amount_screen.dart';
 import 'widgets/wallet_page_header.dart';
 
 /// "Choose Recipient" for Send. The user types a PH mobile number; a
@@ -11,8 +13,8 @@ import 'widgets/wallet_page_header.dart';
 ///  • Contacts — needs a contacts package (e.g. flutter_contacts), the
 ///    READ_CONTACTS / NSContactsUsageDescription permissions, and a Google
 ///    Play "contacts" permission declaration.
-///  • Continue — should look the number up server-side (Cloud Function) to
-///    find the Giggre account, then go to the amount screen.
+///  Tapping the matched number looks it up server-side
+///  (lookupWalletRecipient) and opens SendAmountScreen.
 class ChooseRecipientScreen extends StatefulWidget {
   const ChooseRecipientScreen({super.key, this.role});
 
@@ -47,6 +49,39 @@ class _ChooseRecipientScreenState extends State<ChooseRecipientScreen> {
     final d = _digits;
     if (d.length != 10) return '+63 $d';
     return '+63 ${d.substring(0, 3)} ${d.substring(3, 6)} ${d.substring(6)}';
+  }
+
+  bool _looking = false;
+
+  Future<void> _lookup() async {
+    if (_looking) return;
+    setState(() => _looking = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final config = await WalletRequestsService.fetchConfig();
+      if (!config.canSend) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text("Send isn't available right now.")),
+        );
+        return;
+      }
+      final r = await WalletRequestsService.lookupRecipient('+63$_digits');
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SendAmountScreen(
+            role: widget.role,
+            recipient: r,
+            config: config,
+          ),
+        ),
+      );
+    } on WalletRequestException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _looking = false);
+    }
   }
 
   void _comingSoon(String what) {
@@ -175,7 +210,7 @@ class _ChooseRecipientScreenState extends State<ChooseRecipientScreen> {
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
-                    onTap: () => _comingSoon('Sending to $_pretty'),
+                    onTap: _looking ? null : _lookup,
                     child: Padding(
                       padding: const EdgeInsets.all(14),
                       child: Row(

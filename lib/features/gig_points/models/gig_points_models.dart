@@ -197,9 +197,10 @@ String _voidReasonText(String? reason) => switch (reason) {
 class GigPointsTransaction {
   final String id;
 
-  /// 'earn' (a task), 'adjustment' (admin correction), or a points
-  /// movement: 'deposit', 'withdraw', 'transfer_out', 'transfer_in'
-  /// (functions/src/gigPointsRequests.ts).
+  /// 'earn' (a task), 'adjustment' (admin correction), or a conversion:
+  /// 'convert_to_cash' / 'convert_to_points' (functions/src/
+  /// gigPointsRequests.ts). Old entries may also be 'deposit', 'withdraw',
+  /// 'transfer_out' or 'transfer_in'.
   final String type;
   final GigPointsStatus status;
   final int points;
@@ -228,6 +229,11 @@ class GigPointsTransaction {
   final String? note;
   final String? reference;
 
+  /// Conversions only: the GigCash side and the locked rate (points per ₱1).
+  final double? cash;
+  final String currencyCode;
+  final int? rate;
+
   const GigPointsTransaction({
     required this.id,
     required this.type,
@@ -254,17 +260,32 @@ class GigPointsTransaction {
     this.source,
     this.note,
     this.reference,
+    this.cash,
+    this.currencyCode = 'PHP',
+    this.rate,
   });
 
   static const movementTypes = {
+    'convert_to_cash',
+    'convert_to_points',
     'deposit',
     'withdraw',
     'transfer_out',
     'transfer_in',
   };
 
-  /// A deposit / withdrawal / transfer rather than a task reward.
+  /// A conversion (or an old deposit / withdrawal / transfer) rather than a
+  /// task reward — worded as a request, not a reward stage.
   bool get isMovement => movementTypes.contains(type);
+  bool get isConversion =>
+      type == 'convert_to_cash' || type == 'convert_to_points';
+
+  String get _cashText {
+    final c = cash;
+    if (c == null) return 'GigCash';
+    final sym = currencyCode == 'PHP' ? '₱' : '$currencyCode ';
+    return '$sym${c.toStringAsFixed(2)}';
+  }
   bool get byAdmin => source == 'admin';
 
   bool get isAdjustment => type == 'adjustment';
@@ -291,9 +312,14 @@ class GigPointsTransaction {
   String get statusExplanation {
     if (isAdjustment) return 'Adjusted by Giggre support.';
     if (!isMovement) return stage.explanation;
-    final held = type == 'withdraw' || type == 'transfer_out';
+    final held = type == 'withdraw' || type == 'transfer_out' ||
+        type == 'convert_to_cash';
     return switch (status) {
-      GigPointsStatus.pending => held
+      GigPointsStatus.pending => type == 'convert_to_points'
+          ? 'Waiting for a Giggre admin to review it. $_cashText was taken '
+                'from your Gig Wallet and is refunded if it is rejected or '
+                'you cancel it.'
+          : held
           ? 'Waiting for a Giggre admin to review it. The points are on hold '
                 'and come back to you if it is rejected or you cancel it.'
           : 'Waiting for a Giggre admin to confirm your payment. The points '
@@ -302,13 +328,26 @@ class GigPointsTransaction {
           ? 'Made by Giggre.'
           : 'Approved by Giggre and applied to your balance.',
       GigPointsStatus.voided => voidReason == 'cancelled'
-          ? 'You cancelled this request.${held ? ' The held points were returned.' : ''}'
-          : 'Giggre rejected this request.${held ? ' The held points were returned.' : ''}',
+          ? 'You cancelled this request.${_returnedText(held)}'
+          : 'Giggre rejected this request.${_returnedText(held)}',
     };
   }
 
+  String _returnedText(bool held) => type == 'convert_to_points'
+      ? ' $_cashText was refunded to your Gig Wallet.'
+      : held
+      ? ' The held points were returned.'
+      : '';
+
   /// Why the user received (or would have received) this amount.
   String get amountExplanation {
+    if (isConversion) {
+      final r = rate == null ? '' : ' at $rate points per ₱1';
+      final n = note?.isNotEmpty == true ? ' Note: $note' : '';
+      return type == 'convert_to_cash'
+          ? '${points.abs()} points converted to $_cashText GigCash$r.$n'
+          : '$_cashText GigCash converted to $points points$r.$n';
+    }
     if (isMovement) {
       final who = counterpartyName == null
           ? ''
@@ -347,6 +386,8 @@ class GigPointsTransaction {
   String get title {
     if (isMovement) {
       return switch (type) {
+        'convert_to_cash' => 'Converted to GigCash',
+        'convert_to_points' => 'Converted from GigCash',
         'deposit' => 'Deposit',
         'withdraw' => 'Withdrawal',
         'transfer_out' => counterpartyName == null
@@ -363,6 +404,7 @@ class GigPointsTransaction {
 
   String get typeLabel => switch (type) {
     'adjustment' => 'Adjustment',
+    'convert_to_cash' || 'convert_to_points' => 'Conversion',
     'deposit' => 'Deposit',
     'withdraw' => 'Withdraw',
     'transfer_out' || 'transfer_in' => 'Transfer',
@@ -419,6 +461,9 @@ class GigPointsTransaction {
       source: d['source'] as String?,
       note: d['note'] as String?,
       reference: d['reference'] as String?,
+      cash: d['cash'] is num ? ((d['cash'] as num) * 100).round() / 100 : null,
+      currencyCode: d['currencyCode'] as String? ?? 'PHP',
+      rate: d['rate'] is num ? (d['rate'] as num).toInt() : null,
     );
   }
 }

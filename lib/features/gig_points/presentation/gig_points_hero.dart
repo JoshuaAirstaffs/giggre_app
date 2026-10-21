@@ -10,8 +10,8 @@ import 'reward_stage_style.dart';
 
 final _numFmt = NumberFormat.decimalPattern();
 
-/// Wallet-style balance card: available points, what's on hold, and the
-/// Deposit / Withdraw / Transfer actions.
+/// Wallet-style balance card: available points, what's on hold, the GigCash
+/// balance, and the two conversion actions (To GigCash / To Points).
 ///
 /// "Available" is credited points only (functions/src/gigPoints.ts); held
 /// points are already excluded and shown separately.
@@ -26,6 +26,9 @@ class GigPointsHero extends StatelessWidget {
   /// so while it exists the actions explain that instead of opening.
   final GigPointsRequest? pendingRequest;
 
+  /// Gig Wallet balance, shown for context and used by To Points.
+  final WalletBalance? wallet;
+
   const GigPointsHero({
     super.key,
     required this.balance,
@@ -34,6 +37,7 @@ class GigPointsHero extends StatelessWidget {
     required this.limits,
     required this.onShowInfo,
     this.pendingRequest,
+    this.wallet,
   });
 
   @override
@@ -181,12 +185,18 @@ class GigPointsHero extends StatelessWidget {
                           text:
                               '${_numFmt.format(b!.pendingPoints)} processing',
                         ),
+                      if (wallet != null)
+                        _HeroChip(
+                          icon: Icons.account_balance_wallet_outlined,
+                          text:
+                              '${formatCash(wallet!.balance, wallet!.currencyCode)} GigCash',
+                        ),
                       if (pendingRequest != null)
                         _HeroChip(
                           icon: Icons.schedule_rounded,
                           text:
-                              '${pendingRequest!.type.label} of '
-                              '${_numFmt.format(pendingRequest!.points)} in review',
+                              'Conversion of '
+                              '${_numFmt.format(pendingRequest!.points)} pts in review',
                         ),
                       if (b?.fromCache == true && !hasError)
                         const _HeroChip(
@@ -204,7 +214,8 @@ class GigPointsHero extends StatelessWidget {
                         final l = snap.data;
                         return Row(
                           children: [
-                            for (final t in PointsRequestType.values)
+                            for (final (i, t) in PointsRequestType.values.indexed) ...[
+                              if (i > 0) const SizedBox(width: 10),
                               Expanded(
                                 child: _HeroAction(
                                   type: t,
@@ -217,11 +228,13 @@ class GigPointsHero extends StatelessWidget {
                                           context,
                                           type: t,
                                           balance: b,
+                                          wallet: wallet,
                                           limits: l,
                                           pending: pendingRequest,
                                         ),
                                 ),
                               ),
+                            ],
                           ],
                         );
                       },
@@ -299,45 +312,46 @@ class _HeroAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final icon = pointsRequestStyle(type).icon;
+    const accent = Color(0xFFD9671A);
     return Semantics(
       button: true,
-      label: '${type.label} points${open ? '' : ', unavailable'}',
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Opacity(
-          opacity: open ? 1 : 0.5,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Column(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.08),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
+      label: '${type.title}${open ? '' : ', unavailable'}',
+      child: Opacity(
+        opacity: open ? 1 : 0.55,
+        child: Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          elevation: 0,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    type == PointsRequestType.toCash
+                        ? Icons.account_balance_wallet_outlined
+                        : Icons.stars_rounded,
+                    color: accent,
+                    size: 19,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      type.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: accent,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
                       ),
-                    ],
+                    ),
                   ),
-                  child: Icon(icon, color: const Color(0xFFD9671A), size: 24),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  type.label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

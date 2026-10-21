@@ -8,55 +8,61 @@ import { firestoreTriggerRegion } from "./region";
 // setGlobalOptions in index.ts).
 const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
 
-// ── Gig Points requests: deposit / withdraw / transfer ─────────────────────
-// Users REQUEST a movement of points; an admin approves or rejects it in
-// giggre-admin (Gig Points → Requests). Nothing moves without that approval.
-// Cash is settled by admins outside the app (no payment integration yet).
+// ── Gig Points ⇄ GigCash conversion ────────────────────────────────────────
+// Users REQUEST a conversion between Gig Points (gig_points/{uid}) and their
+// Gig Wallet balance (GigCash, wallets/{uid} — see wallet.ts). An admin
+// approves or rejects it in giggre-admin (Gig Points → Requests). Nothing is
+// converted without that approval.
 //
-//   deposit   user pays the admin outside the app → on approval the points
-//             are credited. Nothing is held while pending.
-//   withdraw  points are HELD (balance → heldPoints) the moment the request
-//             is made, so they can't be spent twice. Approval finalises it
-//             (admin pays out); rejection/cancel returns them.
-//   transfer  held like a withdrawal; approval moves them to the recipient.
+//   to_cash    Points → GigCash. The points are HELD (balance → heldPoints)
+//              when requested; approval credits the wallet.
+//   to_points  GigCash → Points. The pesos are taken from the wallet when
+//              requested (a 'pending' wallet entry = the hold); approval
+//              credits the points. Rejection/cancel refunds the wallet.
 //
-// Limits (general_config/gig_points_requests, super-admin edited):
-//   enabled                       master switch
-//   {deposit|withdraw|transfer}.enabled / min / max / dailyMax
-//   min/max apply per request; dailyMax is the most one user can request of
-//   that type per Manila calendar day. Rejected/cancelled requests stop
-//   counting. A missing doc or a disabled type = requests are closed.
-//   A user may have only ONE pending request at a time, of any type.
+// Rates and limits — general_config/gig_points_requests (super-admin edited):
+//   enabled                         master switch
+//   rates.toCash                    points per 1 unit of wallet currency when
+//                                   cashing out   (e.g. 100 → 100 pts = ₱1)
+//   rates.toPoints                  points per 1 unit when buying points
+//                                   (e.g. 80 → ₱1 = 80 pts)
+//   toCash / toPoints .enabled / min / max / dailyMax   (all in POINTS)
+// The rate is LOCKED onto each request when it's made; later rate changes
+// never alter a pending or past conversion. A missing doc, a disabled
+// direction or a missing rate = that direction is closed.
+// A user may have only ONE pending request at a time.
 //
-// Data (all server-write only — see firestore.rules)
-//   gig_points_requests/{id}                       the request + decision
-//   gig_points/{uid}.heldPoints                    points reserved by
-//                                                  pending withdraw/transfer
-//   gig_points/{uid}/transactions/req__{id}        ledger line per request
-//   gig_points/{uid}/transactions/adm__{id}        ledger line, admin action
-//   gig_points/{uid}/daily/{YYYY-MM-DD}            per-type daily totals
+// Data (server-write only — see firestore.rules)
+//   gig_points_requests/{id}                    request + decision
+//   gig_points/{uid}.heldPoints                 points held by pending to_cash
+//   gig_points/{uid}/transactions/req__{id}     points ledger line
+//   gig_points/{uid}/daily/{YYYY-MM-DD}         per-direction daily totals
+//   wallets/{uid}/transactions/gpconv_{id}[_hold|_refund]   wallet lines
 //
 // Exactly-once: requests use a client-supplied id (retries are no-ops) and
-// every decision is a transaction that only moves a request out of pending.
+// every decision is one transaction that only moves a request out of pending.
 
 const db = () => admin.firestore();
 const FV = admin.firestore.FieldValue;
 
-export const REQUEST_TYPES = ["deposit", "withdraw", "transfer"] as const;
+export const REQUEST_TYPES = ["to_cash", "to_points"] as const;
 export type RequestType = (typeof REQUEST_TYPES)[number];
+const LIMIT_KEY: Record<RequestType, "toCash" | "toPoints"> = { to_cash: "toCash", to_points: "toPoints" };
 const ADMIN_PERMISSION = "gig-points";
-/** Pending requests a user may have at once, across all types. */
+/** Pending requests a user may have at once, across both directions. */
 const MAX_OPEN_REQUESTS = 1;
 const NOTE_MAX = 200;
-const ABS_MAX_POINTS = 1_000_000;
+const ABS_MAX_POINTS = 10_000_000;
 const LIMITS_DOC = "gig_points_requests";
 
 const TYPE_LABEL: Record<RequestType, string> = {
-  deposit: "Deposit",
-  withdraw: "Withdrawal",
-  transfer: "Transfer",
+  to_cash: "Points → GigCash",
+  to_points: "GigCash → Points",
 };
-const holds = (t: RequestType) => t === "withdraw" || t === "transfer";
+const TYPE_NOUN: Record<RequestType, string> = {
+  to_cash: "conversion to GigCash",
+  to_points: "conversion to Gig Points",
+};
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 const nonNegInt = (v: unknown): number =>
@@ -65,39 +71,56 @@ const nonNegInt = (v: unknown): number =>
 const posInt = (v: unknown): number | null =>
   typeof v === "number" && Number.isInteger(v) && v > 0 && v <= ABS_MAX_POINTS ? v : null;
 const fmt = (n: number) => n.toLocaleString("en-US");
+/** Round to centavos so float drift never accumulates (same as wallet.ts). */
+const toMoney = (n: number) => Math.round(n * 100) / 100;
+const money = (n: number, ccy: string) =>
+  `${ccy === "PHP" ? "₱" : `${ccy} `}${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Peso value of a conversion at a locked rate (points per 1 unit).
+ *  Cashing out rounds DOWN, buying rounds UP, both to the centavo, so the
+ *  platform never pays out a fraction more than the rate allows. */
+export function cashFor(type: RequestType, points: number, rate: number): number {
+  const exact = points / rate;
+  return type === "to_cash" ? Math.floor(exact * 100 + 1e-9) / 100 : Math.ceil(exact * 100 - 1e-9) / 100;
+}
 
 /** Calendar day in Manila (UTC+8, no DST) — the daily-cap bucket. */
 export const manilaDayKey = (ms = Date.now()) =>
   new Date(ms + 8 * 3600_000).toISOString().slice(0, 10);
 
-// ── Limits ──────────────────────────────────────────────────────────────────
+// ── Limits + rates ──────────────────────────────────────────────────────────
 
-export interface TypeLimits { enabled: boolean; min: number | null; max: number | null; dailyMax: number | null }
-export interface RequestLimits { exists: boolean; enabled: boolean; byType: Record<RequestType, TypeLimits> }
+export interface DirectionLimits { enabled: boolean; min: number | null; max: number | null; dailyMax: number | null; rate: number | null }
+export interface ConversionConfig { exists: boolean; enabled: boolean; byType: Record<RequestType, DirectionLimits> }
 
-export function parseLimits(d: FirebaseFirestore.DocumentData | undefined): RequestLimits {
-  const byType = {} as Record<RequestType, TypeLimits>;
+export function parseConversionConfig(d: FirebaseFirestore.DocumentData | undefined): ConversionConfig {
+  const rates = (d?.rates ?? {}) as Record<string, unknown>;
+  const byType = {} as Record<RequestType, DirectionLimits>;
   for (const t of REQUEST_TYPES) {
-    const raw = (d?.[t] ?? {}) as Record<string, unknown>;
+    const k = LIMIT_KEY[t];
+    const raw = (d?.[k] ?? {}) as Record<string, unknown>;
+    const rate = posInt(rates[k]);
     byType[t] = {
-      enabled: raw.enabled === true,
+      // A direction without a valid rate can't be priced, so it's closed.
+      enabled: raw.enabled === true && rate != null,
       min: posInt(raw.min),
       max: posInt(raw.max),
       dailyMax: posInt(raw.dailyMax),
+      rate,
     };
   }
   return { exists: !!d, enabled: !!d && d.enabled !== false, byType };
 }
 
-async function loadLimits(): Promise<RequestLimits> {
-  return parseLimits((await db().collection("general_config").doc(LIMITS_DOC).get()).data());
+async function loadConfig(): Promise<ConversionConfig> {
+  return parseConversionConfig((await db().collection("general_config").doc(LIMITS_DOC).get()).data());
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 interface Actor { uid: string; name: string; email: string | null }
 
-async function requireGigPointsAdmin(uid: string | undefined): Promise<Actor> {
+export async function requireGigPointsAdmin(uid: string | undefined): Promise<Actor> {
   if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
   const a = (await db().collection("admins").doc(uid).get()).data();
   if (!a || a.isActive !== true || a.isPending !== false) {
@@ -110,17 +133,10 @@ async function requireGigPointsAdmin(uid: string | undefined): Promise<Actor> {
   return { uid, name: str(a.name) ?? str(a.email) ?? "Admin", email: str(a.email) };
 }
 
-interface UserInfo { uid: string; name: string; code: string | null; photoUrl: string | null }
-const userInfo = (snap: FirebaseFirestore.DocumentSnapshot): UserInfo => {
+export interface UserInfo { uid: string; name: string; code: string | null; photoUrl: string | null }
+export const userInfo = (snap: FirebaseFirestore.DocumentSnapshot): UserInfo => {
   const d = snap.data() ?? {};
   return { uid: snap.id, name: str(d.name) ?? "Giggre user", code: str(d.userId), photoUrl: str(d.photoUrl) };
-};
-
-/** "Juan Dela Cruz" → "Juan D." — enough to confirm, without exposing it all. */
-const maskName = (name: string) => {
-  const parts = name.split(/\s+/).filter(Boolean);
-  if (parts.length < 2) return parts[0] ?? name;
-  return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
 };
 
 /** Variants a stored phone might use for the same number. */
@@ -138,10 +154,10 @@ function phoneCandidates(input: string): string[] {
     out.add(`0${national}`);
     out.add(national);
   }
-  return [...out].slice(0, 10); // Firestore `in` takes at most 30; keep it small
+  return [...out].slice(0, 10);
 }
 
-async function findUser(query: string): Promise<FirebaseFirestore.DocumentSnapshot> {
+export async function findUser(query: string): Promise<FirebaseFirestore.DocumentSnapshot> {
   const q = query.trim();
   if (!q || q.length > 40) throw new HttpsError("invalid-argument", "Enter a Giggre ID or phone number.");
   const users = db().collection("users");
@@ -203,34 +219,37 @@ async function logActivity(actor: Actor, action: string, description: string, ta
 const balanceRef = (uid: string) => db().collection("gig_points").doc(uid);
 const ledgerRef = (uid: string, id: string) => balanceRef(uid).collection("transactions").doc(id);
 const dailyRef = (uid: string, day: string) => balanceRef(uid).collection("daily").doc(day);
+const walletRef = (uid: string) => db().collection("wallets").doc(uid);
+const walletTxRef = (uid: string, id: string) => walletRef(uid).collection("transactions").doc(id);
 
-const parseNote = (v: unknown, required = false): string | null => {
-  if (v == null || v === "") {
-    if (required) throw new HttpsError("invalid-argument", "A reason (3–300 characters) is required.");
-    return null;
-  }
+/** A wallet ledger line in wallet.ts's format. Call after all tx reads. */
+function writeWalletEntry(
+  tx: FirebaseFirestore.Transaction,
+  uid: string,
+  id: string,
+  e: { amount: number; title: string; status: "completed" | "pending"; balanceAfter: number; currencyCode: string; meta: Record<string, unknown>; type?: string },
+) {
+  tx.create(walletTxRef(uid, id), {
+    amount: toMoney(e.amount),
+    type: e.type ?? "points_conversion",
+    title: e.title,
+    currencyCode: e.currencyCode,
+    status: e.status,
+    balanceAfter: toMoney(e.balanceAfter),
+    meta: e.meta,
+    createdAt: FV.serverTimestamp(),
+  });
+}
+
+const parseNote = (v: unknown): string | null => {
+  if (v == null || v === "") return null;
   if (typeof v !== "string") throw new HttpsError("invalid-argument", "Note must be text.");
   const t = v.trim();
-  const max = required ? 300 : NOTE_MAX;
-  if (required && t.length < 3) throw new HttpsError("invalid-argument", "A reason (3–300 characters) is required.");
-  if (t.length > max) throw new HttpsError("invalid-argument", `Keep the note under ${max} characters.`);
+  if (t.length > NOTE_MAX) throw new HttpsError("invalid-argument", `Keep the note under ${NOTE_MAX} characters.`);
   return t || null;
 };
 
-// ── App: limits + recipient lookup ──────────────────────────────────────────
-
-/** Recipient preview for a transfer. users/{uid} is already public-read; this
- *  only resolves an ID/phone to a uid and a masked name for confirmation. */
-export const lookupGigPointsRecipient = onCall(OPTS, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
-  const snap = await findUser(String((request.data ?? {}).query ?? ""));
-  if (snap.id === uid) throw new HttpsError("invalid-argument", "You can't transfer points to yourself.");
-  const u = userInfo(snap);
-  return { recipientId: u.uid, name: maskName(u.name), code: u.code, photoUrl: u.photoUrl };
-});
-
-// ── App: create a request ───────────────────────────────────────────────────
+// ── App: create a conversion request ────────────────────────────────────────
 
 export const createGigPointsRequest = onCall(OPTS, async (request) => {
   const uid = request.auth?.uid;
@@ -238,7 +257,7 @@ export const createGigPointsRequest = onCall(OPTS, async (request) => {
   const d = (request.data ?? {}) as Record<string, unknown>;
 
   const type = d.type as RequestType;
-  if (!REQUEST_TYPES.includes(type)) throw new HttpsError("invalid-argument", "Unknown request type.");
+  if (!REQUEST_TYPES.includes(type)) throw new HttpsError("invalid-argument", "Unknown conversion type.");
   const points = posInt(d.points);
   if (points == null) throw new HttpsError("invalid-argument", "Enter a whole number of points greater than 0.");
   const note = parseNote(d.note);
@@ -247,119 +266,111 @@ export const createGigPointsRequest = onCall(OPTS, async (request) => {
     throw new HttpsError("invalid-argument", "clientRequestId is required.");
   }
 
-  const limits = await loadLimits();
-  const lim = limits.byType[type];
+  const config = await loadConfig();
+  const lim = config.byType[type];
   const label = TYPE_LABEL[type];
-  if (!limits.enabled || !lim.enabled) {
-    throw new HttpsError("failed-precondition", `${label} requests aren't available right now.`);
+  if (!config.enabled || !lim.enabled || lim.rate == null) {
+    throw new HttpsError("failed-precondition", `${label} isn't available right now.`);
   }
   if (lim.min != null && points < lim.min) {
-    throw new HttpsError("out-of-range", `The minimum ${label.toLowerCase()} is ${fmt(lim.min)} points.`);
+    throw new HttpsError("out-of-range", `The minimum is ${fmt(lim.min)} points.`);
   }
   if (lim.max != null && points > lim.max) {
-    throw new HttpsError("out-of-range", `The maximum ${label.toLowerCase()} is ${fmt(lim.max)} points per request.`);
+    throw new HttpsError("out-of-range", `The maximum is ${fmt(lim.max)} points per request.`);
   }
-
-  let recipient: UserInfo | null = null;
-  if (type === "transfer") {
-    const rid = str(d.recipientId);
-    if (!rid || rid.includes("/")) throw new HttpsError("invalid-argument", "Choose who to send the points to.");
-    if (rid === uid) throw new HttpsError("invalid-argument", "You can't transfer points to yourself.");
-    const rSnap = await db().collection("users").doc(rid).get();
-    if (!rSnap.exists) throw new HttpsError("not-found", "That recipient no longer exists.");
-    recipient = userInfo(rSnap);
+  const rate = lim.rate;
+  const cash = cashFor(type, points, rate);
+  if (cash <= 0) {
+    throw new HttpsError("out-of-range", `That's worth less than ₱0.01 at ${fmt(rate)} points per ₱1. Enter more points.`);
   }
 
   const reqRef = db().collection("gig_points_requests").doc(`${uid}_${clientRequestId}`);
   const day = manilaDayKey();
   const bRef = balanceRef(uid);
+  const wRef = walletRef(uid);
+  const holdId = `gpconv_${reqRef.id}_hold`;
 
   const result = await db().runTransaction(async (tx) => {
     const existing = await tx.get(reqRef);
     if (existing.exists) {
       const e = existing.data()!;
       if (e.userId !== uid) throw new HttpsError("already-exists", "Request id in use.");
-      return { requestId: reqRef.id, status: e.status as string, duplicate: true, requester: null as UserInfo | null };
+      return { requestId: reqRef.id, status: e.status as string, duplicate: true, requester: null as UserInfo | null, ccy: "PHP" };
     }
-    const [userSnap, balSnap, daySnap, openSnap] = await Promise.all([
+    const [userSnap, balSnap, daySnap, openSnap, walletSnap] = await Promise.all([
       tx.get(db().collection("users").doc(uid)),
       tx.get(bRef),
       tx.get(dailyRef(uid, day)),
       tx.get(db().collection("gig_points_requests").where("userId", "==", uid).where("status", "==", "pending")),
+      tx.get(wRef),
     ]);
     if (!userSnap.exists) throw new HttpsError("failed-precondition", "Your account profile is missing.");
     if (openSnap.size >= MAX_OPEN_REQUESTS) {
       const open = openSnap.docs[0]?.data();
-      const what = open ? `a ${TYPE_LABEL[open.type as RequestType]?.toLowerCase() ?? "points"} request of ${fmt(nonNegInt(open.points))} points` : "a request";
+      const what = open && REQUEST_TYPES.includes(open.type)
+        ? `a ${TYPE_NOUN[open.type as RequestType]} of ${fmt(nonNegInt(open.points))} points`
+        : "a request";
       throw new HttpsError("resource-exhausted", `You already have ${what} waiting for review. You can make a new one after it's decided, or cancel it.`);
     }
     const usedToday = nonNegInt(daySnap.data()?.[type]);
     if (lim.dailyMax != null && usedToday + points > lim.dailyMax) {
       const left = Math.max(0, lim.dailyMax - usedToday);
       throw new HttpsError("out-of-range", left > 0
-        ? `Daily ${label.toLowerCase()} limit is ${fmt(lim.dailyMax)} points. You can request up to ${fmt(left)} more today.`
-        : `You've reached today's ${label.toLowerCase()} limit of ${fmt(lim.dailyMax)} points. Try again tomorrow.`);
+        ? `The daily limit is ${fmt(lim.dailyMax)} points. You can convert up to ${fmt(left)} more today.`
+        : `You've reached today's limit of ${fmt(lim.dailyMax)} points. Try again tomorrow.`);
     }
-    const balance = nonNegInt(balSnap.data()?.balance);
-    if (holds(type) && balance < points) {
-      throw new HttpsError("failed-precondition", `You only have ${fmt(balance)} available points.`);
+    const ccy = str(walletSnap.data()?.currencyCode) ?? "PHP";
+    const walletBal = toMoney(Number(walletSnap.data()?.balance) || 0);
+    if (type === "to_cash") {
+      const balance = nonNegInt(balSnap.data()?.balance);
+      if (balance < points) throw new HttpsError("failed-precondition", `You only have ${fmt(balance)} available points.`);
+    } else if (walletBal < cash) {
+      throw new HttpsError("failed-precondition", `This needs ${money(cash, ccy)}, but your GigCash balance is ${money(walletBal, ccy)}.`);
     }
 
     const requester = userInfo(userSnap);
     const now = FV.serverTimestamp();
-    const description = type === "transfer"
-      ? `Transfer to ${recipient!.name}`
-      : type === "withdraw" ? "Withdrawal request" : "Deposit request";
-
     tx.create(reqRef, {
-      type,
-      status: "pending",
-      points,
-      note,
-      userId: uid,
-      userName: requester.name,
-      userCode: requester.code,
-      recipientId: recipient?.uid ?? null,
-      recipientName: recipient?.name ?? null,
-      recipientCode: recipient?.code ?? null,
-      heldPoints: holds(type) ? points : 0,
-      dayKey: day,
-      source: "app",
-      createdAt: now,
-      updatedAt: now,
+      type, status: "pending", points, cash, currencyCode: ccy, rate, note,
+      userId: uid, userName: requester.name, userCode: requester.code,
+      heldPoints: type === "to_cash" ? points : 0,
+      heldCash: type === "to_points" ? cash : 0,
+      dayKey: day, source: "app", createdAt: now, updatedAt: now,
     });
     tx.create(ledgerRef(uid, `req__${reqRef.id}`), {
-      type: type === "transfer" ? "transfer_out" : type,
-      source: "user_request",
-      status: "pending",
-      points: type === "deposit" ? points : -points,
-      description,
-      note,
-      requestId: reqRef.id,
-      counterpartyId: recipient?.uid ?? null,
-      counterpartyName: recipient?.name ?? null,
-      counterpartyCode: recipient?.code ?? null,
-      createdAt: now,
-      updatedAt: now,
+      type: type === "to_cash" ? "convert_to_cash" : "convert_to_points",
+      source: "user_request", status: "pending",
+      points: type === "to_cash" ? -points : points,
+      cash, currencyCode: ccy, rate,
+      description: type === "to_cash" ? `Convert to ${money(cash, ccy)} GigCash` : `Bought with ${money(cash, ccy)} GigCash`,
+      note, requestId: reqRef.id, createdAt: now, updatedAt: now,
     });
-    if (holds(type)) {
+    if (type === "to_cash") {
       tx.set(bRef, { userId: uid, balance: FV.increment(-points), heldPoints: FV.increment(points), updatedAt: now }, { merge: true });
+    } else {
+      // The wallet debit IS the hold; refunded if rejected or cancelled.
+      const after = toMoney(walletBal - cash);
+      tx.set(wRef, { balance: after, currencyCode: ccy, updatedAt: now, ...(walletSnap.exists ? {} : { createdAt: now }) }, { merge: true });
+      writeWalletEntry(tx, uid, holdId, {
+        amount: -cash, title: `Convert to ${fmt(points)} Gig Points`, status: "pending",
+        balanceAfter: after, currencyCode: ccy, meta: { requestId: reqRef.id, points, rate },
+      });
     }
     tx.set(dailyRef(uid, day), { dayKey: day, [type]: FV.increment(points), updatedAt: now }, { merge: true });
-    return { requestId: reqRef.id, status: "pending", duplicate: false, requester };
+    return { requestId: reqRef.id, status: "pending", duplicate: false, requester, ccy };
   });
 
   if (!result.duplicate && result.requester) {
     const who = `${result.requester.name}${result.requester.code ? ` (${result.requester.code})` : ""}`;
-    const what = type === "transfer"
-      ? `wants to transfer ${fmt(points)} points to ${recipient!.name}${recipient!.code ? ` (${recipient!.code})` : ""}`
-      : `requested a ${label.toLowerCase()} of ${fmt(points)} points`;
+    const what = type === "to_cash"
+      ? `wants to convert ${fmt(points)} points to ${money(cash, result.ccy)} GigCash`
+      : `wants to convert ${money(cash, result.ccy)} GigCash to ${fmt(points)} points`;
     try {
       await db().collection("admin_notifications").add({
         type: "gig_points_request",
         requiredPermission: ADMIN_PERMISSION,
-        title: `Gig Points ${label.toLowerCase()} request`,
-        message: `${who} ${what}.${note ? ` Note: "${note}"` : ""} Review it before it goes through.`,
+        title: `Gig Points conversion request`,
+        message: `${who} ${what} (rate ${fmt(rate)} pts per ₱1).${note ? ` Note: "${note}"` : ""} Review it before it goes through.`,
         link: "/gig-points",
         sourceCollection: "gig_points_requests",
         sourceId: result.requestId,
@@ -370,21 +381,20 @@ export const createGigPointsRequest = onCall(OPTS, async (request) => {
     } catch (err) {
       logger.error("[gigPointsRequests] admin notification failed", { error: String(err) });
     }
-    await notifyUser(uid, `${label} request submitted`,
-      `Your ${label.toLowerCase()} of ${fmt(points)} points is waiting for review.${holds(type) ? " The points are on hold until it's decided." : ""}`,
+    await notifyUser(uid, "Conversion request submitted",
+      type === "to_cash"
+        ? `Converting ${fmt(points)} points to ${money(cash, result.ccy)} GigCash is waiting for review. The points are on hold until it's decided.`
+        : `Converting ${money(cash, result.ccy)} GigCash to ${fmt(points)} points is waiting for review. The GigCash is on hold until it's decided.`,
       { requestId: result.requestId, status: "pending", requestType: type });
   }
-  return { requestId: result.requestId, status: result.status };
+  return { requestId: result.requestId, status: result.status, cash };
 });
 
 // ── Settle a pending request (approve / reject / cancel) ────────────────────
 
 type Outcome = "approved" | "rejected" | "cancelled";
 
-interface Settled {
-  type: RequestType; points: number; userId: string; recipientId: string | null;
-  recipientName: string | null; userName: string; userCode: string | null;
-}
+interface Settled { type: RequestType; points: number; cash: number; ccy: string; userId: string; userName: string; userCode: string | null; legacy?: boolean }
 
 async function settle(
   requestId: string,
@@ -400,60 +410,72 @@ async function settle(
     if (r.status !== "pending") throw new HttpsError("failed-precondition", `This request is already ${r.status}.`);
     const type = r.type as RequestType;
     const points = posInt(r.points);
-    if (!REQUEST_TYPES.includes(type) || points == null) throw new HttpsError("data-loss", "Malformed request.");
+    const cash = toMoney(Number(r.cash) || 0);
     const uid = r.userId as string;
-    const recipientId = (r.recipientId as string | null) ?? null;
-    const held = holds(type) ? points : 0;
+    if (!REQUEST_TYPES.includes(type) || points == null || cash <= 0) {
+      // Deposit / withdraw / transfer requests from before conversion
+      // replaced them. They can only be closed; held points go back.
+      if (outcome === "approved") {
+        throw new HttpsError("failed-precondition", "This is an old deposit/withdraw/transfer request. Reject it to close it and return any held points.");
+      }
+      const held = nonNegInt(r.heldPoints);
+      const now = FV.serverTimestamp();
+      tx.set(ledgerRef(uid, `req__${requestId}`), { status: "voided", voidedAt: now, voidReason: outcome, updatedAt: now }, { merge: true });
+      if (held > 0) tx.set(balanceRef(uid), { userId: uid, balance: FV.increment(held), heldPoints: FV.increment(-held), updatedAt: now }, { merge: true });
+      tx.update(reqRef, {
+        status: outcome, heldPoints: 0, decidedAt: now,
+        decidedBy: opts.actor?.uid ?? opts.ownerUid ?? null, decidedByName: opts.actor?.name ?? null,
+        decisionNote: opts.note ?? null, reference: null, updatedAt: now,
+      });
+      return { type, points: nonNegInt(r.points), cash: 0, ccy: "PHP", userId: uid, userName: r.userName ?? "Giggre user", userCode: r.userCode ?? null, legacy: true };
+    }
+    const ccy = str(r.currencyCode) ?? "PHP";
 
     // All reads first (Firestore transaction rule).
-    let recipientSnap: FirebaseFirestore.DocumentSnapshot | null = null;
-    if (outcome === "approved" && type === "transfer") {
-      recipientSnap = await tx.get(db().collection("users").doc(recipientId!));
-      if (!recipientSnap.exists) {
-        throw new HttpsError("failed-precondition", "The recipient's account no longer exists. Reject this request to return the points.");
-      }
-    }
+    const wSnap = await tx.get(walletRef(uid));
+    const walletBal = toMoney(Number(wSnap.data()?.balance) || 0);
 
     const now = FV.serverTimestamp();
     const lRef = ledgerRef(uid, `req__${requestId}`);
     const bRef = balanceRef(uid);
+    const holdRef = walletTxRef(uid, `gpconv_${requestId}_hold`);
+    const meta = { requestId, points, rate: r.rate ?? null };
 
     if (outcome === "approved") {
       tx.set(lRef, { status: "credited", creditedAt: now, updatedAt: now, reference: opts.reference ?? null }, { merge: true });
-      if (type === "deposit") {
-        tx.set(bRef, { userId: uid, balance: FV.increment(points), updatedAt: now }, { merge: true });
-      } else {
-        tx.set(bRef, { userId: uid, heldPoints: FV.increment(-held), updatedAt: now }, { merge: true });
-      }
-      if (type === "transfer") {
-        tx.create(ledgerRef(recipientId!, `req__${requestId}`), {
-          type: "transfer_in",
-          source: "user_request",
-          status: "credited",
-          points,
-          description: `Transfer from ${r.userName ?? "a Giggre user"}`,
-          note: r.note ?? null,
-          requestId,
-          counterpartyId: uid,
-          counterpartyName: r.userName ?? null,
-          counterpartyCode: r.userCode ?? null,
-          createdAt: now,
-          creditedAt: now,
-          updatedAt: now,
+      if (type === "to_cash") {
+        const after = toMoney(walletBal + cash);
+        tx.set(bRef, { userId: uid, heldPoints: FV.increment(-points), updatedAt: now }, { merge: true });
+        tx.set(walletRef(uid), { balance: after, currencyCode: ccy, updatedAt: now, ...(wSnap.exists ? {} : { createdAt: now }) }, { merge: true });
+        writeWalletEntry(tx, uid, `gpconv_${requestId}`, {
+          amount: cash, title: `Converted ${fmt(points)} Gig Points`, status: "completed",
+          balanceAfter: after, currencyCode: ccy, meta,
         });
-        tx.set(balanceRef(recipientId!), { userId: recipientId, balance: FV.increment(points), updatedAt: now }, { merge: true });
+      } else {
+        tx.set(bRef, { userId: uid, balance: FV.increment(points), updatedAt: now }, { merge: true });
+        tx.set(holdRef, { status: "completed" }, { merge: true });
       }
     } else {
       tx.set(lRef, { status: "voided", voidedAt: now, voidReason: outcome, updatedAt: now }, { merge: true });
-      if (held) tx.set(bRef, { userId: uid, balance: FV.increment(held), heldPoints: FV.increment(-held), updatedAt: now }, { merge: true });
+      if (type === "to_cash") {
+        tx.set(bRef, { userId: uid, balance: FV.increment(points), heldPoints: FV.increment(-points), updatedAt: now }, { merge: true });
+      } else {
+        const after = toMoney(walletBal + cash);
+        tx.set(holdRef, { status: "reversed" }, { merge: true });
+        tx.set(walletRef(uid), { balance: after, updatedAt: now }, { merge: true });
+        writeWalletEntry(tx, uid, `gpconv_${requestId}_refund`, {
+          amount: cash, type: "refund",
+          title: outcome === "cancelled" ? "Conversion cancelled — refund" : "Conversion rejected — refund",
+          status: "completed", balanceAfter: after, currencyCode: ccy, meta,
+        });
+      }
       if (typeof r.dayKey === "string") {
         tx.set(dailyRef(uid, r.dayKey), { [type]: FV.increment(-points), updatedAt: now }, { merge: true });
       }
     }
 
     tx.update(reqRef, {
-      status: outcome,
-      heldPoints: 0,
+      status: outcome, heldPoints: 0, heldCash: 0,
       decidedAt: now,
       decidedBy: opts.actor?.uid ?? opts.ownerUid ?? null,
       decidedByName: opts.actor?.name ?? null,
@@ -461,10 +483,7 @@ async function settle(
       reference: opts.reference ?? null,
       updatedAt: now,
     });
-    return {
-      type, points, userId: uid, recipientId,
-      recipientName: r.recipientName ?? null, userName: r.userName ?? "Giggre user", userCode: r.userCode ?? null,
-    };
+    return { type, points, cash, ccy, userId: uid, userName: r.userName ?? "Giggre user", userCode: r.userCode ?? null };
   });
 }
 
@@ -482,26 +501,29 @@ export const decideGigPointsRequest = onCall(OPTS, async (request) => {
   const reference = parseNote(d.reference);
 
   const s = await settle(requestId, outcome, { actor, note, reference });
-  const label = TYPE_LABEL[s.type];
+  if (s.legacy) {
+    await notifyUser(s.userId, "Points request closed",
+      `Your old Gig Points request was closed${note ? `: ${note}` : "."} Any points on hold are back in your balance. You can now convert points to GigCash instead.`,
+      { requestId, status: "rejected", requestType: String(s.type) });
+    await logActivity(actor, "gig_points_request_rejected", `Closed old points request for ${s.userName}${note ? ` — ${note}` : ""}`, requestId, s.userName, { legacy: true, note });
+    return { status: outcome };
+  }
   const pts = fmt(s.points);
-
+  const cash = money(s.cash, s.ccy);
   if (outcome === "approved") {
-    const msg = s.type === "deposit" ? `${pts} points were added to your balance.`
-      : s.type === "withdraw" ? `Your withdrawal of ${pts} points was approved.${reference ? ` Reference: ${reference}.` : ""}`
-      : `${pts} points were sent to ${s.recipientName ?? "the recipient"}.`;
-    await notifyUser(s.userId, `${label} approved`, msg, { requestId, status: "approved", requestType: s.type });
-    if (s.type === "transfer" && s.recipientId) {
-      await notifyUser(s.recipientId, `You received ${pts} Gig Points`,
-        `${s.userName} sent you ${pts} Gig Points.`, { requestId, status: "received", requestType: "transfer" });
-    }
+    await notifyUser(s.userId, "Conversion approved",
+      s.type === "to_cash"
+        ? `${pts} Gig Points were converted to ${cash} GigCash in your Gig Wallet.`
+        : `${cash} GigCash was converted to ${pts} Gig Points.`,
+      { requestId, status: "approved", requestType: s.type });
   } else {
-    await notifyUser(s.userId, `${label} request rejected`,
-      `Your ${label.toLowerCase()} of ${pts} points was rejected${note ? `: ${note}` : "."}${holds(s.type) ? " The held points are back in your balance." : ""}`,
+    await notifyUser(s.userId, "Conversion rejected",
+      `Your ${TYPE_NOUN[s.type]} was rejected${note ? `: ${note}` : "."} ${s.type === "to_cash" ? `The ${pts} points are back in your balance.` : `${cash} was refunded to your Gig Wallet.`}`,
       { requestId, status: "rejected", requestType: s.type });
   }
   await logActivity(actor, outcome === "approved" ? "gig_points_request_approved" : "gig_points_request_rejected",
-    `${outcome === "approved" ? "Approved" : "Rejected"} ${label.toLowerCase()} of ${pts} points for ${s.userName}${s.userCode ? ` (${s.userCode})` : ""}${s.type === "transfer" ? ` → ${s.recipientName}` : ""}${note ? ` — ${note}` : ""}`,
-    requestId, s.userName, { type: s.type, points: s.points, userId: s.userId, recipientId: s.recipientId, reference, note });
+    `${outcome === "approved" ? "Approved" : "Rejected"} ${TYPE_LABEL[s.type]} (${pts} pts ↔ ${cash}) for ${s.userName}${s.userCode ? ` (${s.userCode})` : ""}${note ? ` — ${note}` : ""}`,
+    requestId, s.userName, { type: s.type, points: s.points, cash: s.cash, userId: s.userId, reference, note });
   return { status: outcome };
 });
 
@@ -516,100 +538,20 @@ export const cancelGigPointsRequest = onCall(OPTS, async (request) => {
   return { status: "cancelled" };
 });
 
-// ── Admin: direct deposit / withdraw / transfer ─────────────────────────────
-// For support and settlement done outside the request flow. Applies at once
-// (the admin IS the approval), ignores user limits, requires a reason, and is
-// recorded as an approved request with source 'admin' for the audit trail.
-
-export const adminGigPointsAction = onCall(OPTS, async (request) => {
-  const actor = await requireGigPointsAdmin(request.auth?.uid);
-  const d = (request.data ?? {}) as Record<string, unknown>;
-  const type = d.action as RequestType;
-  if (!REQUEST_TYPES.includes(type)) throw new HttpsError("invalid-argument", "action must be deposit, withdraw or transfer.");
-  const points = posInt(d.points);
-  if (points == null) throw new HttpsError("invalid-argument", "Enter a whole number of points greater than 0.");
-  const reason = parseNote(d.reason, true)!;
-  const userId = str(d.userId);
-  if (!userId || userId.includes("/")) throw new HttpsError("invalid-argument", "userId is required.");
-  const toUserId = type === "transfer" ? str(d.toUserId) : null;
-  if (type === "transfer" && (!toUserId || toUserId.includes("/") || toUserId === userId)) {
-    throw new HttpsError("invalid-argument", "Choose a different recipient.");
-  }
-
-  const reqRef = db().collection("gig_points_requests").doc();
-  const result = await db().runTransaction(async (tx) => {
-    const [uSnap, bSnap, tSnap] = await Promise.all([
-      tx.get(db().collection("users").doc(userId)),
-      tx.get(balanceRef(userId)),
-      toUserId ? tx.get(db().collection("users").doc(toUserId)) : Promise.resolve(null),
-    ]);
-    if (!uSnap.exists) throw new HttpsError("not-found", "User not found.");
-    if (toUserId && !tSnap?.exists) throw new HttpsError("not-found", "Recipient not found.");
-    const balance = nonNegInt(bSnap.data()?.balance);
-    if (type !== "deposit" && balance < points) {
-      throw new HttpsError("failed-precondition", `${userInfo(uSnap).name} only has ${fmt(balance)} available points.`);
-    }
-    const u = userInfo(uSnap);
-    const t = tSnap ? userInfo(tSnap) : null;
-    const now = FV.serverTimestamp();
-    const sign = type === "deposit" ? 1 : -1;
-
-    tx.create(reqRef, {
-      type, status: "approved", points, note: reason, userId,
-      userName: u.name, userCode: u.code,
-      recipientId: t?.uid ?? null, recipientName: t?.name ?? null, recipientCode: t?.code ?? null,
-      heldPoints: 0, dayKey: manilaDayKey(), source: "admin",
-      createdAt: now, updatedAt: now, decidedAt: now,
-      decidedBy: actor.uid, decidedByName: actor.name, decisionNote: reason, reference: null,
-    });
-    tx.create(ledgerRef(userId, `adm__${reqRef.id}`), {
-      type: type === "transfer" ? "transfer_out" : type,
-      source: "admin", status: "credited", points: sign * points,
-      description: type === "transfer" ? `Transfer to ${t!.name}` : reason,
-      note: reason, requestId: reqRef.id, adminId: actor.uid,
-      counterpartyId: t?.uid ?? null, counterpartyName: t?.name ?? null, counterpartyCode: t?.code ?? null,
-      createdAt: now, creditedAt: now, updatedAt: now,
-    });
-    tx.set(balanceRef(userId), { userId, balance: FV.increment(sign * points), updatedAt: now }, { merge: true });
-    if (t) {
-      tx.create(ledgerRef(t.uid, `adm__${reqRef.id}`), {
-        type: "transfer_in", source: "admin", status: "credited", points,
-        description: `Transfer from ${u.name}`, note: reason, requestId: reqRef.id, adminId: actor.uid,
-        counterpartyId: u.uid, counterpartyName: u.name, counterpartyCode: u.code,
-        createdAt: now, creditedAt: now, updatedAt: now,
-      });
-      tx.set(balanceRef(t.uid), { userId: t.uid, balance: FV.increment(points), updatedAt: now }, { merge: true });
-    }
-    return { u, t, newBalance: balance + sign * points };
-  });
-
-  const pts = fmt(points);
-  const { u, t } = result;
-  if (type === "deposit") {
-    await notifyUser(userId, `+${pts} Gig Points`, `${pts} points were added to your balance by Giggre.`, { requestId: reqRef.id, status: "approved", requestType: type });
-  } else if (type === "withdraw") {
-    await notifyUser(userId, `${pts} Gig Points withdrawn`, `${pts} points were withdrawn from your balance by Giggre: ${reason}`, { requestId: reqRef.id, status: "approved", requestType: type });
-  } else {
-    await notifyUser(userId, `${pts} Gig Points transferred`, `Giggre transferred ${pts} of your points to ${t!.name}: ${reason}`, { requestId: reqRef.id, status: "approved", requestType: type });
-    await notifyUser(t!.uid, `You received ${pts} Gig Points`, `${u.name} sent you ${pts} Gig Points.`, { requestId: reqRef.id, status: "received", requestType: type });
-  }
-  await logActivity(actor, `gig_points_admin_${type}`,
-    `${TYPE_LABEL[type]} of ${pts} points ${type === "deposit" ? "to" : "from"} ${u.name}${u.code ? ` (${u.code})` : ""}${t ? ` → ${t.name}${t.code ? ` (${t.code})` : ""}` : ""} — ${reason}`,
-    reqRef.id, u.name, { type, points, userId, toUserId, reason });
-  return { requestId: reqRef.id, balance: result.newBalance };
-});
-
-// ── Admin: find a user for a manual action ──────────────────────────────────
+// ── Admin: find a user for a manual adjustment ──────────────────────────────
 
 export const adminFindGigPointsUser = onCall(OPTS, async (request) => {
   await requireGigPointsAdmin(request.auth?.uid);
   const snap = await findUser(String((request.data ?? {}).query ?? ""));
   const u = userInfo(snap);
-  const b = (await balanceRef(u.uid).get()).data() ?? {};
+  const [b, w] = await Promise.all([balanceRef(u.uid).get(), walletRef(u.uid).get()]);
+  const bd = b.data() ?? {};
   return {
     uid: u.uid, name: u.name, code: u.code, photoUrl: u.photoUrl,
     phone: str(snap.data()?.phone), email: str(snap.data()?.email),
-    balance: nonNegInt(b.balance), heldPoints: nonNegInt(b.heldPoints),
-    pendingPoints: nonNegInt(b.pendingPoints), lifetimeEarned: nonNegInt(b.lifetimeEarned),
+    balance: nonNegInt(bd.balance), heldPoints: nonNegInt(bd.heldPoints),
+    pendingPoints: nonNegInt(bd.pendingPoints), lifetimeEarned: nonNegInt(bd.lifetimeEarned),
+    walletBalance: toMoney(Number(w.data()?.balance) || 0),
+    currencyCode: str(w.data()?.currencyCode) ?? "PHP",
   };
 });

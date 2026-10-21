@@ -1441,18 +1441,27 @@ export {
   retryGigPointsAwards,
 } from "./gigPoints";
 
-// ── Gig Points requests ─────────────────────────────────────────────────────
-// Deposit / withdraw / transfer requests reviewed by admins, request limits,
-// and admin direct actions. See functions/src/gigPointsRequests.ts.
+// ── Gig Points conversion ───────────────────────────────────────────────────
+// Points ⇄ GigCash conversion requests reviewed by admins, and the admin user
+// lookup for manual adjustments. See functions/src/gigPointsRequests.ts.
 export {
-  lookupGigPointsRecipient,
   createGigPointsRequest,
   cancelGigPointsRequest,
   decideGigPointsRequest,
-  adminGigPointsAction,
   adminFindGigPointsUser,
 } from "./gigPointsRequests";
 
 // ── Gig Wallet ──────────────────────────────────────────────────────────────
 // Server-only ledger for wallets/{uid}. See functions/src/wallet.ts.
 export { adminAdjustWallet } from "./wallet";
+
+// ── Gig Wallet requests ─────────────────────────────────────────────────────
+// Top Up (manual proof) and Send requests reviewed by admins. See
+// functions/src/walletRequests.ts.
+export {
+  lookupWalletRecipient,
+  createWalletRequest,
+  cancelWalletRequest,
+  decideWalletRequest,
+  adminFindWalletUser,
+} from "./walletRequests";

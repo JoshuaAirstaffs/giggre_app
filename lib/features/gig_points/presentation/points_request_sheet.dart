@@ -10,39 +10,35 @@ import 'reward_stage_style.dart';
 final _numFmt = NumberFormat.decimalPattern();
 String _n(int v) => _numFmt.format(v);
 
-/// Colour + icon per request type, shared by the action buttons, the sheet
-/// and the requests list.
-({Color color, IconData icon}) pointsRequestStyle(PointsRequestType t) =>
+/// Colour + icon per conversion direction, shared by the balance card, the
+/// sheet and the requests list.
+({Color color, IconData icon}) pointsRequestStyle(PointsRequestType? t) =>
     switch (t) {
-      PointsRequestType.deposit => (
-        color: kGigPointsGreen,
-        icon: Icons.add_circle_outline_rounded,
-      ),
-      PointsRequestType.withdraw => (
+      PointsRequestType.toCash => (
         color: const Color(0xFFE07B1A),
         icon: Icons.account_balance_wallet_outlined,
       ),
-      PointsRequestType.transfer => (
-        color: kBlue,
-        icon: Icons.swap_horiz_rounded,
-      ),
+      PointsRequestType.toPoints => (color: kBlue, icon: Icons.stars_rounded),
+      null => (color: kSub, icon: Icons.receipt_long_outlined),
     };
 
-/// Bottom sheet for a deposit / withdraw / transfer REQUEST.
+/// Bottom sheet for a Points ⇄ GigCash conversion REQUEST.
 ///
-/// Two steps: the form, then a confirmation summary — nothing is sent until
-/// the user confirms there. Every request then waits for a Giggre admin; the
-/// sheet says so, and that withdrawals/transfers put the points on hold.
-/// Limits shown here are for guidance — the server enforces them.
+/// Two steps: the form (with a live preview at the admin-set rate), then a
+/// confirmation summary — nothing is sent until the user confirms. Every
+/// request waits for a Giggre admin; the sheet says what is held meanwhile.
+/// The amounts shown are previews — the server decides the real ones.
 class PointsRequestSheet extends StatefulWidget {
   final PointsRequestType type;
-  final int availableBalance;
+  final int availablePoints;
+  final WalletBalance? wallet;
   final PointsTypeLimits limits;
 
   const PointsRequestSheet({
     super.key,
     required this.type,
-    required this.availableBalance,
+    required this.availablePoints,
+    required this.wallet,
     required this.limits,
   });
 
@@ -50,7 +46,8 @@ class PointsRequestSheet extends StatefulWidget {
   static Future<bool?> show(
     BuildContext context, {
     required PointsRequestType type,
-    required int availableBalance,
+    required int availablePoints,
+    required WalletBalance? wallet,
     required PointsTypeLimits limits,
   }) => showModalBottomSheet<bool>(
     context: context,
@@ -62,7 +59,8 @@ class PointsRequestSheet extends StatefulWidget {
     ),
     builder: (_) => PointsRequestSheet(
       type: type,
-      availableBalance: availableBalance,
+      availablePoints: availablePoints,
+      wallet: wallet,
       limits: limits,
     ),
   );
@@ -76,13 +74,9 @@ enum _Step { form, confirm, done }
 class _PointsRequestSheetState extends State<PointsRequestSheet> {
   final _amount = TextEditingController();
   final _note = TextEditingController();
-  final _recipientQuery = TextEditingController();
 
   _Step _step = _Step.form;
-  PointsRecipient? _recipient;
-  bool _lookingUp = false;
   bool _submitting = false;
-  String? _lookupError;
   String? _submitError;
 
   /// One id per sheet: re-submitting after a network error can't duplicate.
@@ -90,18 +84,37 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
 
   PointsRequestType get _type => widget.type;
   PointsTypeLimits get _lim => widget.limits;
+  int get _rate => _lim.rate ?? 1;
+  String get _ccy => widget.wallet?.currencyCode ?? 'PHP';
+  double get _walletBal => widget.wallet?.balance ?? 0;
+  bool get _toCash => _type == PointsRequestType.toCash;
 
   @override
   void dispose() {
     _amount.dispose();
     _note.dispose();
-    _recipientQuery.dispose();
     super.dispose();
   }
 
   int? get _points {
     final v = int.tryParse(_amount.text.trim());
     return v == null || v <= 0 ? null : v;
+  }
+
+  double? get _cash {
+    final p = _points;
+    return p == null ? null : _type.cashFor(p, _rate);
+  }
+
+  /// Most points the user can convert right now.
+  int get _maxPoints {
+    var m = _toCash
+        ? widget.availablePoints
+        // Largest whole number of points the wallet can pay for.
+        : (_walletBal * _rate + 1e-6).floor();
+    if (_lim.max != null && m > _lim.max!) m = _lim.max!;
+    if (_lim.dailyMax != null && m > _lim.dailyMax!) m = _lim.dailyMax!;
+    return m < 0 ? 0 : m;
   }
 
   /// Client-side mirror of the server checks, for instant feedback.
@@ -118,35 +131,19 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
     if (_lim.dailyMax != null && p > _lim.dailyMax!) {
       return 'The daily limit is ${_n(_lim.dailyMax!)} points.';
     }
-    if (_type.holdsPoints && p > widget.availableBalance) {
-      return 'You only have ${_n(widget.availableBalance)} available points.';
+    final c = _cash ?? 0;
+    if (c <= 0) return 'That is worth less than ₱0.01. Enter more points.';
+    if (_toCash && p > widget.availablePoints) {
+      return 'You only have ${_n(widget.availablePoints)} available points.';
+    }
+    if (!_toCash && c > _walletBal) {
+      return 'This costs ${formatCash(c, _ccy)} but your GigCash is '
+          '${formatCash(_walletBal, _ccy)}.';
     }
     return null;
   }
 
-  bool get _formReady =>
-      _points != null &&
-      _amountError == null &&
-      (_type != PointsRequestType.transfer || _recipient != null);
-
-  Future<void> _lookup() async {
-    final q = _recipientQuery.text.trim();
-    if (q.isEmpty) return;
-    FocusScope.of(context).unfocus();
-    setState(() {
-      _lookingUp = true;
-      _lookupError = null;
-      _recipient = null;
-    });
-    try {
-      final r = await GigPointsService.lookupRecipient(q);
-      if (mounted) setState(() => _recipient = r);
-    } on GigPointsRequestException catch (e) {
-      if (mounted) setState(() => _lookupError = e.message);
-    } finally {
-      if (mounted) setState(() => _lookingUp = false);
-    }
-  }
+  bool get _formReady => _points != null && _amountError == null;
 
   Future<void> _submit() async {
     setState(() {
@@ -159,7 +156,6 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
         points: _points!,
         clientRequestId: _clientRequestId,
         note: _note.text,
-        recipientId: _recipient?.id,
       );
       if (mounted) setState(() => _step = _Step.done);
     } on GigPointsRequestException catch (e) {
@@ -174,9 +170,7 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
     final style = pointsRequestStyle(_type);
     final onSurface = Theme.of(context).colorScheme.onSurface;
     return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.viewInsetsOf(context).bottom,
-      ),
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
         child: Column(
@@ -209,8 +203,9 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
                 Expanded(
                   child: Text(
                     switch (_step) {
-                      _Step.form => '${_type.label} points',
-                      _Step.confirm => 'Confirm your ${_type.noun}',
+                      _Step.form =>
+                        _toCash ? 'Convert to GigCash' : 'Convert to Points',
+                      _Step.confirm => 'Confirm conversion',
                       _Step.done => 'Request sent',
                     },
                     style: TextStyle(
@@ -240,140 +235,120 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final limitParts = [
       if (_lim.min != null) 'Min ${_n(_lim.min!)}',
-      if (_lim.max != null) 'Max ${_n(_lim.max!)} per request',
+      if (_lim.max != null) 'Max ${_n(_lim.max!)}',
       if (_lim.dailyMax != null) 'Up to ${_n(_lim.dailyMax!)} a day',
     ];
+    final cash = _amountError == null ? _cash : null;
     return [
-      Text(
-        switch (_type) {
-          PointsRequestType.deposit =>
-            'Pay Giggre first, then request the points here. They are added '
-                'once an admin confirms your payment.',
-          PointsRequestType.withdraw =>
-            'Cash out your points. Giggre pays you outside the app once an '
-                'admin approves the request.',
-          PointsRequestType.transfer =>
-            'Send points to another Giggre user. They arrive once an admin '
-                'approves the transfer.',
-        },
-        style: const TextStyle(color: kSub, fontSize: 13, height: 1.4),
-      ),
-      if (_type.holdsPoints) ...[
-        const SizedBox(height: 10),
-        Text(
-          'Available: ${_n(widget.availableBalance)} points',
-          style: TextStyle(
-            color: onSurface,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
+      // Rate + what you have on each side.
+      Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: kGold.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: kGold.withValues(alpha: 0.25)),
         ),
-      ],
-      if (_type == PointsRequestType.transfer) ...[
-        const SizedBox(height: 16),
-        _label(context, 'Send to'),
-        if (_recipient == null)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _recipientQuery,
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (_) => _lookup(),
-                  enabled: !_lookingUp,
-                  decoration: _decoration(
-                    context,
-                    hint: 'Giggre ID or phone number',
-                    error: _lookupError,
-                  ),
-                ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _toCash
+                  ? 'Rate: ${_n(_rate)} points = ${formatCash(1, _ccy)}'
+                  : 'Rate: ${formatCash(1, _ccy)} = ${_n(_rate)} points',
+              style: TextStyle(
+                color: onSurface,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
               ),
-              const SizedBox(width: 8),
-              SizedBox(
-                height: 48,
-                child: FilledButton(
-                  onPressed: _lookingUp ? null : _lookup,
-                  style: FilledButton.styleFrom(backgroundColor: kBlue),
-                  child: _lookingUp
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text('Find'),
-                ),
-              ),
-            ],
-          )
-        else
-          _RecipientTile(
-            recipient: _recipient!,
-            onChange: () => setState(() => _recipient = null),
-          ),
-      ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Available points: ${_n(widget.availablePoints)}  ·  '
+              'GigCash: ${widget.wallet == null ? '–' : formatCash(_walletBal, _ccy)}',
+              style: const TextStyle(color: kSub, fontSize: 12.5),
+            ),
+          ],
+        ),
+      ),
       const SizedBox(height: 16),
-      _label(context, 'Points'),
+      _label(context, _toCash ? 'Points to convert' : 'Points to get'),
       TextField(
         controller: _amount,
         keyboardType: TextInputType.number,
         inputFormatters: [
           FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(7),
+          LengthLimitingTextInputFormatter(8),
         ],
         onChanged: (_) => setState(() {}),
         decoration: _decoration(
           context,
           hint: '0',
+          suffix: 'pts',
           error: _amountError,
           helper: limitParts.isEmpty ? null : limitParts.join(' · '),
         ),
       ),
-      if (_type.holdsPoints && widget.availableBalance > 0) ...[
-        const SizedBox(height: 8),
+      if (_maxPoints > 0)
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton(
-            onPressed: () {
-              var all = widget.availableBalance;
-              if (_lim.max != null && all > _lim.max!) all = _lim.max!;
-              if (_lim.dailyMax != null && all > _lim.dailyMax!) {
-                all = _lim.dailyMax!;
-              }
-              setState(() => _amount.text = '$all');
-            },
-            child: const Text('Use maximum'),
+            onPressed: () => setState(() => _amount.text = '$_maxPoints'),
+            child: Text('Use maximum (${_n(_maxPoints)})'),
           ),
         ),
-      ],
-      const SizedBox(height: 12),
+      const SizedBox(height: 4),
+      // Live preview.
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.swap_vert_rounded,
+              color: pointsRequestStyle(_type).color,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _toCash ? 'You receive' : 'It costs',
+                style: const TextStyle(color: kSub, fontSize: 13),
+              ),
+            ),
+            Text(
+              cash == null ? '–' : '${formatCash(cash, _ccy)} GigCash',
+              style: TextStyle(
+                color: onSurface,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 16),
       _label(context, 'Note (optional)'),
       TextField(
         controller: _note,
         maxLength: 200,
         maxLines: 2,
         minLines: 1,
-        decoration: _decoration(
-          context,
-          hint: switch (_type) {
-            PointsRequestType.deposit => 'How you paid, e.g. GCash ref. no.',
-            PointsRequestType.withdraw => 'Where to pay you, e.g. GCash number',
-            PointsRequestType.transfer => 'What it is for',
-          },
-        ),
+        decoration: _decoration(context, hint: 'Anything the admin should know'),
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: 8),
       FilledButton(
-        onPressed: _formReady ? () => setState(() => _step = _Step.confirm) : null,
+        onPressed: _formReady
+            ? () => setState(() => _step = _Step.confirm)
+            : null,
         style: FilledButton.styleFrom(
           backgroundColor: kGold,
           minimumSize: const Size.fromHeight(48),
         ),
         child: const Text(
-          'Review request',
+          'Review conversion',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
@@ -384,17 +359,17 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
 
   List<Widget> _confirm(BuildContext context) {
     final p = _points!;
+    final c = _cash!;
     final note = _note.text.trim();
     final rows = <(String, String)>[
-      ('Type', _type.label),
-      ('Points', _n(p)),
-      if (_recipient != null)
-        (
-          'To',
-          '${_recipient!.name}${_recipient!.code == null ? '' : ' (${_recipient!.code})'}',
-        ),
-      if (_type.holdsPoints)
-        ('Balance after hold', _n(widget.availableBalance - p)),
+      ('Conversion', _type.title),
+      (_toCash ? 'You give' : 'You get', '${_n(p)} points'),
+      (_toCash ? 'You get' : 'You pay', '${formatCash(c, _ccy)} GigCash'),
+      ('Rate', '${_n(_rate)} points per ${formatCash(1, _ccy)}'),
+      if (_toCash)
+        ('Points after hold', _n(widget.availablePoints - p))
+      else
+        ('GigCash after', formatCash(_walletBal - c, _ccy)),
       if (note.isNotEmpty) ('Note', note),
     ];
     return [
@@ -439,12 +414,13 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
       const SizedBox(height: 14),
       _Notice(
         icon: Icons.verified_user_outlined,
-        text: _type.holdsPoints
-            ? 'A Giggre admin reviews every request before it goes through. '
-                  '${_n(p)} points go on hold now and come back to you if '
-                  'the request is rejected or you cancel it.'
-            : 'A Giggre admin reviews every request before it goes through. '
-                  'The points are added once your payment is confirmed.',
+        text: _toCash
+            ? 'A Giggre admin reviews every conversion. ${_n(p)} points go on '
+                  'hold now and come back to you if it is rejected or you '
+                  'cancel it.'
+            : 'A Giggre admin reviews every conversion. ${formatCash(c, _ccy)} '
+                  'is taken from your Gig Wallet now and refunded if it is '
+                  'rejected or you cancel it.',
       ),
       if (_submitError != null) ...[
         const SizedBox(height: 12),
@@ -488,9 +464,9 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
                         color: Colors.white,
                       ),
                     )
-                  : Text(
-                      'Send ${_type.noun} request',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                  : const Text(
+                      'Send request',
+                      style: TextStyle(fontWeight: FontWeight.w700),
                     ),
             ),
           ),
@@ -503,16 +479,12 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
 
   List<Widget> _done(BuildContext context) {
     return [
-      const Icon(
-        Icons.check_circle_rounded,
-        color: kGigPointsGreen,
-        size: 56,
-      ),
+      const Icon(Icons.check_circle_rounded, color: kGigPointsGreen, size: 56),
       const SizedBox(height: 12),
       Text(
-        'Your ${_type.noun} of ${_n(_points!)} points is waiting for review. '
-        "We'll notify you when it's approved or rejected."
-        '${_type.holdsPoints ? ' You can cancel it from the Requests tab until then.' : ''}',
+        'Your ${_type.noun} is waiting for review. We\'ll notify you when '
+        "it's approved or rejected. You can cancel it from the Requests tab "
+        'until then.',
         textAlign: TextAlign.center,
         style: TextStyle(
           color: Theme.of(context).colorScheme.onSurface,
@@ -549,10 +521,12 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
     String? hint,
     String? error,
     String? helper,
+    String? suffix,
   }) => InputDecoration(
     hintText: hint,
     errorText: error,
     helperText: helper,
+    suffixText: suffix,
     helperMaxLines: 2,
     errorMaxLines: 3,
     isDense: true,
@@ -572,65 +546,6 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
       borderSide: const BorderSide(color: kGold, width: 1.5),
     ),
   );
-}
-
-class _RecipientTile extends StatelessWidget {
-  final PointsRecipient recipient;
-  final VoidCallback onChange;
-
-  const _RecipientTile({required this.recipient, required this.onChange});
-
-  @override
-  Widget build(BuildContext context) {
-    final photo = recipient.photoUrl;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: kBlue.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: kBlue.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: kBlue.withValues(alpha: 0.15),
-            backgroundImage: photo == null ? null : NetworkImage(photo),
-            child: photo == null
-                ? Text(
-                    recipient.name.isEmpty ? '?' : recipient.name[0],
-                    style: const TextStyle(
-                      color: kBlue,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  )
-                : null,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  recipient.name,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (recipient.code != null)
-                  Text(
-                    recipient.code!,
-                    style: const TextStyle(color: kSub, fontSize: 12),
-                  ),
-              ],
-            ),
-          ),
-          TextButton(onPressed: onChange, child: const Text('Change')),
-        ],
-      ),
-    );
-  }
 }
 
 class _Notice extends StatelessWidget {

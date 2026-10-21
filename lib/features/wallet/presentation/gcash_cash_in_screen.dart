@@ -3,21 +3,22 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/profile_tab_theme.dart';
+import '../services/wallet_requests_service.dart';
+import 'top_up_payment_screen.dart';
 import 'widgets/wallet_page_header.dart';
 
-// GCash only supports PHP. Adjust these to match your payment provider's
-// limits once one is connected.
+// Fallbacks only; the real limits come from general_config/wallet_requests
+// (giggre-admin → Gig Wallet → Settings) and are enforced on the server.
 const double _kMinCashIn = 100;
 const double _kMaxCashIn = 10000;
 const List<int> _kQuickAmounts = [100, 500, 1000, 5000];
 
 /// Amount entry for a GCash cash-in.
 ///
-/// Payment is NOT wired up yet. "Continue" only shows a notice. When a
-/// provider (e.g. PayMongo or Xendit) is connected, Continue should call a
-/// Cloud Function that creates the GCash payment and returns a checkout URL.
-/// The wallet balance must only be credited server-side, after the
-/// provider's webhook confirms the payment — never from the app.
+/// While online payment (PayMongo) is postponed, Continue opens the manual
+/// top up: the user pays Giggre's GCash account and submits the reference
+/// number for an admin to confirm (TopUpPaymentScreen). The balance is only
+/// ever credited server-side.
 class GcashCashInScreen extends StatefulWidget {
   const GcashCashInScreen({super.key, this.role});
 
@@ -30,11 +31,18 @@ class GcashCashInScreen extends StatefulWidget {
 class _GcashCashInScreenState extends State<GcashCashInScreen> {
   final _controller = TextEditingController();
   final _money = NumberFormat.currency(symbol: '₱ ', decimalDigits: 2);
+  WalletRequestConfig? _config;
+
+  double get _min => _config?.deposit.min ?? _kMinCashIn;
+  double get _max => _config?.deposit.max ?? _kMaxCashIn;
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(() => setState(() {}));
+    WalletRequestsService.fetchConfig().then((c) {
+      if (mounted) setState(() => _config = c);
+    });
   }
 
   @override
@@ -48,11 +56,11 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
   String? get _error {
     final a = _amount;
     if (_controller.text.isEmpty || a == null) return null;
-    if (a < _kMinCashIn) {
-      return 'Minimum cash-in is ${_money.format(_kMinCashIn)}';
+    if (a < _min) {
+      return 'Minimum cash-in is ${_money.format(_min)}';
     }
-    if (a > _kMaxCashIn) {
-      return 'Maximum cash-in is ${_money.format(_kMaxCashIn)}';
+    if (a > _max) {
+      return 'Maximum cash-in is ${_money.format(_max)}';
     }
     return null;
   }
@@ -68,11 +76,21 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
 
   void _continue() {
     FocusScope.of(context).unfocus();
-    // TODO: call the cash-in Cloud Function and open the GCash checkout.
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'GCash cash-in of ${_money.format(_amount)} is coming soon.',
+    final config = _config;
+    if (config == null || !config.canTopUp) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Top up isn't available right now.")),
+      );
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TopUpPaymentScreen(
+          role: widget.role,
+          method: 'GCash',
+          amount: (_amount! * 100).round() / 100,
+          config: config,
         ),
       ),
     );
@@ -161,8 +179,8 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
                           const SizedBox(height: 8),
                           Text(
                             _error ??
-                                'Min ${_money.format(_kMinCashIn)} · '
-                                    'Max ${_money.format(_kMaxCashIn)}',
+                                'Min ${_money.format(_min)} · '
+                                    'Max ${_money.format(_max)}',
                             style: TextStyle(
                               color: _error != null
                                   ? Colors.redAccent
@@ -220,9 +238,10 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'You\'ll be taken to GCash to approve the '
-                              'payment. Your Gig Wallet is updated once GCash '
-                              'confirms it.',
+                              'Next, you\'ll see Giggre\'s GCash account. Send '
+                              'the amount from your GCash app, then enter the '
+                              'reference number. Your Gig Wallet is updated '
+                              'once Giggre confirms the payment.',
                               style: TextStyle(
                                 color: tokens.textSecondary,
                                 fontSize: 12.5,
