@@ -24,8 +24,8 @@ class GigPointsRequestException implements Exception {
 ///
 /// Points are recorded exclusively by Cloud Functions
 /// (functions/src/gigPoints.ts, gigPointsRequests.ts). Nothing here writes a
-/// balance or a ledger entry: deposit / withdraw / transfer are REQUESTS sent
-/// through callables, which an admin then approves or rejects.
+/// balance or a ledger entry: converting points to/from GigCash is a REQUEST
+/// sent through a callable, which an admin then approves or rejects.
 class GigPointsService {
   GigPointsService._();
 
@@ -109,7 +109,6 @@ class GigPointsService {
       .map(
         (s) => s.docs
             .map(GigPointsRequest.fromSnapshot)
-            .whereType<GigPointsRequest>()
             .toList(),
       );
 
@@ -142,19 +141,12 @@ class GigPointsService {
     }
   }
 
-  /// Resolves a Giggre ID or phone number to a transfer recipient.
-  static Future<PointsRecipient> lookupRecipient(String query) => _guard(
-    () async {
-      final res = await _fn('lookupGigPointsRecipient').call({'query': query});
-      final d = Map<String, dynamic>.from(res.data as Map);
-      return PointsRecipient(
-        id: d['recipientId'] as String,
-        name: d['name'] as String? ?? 'Giggre user',
-        code: d['code'] as String?,
-        photoUrl: d['photoUrl'] as String?,
-      );
-    },
-  );
+  /// Live Gig Wallet (GigCash) balance. Missing doc = ₱0.
+  static Stream<WalletBalance> walletStream(String uid) => _db
+      .collection('wallets')
+      .doc(uid)
+      .snapshots()
+      .map((s) => WalletBalance.fromMap(s.data()));
 
   /// A fresh id per request attempt, so a retried call can't create two.
   static String newClientRequestId() {
@@ -163,20 +155,18 @@ class GigPointsService {
     return List.generate(20, (_) => chars[rng.nextInt(chars.length)]).join();
   }
 
-  /// Sends a request for admin review. Returns the request id.
+  /// Sends a conversion request for admin review. Returns the request id.
   static Future<String> createRequest({
     required PointsRequestType type,
     required int points,
     required String clientRequestId,
     String? note,
-    String? recipientId,
   }) => _guard(() async {
     final res = await _fn('createGigPointsRequest').call({
-      'type': type.name,
+      'type': type.wire,
       'points': points,
       'clientRequestId': clientRequestId,
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
-      'recipientId': ?recipientId,
     });
     return (res.data as Map)['requestId'] as String;
   });

@@ -15,9 +15,7 @@ final _dateFmt = DateFormat('MMM d, y · h:mm a');
 enum ActivityFilter {
   all('All', null),
   earned('Earned', ['earn', 'adjustment']),
-  deposits('Deposits', ['deposit']),
-  withdrawals('Withdrawals', ['withdraw']),
-  transfers('Transfers', ['transfer_out', 'transfer_in']);
+  conversions('Conversions', ['convert_to_cash', 'convert_to_points']);
 
   final String label;
   final List<String>? types;
@@ -188,6 +186,11 @@ List<Widget> activitySlivers(
     return (color: kSub, icon: Icons.block_rounded);
   }
   return switch (tx.type) {
+    'convert_to_cash' => (
+      color: const Color(0xFFE07B1A),
+      icon: Icons.account_balance_wallet_outlined,
+    ),
+    'convert_to_points' => (color: kBlue, icon: Icons.stars_rounded),
     'deposit' => (color: kGigPointsGreen, icon: Icons.add_circle_outline_rounded),
     'withdraw' => (
       color: const Color(0xFFE07B1A),
@@ -499,7 +502,14 @@ class TransactionDetailsSheet extends StatelessWidget {
       if (!tx.isMovement)
         (tx.isAdjustment ? 'Adjusted' : 'Credited', d(tx.creditedAt)),
       (tx.isMovement ? tx.statusLabel : 'Voided', d(tx.voidedAt)),
-      if (tx.reference?.isNotEmpty == true) ('Payment ref.', tx.reference),
+      if (tx.isConversion && tx.cash != null)
+        (
+          'GigCash',
+          '${tx.currencyCode == 'PHP' ? '₱' : '${tx.currencyCode} '}'
+              '${tx.cash!.toStringAsFixed(2)}',
+        ),
+      if (tx.isConversion && tx.rate != null)
+        ('Rate', '${tx.rate} points per ₱1'),
     ];
 
     return SingleChildScrollView(

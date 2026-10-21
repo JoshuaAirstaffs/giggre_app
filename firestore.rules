@@ -68,9 +68,12 @@ service cloud.firestore {
         d.get('enabled', true) is bool;
     }
 
-    // general_config/gig_points_requests: request limits per type. Each of
-    // min / max / dailyMax is a positive whole number or null (= no limit);
-    // gigPointsRequests.ts treats anything else as no limit, this keeps junk out.
+    // general_config/gig_points_requests: Points ⇄ GigCash conversion.
+    // rates.toCash / rates.toPoints = points per 1 unit of wallet currency
+    // (positive whole numbers). Per direction, min / max / dailyMax are in
+    // points: a positive whole number, or null (= no limit).
+    // gigPointsRequests.ts closes a direction with no valid rate and treats
+    // other junk as no limit; this keeps junk out in the first place.
     function isValidLimit(v) {
       return v == null || ((v is int || (v is float && v == math.floor(v))) && v > 0);
     }
@@ -85,12 +88,45 @@ service cloud.firestore {
         (m.get('min', null) == null || m.get('max', null) == null || m.min <= m.max);
     }
 
+    function isValidConversionRates(m) {
+      return m is map &&
+        m.keys().hasOnly(['toCash', 'toPoints']) &&
+        isValidLimit(m.get('toCash', null)) &&
+        isValidLimit(m.get('toPoints', null));
+    }
+
     function isValidGigPointsRequestLimits(d) {
-      return d.keys().hasOnly(['enabled', 'deposit', 'withdraw', 'transfer', 'updatedAt', 'updatedBy']) &&
+      return d.keys().hasOnly(['enabled', 'rates', 'toCash', 'toPoints', 'updatedAt', 'updatedBy']) &&
         d.get('enabled', true) is bool &&
-        (!('deposit' in d) || isValidTypeLimits(d.deposit)) &&
-        (!('withdraw' in d) || isValidTypeLimits(d.withdraw)) &&
-        (!('transfer' in d) || isValidTypeLimits(d.transfer));
+        (!('rates' in d) || isValidConversionRates(d.rates)) &&
+        (!('toCash' in d) || isValidTypeLimits(d.toCash)) &&
+        (!('toPoints' in d) || isValidTypeLimits(d.toPoints));
+    }
+
+    // general_config/wallet_requests: Gig Wallet request limits (pesos, may
+    // have centavos) + the accounts users pay into for a manual top up.
+    function isValidAmountLimit(v) {
+      return v == null || (v is number && v > 0);
+    }
+
+    function isValidWalletTypeLimits(m) {
+      return m is map &&
+        m.keys().hasOnly(['enabled', 'min', 'max', 'dailyMax']) &&
+        m.get('enabled', false) is bool &&
+        isValidAmountLimit(m.get('min', null)) &&
+        isValidAmountLimit(m.get('max', null)) &&
+        isValidAmountLimit(m.get('dailyMax', null)) &&
+        (m.get('min', null) == null || m.get('max', null) == null || m.min <= m.max);
+    }
+
+    function isValidWalletRequestConfig(d) {
+      return d.keys().hasOnly(['enabled', 'deposit', 'transfer', 'withdraw', 'depositAccounts', 'depositNote', 'updatedAt', 'updatedBy']) &&
+        d.get('enabled', true) is bool &&
+        (!('deposit' in d) || isValidWalletTypeLimits(d.deposit)) &&
+        (!('transfer' in d) || isValidWalletTypeLimits(d.transfer)) &&
+        (!('withdraw' in d) || isValidWalletTypeLimits(d.withdraw)) &&
+        (!('depositAccounts' in d) || (d.depositAccounts is list && d.depositAccounts.size() <= 5)) &&
+        (!('depositNote' in d) || (d.depositNote is string && d.depositNote.size() <= 500));
     }
 
     // The host's approval of a worker's job: gig_detail_sheet.dart sets
@@ -420,11 +456,20 @@ service cloud.firestore {
     }
 
     // ─── Gig Points requests ───────────────────────────────────
-    // Deposit / withdraw / transfer requests (functions/src/gigPointsRequests.ts).
+    // Points ⇄ GigCash conversion requests (functions/src/gigPointsRequests.ts).
     // Created, cancelled and decided ONLY through callables, which hold
-    // points, enforce limits and notify admins. The owner and admins read.
+    // points or GigCash, enforce rates/limits and notify admins. The owner and admins read.
     // gig_points/{uid}/daily/* (daily-cap counters) has no rule → no access.
     match /gig_points_requests/{requestId} {
+      allow read: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // ─── Gig Wallet requests ───────────────────────────────────
+    // Top Up / Send requests (functions/src/walletRequests.ts). Created,
+    // cancelled and decided ONLY through callables. Owner and admins read.
+    // wallets/{uid}/daily/* (daily-cap counters) has no rule → no access.
+    match /wallet_requests/{requestId} {
       allow read: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
       allow write: if false;
     }
@@ -648,8 +693,8 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
-    // Gig Points request limits — read by the app to show min/max/daily cap;
-    // enforced by the gigPointsRequests Cloud Functions.
+    // Gig Points conversion rates + limits — read by the app to show the rate
+    // and limits; enforced by the gigPointsRequests Cloud Functions.
     match /general_config/gig_points_requests {
       allow read: if isAuth();
       allow create, update: if isSuperAdmin() &&
@@ -657,12 +702,22 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // Gig Wallet request limits + top-up accounts — read by the app; enforced
+    // by the walletRequests Cloud Functions.
+    match /general_config/wallet_requests {
+      allow read: if isAuth();
+      allow create, update: if isSuperAdmin() &&
+        isValidWalletRequestConfig(request.resource.data);
+      allow delete: if isSuperAdmin();
+    }
+
     match /general_config/{docId} {
       allow read: if isAdmin();
-      // gig_points / gig_points_requests have their own validated rules above;
+      // gig_points / gig_points_requests / wallet_requests have their own
+      // validated rules above;
       // rules OR together, so they must be excluded here or this would
       // bypass that validation.
-      allow write: if isSuperAdmin() && !(docId in ['gig_points', 'gig_points_requests']);
+      allow write: if isSuperAdmin() && !(docId in ['gig_points', 'gig_points_requests', 'wallet_requests']);
     }
 
     // ─── Account Delete Requests ────────────────────────────────

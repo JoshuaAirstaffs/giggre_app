@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 
-// Read-only views of the request data written by
+// Read-only views of the conversion data written by
 // functions/src/gigPointsRequests.ts. Requests are created, cancelled and
 // decided only through callables (see GigPointsService) — never written here.
 
@@ -12,33 +13,62 @@ int? _posInt(Object? v) {
   return null;
 }
 
+double _money(Object? v) => v is num ? (v * 100).round() / 100 : 0;
+
+/// "₱12.50"
+String formatCash(double v, [String currencyCode = 'PHP']) {
+  final f = NumberFormat.currency(
+    symbol: currencyCode == 'PHP' ? '₱' : '$currencyCode ',
+    decimalDigits: 2,
+  );
+  return f.format(v);
+}
+
+/// The two conversion directions. Matches REQUEST_TYPES on the server.
 enum PointsRequestType {
-  deposit,
-  withdraw,
-  transfer;
+  /// Gig Points → GigCash (Gig Wallet). Points are held while pending.
+  toCash('to_cash', 'toCash'),
+
+  /// GigCash → Gig Points. The GigCash is taken from the wallet when
+  /// requested and refunded if rejected or cancelled.
+  toPoints('to_points', 'toPoints');
+
+  final String wire;
+  final String configKey;
+  const PointsRequestType(this.wire, this.configKey);
 
   static PointsRequestType? parse(Object? v) => switch (v) {
-    'deposit' => PointsRequestType.deposit,
-    'withdraw' => PointsRequestType.withdraw,
-    'transfer' => PointsRequestType.transfer,
+    'to_cash' => PointsRequestType.toCash,
+    'to_points' => PointsRequestType.toPoints,
     _ => null,
   };
 
+  /// Button / tab label.
   String get label => switch (this) {
-    PointsRequestType.deposit => 'Deposit',
-    PointsRequestType.withdraw => 'Withdraw',
-    PointsRequestType.transfer => 'Transfer',
+    PointsRequestType.toCash => 'To GigCash',
+    PointsRequestType.toPoints => 'To Points',
   };
 
-  /// "a deposit", for sentences.
+  String get title => switch (this) {
+    PointsRequestType.toCash => 'Points → GigCash',
+    PointsRequestType.toPoints => 'GigCash → Points',
+  };
+
+  /// For sentences: "your conversion to GigCash".
   String get noun => switch (this) {
-    PointsRequestType.deposit => 'deposit',
-    PointsRequestType.withdraw => 'withdrawal',
-    PointsRequestType.transfer => 'transfer',
+    PointsRequestType.toCash => 'conversion to GigCash',
+    PointsRequestType.toPoints => 'conversion to Gig Points',
   };
 
-  /// Withdrawals and transfers reserve the points while they're reviewed.
-  bool get holdsPoints => this != PointsRequestType.deposit;
+  /// Peso value of [points] at [rate] points per ₱1. Cashing out rounds
+  /// down, buying rounds up (both to the centavo) — same as cashFor() on
+  /// the server, which decides the real amount.
+  double cashFor(int points, int rate) {
+    final exact = points / rate;
+    return this == PointsRequestType.toCash
+        ? (exact * 100 + 1e-9).floorToDouble() / 100
+        : (exact * 100 - 1e-9).ceilToDouble() / 100;
+  }
 }
 
 enum PointsRequestStatus {
@@ -65,14 +95,17 @@ enum PointsRequestStatus {
 /// gig_points_requests/{id}
 class GigPointsRequest {
   final String id;
-  final PointsRequestType type;
+
+  /// Null for an old deposit / withdraw / transfer request from before
+  /// conversion replaced them (shown, but only an admin can close it).
+  final PointsRequestType? type;
   final PointsRequestStatus status;
   final int points;
+  final double cash;
+  final String currencyCode;
+  final int? rate;
   final String? note;
-  final String? recipientName;
-  final String? recipientCode;
   final String? decisionNote;
-  final String? reference;
   final bool byAdmin;
   final DateTime? createdAt;
   final DateTime? decidedAt;
@@ -82,39 +115,38 @@ class GigPointsRequest {
     required this.type,
     required this.status,
     required this.points,
+    required this.cash,
+    this.currencyCode = 'PHP',
+    this.rate,
     this.note,
-    this.recipientName,
-    this.recipientCode,
     this.decisionNote,
-    this.reference,
     this.byAdmin = false,
     this.createdAt,
     this.decidedAt,
   });
 
   bool get isPending => status == PointsRequestStatus.pending;
+  String get title => type?.title ?? 'Points request';
+  String get noun => type?.noun ?? 'request';
 
-  /// Null for a doc with an unknown type (skipped by callers).
-  static GigPointsRequest? fromSnapshot(
+  static GigPointsRequest fromSnapshot(
     DocumentSnapshot<Map<String, dynamic>> snap,
   ) {
     final d = snap.data() ?? const <String, dynamic>{};
-    final type = PointsRequestType.parse(d['type']);
-    if (type == null) return null;
     DateTime? date(Object? v) => v is Timestamp ? v.toDate() : null;
     return GigPointsRequest(
       id: snap.id,
-      type: type,
+      type: PointsRequestType.parse(d['type']),
       status: PointsRequestStatus.parse(d['status']),
       points: _posInt(d['points']) ?? 0,
+      cash: _money(d['cash']),
+      currencyCode: d['currencyCode'] as String? ?? 'PHP',
+      rate: _posInt(d['rate']),
       note: d['note'] as String?,
-      recipientName: d['recipientName'] as String?,
-      recipientCode: d['recipientCode'] as String?,
       // Only rejection reasons are meant for the user.
       decisionNote: d['status'] == 'rejected'
           ? d['decisionNote'] as String?
           : null,
-      reference: d['reference'] as String?,
       byAdmin: d['source'] == 'admin',
       createdAt: date(d['createdAt']),
       decidedAt: date(d['decidedAt']),
@@ -122,15 +154,19 @@ class GigPointsRequest {
   }
 }
 
-/// One request type's limits. Null = no limit.
+/// One direction's rate and limits (limits in points; null = no limit).
 class PointsTypeLimits {
   final bool enabled;
+
+  /// Points per ₱1. A direction with no rate is closed.
+  final int? rate;
   final int? min;
   final int? max;
   final int? dailyMax;
 
   const PointsTypeLimits({
     required this.enabled,
+    this.rate,
     this.min,
     this.max,
     this.dailyMax,
@@ -139,8 +175,8 @@ class PointsTypeLimits {
   static const closed = PointsTypeLimits(enabled: false);
 }
 
-/// general_config/gig_points_requests — mirrors parseLimits() in
-/// gigPointsRequests.ts. A missing doc means requests are closed.
+/// general_config/gig_points_requests — mirrors parseConversionConfig() in
+/// gigPointsRequests.ts. A missing doc means conversion is closed.
 class PointsRequestLimits {
   final bool enabled;
   final Map<PointsRequestType, PointsTypeLimits> byType;
@@ -156,12 +192,15 @@ class PointsRequestLimits {
 
   factory PointsRequestLimits.fromMap(Map<String, dynamic>? d) {
     if (d == null) return closed;
+    final rates = d['rates'] is Map ? d['rates'] as Map : const {};
     final byType = <PointsRequestType, PointsTypeLimits>{};
     for (final t in PointsRequestType.values) {
-      final raw = d[t.name];
+      final raw = d[t.configKey];
       final m = raw is Map ? raw : const {};
+      final rate = _posInt(rates[t.configKey]);
       byType[t] = PointsTypeLimits(
-        enabled: m['enabled'] == true,
+        enabled: m['enabled'] == true && rate != null,
+        rate: rate,
         min: _posInt(m['min']),
         max: _posInt(m['max']),
         dailyMax: _posInt(m['dailyMax']),
@@ -171,19 +210,15 @@ class PointsRequestLimits {
   }
 }
 
-/// A transfer recipient resolved by lookupGigPointsRecipient.
-class PointsRecipient {
-  final String id;
+/// wallets/{uid} — the Gig Wallet (GigCash) balance, read-only here.
+class WalletBalance {
+  final double balance;
+  final String currencyCode;
 
-  /// Masked by the server ("Juan D.").
-  final String name;
-  final String? code;
-  final String? photoUrl;
+  const WalletBalance({required this.balance, this.currencyCode = 'PHP'});
 
-  const PointsRecipient({
-    required this.id,
-    required this.name,
-    this.code,
-    this.photoUrl,
-  });
+  factory WalletBalance.fromMap(Map<String, dynamic>? d) => WalletBalance(
+    balance: _money(d?['balance']),
+    currencyCode: d?['currencyCode'] as String? ?? 'PHP',
+  );
 }

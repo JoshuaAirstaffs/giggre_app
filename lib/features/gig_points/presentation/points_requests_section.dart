@@ -11,12 +11,13 @@ import 'reward_stage_style.dart';
 final _numFmt = NumberFormat.decimalPattern();
 final _dateFmt = DateFormat('MMM d · h:mm a');
 
-/// Opens the request sheet for [type], or explains why it can't be used.
-/// Admins open each type in giggre-admin (Gig Points → Request limits).
+/// Opens the conversion sheet for [type], or explains why it can't be used.
+/// Admins open each direction in giggre-admin (Gig Points → Conversion).
 Future<void> openPointsRequest(
   BuildContext context, {
   required PointsRequestType type,
   required GigPointsBalance balance,
+  required WalletBalance? wallet,
   required PointsRequestLimits limits,
   GigPointsRequest? pending,
 }) async {
@@ -27,10 +28,9 @@ Future<void> openPointsRequest(
       builder: (ctx) => AlertDialog(
         title: const Text('You have a request in review'),
         content: Text(
-          'Your ${pending.type.noun} of ${_numFmt.format(pending.points)} '
-          'points is waiting for a Giggre admin. You can make a new request '
-          'once it is approved or rejected, or cancel it from the Requests '
-          'tab.',
+          'Your ${pending.noun} of ${_numFmt.format(pending.points)} points '
+          'is waiting for a Giggre admin. You can make a new request once it '
+          'is approved or rejected, or cancel it from the Requests tab.',
         ),
         actions: [
           TextButton(
@@ -44,18 +44,20 @@ Future<void> openPointsRequest(
   }
   if (!limits.isOpen(type)) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("${type.label} requests aren't available right now."),
-      ),
+      SnackBar(content: Text("${type.title} isn't available right now.")),
     );
     return;
   }
-  if (type.holdsPoints && balance.balance <= 0) {
+  final empty = type == PointsRequestType.toCash
+      ? balance.balance <= 0
+      : (wallet?.balance ?? 0) <= 0;
+  if (empty) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'You need available points to '
-          '${type == PointsRequestType.withdraw ? 'withdraw' : 'transfer'}.',
+          type == PointsRequestType.toCash
+              ? 'You need available points to convert to GigCash.'
+              : 'You need GigCash in your Gig Wallet to convert to points.',
         ),
       ),
     );
@@ -64,13 +66,14 @@ Future<void> openPointsRequest(
   await PointsRequestSheet.show(
     context,
     type: type,
-    availableBalance: balance.balance,
+    availablePoints: balance.balance,
+    wallet: wallet,
     limits: limits.of(type),
   );
 }
 
-/// Requests tab: the user's own requests, newest first. Pending ones can
-/// be cancelled (held points are returned). Admin-made actions only appear
+/// Requests tab: the user's own conversion requests, newest first. Pending
+/// ones can be cancelled (held points / GigCash are returned). Admin-made actions only appear
 /// in Activity.
 class PointsRequestsList extends StatelessWidget {
   /// Null while loading.
@@ -107,8 +110,8 @@ class PointsRequestsList extends StatelessWidget {
           return const _Empty(
             icon: Icons.receipt_long_outlined,
             text:
-                'No requests yet. Use Deposit, Withdraw or Transfer above — '
-                'a Giggre admin reviews each one before it goes through.',
+                'No conversions yet. Use To GigCash or To Points above — a '
+                'Giggre admin reviews each one before it goes through.',
           );
         }
         final pending = list.where((r) => r.isPending).toList();
@@ -222,12 +225,14 @@ class _RequestTileState extends State<PointsRequestTile> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Cancel this ${r.type.noun}?'),
-        content: Text(
-          r.type.holdsPoints
-              ? 'The ${_numFmt.format(r.points)} held points go back to your balance.'
-              : 'Giggre will no longer review this request.',
-        ),
+        title: Text('Cancel this ${r.noun}?'),
+        content: Text(switch (r.type) {
+          PointsRequestType.toCash =>
+            'The ${_numFmt.format(r.points)} held points go back to your balance.',
+          PointsRequestType.toPoints =>
+            '${formatCash(r.cash, r.currencyCode)} is refunded to your Gig Wallet.',
+          null => 'Any points on hold go back to your balance.',
+        }),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -264,11 +269,13 @@ class _RequestTileState extends State<PointsRequestTile> {
     final type = pointsRequestStyle(r.type);
     final status = _statusStyle(r.status);
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final sign = r.type == PointsRequestType.deposit ? '+' : '−';
+    final sign = r.type == PointsRequestType.toPoints ? '+' : '−';
     final date = r.isPending ? r.createdAt : (r.decidedAt ?? r.createdAt);
     final subtitle = [
-      if (r.type == PointsRequestType.transfer && r.recipientName != null)
-        'To ${r.recipientName}',
+      if (r.type == PointsRequestType.toCash)
+        'Get ${formatCash(r.cash, r.currencyCode)} GigCash',
+      if (r.type == PointsRequestType.toPoints)
+        'Pay ${formatCash(r.cash, r.currencyCode)} GigCash',
       if (date != null) _dateFmt.format(date),
     ].join(' · ');
 
@@ -299,7 +306,7 @@ class _RequestTileState extends State<PointsRequestTile> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      r.type.label,
+                      r.title,
                       style: TextStyle(
                         color: onSurface,
                         fontSize: 14,
@@ -320,7 +327,7 @@ class _RequestTileState extends State<PointsRequestTile> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '$sign${_numFmt.format(r.points)}',
+                    '$sign${_numFmt.format(r.points)} pts',
                     style: TextStyle(
                       color: r.status == PointsRequestStatus.approved
                           ? type.color
@@ -364,23 +371,15 @@ class _RequestTileState extends State<PointsRequestTile> {
               style: const TextStyle(color: kSub, fontSize: 12, height: 1.35),
             ),
           ],
-          if (r.status == PointsRequestStatus.approved &&
-              r.reference?.isNotEmpty == true) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Reference: ${r.reference}',
-              style: const TextStyle(color: kSub, fontSize: 12),
-            ),
-          ],
           if (r.isPending) ...[
             const SizedBox(height: 6),
             Row(
               children: [
                 Expanded(
                   child: Text(
-                    r.type.holdsPoints
-                        ? 'Points on hold until a Giggre admin reviews it.'
-                        : 'Waiting for Giggre to confirm your payment.',
+                    r.type == PointsRequestType.toPoints
+                        ? 'GigCash on hold until a Giggre admin reviews it.'
+                        : 'Points on hold until a Giggre admin reviews it.',
                     style: const TextStyle(color: kSub, fontSize: 12),
                   ),
                 ),

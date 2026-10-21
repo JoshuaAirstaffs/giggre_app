@@ -17,7 +17,7 @@ import 'points_requests_section.dart';
 enum _Tab { activity, requests, earn }
 
 /// Wallet-style Gig Points screen:
-///   balance card (+ Deposit / Withdraw / Transfer) → stats strip →
+///   balance card (+ To GigCash / To Points conversion) → stats strip →
 ///   current gig reward → pinned tabs: Activity | Requests | How to earn.
 ///
 /// Purely a viewer of server-written data (functions/src/gigPoints.ts and
@@ -41,6 +41,7 @@ class _GigPointsScreenState extends State<GigPointsScreen> {
   StreamSubscription<List<GigPointsRequest>>? _requestsSub;
   List<GigPointsRequest>? _requestList;
   bool _requestsError = false;
+  Stream<WalletBalance>? _wallet;
   GigPointsHistoryController? _history;
   Future<GigPointsConfig?> _config = GigPointsService.fetchConfig();
 
@@ -55,6 +56,7 @@ class _GigPointsScreenState extends State<GigPointsScreen> {
     if (uid != null) {
       _balance = GigPointsService.balanceStream(uid);
       _listenRequests(uid);
+      _wallet = GigPointsService.walletStream(uid);
       _history = GigPointsHistoryController(uid);
     }
   }
@@ -106,7 +108,10 @@ class _GigPointsScreenState extends State<GigPointsScreen> {
       _limits = GigPointsService.limitsStream();
     });
     final uid = _uid;
-    if (uid != null) _listenRequests(uid);
+    if (uid != null) {
+      _listenRequests(uid);
+      setState(() => _wallet = GigPointsService.walletStream(uid));
+    }
     _retryBalance();
     _history?.retry();
     await config;
@@ -164,7 +169,10 @@ class _GigPointsScreenState extends State<GigPointsScreen> {
                             builder: (context, snap) => Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                GigPointsHero(
+                                StreamBuilder<WalletBalance>(
+                                  stream: _wallet,
+                                  builder: (context, w) => GigPointsHero(
+                                  wallet: w.data,
                                   balance: snap.data,
                                   hasError: snap.hasError && !snap.hasData,
                                   onRetry: _retryBalance,
@@ -172,6 +180,7 @@ class _GigPointsScreenState extends State<GigPointsScreen> {
                                   onShowInfo: () =>
                                       showGigPointsInfoSheet(context),
                                   pendingRequest: _pendingRequest,
+                                ),
                                 ),
                                 const SizedBox(height: 12),
                                 GigPointsStatsStrip(balance: snap.data),

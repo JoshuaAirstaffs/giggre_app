@@ -454,6 +454,16 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
         importance: Importance.high,
       ),
     );
+    // Gig Wallet top up / send request results — see
+    // functions/src/walletRequests.ts (channelId 'wallet_v1').
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        'wallet_v1',
+        'Gig Wallet',
+        description: 'Updates on your Gig Wallet top ups and transfers',
+        importance: Importance.high,
+      ),
+    );
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
         'gig_cancellation_approved_v1',
