@@ -409,9 +409,19 @@ class _ReferralTreeScreenState extends State<ReferralTreeScreen> {
           Row(
             children: [
               Expanded(
-                child: Text(
-                  e.label,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _onSurface),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      e.label,
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _onSurface),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_money(e.rate)} per referral with a completed gig',
+                      style: TextStyle(fontSize: 11, color: _onSurface.withOpacity(0.55)),
+                    ),
+                  ],
                 ),
               ),
               Text(
@@ -740,7 +750,7 @@ class _ReferralTreeScreenState extends State<ReferralTreeScreen> {
       children: [
         item(const Icon(Icons.verified_rounded, size: 13, color: _blue), 'Verified'),
         item(_gigBadge(true), 'Completed a gig'),
-        item(_gigBadge(false), 'None yet'),
+        item(_gigBadge(false), 'No completed gig yet'),
         item(_levelChip(1), 'Invited by you'),
         item(_levelChip(2), 'Invited by your referral'),
         Text('Tap a person to show or hide who they invited', style: style),
