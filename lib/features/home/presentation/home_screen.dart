@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -19,6 +20,8 @@ import 'package:provider/provider.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:video_player/video_player.dart';
 import 'package:giggre_app/core/widgets/app_update_checker.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
 import 'package:giggre_app/core/widgets/entrance_animation.dart';
@@ -1699,12 +1702,23 @@ class _CarouselItem {
   final String picture;
   final int sortNumber;
 
-  const _CarouselItem({required this.picture, required this.sortNumber});
+  /// Optional MP4 (set in giggre-admin's Content Management). `picture`, if
+  /// also set, is shown as the video's cover while it loads.
+  final String video;
+
+  const _CarouselItem({
+    required this.picture,
+    required this.sortNumber,
+    this.video = '',
+  });
+
+  bool get hasVideo => video.isNotEmpty;
 
   factory _CarouselItem.fromMap(Map<String, dynamic> data) {
     return _CarouselItem(
       picture: data['picture'] as String? ?? '',
       sortNumber: (data['sortNumber'] as num?)?.toInt() ?? 0,
+      video: data['video'] as String? ?? '',
     );
   }
 }
@@ -1720,11 +1734,30 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
   int _current = 0;
   List<_CarouselItem> _slides = [];
   bool _loading = true;
+  // Starts with sound on; one choice applies to every video slide
+  bool _muted = false;
+  final CarouselSliderController _carousel = CarouselSliderController();
+  final _videos = _CarouselVideoCache();
+  // Slide whose video already advanced the carousel — two copies of a slide
+  // can be built at once mid-swipe, and only one may move it on.
+  int? _advancedFrom;
 
   @override
   void initState() {
     super.initState();
     _fetchSlides();
+  }
+
+  @override
+  void dispose() {
+    _videos.dispose();
+    super.dispose();
+  }
+
+  void _advanceFrom(int index) {
+    if (index != _current || _advancedFrom == index) return;
+    _advancedFrom = index;
+    _carousel.nextPage();
   }
 
   Future<void> _fetchSlides() async {
@@ -1738,7 +1771,12 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
       final items =
           snapshot.docs
               .map((doc) => _CarouselItem.fromMap(doc.data()))
-              .where((item) => item.sortNumber != 0 && item.picture.isNotEmpty)
+              // A slide shows with an image, a video, or both
+              .where(
+                (item) =>
+                    item.sortNumber != 0 &&
+                    (item.picture.isNotEmpty || item.hasVideo),
+              )
               .toList()
             ..sort((a, b) => a.sortNumber.compareTo(b.sortNumber));
 
@@ -1774,18 +1812,22 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
 
     // A lone slide stays put — no auto-advance, looping, swipe or dots.
     final hasMultiple = _slides.length > 1;
+    // A video slide holds the carousel until it finishes, then advances itself.
+    final currentIsVideo =
+        _slides[_current.clamp(0, _slides.length - 1)].hasVideo;
 
     return Column(
       children: [
         SizedBox(
           width: double.infinity,
           child: CarouselSlider.builder(
+            carouselController: _carousel,
             itemCount: _slides.length,
             options: CarouselOptions(
               viewportFraction: 1.0,
               padEnds: false,
               enlargeCenterPage: false,
-              autoPlay: hasMultiple,
+              autoPlay: hasMultiple && !currentIsVideo,
               enableInfiniteScroll: hasMultiple,
               scrollPhysics: hasMultiple
                   ? null
@@ -1793,10 +1835,24 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
               autoPlayInterval: const Duration(seconds: 5),
               autoPlayAnimationDuration: const Duration(milliseconds: 600),
               autoPlayCurve: Curves.easeInOut,
-              onPageChanged: (index, _) => setState(() => _current = index),
+              onPageChanged: (index, _) => setState(() {
+                _current = index;
+                _advancedFrom = null;
+              }),
             ),
             itemBuilder: (context, index, _) {
-              return _SlideItem(pictureUrl: _slides[index].picture);
+              final slide = _slides[index];
+              if (!slide.hasVideo) return _SlideItem(pictureUrl: slide.picture);
+              return _VideoSlideItem(
+                videoUrl: slide.video,
+                coverUrl: slide.picture,
+                videos: _videos,
+                isActive: index == _current,
+                loop: !hasMultiple,
+                muted: _muted,
+                onToggleMute: () => setState(() => _muted = !_muted),
+                onFinished: hasMultiple ? () => _advanceFrom(index) : null,
+              );
             },
           ),
         ),
@@ -1846,5 +1902,724 @@ class _SlideItem extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// A carousel slide that plays an MP4 over its cover image, with a
+/// mute/unmute button.
+///
+/// Only the slide on screen loads and plays its video (so the carousel doesn't
+/// download every video up front). Its player comes from [videos], which keeps
+/// it after the slide scrolls away, so coming back plays again instantly. When
+/// it finishes, [onFinished] advances the carousel; a lone slide loops
+/// instead. If the video can't load, the cover stays up and the carousel moves
+/// on after the usual 5 seconds.
+class _VideoSlideItem extends StatefulWidget {
+  final String videoUrl;
+  final String coverUrl;
+  final _CarouselVideoCache videos;
+  final bool isActive;
+  final bool loop;
+  final bool muted;
+  final VoidCallback onToggleMute;
+  final VoidCallback? onFinished;
+
+  const _VideoSlideItem({
+    required this.videoUrl,
+    required this.coverUrl,
+    required this.videos,
+    required this.isActive,
+    required this.loop,
+    required this.muted,
+    required this.onToggleMute,
+    this.onFinished,
+  });
+
+  @override
+  State<_VideoSlideItem> createState() => _VideoSlideItemState();
+}
+
+class _VideoSlideItemState extends State<_VideoSlideItem> {
+  VideoPlayerController? _controller;
+  bool _ready = false;
+  bool _finishedFired = false;
+  Timer? _fallback;
+  // Fires at the video's exact end — position updates only arrive about
+  // every 500ms, and some devices send the completion event late.
+  Timer? _endTimer;
+  // While the video is open full screen, that page handles its ending
+  bool _fullscreen = false;
+  // Paused by the viewer — shared with the full screen page so both agree
+  final _paused = ValueNotifier<bool>(false);
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isActive) _activate();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoSlideItem old) {
+    super.didUpdateWidget(old);
+    if (widget.isActive && !old.isActive) {
+      _activate();
+    } else if (!widget.isActive && old.isActive) {
+      _fallback?.cancel();
+      _endTimer?.cancel();
+      _controller?.pause();
+    }
+    if (widget.muted != old.muted && _ready) {
+      _controller?.setVolume(widget.muted ? 0 : 1);
+    }
+  }
+
+  Future<void> _activate() async {
+    _endTimer?.cancel();
+    _fallback?.cancel();
+    // Hold the "finished" signal until playback has really restarted — a
+    // reused player still reports its last run as completed until the seek.
+    _finishedFired = true;
+    try {
+      final controller = await widget.videos.obtain(widget.videoUrl);
+      if (!mounted) return;
+      if (!identical(controller, _controller)) {
+        // First time here, or the cache swapped in the downloaded copy
+        _controller?.removeListener(_onTick);
+        controller.addListener(_onTick);
+        setState(() {
+          _controller = controller;
+          _ready = true;
+        });
+      }
+      if (!widget.isActive) return;
+      await controller.setVolume(widget.muted ? 0 : 1);
+      await controller.setLooping(widget.loop);
+      await controller.seekTo(Duration.zero);
+      if (!mounted || !widget.isActive) return;
+      _paused.value = false;
+      await controller.play();
+      _finishedFired = false;
+    } catch (e) {
+      debugPrint('Carousel video error: $e');
+      // Keep the cover image and let the carousel move on as for an image.
+      if (mounted && widget.isActive && widget.onFinished != null) {
+        _finishedFired = false;
+        _fallback = Timer(const Duration(seconds: 5), _finish);
+      }
+    }
+  }
+
+  void _onTick() {
+    final v = _controller?.value;
+    if (v == null ||
+        !v.isInitialized ||
+        widget.loop ||
+        !widget.isActive ||
+        _fullscreen) {
+      return;
+    }
+    // The player's own completion event, with the position as a backup for
+    // platforms that report it a beat late — either way, advance right away.
+    final ended =
+        v.isCompleted ||
+        (v.duration > Duration.zero && v.position >= v.duration);
+    if (ended) {
+      _finish();
+      return;
+    }
+    // Re-aimed on every update so it tracks the real playback position;
+    // held off while paused or buffering so a stall can't advance early.
+    _endTimer?.cancel();
+    if (v.isPlaying && !v.isBuffering && v.duration > Duration.zero) {
+      _endTimer = Timer(v.duration - v.position, _finish);
+    }
+  }
+
+  Future<void> _openFullscreen() async {
+    final controller = _controller;
+    if (controller == null || _fullscreen) return;
+    _fullscreen = true;
+    _endTimer?.cancel();
+    final ended = await Navigator.of(context, rootNavigator: true).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => _FullscreenVideoPage(
+          controller: controller,
+          muted: widget.muted,
+          onToggleMute: widget.onToggleMute,
+          paused: _paused,
+          endsOnFinish: !widget.loop,
+        ),
+      ),
+    );
+    _fullscreen = false;
+    if (!mounted) return;
+    // Finished while full screen: move the carousel on, as it would have.
+    // Closed early: carry on playing here and re-aim the end timer.
+    ended == true ? _finish() : _onTick();
+  }
+
+  void _finish() {
+    if (_finishedFired || !mounted || !widget.isActive) return;
+    _finishedFired = true;
+    widget.onFinished?.call();
+  }
+
+  void _togglePlay() {
+    final controller = _controller;
+    if (controller == null) return;
+    _paused.value = !_paused.value;
+    _paused.value ? controller.pause() : controller.play();
+  }
+
+  @override
+  void dispose() {
+    _fallback?.cancel();
+    _endTimer?.cancel();
+    // The player belongs to the carousel's cache, which outlives this slide
+    _controller?.removeListener(_onTick);
+    if (widget.isActive) _controller?.pause();
+    _paused.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (widget.coverUrl.isNotEmpty)
+              CachedNetworkImage(
+                imageUrl: widget.coverUrl,
+                fit: BoxFit.cover,
+                placeholder: (context, url) =>
+                    Container(color: Theme.of(context).cardColor),
+                errorWidget: (context, url, error) =>
+                    Container(color: Theme.of(context).cardColor),
+              )
+            else
+              // No cover: a spinner until the first frame is ready
+              Container(
+                color: Theme.of(context).cardColor,
+                child: _ready
+                    ? null
+                    : const Center(
+                        child: CircularProgressIndicator(
+                          color: kGold,
+                          strokeWidth: 2,
+                        ),
+                      ),
+              ),
+            if (_ready && controller != null)
+              // Tapping the video pauses it and brings up the controls, which
+              // stay until it plays again (tap again, or the center button)
+              ValueListenableBuilder<bool>(
+                valueListenable: _paused,
+                builder: (context, paused, _) => _AutoHideControls(
+                  pinned: paused,
+                  onTap: _togglePlay,
+                  controls: [
+                    if (paused)
+                      Center(
+                        child: _VideoOverlayButton(
+                          icon: Icons.play_arrow_rounded,
+                          label: 'Play',
+                          size: 32,
+                          onTap: _togglePlay,
+                        ),
+                      ),
+                    Positioned(
+                      left: 10,
+                      bottom: 10,
+                      child: _VideoCountdown(controller: controller),
+                    ),
+                    Positioned(
+                      right: 10,
+                      bottom: 10,
+                      child: Row(
+                        children: [
+                          _VideoOverlayButton(
+                            icon: widget.muted
+                                ? Icons.volume_off_rounded
+                                : Icons.volume_up_rounded,
+                            label: widget.muted ? 'Unmute' : 'Mute',
+                            onTap: widget.onToggleMute,
+                          ),
+                          const SizedBox(width: 8),
+                          _VideoOverlayButton(
+                            icon: Icons.fullscreen_rounded,
+                            label: 'Full screen',
+                            onTap: _openFullscreen,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    clipBehavior: Clip.hardEdge,
+                    child: SizedBox(
+                      width: controller.value.size.width,
+                      height: controller.value.size.height,
+                      child: VideoPlayer(controller),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Remaining time of a video, e.g. 0:07, on a dark pill
+class _VideoCountdown extends StatelessWidget {
+  final VideoPlayerController controller;
+
+  const _VideoCountdown({required this.controller});
+
+  // Rounded up so it reads 0:01 until the very end
+  static String _format(Duration d) {
+    final total = (d.inMilliseconds / 1000).ceil();
+    return '${total ~/ 60}:${(total % 60).toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<VideoPlayerValue>(
+      valueListenable: controller,
+      builder: (context, v, _) {
+        final left = v.duration - v.position;
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            _format(left.isNegative ? Duration.zero : left),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Round translucent icon button shown over a video
+class _VideoOverlayButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final double size;
+
+  const _VideoOverlayButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.size = 20,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.5),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Icon(
+            icon,
+            color: Colors.white,
+            size: size,
+            semanticLabel: label,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A carousel video played full screen in landscape, on the same player as
+/// its slide so it carries on from where it was. Pops with `true` when the
+/// video finishes (if [endsOnFinish]), so the carousel can move on.
+class _FullscreenVideoPage extends StatefulWidget {
+  final VideoPlayerController controller;
+  final bool muted;
+  final VoidCallback onToggleMute;
+  // The slide's own paused state, so pausing here carries back to it
+  final ValueNotifier<bool> paused;
+  final bool endsOnFinish;
+
+  const _FullscreenVideoPage({
+    required this.controller,
+    required this.muted,
+    required this.onToggleMute,
+    required this.paused,
+    required this.endsOnFinish,
+  });
+
+  @override
+  State<_FullscreenVideoPage> createState() => _FullscreenVideoPageState();
+}
+
+class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
+  late bool _muted = widget.muted;
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    widget.controller.addListener(_onTick);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTick);
+    // Back to portrait with the status/navigation bars on
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
+    super.dispose();
+  }
+
+  void _onTick() {
+    final v = widget.controller.value;
+    if (!widget.endsOnFinish || !v.isInitialized) return;
+    final ended =
+        v.isCompleted ||
+        (v.duration > Duration.zero && v.position >= v.duration);
+    if (ended) _close(true);
+  }
+
+  void _close(bool ended) {
+    if (_closing || !mounted) return;
+    _closing = true;
+    Navigator.of(context).pop(ended);
+  }
+
+  void _toggleMute() {
+    setState(() => _muted = !_muted);
+    widget.onToggleMute();
+  }
+
+  void _togglePlay() {
+    final paused = widget.paused;
+    paused.value = !paused.value;
+    paused.value ? widget.controller.pause() : widget.controller.play();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: ValueListenableBuilder<bool>(
+        valueListenable: widget.paused,
+        builder: (context, paused, _) => _AutoHideControls(
+          // Controls stay up while paused
+          pinned: paused,
+          controls: [
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Row(
+                    children: [
+                      _VideoOverlayButton(
+                        icon: paused
+                            ? Icons.play_arrow_rounded
+                            : Icons.pause_rounded,
+                        label: paused ? 'Play' : 'Pause',
+                        onTap: _togglePlay,
+                      ),
+                      const SizedBox(width: 12),
+                      _VideoCountdown(controller: controller),
+                      const SizedBox(width: 12),
+                      // Drag or tap to jump; the vertical padding gives the
+                      // thin bar a finger-sized touch area
+                      Expanded(
+                        child: VideoProgressIndicator(
+                          controller,
+                          allowScrubbing: true,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          colors: VideoProgressColors(
+                            playedColor: kGold,
+                            bufferedColor: Colors.white.withValues(alpha: 0.4),
+                            backgroundColor: Colors.white.withValues(
+                              alpha: 0.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _VideoOverlayButton(
+                        icon: _muted
+                            ? Icons.volume_off_rounded
+                            : Icons.volume_up_rounded,
+                        label: _muted ? 'Unmute' : 'Mute',
+                        onTap: _toggleMute,
+                      ),
+                      const SizedBox(width: 8),
+                      _VideoOverlayButton(
+                        icon: Icons.fullscreen_exit_rounded,
+                        label: 'Exit full screen',
+                        onTap: () => _close(false),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+          child: Center(
+            child: AspectRatio(
+              aspectRatio: controller.value.aspectRatio,
+              child: VideoPlayer(controller),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Video controls that start hidden. Tapping the video fades them in; they
+/// fade slowly away again after [_showFor] without a touch, and tapping the
+/// video while they're up hides them straight away. With [onTap], tapping the
+/// video calls that instead. While [pinned] (e.g. paused) they stay up.
+class _AutoHideControls extends StatefulWidget {
+  final Widget child;
+  // Laid out in a Stack over [child], e.g. Positioned buttons
+  final List<Widget> controls;
+  final bool pinned;
+  final VoidCallback? onTap;
+
+  const _AutoHideControls({
+    required this.child,
+    required this.controls,
+    this.pinned = false,
+    this.onTap,
+  });
+
+  @override
+  State<_AutoHideControls> createState() => _AutoHideControlsState();
+}
+
+class _AutoHideControlsState extends State<_AutoHideControls> {
+  static const _showFor = Duration(seconds: 3);
+
+  late bool _visible = widget.pinned;
+  Timer? _hideTimer;
+  // Fingers on the controls — no fading out mid-drag on the time slider
+  int _touches = 0;
+
+  @override
+  void didUpdateWidget(covariant _AutoHideControls old) {
+    super.didUpdateWidget(old);
+    if (widget.pinned == old.pinned) return;
+    if (widget.pinned) {
+      _hideTimer?.cancel();
+      setState(() => _visible = true);
+    } else if (_visible) {
+      // Unpinned (e.g. playing again): fade out after the usual delay
+      _restartHideTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() => _visible = !_visible);
+    _visible ? _restartHideTimer() : _hideTimer?.cancel();
+  }
+
+  void _restartHideTimer() {
+    _hideTimer?.cancel();
+    if (_touches > 0 || widget.pinned) return;
+    _hideTimer = Timer(_showFor, () {
+      if (mounted) setState(() => _visible = false);
+    });
+  }
+
+  void _release() {
+    if (_touches > 0) _touches--;
+    if (_visible) _restartHideTimer();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap ?? _toggle,
+          child: widget.child,
+        ),
+        IgnorePointer(
+          ignoring: !_visible,
+          child: AnimatedOpacity(
+            opacity: _visible ? 1 : 0,
+            // Quick to appear, slow to fade out
+            duration: Duration(milliseconds: _visible ? 200 : 800),
+            curve: Curves.easeInOut,
+            // Using a control keeps them up, then 3s more after letting go
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: (_) {
+                _touches++;
+                _hideTimer?.cancel();
+              },
+              onPointerUp: (_) => _release(),
+              onPointerCancel: (_) => _release(),
+              child: Stack(fit: StackFit.expand, children: widget.controls),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CachedPlayer {
+  final VideoPlayerController controller;
+  final bool fromFile;
+
+  const _CachedPlayer(this.controller, {required this.fromFile});
+}
+
+/// The carousel's video players, kept for as long as the carousel is on
+/// screen so swiping back to a video that already played starts it again
+/// instantly rather than reloading it.
+///
+/// Each video is also saved to the device the first time it plays (in its
+/// own cache, so big videos don't push the carousel images out of theirs).
+/// Once that copy is ready, the next visit swaps the streaming player for one
+/// that reads the file — streaming players can re-download from the start
+/// after a replay — and later app launches play from the file straight away.
+class _CarouselVideoCache {
+  static final _files = CacheManager(
+    Config(
+      'carouselVideos',
+      stalePeriod: const Duration(days: 30),
+      maxNrOfCacheObjects: 20,
+    ),
+  );
+
+  final _players = <String, Future<_CachedPlayer>>{};
+  final _downloading = <String>{};
+  // Streaming players replaced by a downloaded copy. A slide may still be
+  // showing one for a moment, so they're only disposed with the carousel.
+  final _retired = <VideoPlayerController>[];
+  bool _disposed = false;
+
+  Future<VideoPlayerController> obtain(String url) async {
+    final pending = _players[url] ??= _create(url);
+    var player = await pending;
+    if (!player.fromFile && identical(_players[url], pending)) {
+      final cached = await _files.getFileFromCache(url);
+      if (cached != null && identical(_players[url], pending)) {
+        final upgrade = _upgrade(player, cached.file);
+        _players[url] = upgrade;
+        player = await upgrade;
+      }
+    }
+    return player.controller;
+  }
+
+  Future<_CachedPlayer> _create(String url) async {
+    final cached = await _files.getFileFromCache(url);
+    final controller = cached != null
+        ? VideoPlayerController.file(
+            cached.file,
+            videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+          )
+        : VideoPlayerController.networkUrl(
+            Uri.parse(url),
+            videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+          );
+    try {
+      await controller.initialize();
+    } catch (_) {
+      _players.remove(url);
+      await controller.dispose();
+      rethrow;
+    }
+    if (_disposed) {
+      await controller.dispose();
+      throw StateError('Carousel closed');
+    }
+    if (cached == null) _download(url);
+    return _CachedPlayer(controller, fromFile: cached != null);
+  }
+
+  // Falls back to the streaming player if the saved file won't open
+  Future<_CachedPlayer> _upgrade(_CachedPlayer streaming, File file) async {
+    final controller = VideoPlayerController.file(
+      file,
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    );
+    try {
+      await controller.initialize();
+    } catch (e) {
+      debugPrint('Carousel video cache error: $e');
+      await controller.dispose();
+      return streaming;
+    }
+    if (_disposed) {
+      await controller.dispose();
+      return streaming;
+    }
+    _retired.add(streaming.controller);
+    return _CachedPlayer(controller, fromFile: true);
+  }
+
+  void _download(String url) {
+    if (!_downloading.add(url)) return;
+    _files
+        .downloadFile(url)
+        .then<void>(
+          (_) {},
+          onError: (Object e) =>
+              debugPrint('Carousel video download failed: $e'),
+        )
+        .whenComplete(() => _downloading.remove(url));
+  }
+
+  void dispose() {
+    _disposed = true;
+    for (final pending in _players.values) {
+      pending.then((p) => p.controller.dispose()).catchError((_) {});
+    }
+    for (final controller in _retired) {
+      controller.dispose();
+    }
+    _players.clear();
+    _retired.clear();
   }
 }
