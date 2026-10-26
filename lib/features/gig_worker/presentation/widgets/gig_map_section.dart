@@ -28,6 +28,7 @@ import '../../../gig_shared/user_profile_screen.dart';
 import '../../../reports/models/report_content_type.dart';
 import '../../../reports/report_service.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
+import '../../../support_ai/presentation/support_bubble_host.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data models
@@ -3134,19 +3135,21 @@ class _GigMapSectionState extends State<GigMapSection> {
       context,
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) => Scaffold(
-          body: GigMapSection(
-            fullScreen: true,
-            uid: widget.uid,
-            workerName: widget.workerName,
-            seekingQuickGigs: widget.seekingQuickGigs,
-            onQuickGigStarted: widget.onQuickGigStarted,
-            onOpenGigApplied: widget.onOpenGigApplied,
-            onOfferedGigAccepted: widget.onOfferedGigAccepted,
-            isVerified: widget.isVerified,
-            workerSkills: widget.workerSkills,
-            bookmarkedGigIds: widget.bookmarkedGigIds,
-            onToggleBookmark: widget.onToggleBookmark,
+        builder: (_) => HideSupportBubble(
+          child: Scaffold(
+            body: GigMapSection(
+              fullScreen: true,
+              uid: widget.uid,
+              workerName: widget.workerName,
+              seekingQuickGigs: widget.seekingQuickGigs,
+              onQuickGigStarted: widget.onQuickGigStarted,
+              onOpenGigApplied: widget.onOpenGigApplied,
+              onOfferedGigAccepted: widget.onOfferedGigAccepted,
+              isVerified: widget.isVerified,
+              workerSkills: widget.workerSkills,
+              bookmarkedGigIds: widget.bookmarkedGigIds,
+              onToggleBookmark: widget.onToggleBookmark,
+            ),
           ),
         ),
       ),

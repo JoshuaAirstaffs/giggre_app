@@ -5150,7 +5150,8 @@ class _MultiWorkerTrackingMap extends StatefulWidget {
       _MultiWorkerTrackingMapState();
 }
 
-class _MultiWorkerTrackingMapState extends State<_MultiWorkerTrackingMap> {
+class _MultiWorkerTrackingMapState extends State<_MultiWorkerTrackingMap>
+    with HidesSupportBubble {
   GoogleMapController? _googleMapController;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();

@@ -1,4 +1,4 @@
-// Giggre AI support — floating chat bubble + chat sheet (v1, text only).
+// Giggre AI support — floating chat bubble + chat popover (v1, text only).
 //
 // Usage (once, above your navigator):
 //   MaterialApp(
@@ -12,6 +12,8 @@
 //     ]),
 //   );
 
+import 'dart:math' as math;
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -20,8 +22,8 @@ import '../services/support_chat_store.dart';
 
 enum GiggreMode { worker, host }
 
-typedef TalkToPersonCallback = Future<void> Function(
-    List<SupportMessage> transcript);
+typedef TalkToPersonCallback =
+    Future<void> Function(List<SupportMessage> transcript);
 
 class _Palette {
   static const workerGradient = [Color(0xFF2B6FB5), Color(0xFF1F4D80)];
@@ -65,9 +67,11 @@ class SupportBubble extends StatefulWidget {
 class _SupportBubbleState extends State<SupportBubble> {
   static const _size = 56.0;
   Offset? _pos;
-  // The bubble floats above the navigator, so hide it while its own sheet
-  // is open instead of drawing it over the chat.
-  bool _chatOpen = false;
+  // The chat opens as a popover pointing at the bubble. The bubble floats
+  // above the navigator, so it stays on top of it and tapping it closes it.
+  Route<void>? _chatRoute;
+
+  bool get _chatOpen => _chatRoute != null;
 
   List<Color> get _gradient => widget.mode == GiggreMode.worker
       ? _Palette.workerGradient
@@ -82,54 +86,82 @@ class _SupportBubbleState extends State<SupportBubble> {
   }
 
   Future<void> _openChat(String uid) async {
-    final sheetContext = widget.navigatorKey?.currentContext ?? context;
-    setState(() => _chatOpen = true);
-    await showModalBottomSheet(
-      context: sheetContext,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => SupportChatSheet(
-        uid: uid,
-        mode: widget.mode,
+    final navigator =
+        widget.navigatorKey?.currentState ?? Navigator.of(context);
+    final anchor = _pos!;
+    final route = PageRouteBuilder<void>(
+      opaque: false,
+      barrierDismissible: true,
+      barrierColor: Colors.black26,
+      barrierLabel: 'Close Gab',
+      transitionDuration: const Duration(milliseconds: 200),
+      reverseTransitionDuration: const Duration(milliseconds: 150),
+      pageBuilder: (_, animation, _) => _ChatPopover(
+        anchor: anchor,
+        anchorSize: _size,
         gradient: _gradient,
-        onTalkToPerson: widget.onTalkToPerson,
+        animation: animation,
+        child: SupportChatSheet(
+          uid: uid,
+          mode: widget.mode,
+          gradient: _gradient,
+          onTalkToPerson: widget.onTalkToPerson,
+        ),
       ),
     );
-    if (mounted) setState(() => _chatOpen = false);
+    setState(() => _chatRoute = route);
+    await navigator.push(route);
+    if (mounted) setState(() => _chatRoute = null);
+  }
+
+  void _closeChat() {
+    final route = _chatRoute;
+    if (route == null) return;
+    if (route.isCurrent) {
+      route.navigator?.pop();
+    } else if (route.isActive) {
+      route.navigator?.removeRoute(route);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (!widget.visible || uid == null || _chatOpen) {
+    if (!widget.visible || uid == null) {
       return const SizedBox.shrink();
     }
 
-    final screen = MediaQuery.sizeOf(context);
+    final media = MediaQuery.of(context);
+    final screen = media.size;
     _pos ??= Offset(screen.width - _size - 12, screen.height - _size - 140);
+    // While chatting, keep the bubble (and the popover's tail) above the
+    // keyboard. The popover uses the same formula.
+    final top = _chatOpen
+        ? _ChatPopover.bubbleTop(_pos!.dy, _size, media)
+        : _pos!.dy;
 
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOut,
       left: _pos!.dx,
-      top: _pos!.dy,
+      top: top,
       child: GestureDetector(
-        onPanUpdate: (d) => setState(() => _pos = _pos! + d.delta),
-        onPanEnd: (_) => _snapToEdge(screen),
-        onTap: () => _openChat(uid),
+        // Not movable while the popover points at it.
+        onPanUpdate: _chatOpen
+            ? null
+            : (d) => setState(() => _pos = _pos! + d.delta),
+        onPanEnd: _chatOpen ? null : (_) => _snapToEdge(screen),
+        onTap: () => _chatOpen ? _closeChat() : _openChat(uid),
         child: Semantics(
           button: true,
-          label: 'Open Giggre Help',
+          label: _chatOpen ? 'Close Gab' : 'Open Gab',
           child: Container(
             width: _size,
             height: _size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: _gradient,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
+              // gab.png has a white background, so the bubble is white too
+              color: Colors.white,
               boxShadow: [
                 BoxShadow(
                   color: _gradient.last.withValues(alpha: 0.35),
@@ -138,8 +170,19 @@ class _SupportBubbleState extends State<SupportBubble> {
                 ),
               ],
             ),
-            child: const Icon(Icons.chat_bubble_rounded,
-                color: Colors.white, size: 26),
+            child: ClipOval(
+              // The robot fills ~70% of the image; zoom in a little so it
+              // reads at bubble size without clipping its ears.
+              child: Transform.scale(
+                scale: 1.15,
+                child: Image.asset(
+                  'assets/images/gab.png',
+                  fit: BoxFit.cover,
+                  // Source is 1024px; decode small for a 56px bubble.
+                  cacheWidth: 256,
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -148,7 +191,171 @@ class _SupportBubbleState extends State<SupportBubble> {
 }
 
 // ---------------------------------------------------------------------------
-// Chat sheet
+// Chat popover: the chat card plus a tail pointing at the bubble
+// ---------------------------------------------------------------------------
+
+class _ChatPopover extends StatelessWidget {
+  const _ChatPopover({
+    required this.anchor,
+    required this.anchorSize,
+    required this.gradient,
+    required this.animation,
+    required this.child,
+  });
+
+  /// The bubble's top-left (before any keyboard lift) and size.
+  final Offset anchor;
+  final double anchorSize;
+  final List<Color> gradient;
+  final Animation<double> animation;
+  final Widget child;
+
+  static const _margin = 12.0;
+  static const _gap = 6.0;
+  static const _tail = 10.0;
+  static const _maxWidth = 420.0;
+  static const _maxHeight = 560.0;
+
+  /// The bubble's top while the chat is open: moved up above the keyboard.
+  static double bubbleTop(double top, double size, MediaQueryData media) =>
+      math.max(
+        0.0,
+        math.min(
+          top,
+          media.size.height - media.viewInsets.bottom - size - _margin,
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final screen = media.size;
+    final top = bubbleTop(anchor.dy, anchorSize, media);
+    final centerX = anchor.dx + anchorSize / 2;
+
+    final minY = media.padding.top + _margin;
+    final maxY =
+        screen.height -
+        math.max(media.viewInsets.bottom, media.padding.bottom) -
+        _margin;
+
+    // Open on the side of the bubble with more room (with the keyboard up,
+    // that's above it).
+    final roomAbove = top - _gap - _tail - minY;
+    final roomBelow = maxY - (top + anchorSize + _gap + _tail);
+    final above = roomAbove >= roomBelow;
+    final height = math.max(
+      0.0,
+      math.min(_maxHeight, above ? roomAbove : roomBelow),
+    );
+    final cardTop = above
+        ? top - _gap - _tail - height
+        : top + anchorSize + _gap + _tail;
+    final cardBottom = cardTop + height;
+
+    final width = math.min(screen.width - _margin * 2, _maxWidth);
+    final left = math.max(
+      _margin,
+      math.min(centerX - width / 2, screen.width - _margin - width),
+    );
+    final tailX = math.max(24.0, math.min(centerX - left, width - 24.0));
+    // Above: the tail hangs off the white input bar. Below: off the header.
+    final tailColor = above
+        ? _Palette.surface
+        : Color.lerp(gradient.first, gradient.last, tailX / width)!;
+
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutBack,
+      reverseCurve: Curves.easeIn,
+    );
+
+    return Stack(
+      children: [
+        Positioned(
+          left: left,
+          width: width,
+          top: above ? cardTop : cardTop - _tail,
+          height: cardBottom - cardTop + _tail,
+          child: FadeTransition(
+            opacity: animation,
+            child: ScaleTransition(
+              // Grow out of the bubble.
+              alignment: Alignment(tailX / width * 2 - 1, above ? 1 : -1),
+              scale: Tween(begin: 0.6, end: 1.0).animate(curved),
+              child: Stack(
+                children: [
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: above ? 0 : _tail,
+                    bottom: above ? _tail : 0,
+                    child: Material(
+                      color: _Palette.background,
+                      elevation: 12,
+                      shadowColor: Colors.black45,
+                      borderRadius: BorderRadius.circular(20),
+                      clipBehavior: Clip.antiAlias,
+                      child: child,
+                    ),
+                  ),
+                  // Painted after the card so its shadow doesn't cover it;
+                  // overlaps the card by 1px to hide the seam.
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: above ? null : 0,
+                    bottom: above ? 0 : null,
+                    height: _tail + 1,
+                    child: CustomPaint(
+                      painter: _TailPainter(
+                        x: tailX,
+                        pointsUp: !above,
+                        color: tailColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TailPainter extends CustomPainter {
+  const _TailPainter({
+    required this.x,
+    required this.pointsUp,
+    required this.color,
+  });
+
+  final double x;
+  final bool pointsUp;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const halfWidth = 11.0;
+    final tipY = pointsUp ? 0.0 : size.height;
+    final baseY = pointsUp ? size.height : 0.0;
+    final path = Path()
+      ..moveTo(x - halfWidth, baseY)
+      ..lineTo(x, tipY)
+      ..lineTo(x + halfWidth, baseY)
+      ..close();
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_TailPainter old) =>
+      old.x != x || old.pointsUp != pointsUp || old.color != color;
+}
+
+// ---------------------------------------------------------------------------
+// Chat (shown inside the popover)
 // ---------------------------------------------------------------------------
 
 class SupportChatSheet extends StatefulWidget {
@@ -275,7 +482,7 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
     } on SupportUnavailable {
       _restoreUnsent(text, history);
       setState(() {
-        _error = 'Giggre Help couldn’t answer. Try again, or talk to a person.';
+        _error = 'Gab couldn’t answer. Try again, or talk to a person.';
         _offerHuman = true;
       });
     } finally {
@@ -312,181 +519,161 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
     });
   }
 
+  // Sized and kept above the keyboard by _ChatPopover.
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-    return DraggableScrollableSheet(
-      initialChildSize: 0.75,
-      minChildSize: 0.4,
-      maxChildSize: 0.95,
-      builder: (_, _) => Container(
-        padding: EdgeInsets.only(bottom: bottomInset),
-        decoration: const BoxDecoration(
-          color: _Palette.background,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    return Column(
+      children: [
+        _header(),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _messages.isEmpty
+              ? _emptyState()
+              : _messageList(),
         ),
-        child: Column(
-          children: [
-            _header(),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _messages.isEmpty
-                      ? _emptyState()
-                      : _messageList(),
-            ),
-            if (_offerHuman) _humanButton(),
-            _statusLine(),
-            _inputBar(),
-          ],
-        ),
-      ),
+        if (_offerHuman) _humanButton(),
+        _statusLine(),
+        _inputBar(),
+      ],
     );
   }
 
   Widget _header() => Container(
-        padding: const EdgeInsets.fromLTRB(20, 12, 8, 16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(colors: widget.gradient),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
+    padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(colors: widget.gradient),
+    ),
+    child: Column(
+      children: [
+        Row(
           children: [
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.white54,
-                borderRadius: BorderRadius.circular(2),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Gab',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 18,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'AI assistant. A person can take over anytime.',
+                    style: TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Giggre Help',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 18,
-                          color: Colors.white,
-                        ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'AI assistant. A person can take over anytime.',
-                        style: TextStyle(fontSize: 12, color: Colors.white70),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  onPressed: _talkToPerson,
-                  icon: const Icon(Icons.support_agent_rounded,
-                      color: Colors.white),
-                  tooltip: 'Talk to a person',
-                ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close_rounded, color: Colors.white),
-                  tooltip: 'Close',
-                ),
-              ],
+            IconButton(
+              onPressed: _talkToPerson,
+              icon: const Icon(
+                Icons.support_agent_rounded,
+                color: Colors.white,
+              ),
+              tooltip: 'Talk to a person',
+            ),
+            IconButton(
+              onPressed: () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.close_rounded, color: Colors.white),
+              tooltip: 'Close',
             ),
           ],
         ),
-      );
+      ],
+    ),
+  );
 
   Widget _emptyState() => ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const Text(
-            'Ask anything about using Giggre.',
-            style: TextStyle(fontSize: 15, color: _Palette.textSecondary),
-          ),
-          const SizedBox(height: 16),
-          ..._suggestions.map(
-            (s) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: InkWell(
+    padding: const EdgeInsets.all(20),
+    children: [
+      const Text(
+        'Hi! I’m Gab, Giggre’s AI assistant. Ask me how to do something and I’ll guide you through the steps. For now I can only explain things. I can’t post gigs or make changes to your account, but I’m still learning and getting better.',
+        style: TextStyle(fontSize: 15, color: _Palette.textSecondary),
+      ),
+      const SizedBox(height: 16),
+      ..._suggestions.map(
+        (s) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(_Palette.radius),
+            onTap: _limited ? null : () => _send(s),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: _Palette.surface,
+                border: Border.all(color: _Palette.border),
                 borderRadius: BorderRadius.circular(_Palette.radius),
-                onTap: _limited ? null : () => _send(s),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: _Palette.surface,
-                    border: Border.all(color: _Palette.border),
-                    borderRadius: BorderRadius.circular(_Palette.radius),
-                  ),
-                  child: Text(s, style: const TextStyle(fontSize: 14)),
-                ),
               ),
+              child: Text(s, style: const TextStyle(fontSize: 14)),
             ),
           ),
-        ],
-      );
+        ),
+      ),
+    ],
+  );
 
   Widget _messageList() => ListView.builder(
-        controller: _scroll,
-        padding: const EdgeInsets.all(16),
-        itemCount: _messages.length + (_waiting ? 1 : 0),
-        itemBuilder: (_, i) {
-          if (i == _messages.length) return _bubble('…', isUser: false);
-          final m = _messages[i];
-          return _bubble(m.text, isUser: m.isUser);
-        },
-      );
+    controller: _scroll,
+    padding: const EdgeInsets.all(16),
+    itemCount: _messages.length + (_waiting ? 1 : 0),
+    itemBuilder: (_, i) {
+      if (i == _messages.length) return _bubble('…', isUser: false);
+      final m = _messages[i];
+      return _bubble(m.text, isUser: m.isUser);
+    },
+  );
 
   Widget _bubble(String text, {required bool isUser}) => Align(
-        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.sizeOf(context).width * 0.78,
-          ),
-          decoration: BoxDecoration(
-            gradient: isUser ? LinearGradient(colors: widget.gradient) : null,
-            color: isUser ? null : _Palette.surface,
-            border: isUser ? null : Border.all(color: _Palette.border),
-            borderRadius: BorderRadius.circular(_Palette.radius),
-          ),
-          child: SelectableText(
-            text,
-            style: TextStyle(
-              fontSize: 14.5,
-              height: 1.4,
-              color: isUser ? Colors.white : _Palette.textPrimary,
-            ),
-          ),
+    alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+    child: Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.sizeOf(context).width * 0.78,
+      ),
+      decoration: BoxDecoration(
+        gradient: isUser ? LinearGradient(colors: widget.gradient) : null,
+        color: isUser ? null : _Palette.surface,
+        border: isUser ? null : Border.all(color: _Palette.border),
+        borderRadius: BorderRadius.circular(_Palette.radius),
+      ),
+      child: SelectableText(
+        text,
+        style: TextStyle(
+          fontSize: 14.5,
+          height: 1.4,
+          color: isUser ? Colors.white : _Palette.textPrimary,
         ),
-      );
+      ),
+    ),
+  );
 
   Widget _humanButton() => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-        child: OutlinedButton.icon(
-          onPressed: _talkToPerson,
-          icon: const Icon(Icons.support_agent_rounded),
-          label: const Text('Talk to a person'),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(44),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(_Palette.radius),
-            ),
-          ),
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+    child: OutlinedButton.icon(
+      onPressed: _talkToPerson,
+      icon: const Icon(Icons.support_agent_rounded),
+      label: const Text('Talk to a person'),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(44),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(_Palette.radius),
         ),
-      );
+      ),
+    ),
+  );
 
   // Limit reached, error, or "few questions left" — one line above the input.
   Widget _statusLine() {
     String? text;
     if (_limited) {
       final time = TimeOfDay.fromDateTime(_limitResetAt!).format(context);
-      text = 'You’ve reached the limit for this hour. '
+      text =
+          'You’ve reached the limit for this hour. '
           'You can ask again at $time, or talk to a person.';
     } else if (_error != null) {
       text = _error;
@@ -507,40 +694,36 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
     );
   }
 
-  Widget _inputBar() => SafeArea(
-        top: false,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-          decoration: const BoxDecoration(
-            color: _Palette.surface,
-            border: Border(top: BorderSide(color: _Palette.border)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _input,
-                  enabled: !_limited,
-                  minLines: 1,
-                  maxLines: 4,
-                  maxLength: 1000,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: _send,
-                  decoration: const InputDecoration(
-                    hintText: 'Type your question',
-                    border: InputBorder.none,
-                    counterText: '',
-                  ),
-                ),
-              ),
-              IconButton(
-                onPressed:
-                    (_waiting || _limited) ? null : () => _send(_input.text),
-                icon: Icon(Icons.send_rounded, color: widget.gradient.first),
-                tooltip: 'Send',
-              ),
-            ],
+  Widget _inputBar() => Container(
+    padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+    decoration: const BoxDecoration(
+      color: _Palette.surface,
+      border: Border(top: BorderSide(color: _Palette.border)),
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _input,
+            enabled: !_limited,
+            minLines: 1,
+            maxLines: 4,
+            maxLength: 1000,
+            textInputAction: TextInputAction.send,
+            onSubmitted: _send,
+            decoration: const InputDecoration(
+              hintText: 'Type your question',
+              border: InputBorder.none,
+              counterText: '',
+            ),
           ),
         ),
-      );
+        IconButton(
+          onPressed: (_waiting || _limited) ? null : () => _send(_input.text),
+          icon: Icon(Icons.send_rounded, color: widget.gradient.first),
+          tooltip: 'Send',
+        ),
+      ],
+    ),
+  );
 }

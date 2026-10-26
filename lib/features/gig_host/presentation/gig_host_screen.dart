@@ -29,6 +29,7 @@ import 'widgets/notifications_sheet.dart';
 import 'widgets/gig_detail_sheet.dart';
 import 'widgets/host_gig_card.dart';
 import 'host_gigs_screen.dart';
+import '../../support_ai/presentation/support_bubble_host.dart';
 
 class GigHostScreen extends StatefulWidget {
   // True when hosted as the Home tab root inside HostShell — suppresses the
@@ -2278,11 +2279,13 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) => ValueListenableBuilder<int>(
-          valueListenable: _fullScreenTick,
-          builder: (_, _, _) => Scaffold(
-            backgroundColor: Colors.black,
-            body: SafeArea(child: _buildMapStack(isFullScreen: true)),
+        builder: (_) => HideSupportBubble(
+          child: ValueListenableBuilder<int>(
+            valueListenable: _fullScreenTick,
+            builder: (_, _, _) => Scaffold(
+              backgroundColor: Colors.black,
+              body: SafeArea(child: _buildMapStack(isFullScreen: true)),
+            ),
           ),
         ),
       ),

@@ -31,6 +31,7 @@ import '../models/gig_template_model.dart';
 import '../models/open_gig_model.dart';
 import 'widgets/template_name_dialog.dart';
 import 'widgets/skill_picker_sheet.dart';
+import '../../support_ai/presentation/support_bubble_host.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Experience level options
@@ -1561,7 +1562,8 @@ class _MapPickerScreen extends StatefulWidget {
   State<_MapPickerScreen> createState() => _MapPickerScreenState();
 }
 
-class _MapPickerScreenState extends State<_MapPickerScreen> {
+class _MapPickerScreenState extends State<_MapPickerScreen>
+    with HidesSupportBubble {
   GoogleMapController? _googleMapController;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();

@@ -30,6 +30,7 @@ import '../models/gig_template_model.dart';
 import '../models/quick_gig_model.dart';
 import '../services/quick_gig_matching_service.dart';
 import 'widgets/template_name_dialog.dart';
+import '../../support_ai/presentation/support_bubble_host.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Post Quick Gig Screen
@@ -1380,7 +1381,8 @@ class _MapPickerScreen extends StatefulWidget {
   State<_MapPickerScreen> createState() => _MapPickerScreenState();
 }
 
-class _MapPickerScreenState extends State<_MapPickerScreen> {
+class _MapPickerScreenState extends State<_MapPickerScreen>
+    with HidesSupportBubble {
   GoogleMapController? _googleMapController;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();

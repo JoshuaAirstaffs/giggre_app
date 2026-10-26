@@ -44,6 +44,23 @@ mixin HidesSupportBubble<T extends StatefulWidget> on State<T> {
   }
 }
 
+/// The same as [HidesSupportBubble], for screens built inline in a route
+/// builder (e.g. the full-screen maps).
+class HideSupportBubble extends StatefulWidget {
+  const HideSupportBubble({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<HideSupportBubble> createState() => _HideSupportBubbleState();
+}
+
+class _HideSupportBubbleState extends State<HideSupportBubble>
+    with HidesSupportBubble {
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 /// Hides the bubble on support ticket chats. Those open through the
 /// `/chat/{roomId}` route (contact_us.dart, home_chat.dart); gig and DM chats
 /// use the same route or screen but their room ids start with `gig_` / `dm_`.
