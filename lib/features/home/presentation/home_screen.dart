@@ -1730,8 +1730,13 @@ class _TestimonialCarousel extends StatefulWidget {
   State<_TestimonialCarousel> createState() => _TestimonialCarouselState();
 }
 
-class _TestimonialCarouselState extends State<_TestimonialCarousel> {
+class _TestimonialCarouselState extends State<_TestimonialCarousel>
+    with RouteAware {
   int _current = 0;
+  // Another screen is on top of Home — the carousel stays mounted under it,
+  // so videos must stop and auto-slide must not land on (and start) one.
+  bool _covered = false;
+  PageRoute<void>? _subscribedRoute;
   List<_CarouselItem> _slides = [];
   bool _loading = true;
   // Starts with sound on; one choice applies to every video slide
@@ -1749,7 +1754,27 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // welcomeRouteObserver is the app's one RouteObserver (main.dart's
+    // navigatorObservers), not specific to WelcomeScreen.
+    final route = ModalRoute.of(context);
+    if (route is PageRoute<void> && route != _subscribedRoute) {
+      if (_subscribedRoute != null) welcomeRouteObserver.unsubscribe(this);
+      _subscribedRoute = route;
+      welcomeRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPushNext() => setState(() => _covered = true);
+
+  @override
+  void didPopNext() => setState(() => _covered = false);
+
+  @override
   void dispose() {
+    welcomeRouteObserver.unsubscribe(this);
     _videos.dispose();
     super.dispose();
   }
@@ -1827,7 +1852,7 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
               viewportFraction: 1.0,
               padEnds: false,
               enlargeCenterPage: false,
-              autoPlay: hasMultiple && !currentIsVideo,
+              autoPlay: hasMultiple && !currentIsVideo && !_covered,
               enableInfiniteScroll: hasMultiple,
               scrollPhysics: hasMultiple
                   ? null
@@ -1848,6 +1873,7 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel> {
                 coverUrl: slide.picture,
                 videos: _videos,
                 isActive: index == _current,
+                onScreen: !_covered,
                 loop: !hasMultiple,
                 muted: _muted,
                 onToggleMute: () => setState(() => _muted = !_muted),
@@ -1919,6 +1945,8 @@ class _VideoSlideItem extends StatefulWidget {
   final String coverUrl;
   final _CarouselVideoCache videos;
   final bool isActive;
+  // False while another screen covers Home
+  final bool onScreen;
   final bool loop;
   final bool muted;
   final VoidCallback onToggleMute;
@@ -1929,6 +1957,7 @@ class _VideoSlideItem extends StatefulWidget {
     required this.coverUrl,
     required this.videos,
     required this.isActive,
+    required this.onScreen,
     required this.loop,
     required this.muted,
     required this.onToggleMute,
@@ -1939,7 +1968,8 @@ class _VideoSlideItem extends StatefulWidget {
   State<_VideoSlideItem> createState() => _VideoSlideItemState();
 }
 
-class _VideoSlideItemState extends State<_VideoSlideItem> {
+class _VideoSlideItemState extends State<_VideoSlideItem>
+    with WidgetsBindingObserver {
   VideoPlayerController? _controller;
   bool _ready = false;
   bool _finishedFired = false;
@@ -1951,22 +1981,45 @@ class _VideoSlideItemState extends State<_VideoSlideItem> {
   bool _fullscreen = false;
   // Paused by the viewer — shared with the full screen page so both agree
   final _paused = ValueNotifier<bool>(false);
+  // False while the app is in the background or the phone is locked. Handled
+  // here, not by rebuilding: no frames run then, and the carousel's timers
+  // could otherwise move on to this slide and start it with the screen off.
+  bool _appActive = true;
+
+  // Allowed to play: the current slide, Home is the visible screen, and the
+  // app is in front. Our own full screen page covers Home too, but the video
+  // carries on there.
+  bool get _on =>
+      widget.isActive && (widget.onScreen || _fullscreen) && _appActive;
 
   @override
   void initState() {
     super.initState();
-    if (widget.isActive) _activate();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _appActive = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
+    if (_on) _activate();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final wasOn = _on;
+    _appActive = state == AppLifecycleState.resumed;
+    if (_on && !wasOn) {
+      _resumePlayback();
+    } else if (!_on && wasOn) {
+      _pausePlayback();
+    }
   }
 
   @override
   void didUpdateWidget(covariant _VideoSlideItem old) {
     super.didUpdateWidget(old);
-    if (widget.isActive && !old.isActive) {
-      _activate();
-    } else if (!widget.isActive && old.isActive) {
-      _fallback?.cancel();
-      _endTimer?.cancel();
-      _controller?.pause();
+    final wasOn = old.isActive && (old.onScreen || _fullscreen) && _appActive;
+    if (_on && !wasOn) {
+      old.isActive ? _resumePlayback() : _activate();
+    } else if (!_on && wasOn) {
+      _pausePlayback();
     }
     if (widget.muted != old.muted && _ready) {
       _controller?.setVolume(widget.muted ? 0 : 1);
@@ -1991,22 +2044,45 @@ class _VideoSlideItemState extends State<_VideoSlideItem> {
           _ready = true;
         });
       }
-      if (!widget.isActive) return;
+      if (!_on) return;
       await controller.setVolume(widget.muted ? 0 : 1);
       await controller.setLooping(widget.loop);
       await controller.seekTo(Duration.zero);
-      if (!mounted || !widget.isActive) return;
+      if (!mounted || !_on) return;
       _paused.value = false;
       await controller.play();
       _finishedFired = false;
     } catch (e) {
       debugPrint('Carousel video error: $e');
       // Keep the cover image and let the carousel move on as for an image.
-      if (mounted && widget.isActive && widget.onFinished != null) {
+      if (mounted && _on && widget.onFinished != null) {
         _finishedFired = false;
         _fallback = Timer(const Duration(seconds: 5), _finish);
       }
     }
+  }
+
+  void _pausePlayback() {
+    _fallback?.cancel();
+    _endTimer?.cancel();
+    _controller?.pause();
+  }
+
+  // Back in view on the same slide (Home uncovered, or the app reopened):
+  // carry on from where it stopped, unless the viewer paused it or it ended.
+  void _resumePlayback() {
+    final controller = _controller;
+    if (!_ready || controller == null) {
+      _activate();
+      return;
+    }
+    if (!_paused.value &&
+        !controller.value.isPlaying &&
+        !controller.value.isCompleted) {
+      controller.play();
+      _finishedFired = false;
+    }
+    _onTick();
   }
 
   void _onTick() {
@@ -2014,7 +2090,7 @@ class _VideoSlideItemState extends State<_VideoSlideItem> {
     if (v == null ||
         !v.isInitialized ||
         widget.loop ||
-        !widget.isActive ||
+        !_on ||
         _fullscreen) {
       return;
     }
@@ -2073,6 +2149,7 @@ class _VideoSlideItemState extends State<_VideoSlideItem> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _fallback?.cancel();
     _endTimer?.cancel();
     // The player belongs to the carousel's cache, which outlives this slide
