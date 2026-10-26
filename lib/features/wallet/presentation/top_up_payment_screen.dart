@@ -5,6 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+
+import '../../../core/providers/current_user_provider.dart';
+import '../../../core/utils/currency_formatter.dart';
 
 import '../../../core/theme/profile_tab_theme.dart';
 import '../services/wallet_requests_service.dart';
@@ -40,7 +44,13 @@ class TopUpPaymentScreen extends StatefulWidget {
 
 class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
   final _ref = TextEditingController();
-  final _money = NumberFormat.currency(symbol: '₱', decimalDigits: 2);
+  /// The user's currency symbol: $ by default, ₱ for users located in the
+  /// Philippines (CurrentUserProvider / CurrencyFormatter).
+  String get _symbol => CurrencyFormatter.symbol(
+    context.read<CurrentUserProvider>().currencyCode,
+  );
+  NumberFormat get _money =>
+      NumberFormat.currency(symbol: _symbol, decimalDigits: 2);
   final _clientRequestId = WalletRequestsService.newClientRequestId();
   File? _proof;
   bool _submitting = false;

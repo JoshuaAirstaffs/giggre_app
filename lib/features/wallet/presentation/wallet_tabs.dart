@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/currency_formatter.dart';
 import '../services/wallet_requests_service.dart';
 import 'transaction_details_screen.dart';
 import 'widgets/wallet_transaction.dart';
@@ -9,7 +10,11 @@ import 'widgets/wallet_transaction.dart';
 /// The wallet ledger entry model (widgets/wallet_transaction.dart).
 typedef WalletTxView = WalletTx;
 
-final _money2 = NumberFormat.currency(symbol: '₱', decimalDigits: 2);
+/// "$12.50" / "₱12.50" (PHP → ₱, everything else → $).
+String walletCash(double v, String currencyCode) => NumberFormat.currency(
+  symbol: CurrencyFormatter.symbol(currencyCode),
+  decimalDigits: 2,
+).format(v);
 final _timeFmt = DateFormat('h:mm a');
 const _amber = Color(0xFFF0A830);
 
@@ -159,7 +164,8 @@ class WalletHero extends StatelessWidget {
                       if (pending != null)
                         _HeroChip(
                           icon: Icons.schedule_rounded,
-                          text: '${pending!.label} of ${_money2.format(pending!.amount)} in review',
+                          text: '${pending!.label} of '
+                              '${NumberFormat.currency(symbol: symbol, decimalDigits: 2).format(pending!.amount)} in review',
                         ),
                       if (fromCache && !hasError)
                         const _HeroChip(icon: Icons.cloud_off_rounded, text: 'Offline · last synced'),
@@ -730,7 +736,16 @@ class _Pill extends StatelessWidget {
 // ── Requests tab ───────────────────────────────────────────────────────────
 
 class WalletRequestsList extends StatelessWidget {
-  const WalletRequestsList({super.key, required this.requests, required this.hasError, required this.accent});
+  const WalletRequestsList({
+    super.key,
+    required this.requests,
+    required this.hasError,
+    required this.accent,
+    this.fallbackCurrency = 'USD',
+  });
+
+  /// Used if an old request has no currency stored.
+  final String fallbackCurrency;
 
   final List<WalletRequest>? requests;
   final bool hasError;
@@ -766,12 +781,12 @@ class WalletRequestsList extends StatelessWidget {
       children: [
         if (pending.isNotEmpty) ...[
           const _GroupLabel('Waiting for review'),
-          for (final r in pending) ...[WalletRequestTile(request: r), const SizedBox(height: 8)],
+          for (final r in pending) ...[WalletRequestTile(request: r, fallbackCurrency: fallbackCurrency), const SizedBox(height: 8)],
           const SizedBox(height: 8),
         ],
         if (done.isNotEmpty) ...[
           const _GroupLabel('Completed'),
-          for (final r in done) ...[WalletRequestTile(request: r), const SizedBox(height: 8)],
+          for (final r in done) ...[WalletRequestTile(request: r, fallbackCurrency: fallbackCurrency), const SizedBox(height: 8)],
         ],
       ],
     );
@@ -801,9 +816,10 @@ class _GroupLabel extends StatelessWidget {
 };
 
 class WalletRequestTile extends StatefulWidget {
-  const WalletRequestTile({super.key, required this.request});
+  const WalletRequestTile({super.key, required this.request, this.fallbackCurrency = 'USD'});
 
   final WalletRequest request;
+  final String fallbackCurrency;
 
   @override
   State<WalletRequestTile> createState() => _WalletRequestTileState();
@@ -820,7 +836,7 @@ class _WalletRequestTileState extends State<WalletRequestTile> {
         title: Text('Cancel this ${r.label.toLowerCase()}?'),
         content: Text(
           r.type == 'transfer'
-              ? '${_money2.format(r.amount)} goes back to your Gig Wallet.'
+              ? '${walletCash(r.amount, r.currencyCode ?? widget.fallbackCurrency)} goes back to your Gig Wallet.'
               : 'Giggre will no longer review this top up. If you already paid, contact support instead.',
         ),
         actions: [
@@ -895,7 +911,7 @@ class _WalletRequestTileState extends State<WalletRequestTile> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '${isSend ? '−' : '+'}${_money2.format(r.amount)}',
+                    '${isSend ? '−' : '+'}${walletCash(r.amount, r.currencyCode ?? widget.fallbackCurrency)}',
                     style: TextStyle(
                       color: r.status == 'approved' ? typeColor : onSurface,
                       fontSize: 15,

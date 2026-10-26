@@ -1470,3 +1470,7 @@ export {
 // Giggre Help, the in-app AI support bubble (text only). Pins its own region,
 // like the modules above. See functions/src/askSupport.ts.
 export { askSupport } from "./askSupport";
+
+// ── Exchange rates ──────────────────────────────────────────────────────────
+// Live USD→PHP rate for Gig Points / Gig Wallet. See functions/src/fx.ts.
+export { refreshFxRates, adminRefreshFxRates } from "./fx";

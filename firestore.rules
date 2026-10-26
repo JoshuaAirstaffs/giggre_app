@@ -129,6 +129,13 @@ service cloud.firestore {
         (!('depositNote' in d) || (d.depositNote is string && d.depositNote.size() <= 500));
     }
 
+    // general_config/fx_rates: live USD→PHP rate written by fx.ts; super
+    // admins may only set/clear an override.
+    function isValidFxOverride(m) {
+      return m is map && m.keys().hasOnly(['PHP']) &&
+        (m.get('PHP', null) == null || (m.PHP is number && m.PHP > 0));
+    }
+
     // The host's approval of a worker's job: gig_detail_sheet.dart sets
     // status 'payment' + paymentCode + paymentInitiatedAt when the host
     // confirms the work. Gig Points (functions/src/gigPoints.ts) are only
@@ -715,13 +722,25 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // Exchange rates (functions/src/fx.ts) — read by the app to convert USD
+    // settings into the user's currency. Only the override is client-editable.
+    match /general_config/fx_rates {
+      allow read: if isAuth();
+      allow create: if isSuperAdmin() &&
+        request.resource.data.keys().hasOnly(['override', 'overrideBy', 'overrideAt']) &&
+        isValidFxOverride(request.resource.data.override);
+      allow update: if isSuperAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['override', 'overrideBy', 'overrideAt']) &&
+        isValidFxOverride(request.resource.data.override);
+    }
+
     match /general_config/{docId} {
       allow read: if isAdmin();
       // gig_points / gig_points_requests / wallet_requests have their own
       // validated rules above;
       // rules OR together, so they must be excluded here or this would
       // bypass that validation.
-      allow write: if isSuperAdmin() && !(docId in ['gig_points', 'gig_points_requests', 'wallet_requests']);
+      allow write: if isSuperAdmin() && !(docId in ['gig_points', 'gig_points_requests', 'wallet_requests', 'fx_rates']);
     }
 
     // ─── Account Delete Requests ────────────────────────────────

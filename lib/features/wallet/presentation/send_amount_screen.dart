@@ -3,6 +3,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+
+import '../../../core/providers/current_user_provider.dart';
+import '../../../core/services/fx_rates.dart';
+import '../../../core/utils/currency_formatter.dart';
 
 import '../../../core/theme/profile_tab_theme.dart';
 import '../services/wallet_requests_service.dart';
@@ -30,7 +35,13 @@ class SendAmountScreen extends StatefulWidget {
 class _SendAmountScreenState extends State<SendAmountScreen> {
   final _amount = TextEditingController();
   final _note = TextEditingController();
-  final _money = NumberFormat.currency(symbol: '₱', decimalDigits: 2);
+  /// The user's currency symbol: $ by default, ₱ for users located in the
+  /// Philippines (CurrentUserProvider / CurrencyFormatter).
+  String get _symbol => CurrencyFormatter.symbol(
+    context.read<CurrentUserProvider>().currencyCode,
+  );
+  NumberFormat get _money =>
+      NumberFormat.currency(symbol: _symbol, decimalDigits: 2);
   final _clientRequestId = WalletRequestsService.newClientRequestId();
   late final Stream<double> _balance;
   double? _bal;
@@ -49,6 +60,29 @@ class _SendAmountScreenState extends State<SendAmountScreen> {
               .snapshots()
               .map((s) => ((s.data()?['balance'] as num?) ?? 0).toDouble());
     _amount.addListener(() => setState(() {}));
+    FxRates.fetch().then((fx) {
+      if (mounted) setState(() => _fx = fx);
+    });
+  }
+
+  /// Limits are set in USD (admin); shown and checked in the user's currency.
+  FxRates? _fx;
+  String get _ccy => context.read<CurrentUserProvider>().currencyCode;
+  bool get _ratesReady =>
+      _fx != null && _fx!.knows(_ccy) && _fx!.knows(widget.recipient.currencyCode);
+  double? _mine(double? usd) => usd == null ? null : _fx?.fromUsd(usd, _ccy);
+
+  String _theirMoney(double v) => NumberFormat.currency(
+    symbol: CurrencyFormatter.symbol(widget.recipient.currencyCode),
+    decimalDigits: 2,
+  ).format(v);
+
+  /// What the recipient gets when their wallet is in another currency.
+  double? get _theyGet {
+    final v = _value;
+    final r = widget.recipient.currencyCode;
+    if (v == null || r == _ccy) return null;
+    return _fx?.convertDown(v, _ccy, r);
   }
 
   @override
@@ -67,16 +101,18 @@ class _SendAmountScreenState extends State<SendAmountScreen> {
   String? get _fieldError {
     final v = _value;
     if (_amount.text.isEmpty || v == null) return null;
-    if (_lim.min != null && v < _lim.min!) return 'Minimum is ${_money.format(_lim.min)}';
-    if (_lim.max != null && v > _lim.max!) return 'Maximum is ${_money.format(_lim.max)}';
-    if (_lim.dailyMax != null && v > _lim.dailyMax!) {
-      return 'The daily limit is ${_money.format(_lim.dailyMax)}';
+    final min = _mine(_lim.min), max = _mine(_lim.max), daily = _mine(_lim.dailyMax);
+    if (min != null && v < min) return 'Minimum is ${_money.format(min)}';
+    if (max != null && v > max) return 'Maximum is ${_money.format(max)}';
+    if (daily != null && v > daily) {
+      return 'The daily limit is ${_money.format(daily)}';
     }
     if (_bal != null && v > _bal!) return 'Your GigCash is ${_money.format(_bal)}';
     return null;
   }
 
-  bool get _ready => _value != null && _fieldError == null && !_submitting;
+  bool get _ready =>
+      _value != null && _fieldError == null && !_submitting && _ratesReady;
 
   Future<void> _confirmAndSend() async {
     FocusScope.of(context).unfocus();
@@ -87,7 +123,8 @@ class _SendAmountScreenState extends State<SendAmountScreen> {
         title: Text('Send ${_money.format(v)}?'),
         content: Text(
           'To ${widget.recipient.name}'
-          '${widget.recipient.code == null ? '' : ' (${widget.recipient.code})'}.\n\n'
+          '${widget.recipient.code == null ? '' : ' (${widget.recipient.code})'}.'
+          '${_theyGet == null ? '' : ' They receive ${_theirMoney(_theyGet!)} at the current exchange rate.'}\n\n'
           'A Giggre admin reviews every send. ${_money.format(v)} is taken '
           'from your wallet now and refunded if it is rejected or you cancel it.',
         ),
@@ -244,7 +281,7 @@ class _SendAmountScreenState extends State<SendAmountScreen> {
                                   fontWeight: FontWeight.w800,
                                 ),
                                 decoration: InputDecoration(
-                                  prefixText: '₱ ',
+                                  prefixText: '$_symbol ',
                                   prefixStyle: TextStyle(
                                     color: tokens.textPrimary,
                                     fontSize: 30,
@@ -265,8 +302,8 @@ class _SendAmountScreenState extends State<SendAmountScreen> {
                                 _fieldError ??
                                     [
                                       'Available ${_bal == null ? '–' : _money.format(_bal)}',
-                                      if (_lim.min != null) 'Min ${_money.format(_lim.min)}',
-                                      if (_lim.max != null) 'Max ${_money.format(_lim.max)}',
+                                      if (_mine(_lim.min) != null) 'Min ${_money.format(_mine(_lim.min))}',
+                                      if (_mine(_lim.max) != null) 'Max ${_money.format(_mine(_lim.max))}',
                                     ].join(' · '),
                                 style: TextStyle(
                                   color: _fieldError != null
@@ -275,6 +312,18 @@ class _SendAmountScreenState extends State<SendAmountScreen> {
                                   fontSize: 12,
                                 ),
                               ),
+                              if (_theyGet != null && _fieldError == null) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  '${widget.recipient.name} receives ${_theirMoney(_theyGet!)} '
+                                  '(their wallet is in ${widget.recipient.currencyCode})',
+                                  style: TextStyle(
+                                    color: tokens.textPrimary,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
