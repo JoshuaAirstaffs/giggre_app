@@ -141,7 +141,7 @@ class GigPointsService {
     }
   }
 
-  /// Live Gig Wallet (GigCash) balance. Missing doc = ₱0.
+  /// Live Gig Wallet (GigCash) balance. Missing doc = 0.
   static Stream<WalletBalance> walletStream(String uid) => _db
       .collection('wallets')
       .doc(uid)

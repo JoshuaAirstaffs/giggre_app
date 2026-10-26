@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../core/utils/currency_formatter.dart';
+
 // Read-only views of the Gig Points data written by functions/src/gigPoints.ts.
 // The app never writes any of these — firestore.rules denies it — so there
 // are deliberately no toMap() methods here.
@@ -229,10 +231,22 @@ class GigPointsTransaction {
   final String? note;
   final String? reference;
 
-  /// Conversions only: the GigCash side and the locked rate (points per ₱1).
+  /// Conversions only: the GigCash side and the locked rate (points per 1
+  /// unit of GigCash).
   final double? cash;
   final String currencyCode;
   final int? rate;
+
+  /// Wallet units per US$1 locked on the conversion (1 for USD wallets).
+  final double? fxRate;
+
+  /// "100 points per $1" + the exchange rate for non-USD wallets.
+  String? get rateText {
+    if (rate == null) return null;
+    final fx = fxRate;
+    return '$rate points per \$1'
+        '${currencyCode != 'USD' && fx != null ? ' (1 USD = $fx $currencyCode)' : ''}';
+  }
 
   const GigPointsTransaction({
     required this.id,
@@ -261,8 +275,9 @@ class GigPointsTransaction {
     this.note,
     this.reference,
     this.cash,
-    this.currencyCode = 'PHP',
+    this.currencyCode = 'USD',
     this.rate,
+    this.fxRate,
   });
 
   static const movementTypes = {
@@ -283,7 +298,7 @@ class GigPointsTransaction {
   String get _cashText {
     final c = cash;
     if (c == null) return 'GigCash';
-    final sym = currencyCode == 'PHP' ? '₱' : '$currencyCode ';
+    final sym = CurrencyFormatter.symbol(currencyCode);
     return '$sym${c.toStringAsFixed(2)}';
   }
   bool get byAdmin => source == 'admin';
@@ -342,7 +357,7 @@ class GigPointsTransaction {
   /// Why the user received (or would have received) this amount.
   String get amountExplanation {
     if (isConversion) {
-      final r = rate == null ? '' : ' at $rate points per ₱1';
+      final r = rateText == null ? '' : ' at $rateText';
       final n = note?.isNotEmpty == true ? ' Note: $note' : '';
       return type == 'convert_to_cash'
           ? '${points.abs()} points converted to $_cashText GigCash$r.$n'
@@ -462,8 +477,9 @@ class GigPointsTransaction {
       note: d['note'] as String?,
       reference: d['reference'] as String?,
       cash: d['cash'] is num ? ((d['cash'] as num) * 100).round() / 100 : null,
-      currencyCode: d['currencyCode'] as String? ?? 'PHP',
+      currencyCode: d['currencyCode'] as String? ?? 'USD',
       rate: d['rate'] is num ? (d['rate'] as num).toInt() : null,
+      fxRate: d['fxRate'] is num ? (d['fxRate'] as num).toDouble() : null,
     );
   }
 }

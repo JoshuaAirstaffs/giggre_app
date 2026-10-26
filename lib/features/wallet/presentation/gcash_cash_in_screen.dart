@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+
+import '../../../core/providers/current_user_provider.dart';
+import '../../../core/services/fx_rates.dart';
+import '../../../core/utils/currency_formatter.dart';
 
 import '../../../core/theme/profile_tab_theme.dart';
 import '../services/wallet_requests_service.dart';
@@ -11,7 +16,9 @@ import 'widgets/wallet_page_header.dart';
 // (giggre-admin → Gig Wallet → Settings) and are enforced on the server.
 const double _kMinCashIn = 100;
 const double _kMaxCashIn = 10000;
-const List<int> _kQuickAmounts = [100, 500, 1000, 5000];
+/// Quick amounts in the user's own currency.
+List<int> _quickAmounts(String currencyCode) =>
+    currencyCode == 'PHP' ? const [100, 500, 1000, 5000] : const [5, 10, 20, 50];
 
 /// Amount entry for a GCash cash-in.
 ///
@@ -41,17 +48,32 @@ class GcashCashInScreen extends StatefulWidget {
 
 class _GcashCashInScreenState extends State<GcashCashInScreen> {
   final _controller = TextEditingController();
-  final _money = NumberFormat.currency(symbol: '₱ ', decimalDigits: 2);
+  /// The user's currency symbol: $ by default, ₱ for users located in the
+  /// Philippines (CurrentUserProvider / CurrencyFormatter).
+  String get _symbol => CurrencyFormatter.symbol(
+    context.read<CurrentUserProvider>().currencyCode,
+  );
+  NumberFormat get _money =>
+      NumberFormat.currency(symbol: '$_symbol ', decimalDigits: 2);
   WalletRequestConfig? _config;
 
-  double get _min => _config?.deposit.min ?? _kMinCashIn;
-  double get _max => _config?.deposit.max ?? _kMaxCashIn;
+  /// Limits are set in USD (admin) — convert to the user's currency.
+  FxRates? _fx;
+  String get _ccy => context.read<CurrentUserProvider>().currencyCode;
+  double _inMine(double? usd, double fallback) =>
+      usd == null ? fallback : (_fx?.fromUsd(usd, _ccy) ?? usd);
+  double get _min => _inMine(_config?.deposit.min, _kMinCashIn);
+  double get _max => _inMine(_config?.deposit.max, _kMaxCashIn);
+  bool get _ratesReady => _fx != null && _fx!.knows(_ccy);
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(() => setState(() {}));
     _config = widget.config;
+    FxRates.fetch().then((fx) {
+      if (mounted) setState(() => _fx = fx);
+    });
     if (_config == null) {
       WalletRequestsService.fetchConfig().then((c) {
         if (mounted) setState(() => _config = c);
@@ -79,7 +101,7 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
     return null;
   }
 
-  bool get _isValid => _amount != null && _error == null;
+  bool get _isValid => _amount != null && _error == null && _ratesReady;
 
   void _setQuick(int value) {
     _controller.text = value.toString();
@@ -178,7 +200,7 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
                               letterSpacing: -0.5,
                             ),
                             decoration: InputDecoration(
-                              prefixText: '₱ ',
+                              prefixText: '$_symbol ',
                               prefixStyle: TextStyle(
                                 color: tokens.textPrimary,
                                 fontSize: 30,
@@ -198,8 +220,10 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
                           const SizedBox(height: 8),
                           Text(
                             _error ??
-                                'Min ${_money.format(_min)} · '
-                                    'Max ${_money.format(_max)}',
+                                (_ratesReady
+                                    ? 'Min ${_money.format(_min)} · '
+                                          'Max ${_money.format(_max)}'
+                                    : 'Loading limits…'),
                             style: TextStyle(
                               color: _error != null
                                   ? Colors.redAccent
@@ -216,16 +240,17 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
                     WalletSectionHeader(label: 'Quick amounts', tokens: tokens),
                     const SizedBox(height: 10),
                     GridView.count(
-                      crossAxisCount: _kQuickAmounts.length,
+                      crossAxisCount: _quickAmounts(_ccy).length,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       mainAxisSpacing: 10,
                       crossAxisSpacing: 10,
                       childAspectRatio: 1.9,
                       children: [
-                        for (final v in _kQuickAmounts)
+                        for (final v in _quickAmounts(_ccy))
                           _QuickAmountChip(
                             label: NumberFormat.decimalPattern().format(v),
+                            symbol: _symbol,
                             selected: _amount == v.toDouble(),
                             accent: accent,
                             tokens: tokens,
@@ -330,6 +355,7 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
 class _QuickAmountChip extends StatelessWidget {
   const _QuickAmountChip({
     required this.label,
+    required this.symbol,
     required this.selected,
     required this.accent,
     required this.tokens,
@@ -337,6 +363,7 @@ class _QuickAmountChip extends StatelessWidget {
   });
 
   final String label;
+  final String symbol;
   final bool selected;
   final Color accent;
   final ProfileTabTokens tokens;
@@ -358,7 +385,7 @@ class _QuickAmountChip extends StatelessWidget {
         onTap: onTap,
         child: Center(
           child: Text(
-            '₱$label',
+            '$symbol$label',
             style: TextStyle(
               color: selected ? accent : tokens.textPrimary,
               fontSize: 13.5,

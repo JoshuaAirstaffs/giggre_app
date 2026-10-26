@@ -3,6 +3,7 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { sendPushToUser } from "./push";
 import { firestoreTriggerRegion } from "./region";
+import { loadFx, perUsd } from "./fx";
 
 // Same region pinning as gigPoints.ts (imports are hoisted above
 // setGlobalOptions in index.ts).
@@ -22,10 +23,13 @@ const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
 //
 // Rates and limits — general_config/gig_points_requests (super-admin edited):
 //   enabled                         master switch
-//   rates.toCash                    points per 1 unit of wallet currency when
-//                                   cashing out   (e.g. 100 → 100 pts = ₱1)
-//   rates.toPoints                  points per 1 unit when buying points
-//                                   (e.g. 80 → ₱1 = 80 pts)
+//   rates.toCash                    points per US$1 when cashing out
+//                                   (e.g. 100 → 100 pts = $1)
+//   rates.toPoints                  points per US$1 when buying points
+//                                   (e.g. 80 → $1 = 80 pts)
+//   Rates are in USD. A PHP wallet is converted with the live USD→PHP rate
+//   (fx.ts): 100 pts at 100 pts/$1 and 1 USD = 56 PHP → ₱56.00. Both the
+//   points rate and the exchange rate are locked onto the request.
 //   toCash / toPoints .enabled / min / max / dailyMax   (all in POINTS)
 // The rate is LOCKED onto each request when it's made; later rate changes
 // never alter a pending or past conversion. A missing doc, a disabled
@@ -73,14 +77,23 @@ const posInt = (v: unknown): number | null =>
 const fmt = (n: number) => n.toLocaleString("en-US");
 /** Round to centavos so float drift never accumulates (same as wallet.ts). */
 const toMoney = (n: number) => Math.round(n * 100) / 100;
+/** ₱ for PHP; $ for USD and anything else (the app's rule — default USD,
+ *  PHP for users located in the Philippines). */
+export const currencySymbol = (ccy: string | null | undefined) => (ccy === "PHP" ? "₱" : "$");
 const money = (n: number, ccy: string) =>
-  `${ccy === "PHP" ? "₱" : `${ccy} `}${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  `${currencySymbol(ccy)}${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** Wallet currency: the wallet's own, else the user's (set from location), else USD. */
+export const walletCurrency = (
+  wallet: FirebaseFirestore.DocumentData | undefined,
+  user: FirebaseFirestore.DocumentData | undefined,
+) => str(wallet?.currencyCode) ?? str(user?.currencyCode) ?? "USD";
 
-/** Peso value of a conversion at a locked rate (points per 1 unit).
- *  Cashing out rounds DOWN, buying rounds UP, both to the centavo, so the
- *  platform never pays out a fraction more than the rate allows. */
-export function cashFor(type: RequestType, points: number, rate: number): number {
-  const exact = points / rate;
+/** Wallet-currency value of a conversion at a locked points rate (points per
+ *  US$1) and exchange rate (wallet units per US$1). Cashing out rounds DOWN,
+ *  buying rounds UP, both to the cent, so the platform never pays out a
+ *  fraction more than the rates allow. */
+export function cashFor(type: RequestType, points: number, rate: number, fxRate = 1): number {
+  const exact = (points / rate) * fxRate;
   return type === "to_cash" ? Math.floor(exact * 100 + 1e-9) / 100 : Math.ceil(exact * 100 - 1e-9) / 100;
 }
 
@@ -279,10 +292,7 @@ export const createGigPointsRequest = onCall(OPTS, async (request) => {
     throw new HttpsError("out-of-range", `The maximum is ${fmt(lim.max)} points per request.`);
   }
   const rate = lim.rate;
-  const cash = cashFor(type, points, rate);
-  if (cash <= 0) {
-    throw new HttpsError("out-of-range", `That's worth less than ₱0.01 at ${fmt(rate)} points per ₱1. Enter more points.`);
-  }
+  const fx = await loadFx();
 
   const reqRef = db().collection("gig_points_requests").doc(`${uid}_${clientRequestId}`);
   const day = manilaDayKey();
@@ -295,7 +305,10 @@ export const createGigPointsRequest = onCall(OPTS, async (request) => {
     if (existing.exists) {
       const e = existing.data()!;
       if (e.userId !== uid) throw new HttpsError("already-exists", "Request id in use.");
-      return { requestId: reqRef.id, status: e.status as string, duplicate: true, requester: null as UserInfo | null, ccy: "PHP" };
+      return {
+        requestId: reqRef.id, status: e.status as string, duplicate: true, requester: null as UserInfo | null,
+        ccy: str(e.currencyCode) ?? "USD", cash: Number(e.cash) || 0, fxRate: Number(e.fxRate) || 1,
+      };
     }
     const [userSnap, balSnap, daySnap, openSnap, walletSnap] = await Promise.all([
       tx.get(db().collection("users").doc(uid)),
@@ -319,7 +332,12 @@ export const createGigPointsRequest = onCall(OPTS, async (request) => {
         ? `The daily limit is ${fmt(lim.dailyMax)} points. You can convert up to ${fmt(left)} more today.`
         : `You've reached today's limit of ${fmt(lim.dailyMax)} points. Try again tomorrow.`);
     }
-    const ccy = str(walletSnap.data()?.currencyCode) ?? "PHP";
+    const ccy = walletCurrency(walletSnap.data(), userSnap.data());
+    const fxRate = perUsd(fx, ccy);
+    const cash = cashFor(type, points, rate, fxRate);
+    if (cash <= 0) {
+      throw new HttpsError("out-of-range", `That's worth less than ${money(0.01, ccy)}. Enter more points.`);
+    }
     const walletBal = toMoney(Number(walletSnap.data()?.balance) || 0);
     if (type === "to_cash") {
       const balance = nonNegInt(balSnap.data()?.balance);
@@ -331,7 +349,7 @@ export const createGigPointsRequest = onCall(OPTS, async (request) => {
     const requester = userInfo(userSnap);
     const now = FV.serverTimestamp();
     tx.create(reqRef, {
-      type, status: "pending", points, cash, currencyCode: ccy, rate, note,
+      type, status: "pending", points, cash, currencyCode: ccy, rate, fxRate, fxBase: "USD", note,
       userId: uid, userName: requester.name, userCode: requester.code,
       heldPoints: type === "to_cash" ? points : 0,
       heldCash: type === "to_points" ? cash : 0,
@@ -341,7 +359,7 @@ export const createGigPointsRequest = onCall(OPTS, async (request) => {
       type: type === "to_cash" ? "convert_to_cash" : "convert_to_points",
       source: "user_request", status: "pending",
       points: type === "to_cash" ? -points : points,
-      cash, currencyCode: ccy, rate,
+      cash, currencyCode: ccy, rate, fxRate,
       description: type === "to_cash" ? `Convert to ${money(cash, ccy)} GigCash` : `Bought with ${money(cash, ccy)} GigCash`,
       note, requestId: reqRef.id, createdAt: now, updatedAt: now,
     });
@@ -353,12 +371,13 @@ export const createGigPointsRequest = onCall(OPTS, async (request) => {
       tx.set(wRef, { balance: after, currencyCode: ccy, updatedAt: now, ...(walletSnap.exists ? {} : { createdAt: now }) }, { merge: true });
       writeWalletEntry(tx, uid, holdId, {
         amount: -cash, title: `Convert to ${fmt(points)} Gig Points`, status: "pending",
-        balanceAfter: after, currencyCode: ccy, meta: { requestId: reqRef.id, points, rate },
+        balanceAfter: after, currencyCode: ccy, meta: { requestId: reqRef.id, points, rate, fxRate },
       });
     }
     tx.set(dailyRef(uid, day), { dayKey: day, [type]: FV.increment(points), updatedAt: now }, { merge: true });
-    return { requestId: reqRef.id, status: "pending", duplicate: false, requester, ccy };
+    return { requestId: reqRef.id, status: "pending", duplicate: false, requester, ccy, cash, fxRate };
   });
+  const cash = result.cash;
 
   if (!result.duplicate && result.requester) {
     const who = `${result.requester.name}${result.requester.code ? ` (${result.requester.code})` : ""}`;
@@ -370,7 +389,7 @@ export const createGigPointsRequest = onCall(OPTS, async (request) => {
         type: "gig_points_request",
         requiredPermission: ADMIN_PERMISSION,
         title: `Gig Points conversion request`,
-        message: `${who} ${what} (rate ${fmt(rate)} pts per ₱1).${note ? ` Note: "${note}"` : ""} Review it before it goes through.`,
+        message: `${who} ${what} (rate ${fmt(rate)} pts per $1${result.ccy !== "USD" ? `, 1 USD = ${result.fxRate} ${result.ccy}` : ""}).${note ? ` Note: "${note}"` : ""} Review it before it goes through.`,
         link: "/gig-points",
         sourceCollection: "gig_points_requests",
         sourceId: result.requestId,
@@ -427,9 +446,9 @@ async function settle(
         decidedBy: opts.actor?.uid ?? opts.ownerUid ?? null, decidedByName: opts.actor?.name ?? null,
         decisionNote: opts.note ?? null, reference: null, updatedAt: now,
       });
-      return { type, points: nonNegInt(r.points), cash: 0, ccy: "PHP", userId: uid, userName: r.userName ?? "Giggre user", userCode: r.userCode ?? null, legacy: true };
+      return { type, points: nonNegInt(r.points), cash: 0, ccy: "USD", userId: uid, userName: r.userName ?? "Giggre user", userCode: r.userCode ?? null, legacy: true };
     }
-    const ccy = str(r.currencyCode) ?? "PHP";
+    const ccy = str(r.currencyCode) ?? "USD";
 
     // All reads first (Firestore transaction rule).
     const wSnap = await tx.get(walletRef(uid));
@@ -439,7 +458,7 @@ async function settle(
     const lRef = ledgerRef(uid, `req__${requestId}`);
     const bRef = balanceRef(uid);
     const holdRef = walletTxRef(uid, `gpconv_${requestId}_hold`);
-    const meta = { requestId, points, rate: r.rate ?? null };
+    const meta = { requestId, points, rate: r.rate ?? null, fxRate: r.fxRate ?? null };
 
     if (outcome === "approved") {
       tx.set(lRef, { status: "credited", creditedAt: now, updatedAt: now, reference: opts.reference ?? null }, { merge: true });
@@ -552,6 +571,6 @@ export const adminFindGigPointsUser = onCall(OPTS, async (request) => {
     balance: nonNegInt(bd.balance), heldPoints: nonNegInt(bd.heldPoints),
     pendingPoints: nonNegInt(bd.pendingPoints), lifetimeEarned: nonNegInt(bd.lifetimeEarned),
     walletBalance: toMoney(Number(w.data()?.balance) || 0),
-    currencyCode: str(w.data()?.currencyCode) ?? "PHP",
+    currencyCode: walletCurrency(w.data(), snap.data()),
   };
 });

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
+import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../models/gig_points_models.dart';
 import '../models/gig_points_request_models.dart';
@@ -189,7 +191,7 @@ class GigPointsHero extends StatelessWidget {
                         _HeroChip(
                           icon: Icons.account_balance_wallet_outlined,
                           text:
-                              '${formatCash(wallet!.balance, wallet!.currencyCode)} GigCash',
+                              '${formatCash(wallet!.balance, wallet!.currencyOr(context.watch<CurrentUserProvider>().currencyCode))} GigCash',
                         ),
                       if (pendingRequest != null)
                         _HeroChip(

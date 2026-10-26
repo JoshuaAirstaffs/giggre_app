@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/utils/currency_formatter.dart';
+
 // Read-only views of the conversion data written by
 // functions/src/gigPointsRequests.ts. Requests are created, cancelled and
 // decided only through callables (see GigPointsService) — never written here.
@@ -15,14 +17,12 @@ int? _posInt(Object? v) {
 
 double _money(Object? v) => v is num ? (v * 100).round() / 100 : 0;
 
-/// "₱12.50"
-String formatCash(double v, [String currencyCode = 'PHP']) {
-  final f = NumberFormat.currency(
-    symbol: currencyCode == 'PHP' ? '₱' : '$currencyCode ',
-    decimalDigits: 2,
-  );
-  return f.format(v);
-}
+/// "$12.50" / "₱12.50" — same symbol rule as the rest of the app
+/// (CurrencyFormatter: PHP → ₱, everything else → $).
+String formatCash(double v, [String currencyCode = 'USD']) => NumberFormat.currency(
+  symbol: CurrencyFormatter.symbol(currencyCode),
+  decimalDigits: 2,
+).format(v);
 
 /// The two conversion directions. Matches REQUEST_TYPES on the server.
 enum PointsRequestType {
@@ -60,11 +60,12 @@ enum PointsRequestType {
     PointsRequestType.toPoints => 'conversion to Gig Points',
   };
 
-  /// Peso value of [points] at [rate] points per ₱1. Cashing out rounds
-  /// down, buying rounds up (both to the centavo) — same as cashFor() on
-  /// the server, which decides the real amount.
-  double cashFor(int points, int rate) {
-    final exact = points / rate;
+  /// Wallet-currency value of [points] at [rate] points per US$1 and
+  /// [fxRate] wallet units per US$1 (1 for USD). Cashing out rounds down,
+  /// buying rounds up (both to the cent) — same as cashFor() on the server,
+  /// which decides the real amount.
+  double cashFor(int points, int rate, [double fxRate = 1]) {
+    final exact = points / rate * fxRate;
     return this == PointsRequestType.toCash
         ? (exact * 100 + 1e-9).floorToDouble() / 100
         : (exact * 100 - 1e-9).ceilToDouble() / 100;
@@ -116,7 +117,7 @@ class GigPointsRequest {
     required this.status,
     required this.points,
     required this.cash,
-    this.currencyCode = 'PHP',
+    this.currencyCode = 'USD',
     this.rate,
     this.note,
     this.decisionNote,
@@ -140,7 +141,7 @@ class GigPointsRequest {
       status: PointsRequestStatus.parse(d['status']),
       points: _posInt(d['points']) ?? 0,
       cash: _money(d['cash']),
-      currencyCode: d['currencyCode'] as String? ?? 'PHP',
+      currencyCode: d['currencyCode'] as String? ?? 'USD',
       rate: _posInt(d['rate']),
       note: d['note'] as String?,
       // Only rejection reasons are meant for the user.
@@ -158,7 +159,7 @@ class GigPointsRequest {
 class PointsTypeLimits {
   final bool enabled;
 
-  /// Points per ₱1. A direction with no rate is closed.
+  /// Points per US$1. A direction with no rate is closed.
   final int? rate;
   final int? min;
   final int? max;
@@ -213,12 +214,17 @@ class PointsRequestLimits {
 /// wallets/{uid} — the Gig Wallet (GigCash) balance, read-only here.
 class WalletBalance {
   final double balance;
-  final String currencyCode;
 
-  const WalletBalance({required this.balance, this.currencyCode = 'PHP'});
+  /// The wallet's own currency; null until the wallet exists — callers then
+  /// use the user's location currency (CurrentUserProvider.currencyCode).
+  final String? currencyCode;
+
+  const WalletBalance({required this.balance, this.currencyCode});
+
+  String currencyOr(String fallback) => currencyCode ?? fallback;
 
   factory WalletBalance.fromMap(Map<String, dynamic>? d) => WalletBalance(
     balance: _money(d?['balance']),
-    currencyCode: d?['currencyCode'] as String? ?? 'PHP',
+    currencyCode: d?['currencyCode'] as String?,
   );
 }

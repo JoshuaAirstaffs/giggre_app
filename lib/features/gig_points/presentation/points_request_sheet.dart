@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+
+import '../../../core/providers/current_user_provider.dart';
+import '../../../core/services/fx_rates.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../models/gig_points_request_models.dart';
@@ -85,7 +89,23 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
   PointsRequestType get _type => widget.type;
   PointsTypeLimits get _lim => widget.limits;
   int get _rate => _lim.rate ?? 1;
-  String get _ccy => widget.wallet?.currencyCode ?? 'PHP';
+
+  /// Live exchange rate (rates are set per US$1). Null while loading.
+  FxRates? _fx;
+
+  @override
+  void initState() {
+    super.initState();
+    FxRates.fetch().then((fx) {
+      if (mounted) setState(() => _fx = fx);
+    });
+  }
+
+  /// Wallet units per US$1, or null if the rate isn't known yet.
+  double? get _fxRate => _fx?.perUsd(_ccy);
+  String get _ccy =>
+      widget.wallet?.currencyCode ??
+      context.read<CurrentUserProvider>().currencyCode;
   double get _walletBal => widget.wallet?.balance ?? 0;
   bool get _toCash => _type == PointsRequestType.toCash;
 
@@ -103,7 +123,8 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
 
   double? get _cash {
     final p = _points;
-    return p == null ? null : _type.cashFor(p, _rate);
+    final fx = _fxRate;
+    return p == null || fx == null ? null : _type.cashFor(p, _rate, fx);
   }
 
   /// Most points the user can convert right now.
@@ -111,7 +132,7 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
     var m = _toCash
         ? widget.availablePoints
         // Largest whole number of points the wallet can pay for.
-        : (_walletBal * _rate + 1e-6).floor();
+        : (_walletBal / (_fxRate ?? 1) * _rate + 1e-6).floor();
     if (_lim.max != null && m > _lim.max!) m = _lim.max!;
     if (_lim.dailyMax != null && m > _lim.dailyMax!) m = _lim.dailyMax!;
     return m < 0 ? 0 : m;
@@ -131,8 +152,11 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
     if (_lim.dailyMax != null && p > _lim.dailyMax!) {
       return 'The daily limit is ${_n(_lim.dailyMax!)} points.';
     }
+    if (_fxRate == null) return null; // rate still loading
     final c = _cash ?? 0;
-    if (c <= 0) return 'That is worth less than ₱0.01. Enter more points.';
+    if (c <= 0) {
+      return 'That is worth less than ${formatCash(0.01, _ccy)}. Enter more points.';
+    }
     if (_toCash && p > widget.availablePoints) {
       return 'You only have ${_n(widget.availablePoints)} available points.';
     }
@@ -143,7 +167,17 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
     return null;
   }
 
-  bool get _formReady => _points != null && _amountError == null;
+  bool get _formReady =>
+      _points != null && _amountError == null && _fxRate != null;
+
+  /// "$1" for dollar wallets, "$1 (₱56.12)" for peso wallets.
+  String _perDollar() {
+    if (_ccy == 'USD') return formatCash(1, 'USD');
+    final fx = _fxRate;
+    return fx == null
+        ? '${formatCash(1, 'USD')} (rate loading…)'
+        : '${formatCash(1, 'USD')} (${formatCash(fx, _ccy)})';
+  }
 
   Future<void> _submit() async {
     setState(() {
@@ -253,8 +287,8 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
           children: [
             Text(
               _toCash
-                  ? 'Rate: ${_n(_rate)} points = ${formatCash(1, _ccy)}'
-                  : 'Rate: ${formatCash(1, _ccy)} = ${_n(_rate)} points',
+                  ? 'Rate: ${_n(_rate)} points = ${_perDollar()}'
+                  : 'Rate: ${_perDollar()} = ${_n(_rate)} points',
               style: TextStyle(
                 color: onSurface,
                 fontSize: 14,
@@ -365,7 +399,7 @@ class _PointsRequestSheetState extends State<PointsRequestSheet> {
       ('Conversion', _type.title),
       (_toCash ? 'You give' : 'You get', '${_n(p)} points'),
       (_toCash ? 'You get' : 'You pay', '${formatCash(c, _ccy)} GigCash'),
-      ('Rate', '${_n(_rate)} points per ${formatCash(1, _ccy)}'),
+      ('Rate', '${_n(_rate)} points per ${_perDollar()}'),
       if (_toCash)
         ('Points after hold', _n(widget.availablePoints - p))
       else
