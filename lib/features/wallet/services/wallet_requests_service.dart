@@ -80,7 +80,8 @@ class DepositAccount {
   });
 }
 
-/// general_config/wallet_requests — missing doc = closed.
+/// general_config/wallet_requests — missing doc = closed. Limits are in USD;
+/// convert with FxRates before showing them to a PHP user.
 class WalletRequestConfig {
   final bool enabled;
   final WalletAmountLimits deposit;
@@ -158,6 +159,9 @@ class WalletRequest {
   final String type; // 'deposit' | 'transfer'
   final String status; // pending | approved | rejected | cancelled
   final double amount;
+
+  /// Set by the server from the wallet / user's location currency.
+  final String? currencyCode;
   final String? recipientName;
   final String? reference;
   final String? note;
@@ -173,6 +177,7 @@ class WalletRequest {
     required this.type,
     required this.status,
     required this.amount,
+    this.currencyCode,
     this.recipientName,
     this.reference,
     this.note,
@@ -193,6 +198,7 @@ class WalletRequest {
       type: d['type'] as String? ?? 'deposit',
       status: d['status'] as String? ?? 'pending',
       amount: _amount(d['amount']) ?? 0,
+      currencyCode: d['currencyCode'] as String?,
       recipientName: d['recipientName'] as String?,
       reference: d['reference'] as String?,
       note: d['note'] as String?,
@@ -213,7 +219,16 @@ class WalletRecipient {
   final String name; // masked by the server
   final String? code;
   final String? photoUrl;
-  const WalletRecipient(this.id, this.name, this.code, this.photoUrl);
+
+  /// The recipient's wallet currency (USD / PHP), for a converted preview.
+  final String currencyCode;
+  const WalletRecipient(
+    this.id,
+    this.name,
+    this.code,
+    this.photoUrl, [
+    this.currencyCode = 'USD',
+  ]);
 }
 
 class WalletRequestsService {
@@ -287,6 +302,7 @@ class WalletRequestsService {
       d['name'] as String? ?? 'Giggre user',
       d['code'] as String?,
       d['photoUrl'] as String?,
+      d['currencyCode'] as String? ?? 'USD',
     );
   });
 

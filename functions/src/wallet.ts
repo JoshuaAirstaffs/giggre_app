@@ -2,6 +2,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import { firestoreTriggerRegion } from "./region";
 import { requireWalletAdmin, notifyWalletUser, logWalletActivity } from "./walletRequests";
+import { currencySymbol } from "./gigPointsRequests";
 
 // ── Gig Wallet ledger ───────────────────────────────────────────────────────
 // Storage:
@@ -103,7 +104,7 @@ export async function postLedgerEntry(
     const currencyCode =
       input.currencyCode ??
       (walletSnap.get("currencyCode") as string | undefined) ??
-      "PHP";
+      "USD";
 
     tx.set(
       walletRef,
@@ -174,11 +175,11 @@ export const adminAdjustWallet = onCall({ region: REGION }, async (request) => {
     type: "adjustment",
     title: amount > 0 ? "Adjustment by Giggre" : "Correction by Giggre",
     idempotencyKey: `adj_${requestId}`,
-    currencyCode: (user.get("currencyCode") as string | undefined) ?? "PHP",
+    currencyCode: (user.get("currencyCode") as string | undefined) ?? "USD",
     meta: { adminUid, reason },
   });
   if (!result.duplicate) {
-    const amt = `₱${Math.abs(amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const amt = `${currencySymbol(user.get("currencyCode") as string | undefined)}${Math.abs(amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     await notifyWalletUser(uid, amount > 0 ? `+${amt} GigCash` : `${amt} GigCash removed`,
       `${amt} was ${amount > 0 ? "added to" : "removed from"} your Gig Wallet by Giggre: ${reason}`,
       { status: "adjusted", requestType: "adjustment" });

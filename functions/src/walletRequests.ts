@@ -3,7 +3,8 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { sendPushToUser } from "./push";
 import { firestoreTriggerRegion } from "./region";
-import { findUser, userInfo, type UserInfo } from "./gigPointsRequests";
+import { findUser, userInfo, currencySymbol, walletCurrency, type UserInfo } from "./gigPointsRequests";
+import { loadFx, fromUsd, convertDown, perUsd } from "./fx";
 
 const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
 
@@ -23,7 +24,10 @@ const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
 //             approval credits the recipient; rejection/cancel refunds.
 //
 // Config — general_config/wallet_requests (super-admin edited):
-//   enabled, deposit|transfer.{enabled, min, max, dailyMax} (pesos),
+//   enabled, deposit|transfer.{enabled, min, max, dailyMax} — in USD; a PHP
+//   wallet is checked against them converted at the live rate (fx.ts).
+//   A Send between a PHP and a USD wallet converts too: the recipient gets
+//   the amount at the rate locked when the request was made.
 //   depositAccounts [{kind: ewallet|office|remittance, method, accountName,
 //                     accountNumber, details}], depositNote
 // A user may have only ONE pending wallet request at a time.
@@ -52,8 +56,8 @@ const amountOf = (v: unknown): number | null => {
   return Math.abs(toMoney(v) - v) < 1e-9 ? toMoney(v) : null;
 };
 const cents = (n: number) => Math.round(n * 100);
-const money = (n: number, ccy = "PHP") =>
-  `${ccy === "PHP" ? "₱" : `${ccy} `}${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = (n: number, ccy = "USD") =>
+  `${currencySymbol(ccy)}${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const manilaDayKey = (ms = Date.now()) => new Date(ms + 8 * 3600_000).toISOString().slice(0, 10);
 const maskName = (name: string) => {
   const parts = name.split(/\s+/).filter(Boolean);
@@ -134,7 +138,9 @@ export const lookupWalletRecipient = onCall(OPTS, async (request) => {
   const snap = await findUser(String((request.data ?? {}).query ?? ""));
   if (snap.id === uid) throw new HttpsError("invalid-argument", "You can't send money to yourself.");
   const u = userInfo(snap);
-  return { recipientId: u.uid, name: maskName(u.name), code: u.code, photoUrl: u.photoUrl };
+  // The recipient's wallet currency, so the app can preview a USD⇄PHP send.
+  const currencyCode = walletCurrency((await walletRef(u.uid).get()).data(), snap.data());
+  return { recipientId: u.uid, name: maskName(u.name), code: u.code, photoUrl: u.photoUrl, currencyCode };
 });
 
 // ── App: create a request ───────────────────────────────────────────────────
@@ -148,7 +154,7 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
   if (d.type === "withdraw") throw new HttpsError("failed-precondition", "Withdraw is coming soon.");
   if (!WALLET_REQUEST_TYPES.includes(type)) throw new HttpsError("invalid-argument", "Unknown request type.");
   const amount = amountOf(d.amount);
-  if (amount == null) throw new HttpsError("invalid-argument", "Enter an amount above ₱0 with up to 2 decimals.");
+  if (amount == null) throw new HttpsError("invalid-argument", "Enter an amount above 0 with up to 2 decimals.");
   const note = optText(d.note, 200, "Note");
   const clientRequestId = d.clientRequestId;
   if (typeof clientRequestId !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(clientRequestId)) {
@@ -170,10 +176,10 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
   const config = parseConfig((await db().collection("general_config").doc(CONFIG_DOC).get()).data());
   const lim = config.byType[type];
   if (!config.enabled || !lim.enabled) throw new HttpsError("failed-precondition", `${LABEL[type]} isn't available right now.`);
-  if (lim.min != null && amount < lim.min) throw new HttpsError("out-of-range", `The minimum is ${money(lim.min)}.`);
-  if (lim.max != null && amount > lim.max) throw new HttpsError("out-of-range", `The maximum is ${money(lim.max)} per request.`);
+  const fx = await loadFx();
 
   let recipient: UserInfo | null = null;
+  let recipientCcy: string | null = null;
   if (type === "transfer") {
     const rid = str(d.recipientId);
     if (!rid || rid.includes("/")) throw new HttpsError("invalid-argument", "Choose who to send money to.");
@@ -181,6 +187,7 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
     const rSnap = await db().collection("users").doc(rid).get();
     if (!rSnap.exists) throw new HttpsError("not-found", "That recipient no longer exists.");
     recipient = userInfo(rSnap);
+    recipientCcy = walletCurrency((await walletRef(rid).get()).data(), rSnap.data());
   }
 
   const reqRef = db().collection("wallet_requests").doc(`${uid}_${clientRequestId}`);
@@ -192,7 +199,10 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
     if (existing.exists) {
       const e = existing.data()!;
       if (e.userId !== uid) throw new HttpsError("already-exists", "Request id in use.");
-      return { requestId: reqRef.id, status: e.status as string, duplicate: true, requester: null as UserInfo | null, ccy: "PHP" };
+      return {
+        requestId: reqRef.id, status: e.status as string, duplicate: true, requester: null as UserInfo | null,
+        ccy: str(e.currencyCode) ?? "USD", recipientAmount: Number(e.recipientAmount) || 0,
+      };
     }
     const [userSnap, wSnap, daySnap, openSnap] = await Promise.all([
       tx.get(db().collection("users").doc(uid)),
@@ -209,14 +219,23 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
       const what = o ? `a ${(LABEL[o.type as WType] ?? "wallet").toLowerCase()} request of ${money(Number(o.amount) || 0)}` : "a request";
       throw new HttpsError("resource-exhausted", `You already have ${what} waiting for review. You can make a new one after it's decided, or cancel it.`);
     }
+    const ccy = walletCurrency(wSnap.data(), userSnap.data());
+    // Limits are set in USD; compare in the wallet's currency.
+    const min = lim.min != null ? fromUsd(fx, lim.min, ccy) : null;
+    const max = lim.max != null ? fromUsd(fx, lim.max, ccy) : null;
+    const dailyMax = lim.dailyMax != null ? fromUsd(fx, lim.dailyMax, ccy) : null;
+    if (min != null && amount < min) throw new HttpsError("out-of-range", `The minimum is ${money(min, ccy)}.`);
+    if (max != null && amount > max) throw new HttpsError("out-of-range", `The maximum is ${money(max, ccy)} per request.`);
     const usedCents = Number(daySnap.data()?.[type]) || 0;
-    if (lim.dailyMax != null && usedCents + cents(amount) > cents(lim.dailyMax)) {
-      const left = Math.max(0, cents(lim.dailyMax) - usedCents) / 100;
+    if (dailyMax != null && usedCents + cents(amount) > cents(dailyMax)) {
+      const left = Math.max(0, cents(dailyMax) - usedCents) / 100;
       throw new HttpsError("out-of-range", left > 0
-        ? `The daily limit is ${money(lim.dailyMax)}. You can request up to ${money(left)} more today.`
-        : `You've reached today's limit of ${money(lim.dailyMax)}. Try again tomorrow.`);
+        ? `The daily limit is ${money(dailyMax, ccy)}. You can request up to ${money(left, ccy)} more today.`
+        : `You've reached today's limit of ${money(dailyMax, ccy)}. Try again tomorrow.`);
     }
-    const ccy = str(wSnap.data()?.currencyCode) ?? "PHP";
+    // What the recipient gets, in their wallet's currency (locked now).
+    const recipientAmount = recipient ? convertDown(fx, amount, ccy, recipientCcy!) : null;
+    if (recipient && (recipientAmount ?? 0) <= 0) throw new HttpsError("out-of-range", "That amount is too small to send.");
     const bal = toMoney(Number(wSnap.data()?.balance) || 0);
     if (type === "transfer" && bal < amount) {
       throw new HttpsError("failed-precondition", `Your GigCash balance is only ${money(bal, ccy)}.`);
@@ -229,6 +248,8 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
       method, methodKind, reference, proofPath, proofUrl,
       userId: uid, userName: requester.name, userCode: requester.code,
       recipientId: recipient?.uid ?? null, recipientName: recipient?.name ?? null, recipientCode: recipient?.code ?? null,
+      recipientAmount, recipientCurrency: recipientCcy,
+      fxRates: recipient && recipientCcy !== ccy ? { [ccy]: perUsd(fx, ccy), [recipientCcy!]: perUsd(fx, recipientCcy!) } : null,
       dayKey: day, source: "app", createdAt: now, updatedAt: now,
     });
     if (type === "deposit") {
@@ -247,14 +268,16 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
       });
     }
     tx.set(dailyRef(uid, day), { dayKey: day, [type]: FV.increment(cents(amount)), updatedAt: now }, { merge: true });
-    return { requestId: reqRef.id, status: "pending", duplicate: false, requester, ccy };
+    return { requestId: reqRef.id, status: "pending", duplicate: false, requester, ccy, recipientAmount: recipientAmount ?? 0 };
   });
+  const converted = type === "transfer" && recipientCcy && recipientCcy !== result.ccy
+    ? ` (they receive ${money(result.recipientAmount, recipientCcy)})` : "";
 
   if (!result.duplicate && result.requester) {
     const who = `${result.requester.name}${result.requester.code ? ` (${result.requester.code})` : ""}`;
     const what = type === "deposit"
       ? `submitted a top up of ${money(amount, result.ccy)} via ${method ?? "manual payment"} (ref ${reference})`
-      : `wants to send ${money(amount, result.ccy)} to ${recipient!.name}${recipient!.code ? ` (${recipient!.code})` : ""}`;
+      : `wants to send ${money(amount, result.ccy)}${converted} to ${recipient!.name}${recipient!.code ? ` (${recipient!.code})` : ""}`;
     try {
       await db().collection("admin_notifications").add({
         type: "wallet_request", requiredPermission: ADMIN_PERMISSION,
@@ -279,7 +302,7 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
 // ── Settle ──────────────────────────────────────────────────────────────────
 
 type Outcome = "approved" | "rejected" | "cancelled";
-interface Settled { type: WType; amount: number; ccy: string; userId: string; userName: string; userCode: string | null; recipientId: string | null; recipientName: string | null }
+interface Settled { type: WType; amount: number; ccy: string; userId: string; userName: string; userCode: string | null; recipientId: string | null; recipientName: string | null; recipientAmount: number; recipientCcy: string }
 
 async function settle(requestId: string, outcome: Outcome, opts: { actor?: Actor; ownerUid?: string; note?: string | null }): Promise<Settled> {
   const reqRef = db().collection("wallet_requests").doc(requestId);
@@ -294,7 +317,7 @@ async function settle(requestId: string, outcome: Outcome, opts: { actor?: Actor
     if (!WALLET_REQUEST_TYPES.includes(type) || amount == null) throw new HttpsError("data-loss", "Malformed request.");
     const uid = r.userId as string;
     const rid = (r.recipientId as string | null) ?? null;
-    const ccy = str(r.currencyCode) ?? "PHP";
+    const ccy = str(r.currencyCode) ?? "USD";
 
     const [wSnap, rUser, rWallet] = await Promise.all([
       tx.get(walletRef(uid)),
@@ -316,13 +339,15 @@ async function settle(requestId: string, outcome: Outcome, opts: { actor?: Actor
       } else {
         tx.set(mainTx, { status: "completed" }, { merge: true });
         const rBal = toMoney(Number(rWallet?.data()?.balance) || 0);
-        const rAfter = toMoney(rBal + amount);
-        const rCcy = str(rWallet?.data()?.currencyCode) ?? ccy;
+        // Locked at request time; older requests (same currency) fall back to amount.
+        const rCcy = str(r.recipientCurrency) ?? str(rWallet?.data()?.currencyCode) ?? str(rUser?.data()?.currencyCode) ?? ccy;
+        const rAmount = toMoney(Number(r.recipientAmount) || amount);
+        const rAfter = toMoney(rBal + rAmount);
         tx.set(walletRef(rid!), { balance: rAfter, currencyCode: rCcy, updatedAt: now, ...(rWallet?.exists ? {} : { createdAt: now }) }, { merge: true });
         tx.create(txRef(rid!, `wreq_${requestId}_in`), {
-          amount, type: "receive", title: `From ${r.userName ?? "a Giggre user"}`, currencyCode: rCcy,
+          amount: rAmount, type: "receive", title: `From ${r.userName ?? "a Giggre user"}`, currencyCode: rCcy,
           status: "completed", balanceAfter: rAfter,
-          meta: { requestId, senderId: uid, senderName: r.userName ?? null, note: r.note ?? null }, createdAt: now,
+          meta: { requestId, senderId: uid, senderName: r.userName ?? null, note: r.note ?? null, sentAmount: amount, sentCurrency: ccy }, createdAt: now,
         });
       }
     } else {
@@ -346,7 +371,8 @@ async function settle(requestId: string, outcome: Outcome, opts: { actor?: Actor
       decidedBy: opts.actor?.uid ?? opts.ownerUid ?? null, decidedByName: opts.actor?.name ?? null,
       decisionNote: opts.note ?? null, updatedAt: now,
     });
-    return { type, amount, ccy, userId: uid, userName: r.userName ?? "Giggre user", userCode: r.userCode ?? null, recipientId: rid, recipientName: r.recipientName ?? null };
+    return { type, amount, ccy, userId: uid, userName: r.userName ?? "Giggre user", userCode: r.userCode ?? null, recipientId: rid, recipientName: r.recipientName ?? null,
+      recipientAmount: toMoney(Number(r.recipientAmount) || amount), recipientCcy: str(r.recipientCurrency) ?? ccy };
   });
 }
 
@@ -367,7 +393,8 @@ export const decideWalletRequest = onCall(OPTS, async (request) => {
       s.type === "deposit" ? `${amt} was added to your Gig Wallet.` : `${amt} was sent to ${s.recipientName ?? "the recipient"}.`,
       { requestId, status: "approved", requestType: s.type });
     if (s.type === "transfer" && s.recipientId) {
-      await notifyWalletUser(s.recipientId, `You received ${amt}`, `${s.userName} sent you ${amt} GigCash.`,
+      const got = money(s.recipientAmount, s.recipientCcy);
+      await notifyWalletUser(s.recipientId, `You received ${got}`, `${s.userName} sent you ${got} GigCash.`,
         { requestId, status: "received", requestType: "transfer" });
     }
   } else {
@@ -401,6 +428,6 @@ export const adminFindWalletUser = onCall(OPTS, async (request) => {
     uid: u.uid, name: u.name, code: u.code, photoUrl: u.photoUrl,
     phone: str(snap.data()?.phone), email: str(snap.data()?.email),
     isVerified: str(snap.data()?.isVerified),
-    walletBalance: toMoney(Number(w.balance) || 0), currencyCode: str(w.currencyCode) ?? "PHP",
+    walletBalance: toMoney(Number(w.balance) || 0), currencyCode: walletCurrency(w, snap.data()),
   };
 });

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/providers/current_user_provider.dart';
@@ -171,7 +170,7 @@ class _WalletScreenState extends State<WalletScreen> {
         title: const Text('You have a request in review'),
         content: Text(
           'Your ${p.label.toLowerCase()} of '
-          '${NumberFormat.currency(symbol: '₱', decimalDigits: 2).format(p.amount)} '
+          '${walletCash(p.amount, p.currencyCode ?? context.read<CurrentUserProvider>().currencyCode)} '
           'is waiting for a Giggre admin. You can make a new request once it '
           'is approved or rejected, or cancel it from the Requests tab.',
         ),
@@ -304,6 +303,7 @@ class _WalletScreenState extends State<WalletScreen> {
                         _boxed(
                           WalletRequestsList(
                             requests: _requests,
+                            fallbackCurrency: userCurrency,
                             hasError: _reqError,
                             accent: _accent,
                           ),

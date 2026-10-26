@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/currency_formatter.dart';
 import '../models/gig_points_models.dart';
 import '../services/gig_points_history_controller.dart';
 import 'reward_stage_style.dart';
@@ -505,11 +506,10 @@ class TransactionDetailsSheet extends StatelessWidget {
       if (tx.isConversion && tx.cash != null)
         (
           'GigCash',
-          '${tx.currencyCode == 'PHP' ? '₱' : '${tx.currencyCode} '}'
+          '${CurrencyFormatter.symbol(tx.currencyCode)}'
               '${tx.cash!.toStringAsFixed(2)}',
         ),
-      if (tx.isConversion && tx.rate != null)
-        ('Rate', '${tx.rate} points per ₱1'),
+      if (tx.isConversion && tx.rateText != null) ('Rate', tx.rateText),
     ];
 
     return SingleChildScrollView(

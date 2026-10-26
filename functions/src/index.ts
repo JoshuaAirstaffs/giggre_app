@@ -1465,3 +1465,7 @@ export {
   decideWalletRequest,
   adminFindWalletUser,
 } from "./walletRequests";
+
+// ── Exchange rates ──────────────────────────────────────────────────────────
+// Live USD→PHP rate for Gig Points / Gig Wallet. See functions/src/fx.ts.
+export { refreshFxRates, adminRefreshFxRates } from "./fx";
