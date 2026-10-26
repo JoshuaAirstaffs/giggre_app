@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:giggre_app/features/call/video_call_screen.dart';
+import 'package:giggre_app/features/support_ai/presentation/support_bubble_host.dart';
 
 class IncomingVideoCallScreen extends StatefulWidget {
   final String callerId;
@@ -30,7 +31,7 @@ class IncomingVideoCallScreen extends StatefulWidget {
 }
 
 class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, HidesSupportBubble {
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
   final AudioPlayer _audioPlayer = AudioPlayer();

@@ -25,6 +25,7 @@ import 'core/theme/theme_provider.dart';
 import 'features/tutorial/controller/tutorial_controller.dart';
 import 'features/tutorial/services/tutorial_service.dart';
 import 'features/tutorial/widgets/tutorial_overlay.dart';
+import 'features/support_ai/presentation/support_bubble_host.dart';
 import 'services/delete_acc_service.dart';
 import 'firebase_options_dev.dart' as dev;
 import 'firebase_options_prod.dart' as prod;
@@ -71,6 +72,8 @@ final ValueNotifier<bool> isCompletingRegistration = ValueNotifier<bool>(false);
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<NavigatorState> callNavigatorKey = GlobalKey<NavigatorState>();
+final SupportBubbleRouteObserver supportBubbleRouteObserver =
+    SupportBubbleRouteObserver();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -645,9 +648,16 @@ class GiggreApp extends StatelessWidget {
       darkTheme: ThemeProvider.darkTheme,
       themeMode: themeProvider.mode,
       builder: (context, child) => TutorialOverlayHost(
-        child: AppUpdateChecker(child: child ?? const SizedBox()),
+        child: AppUpdateChecker(
+          child: Stack(
+            children: [
+              child ?? const SizedBox(),
+              SupportBubbleHost(navigatorKey: navigatorKey),
+            ],
+          ),
+        ),
       ),
-      navigatorObservers: [welcomeRouteObserver],
+      navigatorObservers: [welcomeRouteObserver, supportBubbleRouteObserver],
       home: firebaseError != null
           ? _FirebaseErrorScreen(firebaseError!)
           : const _MaintenanceGate(),

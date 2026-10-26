@@ -11,6 +11,7 @@ import '../core/providers/current_user_provider.dart';
 import '../core/theme/app_colors.dart';
 import '../features/auth/models/delete_request_model.dart';
 import '../features/auth/presentation/welcome_screen.dart';
+import '../features/support_ai/services/support_chat_store.dart';
 
 class DeleteAccountService {
   // ─────────────────────────────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ class DeleteAccountService {
         );
       }
       await clearing;
+      await SupportChatStore.clearAll();
       await FirebaseAuth.instance.signOut();
     } catch (e) {
       debugPrint('[DeleteAccountService] deleteAccount error: $e');

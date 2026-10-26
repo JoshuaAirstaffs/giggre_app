@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'call_log.dart';
+import '../support_ai/presentation/support_bubble_host.dart';
 
 class VoiceCallScreen extends StatefulWidget {
   final String channelName;
@@ -24,7 +25,7 @@ class VoiceCallScreen extends StatefulWidget {
 }
 
 class _VoiceCallScreenState extends State<VoiceCallScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, HidesSupportBubble {
   // Nullable — _endCall() can run (e.g. the user taps End) before _initAgora's
   // await Permission.microphone.request() resolves and assigns this, so a
   // non-nullable `late` field would throw LateInitializationError there and

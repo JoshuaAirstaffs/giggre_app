@@ -18,6 +18,8 @@ import '../../features/tutorial/flows/gig_types_flow.dart';
 import '../chat/home_chat.dart';
 import '../worker/worker_shell.dart';
 import 'host_speed_dial.dart';
+import '../../features/support_ai/presentation/support_bubble.dart';
+import '../../features/support_ai/presentation/support_bubble_host.dart';
 
 const _kNavActive = Color(0xFFD88810);
 const _kNavInactive = Color(0xFF9AA5B5);
@@ -65,6 +67,7 @@ class _HostShellState extends State<HostShell>
   @override
   void initState() {
     super.initState();
+    SupportBubbleMode.set(GiggreMode.host);
     _listenForUnreadSupport();
     _listenForUnreadGig();
   }

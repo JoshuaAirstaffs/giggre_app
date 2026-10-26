@@ -402,6 +402,10 @@ service cloud.firestore {
       allow write: if true;
     }
 
+    // ─── AI Support Usage ──────────────────────────────────────
+    // Hourly message counter for the askSupport function (Admin SDK only).
+    match /supportAiUsage/{uid} { allow read, write: if false; }
+
     // ─── User Requests ─────────────────────────────────────────
     match /user_requests/{requestId} {
       allow read: if isAuth() && (

@@ -38,6 +38,7 @@ import '../../../gig_shared/active_gig_widgets.dart';
 import '../../../gig_shared/post_gig_actions.dart';
 import '../../../gig_shared/user_profile_screen.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
+import '../../../support_ai/presentation/support_bubble_host.dart';
 
 String _generatePaymentCode() {
   final r = Random();
@@ -3108,7 +3109,8 @@ class _GigTrackingMap extends StatefulWidget {
   State<_GigTrackingMap> createState() => _GigTrackingMapState();
 }
 
-class _GigTrackingMapState extends State<_GigTrackingMap> {
+class _GigTrackingMapState extends State<_GigTrackingMap>
+    with HidesSupportBubble {
   GoogleMapController? _googleMapController;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();

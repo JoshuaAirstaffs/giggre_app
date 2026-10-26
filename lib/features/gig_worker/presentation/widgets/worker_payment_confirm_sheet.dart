@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/earnings_service.dart';
+import '../../../support_ai/presentation/support_bubble_host.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  WorkerPaymentConfirmSheet — shown to worker when gig enters 'payment' status.
@@ -548,7 +549,8 @@ class _QrScannerScreen extends StatefulWidget {
   State<_QrScannerScreen> createState() => _QrScannerScreenState();
 }
 
-class _QrScannerScreenState extends State<_QrScannerScreen> {
+class _QrScannerScreenState extends State<_QrScannerScreen>
+    with HidesSupportBubble {
   final _controller = MobileScannerController();
   bool _detected = false;
 

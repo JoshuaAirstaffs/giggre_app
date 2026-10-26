@@ -10,6 +10,8 @@ import '../../features/home/presentation/profile_tab.dart';
 import '../chat/home_chat.dart';
 import '../host/host_shell.dart';
 import '../../features/gig_worker/presentation/saved_screen.dart';
+import '../../features/support_ai/presentation/support_bubble.dart';
+import '../../features/support_ai/presentation/support_bubble_host.dart';
 
 const _kNavActive = Color(0xFF2B6FB5);
 const _kNavInactive = Color(0xFF9AA5B5);
@@ -55,6 +57,7 @@ class _WorkerShellState extends State<WorkerShell> {
   @override
   void initState() {
     super.initState();
+    SupportBubbleMode.set(GiggreMode.worker);
     _listenForUnreadSupport();
     _listenForUnreadGig();
   }

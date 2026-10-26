@@ -4,6 +4,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
 
 import '../../features/auth/presentation/welcome_screen.dart';
+import '../../features/support_ai/services/support_chat_store.dart';
 import '../providers/current_user_provider.dart';
 
 /// The sign-out teardown chain, with no navigation and no [BuildContext] —
@@ -49,6 +50,7 @@ Future<void> signOutAndCleanup(
     } catch (_) {}
   }
 
+  await SupportChatStore.clearAll();
   await FirebaseAuth.instance.signOut();
 }
 

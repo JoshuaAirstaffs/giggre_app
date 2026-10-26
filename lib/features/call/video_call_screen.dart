@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'call_log.dart';
+import '../support_ai/presentation/support_bubble_host.dart';
 
 class VideoCallScreen extends StatefulWidget {
   final String channelName;
@@ -24,7 +25,7 @@ class VideoCallScreen extends StatefulWidget {
 }
 
 class _VideoCallScreenState extends State<VideoCallScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, HidesSupportBubble {
   RtcEngine? _engine;
 
   final AudioPlayer _ringbackPlayer = AudioPlayer();

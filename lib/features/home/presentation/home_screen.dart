@@ -38,6 +38,8 @@ import '../../wallet/presentation/wallet_screen.dart';
 import 'profile_tab.dart';
 import '../../gig_points/presentation/gig_points_button.dart';
 import '../../gig_points/presentation/gig_points_screen.dart';
+import '../../support_ai/presentation/support_bubble_host.dart';
+import '../../support_ai/services/support_chat_store.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -299,6 +301,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _selectedRole = data?['role'];
       _photoUrl = data?['photoUrl'] ?? '';
     });
+    SupportBubbleMode.setFromRole(_selectedRole);
     final homeProvider = context.read<CurrentUserProvider>();
     homeProvider.setCurrentUserInfo(
       FirebaseAuth.instance.currentUser?.email,
@@ -442,6 +445,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       );
                     }
                     await clearing;
+                    await SupportChatStore.clearAll();
                     await FirebaseAuth.instance.signOut();
                   },
                   child: const Text(
@@ -463,6 +467,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _saving = true;
       _selectedRole = role;
     });
+    SupportBubbleMode.setFromRole(role);
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {

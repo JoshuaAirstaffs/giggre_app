@@ -27,6 +27,7 @@ import '../../../../core/widgets/rating_dialog.dart';
 import '../../../gig_shared/active_gig_theme.dart';
 import '../../../gig_shared/active_gig_step.dart';
 import '../../../gig_shared/active_gig_widgets.dart';
+import '../../../support_ai/presentation/support_bubble_host.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Route step model + helpers (used by _fetchRoute)
@@ -155,7 +156,8 @@ class WorkingUI extends StatefulWidget {
   State<WorkingUI> createState() => _WorkingUIState();
 }
 
-class _WorkingUIState extends State<WorkingUI> {
+class _WorkingUIState extends State<WorkingUI>
+    with HidesSupportBubble {
   GigStep _step = GigStep.navigating;
 
   GigStep _lastActiveStep = GigStep.navigating;
