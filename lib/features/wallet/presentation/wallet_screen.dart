@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -6,789 +8,435 @@ import 'package:provider/provider.dart';
 
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/profile_tab_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../services/wallet_requests_service.dart';
 import 'cash_in_methods_screen.dart';
 import 'choose_recipient_screen.dart';
 import 'security_privacy_centre_screen.dart';
-import 'transaction_details_screen.dart';
-import 'transaction_history_screen.dart';
-import 'widgets/wallet_transaction.dart';
+import 'wallet_tabs.dart';
 
-// Hidden until payment methods exist. Flip to true to bring the
-// "Set as default payment method" row back.
-const bool _kShowDefaultPaymentToggle = false;
+enum _Tab { activity, requests, info }
 
-// Security and Privacy Centre is built but hidden for now — the banner shows
-// "coming soon" instead. Flip to true to open the real screen.
-const bool _kShowSecurityCentre = true;
-
-/// Wallet screen. Layout mirrors ProfileTab: themed background, back arrow +
-/// bold title row, then scrollable content.
-class WalletScreen extends StatelessWidget {
+/// Gig Wallet, laid out like the Gig Points screen:
+///   balance card (+ Top Up / Withdraw / Send) → stats strip →
+///   security banner → pinned tabs: Activity | Requests | How it works.
+///
+/// Read-only over server-written data: wallets/{uid} and its transactions
+/// (functions/src/wallet.ts) and wallet_requests (walletRequests.ts).
+/// Top Up and Send are requests a Giggre admin approves; Withdraw is not
+/// available yet. Blue in Worker mode, gold in Host mode.
+class WalletScreen extends StatefulWidget {
   const WalletScreen({super.key, this.role});
 
-  /// The mode picked on Home: 'worker' → blue, 'host' → gold.
-  /// Anything else (e.g. null) falls back to worker blue.
+  /// The mode picked on Home: 'host' → gold, anything else → blue.
   final String? role;
 
-  // Withdraw (cash out) is not available yet; Top Up and Send are requests
-  // reviewed by a Giggre admin (functions/src/walletRequests.ts).
-  void _comingSoon(BuildContext context, String action) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$action is coming soon.')),
-    );
-  }
-
   @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent = _WalletAccent.forRole(role, isDark: isDark);
-
-    return _WalletAccentScope(
-      accent: accent,
-      child: Scaffold(
-        backgroundColor: tokens.screenBg,
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.only(bottom: 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Hero: back, title, GigCash amount, badge ───────────────
-              _WalletHero(uid: uid, tokens: tokens),
-              Divider(height: 1, thickness: 1, color: tokens.divider),
-
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                  // ── Wallet actions ─────────────────────────────────────────
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _WalletActionButton(
-                          label: 'Top Up',
-                          icon: Icons.add_card_rounded,
-                          tokens: tokens,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => CashInMethodsScreen(role: role),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _WalletActionButton(
-                          label: 'Withdraw',
-                          icon: Icons.account_balance_rounded,
-                          tokens: tokens,
-                          onTap: () => _comingSoon(context, 'Withdraw'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _WalletActionButton(
-                          label: 'Send',
-                          icon: Icons.north_east_rounded,
-                          tokens: tokens,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ChooseRecipientScreen(role: role),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // ── Request waiting for review (one at a time) ─────────────
-                  if (uid != null) _PendingWalletRequestCard(uid: uid, tokens: tokens),
-
-                  // ── Default payment toggle (hidden for now) ────────────────
-                  if (_kShowDefaultPaymentToggle) ...[
-                    _DefaultPaymentToggle(tokens: tokens),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // ── Security info banner ───────────────────────────────────
-                  _SecurityBanner(
-                    onTap: _kShowSecurityCentre
-                        ? () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  SecurityPrivacyCentreScreen(role: role),
-                            ),
-                          )
-                        : () => _comingSoon(context, 'Security and Privacy Centre'),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // ── Transaction history ────────────────────────────────────
-                  _TransactionHistory(uid: uid, role: role, tokens: tokens),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  State<WalletScreen> createState() => _WalletScreenState();
 }
 
-class _WalletHero extends StatelessWidget {
-  const _WalletHero({required this.uid, required this.tokens});
+class _WalletScreenState extends State<WalletScreen> {
+  static const _pageSize = 30;
 
-  final String? uid;
-  final ProfileTabTokens tokens;
+  String? _uid;
+  Stream<DocumentSnapshot<Map<String, dynamic>>>? _wallet;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _txSub;
+  StreamSubscription<List<WalletRequest>>? _reqSub;
+
+  List<WalletTxView>? _txs;
+  bool _txError = false;
+  bool _txFromCache = false;
+  int _txLimit = _pageSize;
+  bool _loadingMore = false;
+
+  List<WalletRequest>? _requests;
+  bool _reqError = false;
+
+  _Tab _tab = _Tab.activity;
+  WalletFilter _filter = WalletFilter.all;
+
+  bool get _isHost => widget.role == 'host';
+  Color get _accent => _isHost ? kGold : kBlue;
+
+  @override
+  void initState() {
+    super.initState();
+    _uid = FirebaseAuth.instance.currentUser?.uid;
+    _listenAll();
+  }
+
+  void _listenAll() {
+    final uid = _uid;
+    if (uid == null) return;
+    _wallet = FirebaseFirestore.instance.collection('wallets').doc(uid).snapshots(
+      includeMetadataChanges: true,
+    );
+    _listenTxs();
+    _reqSub?.cancel();
+    _reqSub = WalletRequestsService.requestsStream(uid).listen(
+      (list) {
+        if (mounted) setState(() {
+          _requests = list;
+          _reqError = false;
+        });
+      },
+      onError: (Object e) {
+        debugPrint('[Wallet] requests: $e');
+        if (mounted) setState(() => _reqError = true);
+      },
+    );
+  }
+
+  // One growing live query (like the Gig Points history), so pending
+  // entries flip to completed on screen.
+  void _listenTxs() {
+    final uid = _uid;
+    if (uid == null) return;
+    _txSub?.cancel();
+    _txSub = FirebaseFirestore.instance
+        .collection('wallets')
+        .doc(uid)
+        .collection('transactions')
+        .orderBy('createdAt', descending: true)
+        .limit(_txLimit)
+        .snapshots(includeMetadataChanges: true)
+        .listen(
+          (q) {
+            if (!mounted) return;
+            setState(() {
+              _txs = q.docs.map(WalletTxView.fromDoc).toList();
+              _txFromCache = q.metadata.isFromCache;
+              _txError = false;
+              _loadingMore = false;
+            });
+          },
+          onError: (Object e) {
+            debugPrint('[Wallet] history: $e');
+            if (mounted) setState(() {
+              _txError = true;
+              _loadingMore = false;
+            });
+          },
+        );
+  }
+
+  bool get _hasMore => (_txs?.length ?? 0) >= _txLimit;
+
+  void _loadMore() {
+    if (_loadingMore || !_hasMore || _txError) return;
+    setState(() {
+      _loadingMore = true;
+      _txLimit += _pageSize;
+    });
+    _listenTxs();
+  }
+
+  bool _onScroll(ScrollUpdateNotification n) {
+    if (_tab == _Tab.activity && n.metrics.extentAfter < 400) _loadMore();
+    return false;
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _txLimit = _pageSize;
+    });
+    _listenAll();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+  }
+
+  @override
+  void dispose() {
+    _txSub?.cancel();
+    _reqSub?.cancel();
+    super.dispose();
+  }
+
+  WalletRequest? get _pending {
+    for (final r in _requests ?? const <WalletRequest>[]) {
+      if (r.isPending) return r;
+    }
+    return null;
+  }
+
+  void _snack(String text) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  /// One request at a time (enforced on the server too).
+  bool _blockedByPending() {
+    final p = _pending;
+    if (p == null) return false;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('You have a request in review'),
+        content: Text(
+          'Your ${p.label.toLowerCase()} of '
+          '${NumberFormat.currency(symbol: '₱', decimalDigits: 2).format(p.amount)} '
+          'is waiting for a Giggre admin. You can make a new request once it '
+          'is approved or rejected, or cancel it from the Requests tab.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
+      ),
+    );
+    return true;
+  }
+
+  void _topUp() {
+    if (_blockedByPending()) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => CashInMethodsScreen(role: widget.role)),
+    );
+  }
+
+  void _send() {
+    if (_blockedByPending()) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ChooseRecipientScreen(role: widget.role)),
+    );
+  }
+
+  void _withdraw() => _snack('Withdraw is coming soon.');
+
+  void _openSecurity() => Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => SecurityPrivacyCentreScreen(role: widget.role)),
+  );
 
   @override
   Widget build(BuildContext context) {
-    final accent = _WalletAccent.of(context);
-    final currencyCode = context.watch<CurrentUserProvider>().currencyCode;
-    final number = NumberFormat.currency(symbol: '', decimalDigits: 2);
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    final userCurrency = context.watch<CurrentUserProvider>().currencyCode;
+    final uid = _uid;
 
-    return ClipRect(
-      child: Stack(
-        children: [
-          // Soft accent glow in the top-right corner.
-          Positioned(
-            top: -120,
-            right: -110,
-            child: IgnorePointer(
-              child: Container(
-                width: 340,
-                height: 340,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      accent.fill.withValues(alpha: 0.22),
-                      accent.fill.withValues(alpha: 0.0),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 20, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  IconButton(
-                    tooltip: 'Back',
-                    onPressed: () => Navigator.maybePop(context),
-                    icon: Icon(
-                      Icons.arrow_back_rounded,
-                      color: tokens.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Padding(
-                    padding: const EdgeInsets.only(left: 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Gig Wallet',
-                                style: TextStyle(
-                                  color: accent.fg,
-                                  fontSize: 26,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.4,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'GigCash',
-                                style: TextStyle(
-                                  color: tokens.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              // Live: updates when the user doc's balance changes.
-                              StreamBuilder<
-                                DocumentSnapshot<Map<String, dynamic>>
-                              >(
-                                stream: uid == null
-                                    ? null
-                                    // Server-only wallet doc (see
-                                    // functions/src/wallet.ts). Missing doc
-                                    // = no transactions yet = 0.
-                                    : FirebaseFirestore.instance
-                                          .collection('wallets')
-                                          .doc(uid)
-                                          .snapshots(),
-                                builder: (context, snap) {
-                                  if (snap.connectionState ==
-                                          ConnectionState.waiting &&
-                                      !snap.hasData) {
-                                    return SizedBox(
-                                      height: 42,
-                                      child: Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: SizedBox(
-                                          width: 22,
-                                          height: 22,
-                                          child: CircularProgressIndicator(
-                                            color: accent.fill,
-                                            strokeWidth: 2,
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                  final wallet = snap.data?.data();
-                                  final balance =
-                                      (wallet?['balance'] as num?)
-                                          ?.toDouble() ??
-                                      0;
-                                  // The wallet's own currency wins once it
-                                  // exists; until then, the user's location.
-                                  final symbol = CurrencyFormatter.symbol(
-                                    wallet?['currencyCode'] as String? ??
-                                        currencyCode,
-                                  );
-                                  return FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    alignment: Alignment.centerLeft,
-                                    child: Text.rich(
-                                      TextSpan(
-                                        children: [
-                                          TextSpan(
-                                            text: '$symbol ',
-                                            style: TextStyle(
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.w600,
-                                              color: tokens.textSecondary,
-                                            ),
-                                          ),
-                                          TextSpan(
-                                            text: snap.hasError
-                                                ? '—'
-                                                : number
-                                                      .format(balance)
-                                                      .trim(),
-                                            style: TextStyle(
-                                              fontSize: 36,
-                                              fontWeight: FontWeight.w800,
-                                              letterSpacing: -0.6,
-                                              color: tokens.textPrimary,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
+    return Scaffold(
+      backgroundColor: bg,
+      appBar: AppBar(
+        backgroundColor: bg,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        title: const Text('Gig Wallet', style: TextStyle(fontWeight: FontWeight.w800)),
+      ),
+      body: uid == null
+          ? const WalletEmpty(
+              icon: Icons.lock_outline_rounded,
+              text: 'Sign in to see your Gig Wallet.',
+            )
+          : RefreshIndicator(
+              color: _accent,
+              onRefresh: _refresh,
+              child: NotificationListener<ScrollUpdateNotification>(
+                onNotification: _onScroll,
+                child: CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                      sliver: SliverToBoxAdapter(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                              stream: _wallet,
+                              builder: (context, snap) {
+                                final d = snap.data?.data();
+                                return WalletHero(
+                                  isHost: _isHost,
+                                  loading: !snap.hasData && !snap.hasError,
+                                  hasError: snap.hasError && !snap.hasData,
+                                  balance: (d?['balance'] as num?)?.toDouble() ?? 0,
+                                  symbol: CurrencyFormatter.symbol(
+                                    d?['currencyCode'] as String? ?? userCurrency,
+                                  ),
+                                  fromCache: snap.data?.metadata.isFromCache ?? false,
+                                  pending: _pending,
+                                  onTopUp: _topUp,
+                                  onWithdraw: _withdraw,
+                                  onSend: _send,
+                                  onInfo: () => showWalletInfoSheet(context),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            WalletStatsStrip(
+                              txs: _txs,
+                              currency: userCurrency,
+                              accent: _accent,
+                            ),
+                            const SizedBox(height: 12),
+                            WalletSecurityBanner(accent: _accent, onTap: _openSecurity),
+                            const SizedBox(height: 8),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        // Round Giggre badge.
-                        Container(
-                          width: 60,
-                          height: 60,
-                          decoration: BoxDecoration(
-                            color: accent.fill,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: accent.fill.withValues(alpha: 0.3),
-                                blurRadius: 14,
-                                offset: const Offset(0, 5),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.bolt_rounded,
-                            color: Colors.white,
-                            size: 32,
+                      ),
+                    ),
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _TabsHeader(
+                        background: bg,
+                        accent: _accent,
+                        selected: _tab,
+                        pendingCount: _pending == null ? 0 : 1,
+                        onChanged: (t) => setState(() => _tab = t),
+                      ),
+                    ),
+                    ...switch (_tab) {
+                      _Tab.activity => walletActivitySlivers(
+                        context,
+                        txs: _txs,
+                        hasError: _txError,
+                        fromCache: _txFromCache,
+                        filter: _filter,
+                        onFilter: (f) => setState(() => _filter = f),
+                        hasMore: _hasMore,
+                        loadingMore: _loadingMore,
+                        onLoadMore: _loadMore,
+                        onRetry: _listenTxs,
+                        fallbackCurrency: userCurrency,
+                        role: widget.role,
+                        accent: _accent,
+                      ),
+                      _Tab.requests => [
+                        _boxed(
+                          WalletRequestsList(
+                            requests: _requests,
+                            hasError: _reqError,
+                            accent: _accent,
                           ),
                         ),
                       ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _WalletActionButton extends StatelessWidget {
-  const _WalletActionButton({
-    required this.label,
-    required this.icon,
-    required this.tokens,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final ProfileTabTokens tokens;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(12);
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Material(
-        color: tokens.cardSurface,
-        shape: RoundedRectangleBorder(
-          borderRadius: radius,
-          side: BorderSide(color: tokens.cardBorder),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 14),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 22, color: _WalletAccent.of(context).fg),
-                const SizedBox(height: 6),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: tokens.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// TODO: persist this choice (e.g. a field on the user doc) once the payment
-// flow reads it. For now it only lives in memory while the screen is open.
-class _DefaultPaymentToggle extends StatefulWidget {
-  const _DefaultPaymentToggle({required this.tokens});
-
-  final ProfileTabTokens tokens;
-
-  @override
-  State<_DefaultPaymentToggle> createState() => _DefaultPaymentToggleState();
-}
-
-class _DefaultPaymentToggleState extends State<_DefaultPaymentToggle> {
-  bool _isDefault = true;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              'Set as default payment method',
-              style: TextStyle(
-                color: widget.tokens.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          Switch(
-            value: _isDefault,
-            onChanged: (v) => setState(() => _isDefault = v),
-            activeThumbColor: Colors.white,
-            activeTrackColor: _WalletAccent.of(context).fill,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SecurityBanner extends StatelessWidget {
-  const _SecurityBanner({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = _WalletAccent.of(context);
-    final radius = BorderRadius.circular(12);
-    // Light tint instead of a solid fill so it doesn't outshout the balance.
-    return Material(
-      color: accent.fill.withValues(alpha: 0.10),
-      shape: RoundedRectangleBorder(
-        borderRadius: radius,
-        side: BorderSide(color: accent.fill.withValues(alpha: 0.25)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Icon(Icons.shield_outlined, color: accent.fg, size: 19),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Find out how we keep your Gig Wallet secure',
-                  style: TextStyle(
-                    color: accent.fg,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              Icon(Icons.chevron_right_rounded, color: accent.fg, size: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-//  Transaction history
-//
-//  Reads wallets/{uid}/transactions, newest first (written only by
-//  postLedgerEntry in functions/src/wallet.ts). Fields:
-//    title        String     e.g. "Top Up via GCash", "Payment for Gig #123"
-//    amount       num        signed: positive = money in, negative = money out
-//    type         String     top_up | withdraw | send | receive | gig_payment |
-//                            earning | refund | fee | adjustment
-//    currencyCode String?    defaults to the user's currency
-//    status       String?    completed | pending | failed (default completed)
-//    createdAt    Timestamp
-//  Only the backend (Cloud Functions / Admin SDK) should write these.
-// ─────────────────────────────────────────────
-class _TransactionHistory extends StatelessWidget {
-  const _TransactionHistory({
-    required this.uid,
-    required this.role,
-    required this.tokens,
-  });
-
-  final String? uid;
-  final String? role;
-  final ProfileTabTokens tokens;
-
-  /// Rows shown here; the rest are on the "See all" screen.
-  static const int _kPreview = 5;
-
-  void _openDetails(BuildContext context, WalletTx tx, String currency) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => TransactionDetailsScreen(
-          tx: tx,
-          fallbackCurrency: currency,
-          role: role,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final userCurrency = context.watch<CurrentUserProvider>().currencyCode;
-    final accent = _WalletAccent.of(context);
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      decoration: BoxDecoration(
-        color: tokens.cardSurface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: tokens.cardBorder),
-      ),
-      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: uid == null
-            ? null
-            : FirebaseFirestore.instance
-                  .collection('wallets')
-                  .doc(uid)
-                  .collection('transactions')
-                  .orderBy('createdAt', descending: true)
-                  .limit(_kPreview)
-                  .snapshots(),
-        builder: (context, snap) {
-          final txs = snap.data?.docs.map(WalletTx.fromDoc).toList() ?? [];
-
-          final Widget body;
-          if (snap.hasError) {
-            debugPrint('[Wallet] history error: ${snap.error}');
-            body = WalletHistoryMessage(
-              icon: Icons.error_outline_rounded,
-              text: "Couldn't load transactions.",
-              tokens: tokens,
-            );
-          } else if (!snap.hasData) {
-            body = Padding(
-              padding: const EdgeInsets.symmetric(vertical: 28),
-              child: Center(
-                child: SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    color: accent.fill,
-                    strokeWidth: 2,
-                  ),
-                ),
-              ),
-            );
-          } else if (txs.isEmpty) {
-            body = WalletHistoryMessage(
-              icon: Icons.receipt_long_rounded,
-              text: 'No transactions yet.',
-              tokens: tokens,
-            );
-          } else {
-            body = Column(
-              children: [
-                for (var i = 0; i < txs.length; i++) ...[
-                  if (i > 0) Divider(height: 1, color: tokens.divider),
-                  WalletTransactionRow(
-                    tx: txs[i],
-                    fallbackCurrency: userCurrency,
-                    tokens: tokens,
-                    onTap: () => _openDetails(context, txs[i], userCurrency),
-                  ),
-                ],
-              ],
-            );
-          }
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Header: title + See all ────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Transaction History',
-                        style: TextStyle(
-                          color: tokens.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (uid != null && txs.isNotEmpty)
-                      TextButton(
-                        onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => TransactionHistoryScreen(
-                              uid: uid!,
-                              role: role,
-                            ),
-                          ),
-                        ),
-                        style: TextButton.styleFrom(
-                          foregroundColor: accent.fg,
-                        ),
-                        child: const Text(
-                          'See all',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      )
-                    else
-                      const SizedBox(height: 48),
+                      _Tab.info => [
+                        _boxed(WalletInfoTab(accent: _accent, onSecurity: _openSecurity)),
+                      ],
+                    },
                   ],
                 ),
               ),
-              body,
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-//  Role accent: blue for Gig Worker, gold for Gig Host
-// ─────────────────────────────────────────────
-class _WalletAccent {
-  const _WalletAccent({required this.fill, required this.fg});
-
-  /// Brand colour for fills, tints, switch tracks and spinners.
-  final Color fill;
-
-  /// Colour for icons and text. Same brand gold as Home's Gig Host card.
-  final Color fg;
-
-  factory _WalletAccent.forRole(String? role, {required bool isDark}) {
-    if (role == 'host') {
-      return const _WalletAccent(fill: kGold, fg: kGold);
-    }
-    return const _WalletAccent(fill: kBlue, fg: kBlue);
-  }
-
-  static _WalletAccent of(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<_WalletAccentScope>()?.accent ??
-      const _WalletAccent(fill: kBlue, fg: kBlue);
-}
-
-class _WalletAccentScope extends InheritedWidget {
-  const _WalletAccentScope({required this.accent, required super.child});
-
-  final _WalletAccent accent;
-
-  @override
-  bool updateShouldNotify(_WalletAccentScope old) =>
-      old.accent.fill != accent.fill || old.accent.fg != accent.fg;
-}
-
-/// The user's top up / send request that's waiting for a Giggre admin, with
-/// Cancel. Renders nothing when there isn't one.
-class _PendingWalletRequestCard extends StatelessWidget {
-  const _PendingWalletRequestCard({required this.uid, required this.tokens});
-
-  final String uid;
-  final ProfileTabTokens tokens;
-
-  Future<void> _cancel(BuildContext context, WalletRequest r) async {
-    final money = NumberFormat.currency(symbol: '₱', decimalDigits: 2);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Cancel this ${r.label.toLowerCase()}?'),
-        content: Text(
-          r.type == 'transfer'
-              ? '${money.format(r.amount)} goes back to your Gig Wallet.'
-              : 'Giggre will no longer review this top up. If you already '
-                    'paid, contact support instead.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep it'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Cancel request',
-              style: TextStyle(color: Colors.redAccent),
             ),
-          ),
-        ],
-      ),
     );
-    if (ok != true || !context.mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await WalletRequestsService.cancel(r.id);
-      messenger.showSnackBar(const SnackBar(content: Text('Request cancelled.')));
-    } on WalletRequestException catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.message)));
-    }
   }
 
+  Widget _boxed(Widget child) => SliverPadding(
+    padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+    sliver: SliverToBoxAdapter(child: child),
+  );
+}
+
+/// Pinned segmented tabs (same look as Gig Points, in the wallet accent).
+class _TabsHeader extends SliverPersistentHeaderDelegate {
+  final Color background;
+  final Color accent;
+  final _Tab selected;
+  final int pendingCount;
+  final ValueChanged<_Tab> onChanged;
+
+  _TabsHeader({
+    required this.background,
+    required this.accent,
+    required this.selected,
+    required this.pendingCount,
+    required this.onChanged,
+  });
+
+  static const double _height = 60;
+
   @override
-  Widget build(BuildContext context) {
-    final money = NumberFormat.currency(symbol: '₱', decimalDigits: 2);
-    const amber = Color(0xFFF0A830);
-    return StreamBuilder<WalletRequest?>(
-      stream: WalletRequestsService.pendingStream(uid),
-      builder: (context, snap) {
-        final r = snap.data;
-        if (r == null) return const SizedBox.shrink();
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+  double get minExtent => _height;
+  @override
+  double get maxExtent => _height;
+
+  @override
+  bool shouldRebuild(_TabsHeader old) =>
+      old.selected != selected ||
+      old.background != background ||
+      old.accent != accent ||
+      old.pendingCount != pendingCount;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlaps) {
+    return Container(
+      color: background,
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Theme.of(context).dividerColor),
+        ),
+        child: Row(
+          children: [
+            _seg(context, _Tab.activity, 'Activity'),
+            _seg(context, _Tab.requests, 'Requests', badge: pendingCount),
+            _seg(context, _Tab.info, 'How it works'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _seg(BuildContext context, _Tab t, String label, {int badge = 0}) {
+    final active = t == selected;
+    return Expanded(
+      child: Semantics(
+        selected: active,
+        button: true,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => onChanged(t),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: amber.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: amber.withValues(alpha: 0.35)),
+              color: active ? accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.hourglass_top_rounded, color: amber, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${r.label} of ${money.format(r.amount)} in review',
-                        style: TextStyle(
-                          color: tokens.textPrimary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        r.type == 'transfer'
-                            ? 'To ${r.recipientName ?? 'recipient'} · on hold until Giggre reviews it'
-                            : 'Ref ${r.reference ?? '—'} · Giggre is confirming your payment',
-                        style: TextStyle(
-                          color: tokens.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: active ? Colors.white : Theme.of(context).colorScheme.onSurface,
+                      fontSize: 13,
+                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                    ),
                   ),
                 ),
-                TextButton(
-                  onPressed: () => _cancel(context, r),
-                  child: const Text(
-                    'Cancel',
-                    style: TextStyle(color: Colors.redAccent),
+                if (badge > 0) ...[
+                  const SizedBox(width: 5),
+                  Container(
+                    constraints: const BoxConstraints(minWidth: 18),
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    height: 18,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: active ? Colors.white : accent,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Text(
+                      '$badge',
+                      style: TextStyle(
+                        color: active ? accent : Colors.white,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

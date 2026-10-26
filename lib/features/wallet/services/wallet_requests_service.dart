@@ -37,11 +37,47 @@ class WalletAmountLimits {
   static const closed = WalletAmountLimits(enabled: false);
 }
 
+/// How a manual top up is paid (set per method in giggre-admin →
+/// Gig Wallet → Settings).
+enum DepositKind {
+  /// GCash / Maya / bank transfer: accountName + accountNumber.
+  ewallet,
+
+  /// Cash at a Giggre office: accountName = office, accountNumber = address,
+  /// details = hours. Proof = official receipt number.
+  office,
+
+  /// Remittance center: accountName = receiver, accountNumber = receiver
+  /// mobile, details = address / accepted centers. Proof = control number.
+  remittance;
+
+  static DepositKind parse(Object? v) => switch (v) {
+    'office' => DepositKind.office,
+    'remittance' => DepositKind.remittance,
+    _ => DepositKind.ewallet,
+  };
+
+  /// What the proof number is called.
+  String get referenceLabel => switch (this) {
+    DepositKind.ewallet => 'reference number',
+    DepositKind.office => 'official receipt (OR) number',
+    DepositKind.remittance => 'control / tracking number',
+  };
+}
+
 class DepositAccount {
+  final DepositKind kind;
   final String method;
   final String accountName;
   final String accountNumber;
-  const DepositAccount(this.method, this.accountName, this.accountNumber);
+  final String details;
+  const DepositAccount(
+    this.method,
+    this.accountName,
+    this.accountNumber, {
+    this.kind = DepositKind.ewallet,
+    this.details = '',
+  });
 }
 
 /// general_config/wallet_requests — missing doc = closed.
@@ -67,6 +103,13 @@ class WalletRequestConfig {
   );
 
   bool get canTopUp => enabled && deposit.enabled;
+
+  List<DepositAccount> accountsOf(DepositKind kind, {String? method}) =>
+      depositAccounts
+          .where((a) =>
+              a.kind == kind &&
+              (method == null || a.method.toLowerCase() == method.toLowerCase()))
+          .toList();
   bool get canSend => enabled && transfer.enabled;
 
   factory WalletRequestConfig.fromMap(Map<String, dynamic>? d) {
@@ -88,7 +131,13 @@ class WalletRequestConfig {
         if (a is Map) {
           final m = a['method'], n = a['accountName'], no = a['accountNumber'];
           if (m is String && n is String && no is String) {
-            accounts.add(DepositAccount(m, n, no));
+            accounts.add(DepositAccount(
+              m,
+              n,
+              no,
+              kind: DepositKind.parse(a['kind']),
+              details: a['details'] as String? ?? '',
+            ));
           }
         }
       }
@@ -111,7 +160,13 @@ class WalletRequest {
   final double amount;
   final String? recipientName;
   final String? reference;
+  final String? note;
+  final String? method;
+
+  /// Rejection reason (only shown for rejected requests).
+  final String? decisionNote;
   final DateTime? createdAt;
+  final DateTime? decidedAt;
 
   const WalletRequest({
     required this.id,
@@ -120,8 +175,14 @@ class WalletRequest {
     required this.amount,
     this.recipientName,
     this.reference,
+    this.note,
+    this.method,
+    this.decisionNote,
     this.createdAt,
+    this.decidedAt,
   });
+
+  bool get isPending => status == 'pending';
 
   String get label => type == 'transfer' ? 'Send' : 'Top up';
 
@@ -134,8 +195,14 @@ class WalletRequest {
       amount: _amount(d['amount']) ?? 0,
       recipientName: d['recipientName'] as String?,
       reference: d['reference'] as String?,
+      note: d['note'] as String?,
+      method: d['method'] as String?,
+      decisionNote: d['status'] == 'rejected' ? d['decisionNote'] as String? : null,
       createdAt: d['createdAt'] is Timestamp
           ? (d['createdAt'] as Timestamp).toDate()
+          : null,
+      decidedAt: d['decidedAt'] is Timestamp
+          ? (d['decidedAt'] as Timestamp).toDate()
           : null,
     );
   }
@@ -179,6 +246,15 @@ class WalletRequestsService {
       .limit(1)
       .snapshots()
       .map((q) => q.docs.isEmpty ? null : WalletRequest.fromSnapshot(q.docs.first));
+
+  /// The user's newest requests (needs the userId+createdAt index).
+  static Stream<List<WalletRequest>> requestsStream(String uid, {int limit = 30}) => _db
+      .collection('wallet_requests')
+      .where('userId', isEqualTo: uid)
+      .orderBy('createdAt', descending: true)
+      .limit(limit)
+      .snapshots()
+      .map((q) => q.docs.map(WalletRequest.fromSnapshot).toList());
 
   static HttpsCallable _fn(String name) =>
       FirebaseFunctions.instanceFor(region: _functionsRegion).httpsCallable(name);
@@ -229,6 +305,7 @@ class WalletRequestsService {
   static Future<String> createTopUp({
     required double amount,
     required String method,
+    required DepositKind kind,
     required String reference,
     required String clientRequestId,
     String? proofPath,
@@ -239,6 +316,7 @@ class WalletRequestsService {
       'type': 'deposit',
       'amount': amount,
       'method': method,
+      'methodKind': kind.name,
       'reference': reference,
       'clientRequestId': clientRequestId,
       'proofPath': ?proofPath,

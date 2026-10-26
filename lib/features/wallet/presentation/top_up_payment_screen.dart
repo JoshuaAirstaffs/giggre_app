@@ -19,6 +19,7 @@ class TopUpPaymentScreen extends StatefulWidget {
     super.key,
     this.role,
     required this.method,
+    this.kind = DepositKind.ewallet,
     required this.amount,
     required this.config,
     this.popCount = 3,
@@ -26,6 +27,7 @@ class TopUpPaymentScreen extends StatefulWidget {
 
   final String? role;
   final String method;
+  final DepositKind kind;
   final double amount;
   final WalletRequestConfig config;
 
@@ -57,12 +59,13 @@ class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
   }
 
   List<DepositAccount> get _accounts {
-    final all = widget.config.depositAccounts;
-    final same = all
-        .where((a) => a.method.toLowerCase() == widget.method.toLowerCase())
-        .toList();
-    return same.isEmpty ? all : same;
+    final ofKind = widget.config.accountsOf(widget.kind);
+    if (widget.kind != DepositKind.ewallet) return ofKind;
+    final same = widget.config.accountsOf(widget.kind, method: widget.method);
+    return same.isEmpty ? ofKind : same;
   }
+
+  bool get _isEwallet => widget.kind == DepositKind.ewallet;
 
   bool get _ready => _ref.text.trim().length >= 4 && !_submitting;
 
@@ -95,6 +98,7 @@ class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
       await WalletRequestsService.createTopUp(
         amount: widget.amount,
         method: widget.method,
+        kind: widget.kind,
         reference: _ref.text.trim(),
         clientRequestId: _clientRequestId,
         proofPath: path,
@@ -196,11 +200,25 @@ class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          step(1, 'Send exactly ${_money.format(widget.amount)}'),
+                          step(1, switch (widget.kind) {
+                            DepositKind.ewallet => 'Send exactly ${_money.format(widget.amount)}',
+                            DepositKind.office => 'Pay ${_money.format(widget.amount)} in cash',
+                            DepositKind.remittance => 'Send ${_money.format(widget.amount)} by remittance',
+                          }),
                           const SizedBox(height: 4),
                           Text(
-                            'Use your ${widget.method} app to pay one of these '
-                            'Giggre accounts:',
+                            switch (widget.kind) {
+                              DepositKind.ewallet =>
+                                'Use your ${widget.method} app to pay one of '
+                                    'these Giggre accounts:',
+                              DepositKind.office =>
+                                'Go to one of these offices and pay the cashier. '
+                                    'Ask for an official receipt.',
+                              DepositKind.remittance =>
+                                'At any remittance center, send the amount to '
+                                    'this receiver. The center charges you its '
+                                    'own fee on top.',
+                            },
                             style: TextStyle(
                               color: tokens.textSecondary,
                               fontSize: 13,
@@ -209,8 +227,8 @@ class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
                           const SizedBox(height: 10),
                           if (_accounts.isEmpty)
                             Text(
-                              'No payment accounts are set up yet. Please try '
-                              'again later.',
+                              'This top-up method is not set up yet. Please '
+                              'try another one.',
                               style: TextStyle(color: tokens.textMuted),
                             ),
                           for (final a in _accounts)
@@ -229,25 +247,50 @@ class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
                                           CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          '${a.method} · ${a.accountName}',
+                                          switch (widget.kind) {
+                                            DepositKind.ewallet => '${a.method} · ${a.accountName}',
+                                            DepositKind.office => a.accountName,
+                                            DepositKind.remittance => 'Receiver: ${a.accountName}',
+                                          },
                                           style: TextStyle(
-                                            color: tokens.textSecondary,
-                                            fontSize: 12.5,
+                                            color: _isEwallet
+                                                ? tokens.textSecondary
+                                                : tokens.textPrimary,
+                                            fontSize: _isEwallet ? 12.5 : 14.5,
+                                            fontWeight: _isEwallet
+                                                ? FontWeight.w400
+                                                : FontWeight.w700,
                                           ),
                                         ),
                                         const SizedBox(height: 2),
                                         Text(
-                                          a.accountNumber,
+                                          widget.kind == DepositKind.remittance
+                                              ? 'Mobile: ${a.accountNumber}'
+                                              : a.accountNumber,
                                           style: TextStyle(
                                             color: tokens.textPrimary,
-                                            fontSize: 17,
-                                            fontWeight: FontWeight.w800,
-                                            letterSpacing: 0.5,
+                                            fontSize: _isEwallet ? 17 : 13.5,
+                                            fontWeight: _isEwallet
+                                                ? FontWeight.w800
+                                                : FontWeight.w500,
+                                            letterSpacing: _isEwallet ? 0.5 : 0,
                                           ),
                                         ),
+                                        if (a.details.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            a.details,
+                                            style: TextStyle(
+                                              color: tokens.textSecondary,
+                                              fontSize: 12.5,
+                                              height: 1.35,
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                     ),
                                   ),
+                                  if (widget.kind != DepositKind.office)
                                   IconButton(
                                     tooltip: 'Copy number',
                                     icon: Icon(Icons.copy_rounded,
@@ -283,7 +326,7 @@ class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          step(2, 'Enter the reference number'),
+                          step(2, 'Enter the ${widget.kind.referenceLabel}'),
                           const SizedBox(height: 10),
                           TextField(
                             controller: _ref,
@@ -292,7 +335,11 @@ class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
                             cursorColor: accent,
                             style: TextStyle(color: tokens.textPrimary),
                             decoration: InputDecoration(
-                              hintText: 'e.g. 1234 567 890123',
+                              hintText: switch (widget.kind) {
+                                DepositKind.ewallet => 'e.g. 1234 567 890123',
+                                DepositKind.office => 'e.g. OR 004512',
+                                DepositKind.remittance => 'e.g. 1234-5678-9012',
+                              },
                               hintStyle: TextStyle(color: tokens.textMuted),
                               filled: true,
                               fillColor: tokens.insetBg,
@@ -304,7 +351,15 @@ class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Find it on the receipt in your ${widget.method} app.',
+                            switch (widget.kind) {
+                              DepositKind.ewallet =>
+                                'Find it on the receipt in your ${widget.method} app.',
+                              DepositKind.office =>
+                                "It's printed on the official receipt the cashier gives you.",
+                              DepositKind.remittance =>
+                                "It's on the remittance slip (also called KPTN, "
+                                    'reference or tracking number).',
+                            },
                             style: TextStyle(
                               color: tokens.textMuted,
                               fontSize: 12,
@@ -312,7 +367,9 @@ class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
                           ),
                           const SizedBox(height: 14),
                           Text(
-                            'Screenshot of the receipt (optional)',
+                            _isEwallet
+                                ? 'Screenshot of the receipt (optional)'
+                                : 'Photo of the receipt / slip (optional)',
                             style: TextStyle(
                               color: tokens.textSecondary,
                               fontSize: 13,
@@ -324,7 +381,7 @@ class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
                             OutlinedButton.icon(
                               onPressed: _submitting ? null : _pickProof,
                               icon: const Icon(Icons.add_photo_alternate_outlined),
-                              label: const Text('Add screenshot'),
+                              label: Text(_isEwallet ? 'Add screenshot' : 'Add photo'),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: accent,
                                 side: BorderSide(color: accent),

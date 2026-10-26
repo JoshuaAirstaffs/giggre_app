@@ -11,8 +11,10 @@ const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
 // Users REQUEST a wallet movement; an admin approves or rejects it in
 // giggre-admin (Wallet → Requests). Nothing moves without that approval.
 // PayMongo/GCash checkout is postponed, so top-ups are paid OUTSIDE the app
-// to the accounts admins list, and the user submits the reference number
-// (plus an optional screenshot) as proof. Withdraw is "coming soon".
+// using a method admins list — e-wallet transfer, cash at the office, or a
+// remittance center — and the user submits the reference / official receipt
+// / control number (plus an optional photo) as proof. Withdraw is "coming
+// soon".
 //
 //   deposit   nothing is held. A 'pending' top_up entry shows in the
 //             user's history; approval credits the wallet.
@@ -22,7 +24,8 @@ const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
 //
 // Config — general_config/wallet_requests (super-admin edited):
 //   enabled, deposit|transfer.{enabled, min, max, dailyMax} (pesos),
-//   depositAccounts [{method, accountName, accountNumber}], depositNote
+//   depositAccounts [{kind: ewallet|office|remittance, method, accountName,
+//                     accountNumber, details}], depositNote
 // A user may have only ONE pending wallet request at a time.
 //
 // Data (server-write only — see firestore.rules)
@@ -154,6 +157,8 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
 
   // Deposit proof
   const method = type === "deposit" ? optText(d.method, 40, "Payment method") : null;
+  const methodKind = type === "deposit" && ["ewallet", "office", "remittance"].includes(String(d.methodKind))
+    ? String(d.methodKind) : null;
   const reference = type === "deposit" ? optText(d.reference, 60, "Reference number") : null;
   if (type === "deposit" && (!reference || reference.length < 4)) {
     throw new HttpsError("invalid-argument", "Enter the reference number of your payment.");
@@ -221,7 +226,7 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
     const now = FV.serverTimestamp();
     tx.create(reqRef, {
       type, status: "pending", amount, currencyCode: ccy, note,
-      method, reference, proofPath, proofUrl,
+      method, methodKind, reference, proofPath, proofUrl,
       userId: uid, userName: requester.name, userCode: requester.code,
       recipientId: recipient?.uid ?? null, recipientName: recipient?.name ?? null, recipientCode: recipient?.code ?? null,
       dayKey: day, source: "app", createdAt: now, updatedAt: now,

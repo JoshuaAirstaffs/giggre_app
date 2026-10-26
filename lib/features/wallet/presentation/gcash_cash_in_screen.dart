@@ -20,9 +20,20 @@ const List<int> _kQuickAmounts = [100, 500, 1000, 5000];
 /// number for an admin to confirm (TopUpPaymentScreen). The balance is only
 /// ever credited server-side.
 class GcashCashInScreen extends StatefulWidget {
-  const GcashCashInScreen({super.key, this.role});
+  const GcashCashInScreen({
+    super.key,
+    this.role,
+    this.method = 'GCash',
+    this.kind = DepositKind.ewallet,
+    this.config,
+  });
 
   final String? role;
+
+  /// The admin's label for the method, e.g. "GCash" or "Cash at office".
+  final String method;
+  final DepositKind kind;
+  final WalletRequestConfig? config;
 
   @override
   State<GcashCashInScreen> createState() => _GcashCashInScreenState();
@@ -40,9 +51,12 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
   void initState() {
     super.initState();
     _controller.addListener(() => setState(() {}));
-    WalletRequestsService.fetchConfig().then((c) {
-      if (mounted) setState(() => _config = c);
-    });
+    _config = widget.config;
+    if (_config == null) {
+      WalletRequestsService.fetchConfig().then((c) {
+        if (mounted) setState(() => _config = c);
+      });
+    }
   }
 
   @override
@@ -88,7 +102,8 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
       MaterialPageRoute(
         builder: (_) => TopUpPaymentScreen(
           role: widget.role,
-          method: 'GCash',
+          method: widget.method,
+          kind: widget.kind,
           amount: (_amount! * 100).round() / 100,
           config: config,
         ),
@@ -113,7 +128,11 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     WalletPageHeader(
-                      title: 'Cash in via GCash',
+                      title: switch (widget.kind) {
+                        DepositKind.ewallet => 'Cash in via ${widget.method}',
+                        DepositKind.office => 'Pay cash at the office',
+                        DepositKind.remittance => 'Send via remittance',
+                      },
                       tokens: tokens,
                     ),
                     const SizedBox(height: 4),
@@ -238,10 +257,24 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'Next, you\'ll see Giggre\'s GCash account. Send '
-                              'the amount from your GCash app, then enter the '
-                              'reference number. Your Gig Wallet is updated '
-                              'once Giggre confirms the payment.',
+                              (switch (widget.kind) {
+                                DepositKind.ewallet =>
+                                  "Next, you'll see Giggre's ${widget.method} "
+                                      'account. Send the amount from your '
+                                      '${widget.method} app, then enter the '
+                                      'reference number.',
+                                DepositKind.office =>
+                                  "Next, you'll see the office address and "
+                                      'hours. Pay the amount in cash there and '
+                                      'enter the official receipt number.',
+                                DepositKind.remittance =>
+                                  "Next, you'll see who to send it to. Send "
+                                      'the amount at any remittance center, '
+                                      'then enter the control number. You pay '
+                                      "the center's fee.",
+                              }) +
+                                  ' Your Gig Wallet is updated once Giggre '
+                                      'confirms it.',
                               style: TextStyle(
                                 color: tokens.textSecondary,
                                 fontSize: 12.5,
