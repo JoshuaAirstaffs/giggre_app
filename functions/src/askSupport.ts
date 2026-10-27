@@ -22,7 +22,7 @@ const anthropicKey = defineSecret("ANTHROPIC_API_KEY");
 // ---- Settings -------------------------------------------------------------
 
 const MODEL = "claude-haiku-5-5";
-const MAX_OUTPUT_TOKENS = 600;
+const MAX_OUTPUT_TOKENS = 1500;
 const LIMIT_PER_WINDOW = 10;
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const MAX_MESSAGE_CHARS = 1000;
@@ -172,6 +172,9 @@ export const askSupport = onCall(
       response = await client.messages.create({
         model: MODEL,
         max_tokens: MAX_OUTPUT_TOKENS,
+        // Haiku 5.5 thinks by default, and thinking counts toward max_tokens —
+        // it was using up the budget and cutting answers off (or leaving none).
+        thinking: { type: "disabled" },
         system: [
           { type: "text", text: SUPPORT_RULES },
           // Everything up to and including this block is cached between calls.
@@ -215,6 +218,7 @@ export const askSupport = onCall(
       uid,
       mode,
       escalate,
+      stopReason: response.stop_reason,
       inputTokens: response.usage?.input_tokens,
       outputTokens: response.usage?.output_tokens,
       cacheReadTokens: response.usage?.cache_read_input_tokens,
