@@ -621,13 +621,15 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
     padding: const EdgeInsets.all(16),
     itemCount: _messages.length + (_waiting ? 1 : 0),
     itemBuilder: (_, i) {
-      if (i == _messages.length) return _bubble('…', isUser: false);
+      if (i == _messages.length) {
+        return _bubble('', isUser: false, child: const _ThinkingIndicator());
+      }
       final m = _messages[i];
       return _bubble(m.text, isUser: m.isUser);
     },
   );
 
-  Widget _bubble(String text, {required bool isUser}) => Align(
+  Widget _bubble(String text, {required bool isUser, Widget? child}) => Align(
     alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
     child: Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -641,14 +643,16 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
         border: isUser ? null : Border.all(color: _Palette.border),
         borderRadius: BorderRadius.circular(_Palette.radius),
       ),
-      child: SelectableText(
-        text,
-        style: TextStyle(
-          fontSize: 14.5,
-          height: 1.4,
-          color: isUser ? Colors.white : _Palette.textPrimary,
-        ),
-      ),
+      child:
+          child ??
+          SelectableText(
+            text,
+            style: TextStyle(
+              fontSize: 14.5,
+              height: 1.4,
+              color: isUser ? Colors.white : _Palette.textPrimary,
+            ),
+          ),
     ),
   );
 
@@ -726,4 +730,60 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
       ],
     ),
   );
+}
+
+/// "Thinking..." shown while Gab replies; each dot hops in turn.
+class _ThinkingIndicator extends StatefulWidget {
+  const _ThinkingIndicator();
+
+  @override
+  State<_ThinkingIndicator> createState() => _ThinkingIndicatorState();
+}
+
+class _ThinkingIndicatorState extends State<_ThinkingIndicator>
+    with SingleTickerProviderStateMixin {
+  static const _dots = 3;
+  static const _hop = 4.0;
+
+  late final _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  // Each dot rises and falls over its own slice of the cycle, then rests
+  double _offset(int i) {
+    final t = (_controller.value - i * 0.15) % 1.0;
+    if (t > 0.4) return 0;
+    return -_hop * math.sin(t / 0.4 * math.pi);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const style = TextStyle(
+      fontSize: 14.5,
+      height: 1.4,
+      color: _Palette.textSecondary,
+    );
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (_, _) => Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          const Text('Thinking', style: style),
+          for (var i = 0; i < _dots; i++)
+            Transform.translate(
+              offset: Offset(0, _offset(i)),
+              child: const Text('.', style: style),
+            ),
+        ],
+      ),
+    );
+  }
 }
