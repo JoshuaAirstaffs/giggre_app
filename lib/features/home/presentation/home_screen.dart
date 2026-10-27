@@ -22,6 +22,7 @@ import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:video_player/video_player.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 import 'package:giggre_app/core/widgets/app_update_checker.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
 import 'package:giggre_app/core/widgets/entrance_animation.dart';
@@ -1736,6 +1737,8 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
   // Another screen is on top of Home — the carousel stays mounted under it,
   // so videos must stop and auto-slide must not land on (and start) one.
   bool _covered = false;
+  // False once Home is scrolled so that less than half the carousel shows
+  bool _inView = true;
   PageRoute<void>? _subscribedRoute;
   List<_CarouselItem> _slides = [];
   bool _loading = true;
@@ -1777,6 +1780,13 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
     welcomeRouteObserver.unsubscribe(this);
     _videos.dispose();
     super.dispose();
+  }
+
+  void _onVisibilityChanged(VisibilityInfo info) {
+    // Reported after a short delay, so the carousel may be gone by now
+    if (!mounted) return;
+    final inView = info.visibleFraction >= 0.5;
+    if (inView != _inView) setState(() => _inView = inView);
   }
 
   void _advanceFrom(int index) {
@@ -1843,43 +1853,50 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
 
     return Column(
       children: [
-        SizedBox(
-          width: double.infinity,
-          child: CarouselSlider.builder(
-            carouselController: _carousel,
-            itemCount: _slides.length,
-            options: CarouselOptions(
-              viewportFraction: 1.0,
-              padEnds: false,
-              enlargeCenterPage: false,
-              autoPlay: hasMultiple && !currentIsVideo && !_covered,
-              enableInfiniteScroll: hasMultiple,
-              scrollPhysics: hasMultiple
-                  ? null
-                  : const NeverScrollableScrollPhysics(),
-              autoPlayInterval: const Duration(seconds: 5),
-              autoPlayAnimationDuration: const Duration(milliseconds: 600),
-              autoPlayCurve: Curves.easeInOut,
-              onPageChanged: (index, _) => setState(() {
-                _current = index;
-                _advancedFrom = null;
-              }),
+        VisibilityDetector(
+          key: const Key('home-carousel'),
+          onVisibilityChanged: _onVisibilityChanged,
+          child: SizedBox(
+            width: double.infinity,
+            child: CarouselSlider.builder(
+              carouselController: _carousel,
+              itemCount: _slides.length,
+              options: CarouselOptions(
+                viewportFraction: 1.0,
+                padEnds: false,
+                enlargeCenterPage: false,
+                autoPlay:
+                    hasMultiple && !currentIsVideo && !_covered && _inView,
+                enableInfiniteScroll: hasMultiple,
+                scrollPhysics: hasMultiple
+                    ? null
+                    : const NeverScrollableScrollPhysics(),
+                autoPlayInterval: const Duration(seconds: 5),
+                autoPlayAnimationDuration: const Duration(milliseconds: 600),
+                autoPlayCurve: Curves.easeInOut,
+                onPageChanged: (index, _) => setState(() {
+                  _current = index;
+                  _advancedFrom = null;
+                }),
+              ),
+              itemBuilder: (context, index, _) {
+                final slide = _slides[index];
+                if (!slide.hasVideo) {
+                  return _SlideItem(pictureUrl: slide.picture);
+                }
+                return _VideoSlideItem(
+                  videoUrl: slide.video,
+                  coverUrl: slide.picture,
+                  videos: _videos,
+                  isActive: index == _current,
+                  onScreen: !_covered && _inView,
+                  loop: !hasMultiple,
+                  muted: _muted,
+                  onToggleMute: () => setState(() => _muted = !_muted),
+                  onFinished: hasMultiple ? () => _advanceFrom(index) : null,
+                );
+              },
             ),
-            itemBuilder: (context, index, _) {
-              final slide = _slides[index];
-              if (!slide.hasVideo) return _SlideItem(pictureUrl: slide.picture);
-              return _VideoSlideItem(
-                videoUrl: slide.video,
-                coverUrl: slide.picture,
-                videos: _videos,
-                isActive: index == _current,
-                onScreen: !_covered,
-                loop: !hasMultiple,
-                muted: _muted,
-                onToggleMute: () => setState(() => _muted = !_muted),
-                onFinished: hasMultiple ? () => _advanceFrom(index) : null,
-              );
-            },
           ),
         ),
         if (hasMultiple) ...[
