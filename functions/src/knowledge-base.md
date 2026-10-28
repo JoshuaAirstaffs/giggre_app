@@ -173,7 +173,10 @@ The worker Home tab is the "Gig Worker Dashboard". From top to bottom it shows:
 
 The bell icon opens "Activity", which lists your gig updates from the last 30 minutes.
 
-Giggre needs your location to show nearby gigs and match you with Quick Gigs. If location is off, you'll see a message asking you to turn it on. Tap "Enable" or "Settings" to allow it.
+Giggre needs your location to show nearby gigs and match you with Quick Gigs. Location is required: while you are logged in, the app can't be used with location turned off or not allowed.
+- If location services are off, you'll see "Turn on location". Tap "Turn on location" and switch location on.
+- If Giggre isn't allowed to use your location, you'll see "Allow location access". Tap "Allow location" and choose to allow it. If it says "Open Settings", tap it, then go to Location and allow Giggre.
+The app continues by itself once location is on. You can also tap "Log out" on that screen.
 
 ### Your skills (My Toolchest)
 
