@@ -3,7 +3,7 @@
 // - Text chat only, answers from knowledge-base.md
 // - 10 messages per hour per user (counter only, no message content stored)
 // - Chat history lives on the phone; the app sends recent history each call
-// - Returns { answer, escalate, remaining, resetAt }
+// - Returns { answer, escalate, actions, remaining, resetAt }
 //
 // Requires firebase-admin to be initialized in index.ts (initializeApp()).
 // getFirestore() is only called inside the handler, so the import hoisting
@@ -29,6 +29,34 @@ const MAX_MESSAGE_CHARS = 1000;
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_HISTORY_CHARS = 2000; // per message
 const ESCALATE_TOKEN = "[ESCALATE]";
+
+// "[GO:wallet]" tags the AI adds when a screen answers the question; the app
+// shows a button that opens it. Must match the ids in support-rules.md and
+// the app's support_destinations.dart (unknown ids are dropped here).
+const GO_TAG = /\[GO:([a-z_]+)\]/g;
+const MAX_ACTIONS = 2;
+const DESTINATIONS = new Set([
+  "profile",
+  "settings",
+  "wallet",
+  "gig_points",
+  "referrals",
+  "verification",
+  "documents",
+  "gig_history",
+  "my_ratings",
+  "saved_gigs",
+  "my_gigs",
+  "post_quick_gig",
+  "post_open_gig",
+  "post_offered_gig",
+  "demos",
+  "contact_us",
+  "help_faq",
+  "terms",
+  "privacy",
+  "about",
+]);
 
 // The .md files live in src/ next to this file, but tsc emits this file to
 // lib/ and doesn't copy them, so resolve them from src/ (deployed as part of
@@ -211,13 +239,25 @@ export const askSupport = onCall(
       .trim();
 
     const escalate = raw.includes(ESCALATE_TOKEN);
-    const answer = raw.split(ESCALATE_TOKEN).join("").trim();
+    const actions = [
+      ...new Set([...raw.matchAll(GO_TAG)].map((m) => m[1])),
+    ]
+      .filter((id) => DESTINATIONS.has(id))
+      .slice(0, MAX_ACTIONS);
+    const answer = raw
+      .split(ESCALATE_TOKEN)
+      .join("")
+      .replace(GO_TAG, "")
+      .replace(/[ \t]+$/gm, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
 
     // Usage only — no message content is logged.
     logger.info("askSupport: answered", {
       uid,
       mode,
       escalate,
+      actions,
       stopReason: response.stop_reason,
       inputTokens: response.usage?.input_tokens,
       outputTokens: response.usage?.output_tokens,
@@ -230,6 +270,7 @@ export const askSupport = onCall(
         answer ||
         "I couldn't find an answer to that. Tap “Talk to a person” and our team will help.",
       escalate: escalate || !answer,
+      actions: answer ? actions : [],
       remaining: quota.remaining,
       resetAt: quota.resetAt,
     };

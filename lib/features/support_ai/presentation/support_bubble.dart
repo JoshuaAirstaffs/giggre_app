@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 
 import '../services/support_chat_service.dart';
 import '../services/support_chat_store.dart';
+import 'support_destinations.dart';
 
 enum GiggreMode { worker, host }
 
@@ -462,7 +463,11 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
       if (!mounted) return;
       final updated = [
         ..._messages,
-        SupportMessage(role: 'assistant', text: reply.answer),
+        SupportMessage(
+          role: 'assistant',
+          text: reply.answer,
+          actions: reply.actions,
+        ),
       ];
       setState(() {
         _messages = updated;
@@ -505,6 +510,17 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
     final transcript = List<SupportMessage>.of(_messages);
     Navigator.of(context).pop();
     await widget.onTalkToPerson(transcript);
+  }
+
+  // Close the chat and open the screen Gab pointed to, on the same navigator.
+  void _openDestination(SupportDestination destination) {
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    navigator.push(
+      MaterialPageRoute(
+        builder: (context) => destination.builder(context, widget.mode),
+      ),
+    );
   }
 
   void _scrollDown() {
@@ -625,8 +641,36 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
         return _bubble('', isUser: false, child: const _ThinkingIndicator());
       }
       final m = _messages[i];
-      return _bubble(m.text, isUser: m.isUser);
+      final destinations = m.actions
+          .map(SupportDestination.byId)
+          .whereType<SupportDestination>()
+          .toList();
+      if (destinations.isEmpty) return _bubble(m.text, isUser: m.isUser);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _bubble(m.text, isUser: m.isUser),
+          ...destinations.map(_destinationButton),
+        ],
+      );
     },
+  );
+
+  Widget _destinationButton(SupportDestination destination) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: OutlinedButton.icon(
+      onPressed: () => _openDestination(destination),
+      icon: Icon(destination.icon, size: 18),
+      label: Text(destination.label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: widget.gradient.last,
+        backgroundColor: _Palette.surface,
+        side: BorderSide(color: widget.gradient.first),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(_Palette.radius),
+        ),
+      ),
+    ),
   );
 
   Widget _bubble(String text, {required bool isUser, Widget? child}) => Align(

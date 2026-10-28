@@ -7,20 +7,32 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SupportMessage {
-  const SupportMessage({required this.role, required this.text});
+  const SupportMessage({
+    required this.role,
+    required this.text,
+    this.actions = const [],
+  });
 
   final String role; // 'user' | 'assistant'
   final String text;
+  final List<String> actions; // "open this screen" buttons on Gab's reply
 
   bool get isUser => role == 'user';
 
   /// Shape the askSupport function expects.
   Map<String, String> toApi() => {'role': role, 'content': text};
 
-  Map<String, dynamic> toJson() => {'r': role, 't': text};
+  Map<String, dynamic> toJson() => {
+    'r': role,
+    't': text,
+    if (actions.isNotEmpty) 'a': actions,
+  };
 
-  factory SupportMessage.fromJson(Map<String, dynamic> json) =>
-      SupportMessage(role: json['r'] as String, text: json['t'] as String);
+  factory SupportMessage.fromJson(Map<String, dynamic> json) => SupportMessage(
+    role: json['r'] as String,
+    text: json['t'] as String,
+    actions: (json['a'] as List?)?.whereType<String>().toList() ?? const [],
+  );
 }
 
 class SupportChatStore {

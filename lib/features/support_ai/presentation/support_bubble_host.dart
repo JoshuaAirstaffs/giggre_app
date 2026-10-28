@@ -1,6 +1,7 @@
 // Giggre AI support — wires SupportBubble into the app: which mode it's in,
 // which screens hide it, and the hand-off to a support ticket.
 
+import 'package:firebase_auth/firebase_auth.dart'; // TEMP: [GabBubble] log
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -15,6 +16,7 @@ import 'support_bubble.dart';
 class SupportBubbleVisibility {
   static final ValueNotifier<bool> hidden = ValueNotifier<bool>(false);
   static int _holds = 0;
+  static int get holds => _holds; // TEMP: for the [GabBubble] debug log
 
   static void hold() => _update(_holds + 1);
   static void release() => _update(_holds > 0 ? _holds - 1 : 0);
@@ -111,8 +113,9 @@ class SupportBubbleRouteObserver extends NavigatorObserver {
 /// the shells set this when they open; HomeScreen sets it from the saved role
 /// and the role picker.
 class SupportBubbleMode {
-  static final ValueNotifier<GiggreMode> current =
-      ValueNotifier<GiggreMode>(GiggreMode.worker);
+  static final ValueNotifier<GiggreMode> current = ValueNotifier<GiggreMode>(
+    GiggreMode.worker,
+  );
 
   static void set(GiggreMode mode) {
     // Called from initState, so wait for the frame like the holds above.
@@ -143,16 +146,24 @@ class SupportBubbleHost extends StatelessWidget {
       valueListenable: SupportBubbleVisibility.hidden,
       builder: (context, hidden, _) => ValueListenableBuilder<GiggreMode>(
         valueListenable: SupportBubbleMode.current,
-        builder: (context, mode, _) => SupportBubble(
-          mode: mode,
-          visible: signedIn && !hidden,
-          navigatorKey: navigatorKey,
-          onTalkToPerson: (transcript) => handOffAiChatToSupport(
+        builder: (context, mode, _) {
+          // TEMP: diagnosing the bubble missing after logout → login.
+          debugPrint(
+            '[GabBubble] signedIn=$signedIn hidden=$hidden '
+            'holds=${SupportBubbleVisibility.holds} '
+            'authUid=${FirebaseAuth.instance.currentUser?.uid}',
+          );
+          return SupportBubble(
+            mode: mode,
+            visible: signedIn && !hidden,
             navigatorKey: navigatorKey,
-            user: context.read<CurrentUserProvider>(),
-            transcript: transcript,
-          ),
-        ),
+            onTalkToPerson: (transcript) => handOffAiChatToSupport(
+              navigatorKey: navigatorKey,
+              user: context.read<CurrentUserProvider>(),
+              transcript: transcript,
+            ),
+          );
+        },
       ),
     );
   }

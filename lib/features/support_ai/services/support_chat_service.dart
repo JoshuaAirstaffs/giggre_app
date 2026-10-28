@@ -9,11 +9,13 @@ class SupportReply {
     required this.answer,
     required this.escalate,
     required this.remaining,
+    this.actions = const [],
     this.resetAt,
   });
 
   final String answer;
   final bool escalate; // true → show "Talk to a person"
+  final List<String> actions; // screens to offer as buttons (destination ids)
   final int remaining; // messages left this hour
   final DateTime? resetAt; // when the hourly limit resets
 }
@@ -62,6 +64,8 @@ class SupportChatService {
       return SupportReply(
         answer: data['answer'] as String? ?? '',
         escalate: data['escalate'] == true,
+        actions: (data['actions'] as List?)?.whereType<String>().toList() ??
+            const [],
         remaining: (data['remaining'] as num?)?.toInt() ?? 0,
         resetAt: _time(data['resetAt']),
       );
