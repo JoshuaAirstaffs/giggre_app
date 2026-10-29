@@ -310,6 +310,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       context,
       amount: (double.tryParse(_budgetCtrl.text.trim()) ?? 0) * _workerSlots,
       currencyCode: context.read<CurrentUserProvider>().currencyCode,
+      action: LimitAction.post,
     )) {
       return;
     }

@@ -164,7 +164,8 @@ class _SavedScreenState extends State<SavedScreen> {
   // snackbar and points the worker back to Home instead of showing it inline.
   Future<void> _acceptOfferedGig(GigMarkerData gig) async {
     if (!await guardUnverifiedLimit(context,
-        amount: gig.budget, currencyCode: gig.currencyCode)) {
+        amount: gig.budget, currencyCode: gig.currencyCode,
+        action: LimitAction.accept)) {
       return;
     }
     if (!mounted) return;

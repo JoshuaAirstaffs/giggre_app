@@ -391,6 +391,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       context,
       amount: (double.tryParse(_budgetCtrl.text.trim()) ?? 0),
       currencyCode: context.read<CurrentUserProvider>().currencyCode,
+      action: LimitAction.post,
     )) {
       return;
     }

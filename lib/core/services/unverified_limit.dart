@@ -14,13 +14,19 @@ import 'package:giggre_app/core/widgets/account_not_verified_modal.dart';
 // are completed (functions/src/unverifiedLimits.ts).
 //
 // [guardUnverifiedLimit] is called before applying for / accepting / posting
-// a gig. It returns true when the action may go ahead; otherwise it shows the
-// limit prompt (with "Verify Now") and returns false. Any read failure lets
-// the action through so a network blip never blocks work.
+// a gig. It returns true when the action may go ahead. When the user is
+// unverified and the gig would take them over the admin's limit (including a
+// single gig that is bigger than the whole limit), it shows an "Unable to
+// apply / accept / post" prompt explaining why (with "Verify Now") and returns
+// false. Any read failure lets the action through so a network blip never
+// blocks work.
+enum LimitAction { apply, accept, post }
+
 Future<bool> guardUnverifiedLimit(
   BuildContext context, {
   double amount = 0,
   String currencyCode = 'USD',
+  LimitAction action = LimitAction.apply,
 }) async {
   final uid = FirebaseAuth.instance.currentUser?.uid;
   if (uid == null) return true;
@@ -38,7 +44,11 @@ Future<bool> guardUnverifiedLimit(
 
     final totalsSnap = await db.collection('transaction_totals').doc(uid).get(server);
     final fx = await FxRates.fetch();
-    final totals = totalsSnap.data() ?? const {};
+    final raw = totalsSnap.data() ?? const {};
+    // Totals from an earlier period (or before an admin reset) don't count.
+    final totals = (raw['periodKey'] ?? '0|never|all') == unverifiedLimitPeriodKey(cfg)
+        ? raw
+        : const <String, dynamic>{};
     double usedUsd = 0;
     for (final side in ['worker', 'host']) {
       final m = totals[side];
@@ -55,17 +65,77 @@ Future<bool> guardUnverifiedLimit(
     final ccy = fx.knows(currencyCode) ? currencyCode : 'USD';
     String money(double usd) =>
         CurrencyFormatter.format(fx.fromUsd(usd, ccy) ?? usd, ccy);
+    final max = money(maxUsd.toDouble());
+    final gig = CurrencyFormatter.format(amount, currencyCode);
+    final isHost = action == LimitAction.post;
+    final verb = switch (action) {
+      LimitAction.apply => 'apply for',
+      LimitAction.accept => 'accept',
+      LimitAction.post => 'post',
+    };
+    final limitName = isHost
+        ? 'the $max limit unverified accounts can spend on gigs'
+        : 'the $max limit unverified accounts can earn';
+    final String reason;
+    if (usedUsd >= maxUsd - 0.005) {
+      reason = "Your account isn't verified and you've already reached "
+          '$limitName. Verify your account to $verb more gigs.';
+    } else if (newUsd > maxUsd + 0.005) {
+      reason = "Your account isn't verified. This gig "
+          '${isHost ? 'costs' : 'pays'} $gig, which is more than '
+          '$limitName. Verify your account to $verb it.';
+    } else {
+      final left = money(maxUsd - usedUsd);
+      reason = "Your account isn't verified. This gig ($gig) would take you "
+          'over $limitName — you only have $left left. Verify your account '
+          'to $verb it.';
+    }
+    final resetNote = switch (cfg['resetPeriod']) {
+      'daily' => ' The limit resets every day.',
+      'weekly' => ' The limit resets every Monday.',
+      'monthly' => ' The limit resets on the 1st of every month.',
+      'yearly' => ' The limit resets every January 1.',
+      _ => '',
+    };
     await _showLimitDialog(
       context,
-      reached: usedUsd >= maxUsd,
-      used: money(usedUsd),
-      max: money(maxUsd.toDouble()),
-      left: money((maxUsd - usedUsd).clamp(0, double.infinity).toDouble()),
+      title: switch (action) {
+        LimitAction.apply => 'Unable to Apply',
+        LimitAction.accept => 'Unable to Accept Gig',
+        LimitAction.post => 'Unable to Post Gig',
+      },
+      message: reason + resetNote,
     );
     return false;
   } catch (_) {
     return true;
   }
+}
+
+// Mirror of periodKey() in functions/src/unverifiedLimits.ts — keep in sync.
+// Calendar periods in Philippine time (UTC+8, no DST); weeks start Monday.
+String unverifiedLimitPeriodKey(Map<String, dynamic> cfg, [DateTime? now]) {
+  const periods = ['never', 'daily', 'weekly', 'monthly', 'yearly'];
+  final p = periods.contains(cfg['resetPeriod']) ? cfg['resetPeriod'] as String : 'never';
+  final e = cfg['resetEpoch'];
+  final epoch = e is num && e > 0 ? e.round() : 0;
+  final t = (now ?? DateTime.now()).toUtc().add(const Duration(hours: 8));
+  String two(int n) => n.toString().padLeft(2, '0');
+  final String bucket;
+  switch (p) {
+    case 'daily':
+      bucket = '${t.year}-${two(t.month)}-${two(t.day)}';
+    case 'weekly':
+      final mon = DateTime.utc(t.year, t.month, t.day - (t.weekday - 1));
+      bucket = '${mon.year}-${two(mon.month)}-${two(mon.day)}';
+    case 'monthly':
+      bucket = '${t.year}-${two(t.month)}';
+    case 'yearly':
+      bucket = '${t.year}';
+    default:
+      bucket = 'all';
+  }
+  return '$epoch|$p|$bucket';
 }
 
 double _toUsd(FxRates fx, double amount, String ccy) {
@@ -75,10 +145,8 @@ double _toUsd(FxRates fx, double amount, String ccy) {
 
 Future<void> _showLimitDialog(
   BuildContext context, {
-  required bool reached,
-  required String used,
-  required String max,
-  required String left,
+  required String title,
+  required String message,
 }) {
   return showDialog(
     context: context,
@@ -99,19 +167,13 @@ Future<void> _showLimitDialog(
           ),
           const SizedBox(height: 16),
           Text(
-            reached ? 'Transaction Limit Reached' : 'Over Your Transaction Limit',
+            title,
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           Text(
-            reached
-                ? 'Unverified accounts can transact up to $max in total. '
-                    'You have reached it, so verify your account to keep '
-                    'taking and posting gigs.'
-                : 'Unverified accounts can transact up to $max in total. '
-                    'You have used $used, so only $left is left — this gig '
-                    'would go over it. Verify your account to remove the limit.',
+            message,
             style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
             textAlign: TextAlign.center,
           ),

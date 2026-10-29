@@ -928,7 +928,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
   Future<void> _acceptOfferedGig(GigMarkerData gig) async {
     if (!await guardUnverifiedLimit(context,
-        amount: gig.budget, currencyCode: gig.currencyCode)) {
+        amount: gig.budget, currencyCode: gig.currencyCode,
+        action: LimitAction.accept)) {
       return;
     }
     if (!mounted) return;

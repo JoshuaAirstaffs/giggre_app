@@ -746,7 +746,10 @@ service cloud.firestore {
       allow write: if isSuperAdmin() &&
         request.resource.data.get('enabled', false) is bool &&
         (request.resource.data.get('maxUsd', null) == null ||
-          (request.resource.data.maxUsd is number && request.resource.data.maxUsd > 0));
+          (request.resource.data.maxUsd is number && request.resource.data.maxUsd > 0)) &&
+        request.resource.data.get('resetPeriod', 'never') in ['never', 'daily', 'weekly', 'monthly', 'yearly'] &&
+        (request.resource.data.get('resetEpoch', null) == null ||
+          (request.resource.data.resetEpoch is number && request.resource.data.resetEpoch > 0));
     }
 
     match /general_config/{docId} {

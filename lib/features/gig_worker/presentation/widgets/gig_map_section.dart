@@ -360,7 +360,8 @@ Future<void> applyToOpenGig(
   Map<String, String?> countryCodeCache = const {},
 }) async {
   if (!await guardUnverifiedLimit(context,
-      amount: gig.budget, currencyCode: gig.currencyCode)) {
+      amount: gig.budget, currencyCode: gig.currencyCode,
+        action: LimitAction.apply)) {
     return;
   }
   if (!context.mounted) return;
