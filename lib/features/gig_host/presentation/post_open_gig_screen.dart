@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:giggre_app/core/services/unverified_limit.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:giggre_app/core/constants/api_keys.dart';
@@ -305,6 +306,14 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   // ── Submit ───────────────────────────────────────────────────────────────────
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!await guardUnverifiedLimit(
+      context,
+      amount: (double.tryParse(_budgetCtrl.text.trim()) ?? 0) * _workerSlots,
+      currencyCode: context.read<CurrentUserProvider>().currencyCode,
+    )) {
+      return;
+    }
+    if (!mounted) return;
 
     if (ContentFilterService.instance.check(_titleCtrl.text) ||
         ContentFilterService.instance.check(_descCtrl.text)) {

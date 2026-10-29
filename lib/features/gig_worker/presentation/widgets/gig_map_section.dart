@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:giggre_app/core/services/unverified_limit.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -358,6 +359,11 @@ Future<void> applyToOpenGig(
   String? myCountryCode,
   Map<String, String?> countryCodeCache = const {},
 }) async {
+  if (!await guardUnverifiedLimit(context,
+      amount: gig.budget, currencyCode: gig.currencyCode)) {
+    return;
+  }
+  if (!context.mounted) return;
   final myLoc = myLocation;
   if (myLoc != null) {
     final myCountry =
