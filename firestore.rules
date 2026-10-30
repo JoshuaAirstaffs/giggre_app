@@ -485,6 +485,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ─── Transaction totals (unverified limit) ─────────────────
+    // Written only by functions/src/unverifiedLimits.ts. The owner reads it to
+    // see how much of the unverified limit is used; admins read too.
+    match /transaction_totals/{uid} {
+      allow read: if isUser(uid) || isAdmin();
+      allow write: if false;
+    }
+
     // ─── Gig Points config issues ──────────────────────────────
     // Raised by the gigPoints Cloud Functions when a task has no valid
     // reward configured (its points are held, not awarded) — admin-only.
@@ -734,13 +742,27 @@ service cloud.firestore {
         isValidFxOverride(request.resource.data.override);
     }
 
+    // Transaction limit for unverified accounts (functions/src/
+    // unverifiedLimits.ts) — read by the app before applying / accepting /
+    // posting; set by super admins in giggre-admin → Settings.
+    match /general_config/unverified_limits {
+      allow read: if isAuth();
+      allow write: if isSuperAdmin() &&
+        request.resource.data.get('enabled', false) is bool &&
+        (request.resource.data.get('maxUsd', null) == null ||
+          (request.resource.data.maxUsd is number && request.resource.data.maxUsd > 0)) &&
+        request.resource.data.get('resetPeriod', 'never') in ['never', 'daily', 'weekly', 'monthly', 'yearly'] &&
+        (request.resource.data.get('resetEpoch', null) == null ||
+          (request.resource.data.resetEpoch is number && request.resource.data.resetEpoch > 0));
+    }
+
     match /general_config/{docId} {
       allow read: if isAdmin();
       // gig_points / gig_points_requests / wallet_requests have their own
       // validated rules above;
       // rules OR together, so they must be excluded here or this would
       // bypass that validation.
-      allow write: if isSuperAdmin() && !(docId in ['gig_points', 'gig_points_requests', 'wallet_requests', 'fx_rates']);
+      allow write: if isSuperAdmin() && !(docId in ['gig_points', 'gig_points_requests', 'wallet_requests', 'fx_rates', 'unverified_limits']);
     }
 
     // ─── Account Delete Requests ────────────────────────────────

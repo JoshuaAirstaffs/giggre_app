@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:giggre_app/core/services/unverified_limit.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -926,6 +927,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _acceptOfferedGig(GigMarkerData gig) async {
+    if (!await guardUnverifiedLimit(context,
+        amount: gig.budget, currencyCode: gig.currencyCode,
+        action: LimitAction.accept)) {
+      return;
+    }
+    if (!mounted) return;
     if (_suspendedUntil != null && DateTime.now().isBefore(_suspendedUntil!)) {
       _showSuspensionDialog();
       return;

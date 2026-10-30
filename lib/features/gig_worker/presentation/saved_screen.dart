@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:giggre_app/core/services/unverified_limit.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -162,6 +163,12 @@ class _SavedScreenState extends State<SavedScreen> {
   // has no active-gig overlay of its own, so on success it just confirms via
   // snackbar and points the worker back to Home instead of showing it inline.
   Future<void> _acceptOfferedGig(GigMarkerData gig) async {
+    if (!await guardUnverifiedLimit(context,
+        amount: gig.budget, currencyCode: gig.currencyCode,
+        action: LimitAction.accept)) {
+      return;
+    }
+    if (!mounted) return;
     if (_suspendedUntil != null && DateTime.now().isBefore(_suspendedUntil!)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

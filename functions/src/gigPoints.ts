@@ -4,6 +4,7 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { sendPushToUser } from "./push";
 import { firestoreTriggerRegion } from "./region";
+import { recordCompletedTask, taskAmount } from "./unverifiedLimits";
 import { requireGigPointsAdmin } from "./gigPointsRequests";
 
 // Pinned here rather than inherited from setGlobalOptions in index.ts: this
@@ -540,6 +541,21 @@ async function handleTransition(
   const action = classifyTransition(before, after);
   if (!action || e.workerId === e.gig.hostId) return;
   await runAction(action, { ...e, target: after });
+  if (action === "credit") {
+    // Count the finished task toward both sides' totals for the unverified
+    // transaction limit (unverifiedLimits.ts). Never blocks the award.
+    try {
+      await recordCompletedTask({
+        ledgerId: ledgerId(e.collection, e.gigId, e.workerId),
+        workerId: e.workerId,
+        hostId: str(e.gig.hostId),
+        amount: taskAmount(after, e.gig),
+        currencyCode: str(e.gig.currencyCode) ?? "USD",
+      });
+    } catch (err) {
+      logger.error("[gigPoints] recording transaction totals failed", { error: String(err), gigId: e.gigId });
+    }
+  }
 }
 
 // ── Triggers ────────────────────────────────────────────────────────────────

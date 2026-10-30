@@ -21,6 +21,7 @@ import 'features/auth/presentation/register_screen.dart';
 import 'features/auth/presentation/welcome_screen.dart';
 import 'core/widgets/main_navigation.dart';
 import 'core/widgets/app_update_checker.dart';
+import 'core/widgets/location_gate.dart';
 import 'core/theme/theme_provider.dart';
 import 'features/tutorial/controller/tutorial_controller.dart';
 import 'features/tutorial/services/tutorial_service.dart';
@@ -653,6 +654,7 @@ class GiggreApp extends StatelessWidget {
             children: [
               child ?? const SizedBox(),
               SupportBubbleHost(navigatorKey: navigatorKey),
+              LocationGate(navigatorKey: navigatorKey),
             ],
           ),
         ),

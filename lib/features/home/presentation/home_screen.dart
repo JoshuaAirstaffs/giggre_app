@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
@@ -58,8 +57,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _pendingDeletion = false;
   String _deletionStatus = 'pending_deletion';
   List<Map<String, dynamic>> _updates = [];
-  bool _locationServiceEnabled = true;
-  StreamSubscription<ServiceStatus>? _locationServiceSub;
   bool _internetAvailable = true;
   Timer? _internetCheckTimer;
   Stream<ActiveGigInfo?>? _activeGigStream;
@@ -76,7 +73,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     AppUpdateChecker.updateAvailable.addListener(_onUpdateAvailableChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeShowVerifyPrompt();
-      _initLocationServiceListener();
       _checkInternet();
       _internetCheckTimer = Timer.periodic(
         const Duration(seconds: 30),
@@ -111,16 +107,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _initLocationServiceListener() async {
-    if (kIsWeb || !Platform.isAndroid && !Platform.isIOS) return;
-    final enabled = await Geolocator.isLocationServiceEnabled();
-    if (mounted) setState(() => _locationServiceEnabled = enabled);
-    _locationServiceSub = Geolocator.getServiceStatusStream().listen((status) {
-      if (!mounted) return;
-      setState(() => _locationServiceEnabled = status == ServiceStatus.enabled);
-    });
-  }
-
   Future<void> _checkInternet() async {
     if (kIsWeb) return;
     try {
@@ -139,7 +125,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     AppUpdateChecker.updateAvailable.removeListener(_onUpdateAvailableChanged);
     _internetCheckTimer?.cancel();
-    _locationServiceSub?.cancel();
     super.dispose();
   }
 
@@ -635,46 +620,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     return Scaffold(
       backgroundColor: bgColor,
-      bottomSheet: !_locationServiceEnabled
-          ? SafeArea(
-              child: Container(
-                width: double.infinity,
-                color: Colors.orange.shade700,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.location_off_rounded,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Text(
-                        'Location is turned off. Enable it to find nearby gigs.',
-                        style: TextStyle(color: Colors.white, fontSize: 13),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => Geolocator.openLocationSettings(),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: const Text(
-                        'Enable',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : !_internetAvailable
+      // Location off is handled app-wide by LocationGate (main.dart).
+      bottomSheet: !_internetAvailable
           ? SafeArea(
               child: Container(
                 width: double.infinity,
@@ -1712,19 +1659,37 @@ class _CarouselItem {
   /// also set, is shown as the video's cover while it loads.
   final String video;
 
+  /// ISO country codes (e.g. PH, US) this slide is limited to, set in
+  /// giggre-admin. Empty — including slides saved before the field existed —
+  /// means every country.
+  final List<String> countries;
+
   const _CarouselItem({
     required this.picture,
     required this.sortNumber,
     this.video = '',
+    this.countries = const [],
   });
 
   bool get hasVideo => video.isNotEmpty;
 
+  /// Country used when the user's location couldn't be detected (location
+  /// off, permission denied, lookup failed) — they see the US slides.
+  static const defaultCountry = 'US';
+
+  bool showsIn(String? countryCode) =>
+      countries.isEmpty ||
+      countries.contains((countryCode ?? defaultCountry).toUpperCase());
+
   factory _CarouselItem.fromMap(Map<String, dynamic> data) {
+    final rawCountries = data['countries'];
     return _CarouselItem(
       picture: data['picture'] as String? ?? '',
       sortNumber: (data['sortNumber'] as num?)?.toInt() ?? 0,
       video: data['video'] as String? ?? '',
+      countries: rawCountries is List
+          ? rawCountries.whereType<String>().map((c) => c.toUpperCase()).toList()
+          : const [],
     );
   }
 }
@@ -1759,6 +1724,10 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
   void initState() {
     super.initState();
     _fetchSlides();
+    // Slides can be limited by country; make sure it gets detected
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<CurrentUserProvider>().ensureCountryCode();
+    });
   }
 
   @override
@@ -1848,13 +1817,21 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
       );
     }
 
-    if (_slides.isEmpty) return const SizedBox.shrink();
+    // Only the slides meant for this user's country (US until a location is
+    // detected). Filtered here rather than at fetch time so a country
+    // detected after loading still applies.
+    final countryCode = context.select<CurrentUserProvider, String?>(
+      (p) => p.countryCode,
+    );
+    final slides = _slides.where((s) => s.showsIn(countryCode)).toList();
 
+    if (slides.isEmpty) return const SizedBox.shrink();
+
+    final current = _current.clamp(0, slides.length - 1);
     // A lone slide stays put — no auto-advance, looping, swipe or dots.
-    final hasMultiple = _slides.length > 1;
+    final hasMultiple = slides.length > 1;
     // A video slide holds the carousel until it finishes, then advances itself.
-    final currentIsVideo =
-        _slides[_current.clamp(0, _slides.length - 1)].hasVideo;
+    final currentIsVideo = slides[current].hasVideo;
 
     return Column(
       children: [
@@ -1865,7 +1842,7 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
             width: double.infinity,
             child: CarouselSlider.builder(
               carouselController: _carousel,
-              itemCount: _slides.length,
+              itemCount: slides.length,
               options: CarouselOptions(
                 viewportFraction: 1.0,
                 padEnds: false,
@@ -1885,7 +1862,7 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
                 }),
               ),
               itemBuilder: (context, index, _) {
-                final slide = _slides[index];
+                final slide = slides[index];
                 if (!slide.hasVideo) {
                   return _SlideItem(pictureUrl: slide.picture);
                 }
@@ -1907,8 +1884,8 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
         if (hasMultiple) ...[
           const SizedBox(height: 12),
           AnimatedSmoothIndicator(
-            activeIndex: _current,
-            count: _slides.length,
+            activeIndex: current,
+            count: slides.length,
             effect: const ExpandingDotsEffect(
               activeDotColor: kGold,
               dotColor: Color(0x5994A3B8), // kSub @ 35% opacity

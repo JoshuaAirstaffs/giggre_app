@@ -1474,3 +1474,4 @@ export { askSupport } from "./askSupport";
 // ── Exchange rates ──────────────────────────────────────────────────────────
 // Live USD→PHP rate for Gig Points / Gig Wallet. See functions/src/fx.ts.
 export { refreshFxRates, adminRefreshFxRates } from "./fx";
+export { adminUnverifiedUsage } from "./unverifiedLimits";
