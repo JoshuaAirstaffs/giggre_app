@@ -317,6 +317,37 @@ export const onSkillRequestStatusChanged = onDocumentUpdated(
   }
 );
 
+// ── New skill request (admin notification) ─────────────────────────────────
+// Fires when a worker submits a skill_requests doc (SkillRequestForm._submit)
+// and drops an entry in giggre-admin's notification bell for admins with
+// the User Skills module ("library-gsin").
+export const onSkillRequestCreated = onDocumentCreated(
+  "skill_requests/{requestId}",
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+    const name = (data.userName as string) || (data.userEmail as string) || "A worker";
+    const skill = (data.skillName as string) || "a skill";
+    const category = data.skillCategory ? ` (${data.skillCategory})` : "";
+    try {
+      await admin.firestore().collection("admin_notifications").add({
+        type: "skill_request",
+        requiredPermission: "library-gsin",
+        title: "New skill request",
+        message: `${name} requested to add "${skill}"${category}. Review it in User Skills.`,
+        link: "/user-skills?tab=requests",
+        sourceCollection: "skill_requests",
+        sourceId: event.params.requestId,
+        meta: { userId: data.userId ?? null, name: data.userName ?? null, email: data.userEmail ?? null },
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        readBy: {},
+      });
+    } catch (err) {
+      console.error("[onSkillRequestCreated] admin notification failed", err);
+    }
+  }
+);
+
 // ── Worker progress milestones (host side) ──────────────────────────────────
 // Fires when arrivedAt / workStartedAt / workCompletedAt transitions from
 // unset to set, across all three gig collections.

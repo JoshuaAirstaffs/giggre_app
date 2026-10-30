@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/services/sign_out_service.dart';
 import '../../features/gig_worker/presentation/gig_worker_screen.dart';
 import '../../features/home/presentation/profile_tab.dart';
+import '../../features/tutorial/widgets/tutorial_anchor.dart';
 import '../chat/home_chat.dart';
 import '../host/host_shell.dart';
 import '../../features/gig_worker/presentation/saved_screen.dart';
@@ -259,44 +260,48 @@ class _WorkerBottomNavBar extends StatelessWidget {
               final color = active ? _kNavActive : _kNavInactive;
               final showDot = i == 2 && hasUnreadChat;
 
+              final tab = Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Icon(item.icon, size: 22, color: color),
+                      if (showDot)
+                        Positioned(
+                          top: -2,
+                          right: -3,
+                          child: Container(
+                            width: 7,
+                            height: 7,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFFF5252),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.label,
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                      color: color,
+                    ),
+                  ),
+                ],
+              );
+
               return Expanded(
                 child: InkWell(
                   onTap: () => onTap(i),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Icon(item.icon, size: 22, color: color),
-                          if (showDot)
-                            Positioned(
-                              top: -2,
-                              right: -3,
-                              child: Container(
-                                width: 7,
-                                height: 7,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFFFF5252),
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        item.label,
-                        style: TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: active
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                          color: color,
-                        ),
-                      ),
-                    ],
-                  ),
+                  // The worker dashboard tutorial points here for
+                  // "Manage your skills" (Profile → My Toolchest).
+                  child: i == 3
+                      ? TutorialAnchor(id: 'workerHome.profileTab', child: tab)
+                      : tab,
                 ),
               );
             }),

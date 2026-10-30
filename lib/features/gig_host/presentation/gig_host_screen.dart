@@ -53,7 +53,6 @@ class GigHostScreen extends StatefulWidget {
 
 class _GigHostScreenState extends State<GigHostScreen> {
   String _userName = '';
-  String _photoUrl = '';
   final GlobalKey _workerMapKey = GlobalKey();
 
   @override
@@ -72,7 +71,6 @@ class _GigHostScreenState extends State<GigHostScreen> {
     if (!mounted) return;
     setState(() {
       _userName = doc.data()?['name'] ?? '';
-      _photoUrl = doc.data()?['photoUrl'] ?? '';
     });
   }
 
@@ -100,7 +98,6 @@ class _GigHostScreenState extends State<GigHostScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final firstName = _userName.split(' ').first;
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
@@ -111,8 +108,6 @@ class _GigHostScreenState extends State<GigHostScreen> {
           // ── Gold header band + overlapping stat cards ──────────
           SliverToBoxAdapter(
             child: _HostHeader(
-              firstName: firstName,
-              photoUrl: _photoUrl,
               uid: uid,
               showBackButton: !widget.isTabRoot,
               onTemplates: _showTemplates,
@@ -194,8 +189,6 @@ class _GigHostScreenState extends State<GigHostScreen> {
 //  Gold header band
 // ─────────────────────────────────────────────────────────────────────────────
 class _HostHeader extends StatelessWidget {
-  final String firstName;
-  final String photoUrl;
   final String uid;
   final bool showBackButton;
   final VoidCallback onTemplates;
@@ -203,8 +196,6 @@ class _HostHeader extends StatelessWidget {
   final VoidCallback? onSwitchToWorker;
 
   const _HostHeader({
-    required this.firstName,
-    required this.photoUrl,
     required this.uid,
     required this.showBackButton,
     required this.onTemplates,
@@ -378,50 +369,10 @@ class _HostHeader extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 14),
-                    // ── Profile strip ────────────────────────────
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 22,
-                          backgroundColor: Colors.white.withValues(alpha: 0.22),
-                          backgroundImage: photoUrl.isNotEmpty
-                              ? CachedNetworkImageProvider(photoUrl)
-                              : null,
-                          child: photoUrl.isEmpty
-                              ? const Icon(
-                                  Icons.account_circle_rounded,
-                                  color: Colors.white,
-                                  size: 26,
-                                )
-                              : null,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                firstName.isNotEmpty
-                                    ? firstName
-                                    : 'Welcome, Host!',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Text(
-                                'Manage your gigs and find workers',
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Manage your gigs and find workers',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                   ],
                 ),

@@ -8,15 +8,12 @@ import '../../../core/services/rating_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import 'package:provider/provider.dart';
-import '../../../core/services/sign_out_service.dart';
 import '../../../core/widgets/entrance_animation.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/cancellation_request.dart';
 import '../../../core/utils/worker_active_gig.dart';
 import '../../gig_host/services/quick_gig_matching_service.dart';
-import '../../../screens/host/host_shell.dart';
-import '../../home/presentation/profile_tab.dart';
 import '../../tutorial/controller/tutorial_controller.dart';
 import '../../tutorial/flows/gig_worker_home_flow.dart';
 import 'widgets/dashboard_summary_card.dart';
@@ -75,7 +72,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   String _name = '';
   String _email = '';
   String _phone = '';
-  String _photoUrl = '';
   List<String> _skills = [];
   Set<String> _bookmarkedGigIds = {};
   RatingSummary _rating = RatingSummary.empty;
@@ -294,7 +290,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             _name = data['name'] as String? ?? '';
             _email = data['email'] as String? ?? '';
             _phone = data['phone'] as String? ?? '';
-            _photoUrl = data['photoUrl'] as String? ?? '';
             final skillsXP = data['skillsXP'] as Map<String, dynamic>? ?? {};
             _skills = skillsXP.keys.toList();
             _rating = RatingSummary.fromUserData(data, RateeRole.worker);
@@ -1738,33 +1733,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     );
   }
 
-  void _openProfile() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => Scaffold(
-          body: ProfileTab(
-            initialRole: 'worker',
-            isTabRoot: false,
-            onSwitchRole: () => Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const HostShell()),
-            ),
-            onLogout: _performLogout,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _performLogout() async {
-    _profileSub?.cancel();
-    _dispatchSub?.cancel();
-    _offeredGigSub?.cancel();
-    if (!mounted) return;
-    await performSignOut(context);
-  }
-
   String _monthName(int m) {
     const months = [
       '',
@@ -1843,15 +1811,11 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                             children: [
                               WorkerHeader(
                                 userId: _userId,
-                                name: _name,
                                 email: _email,
                                 phone: _phone,
-                                photoUrl: _photoUrl,
                                 rating: _rating,
                                 memberSince: _memberSince,
                                 isDark: isDark,
-                                onEdit: _openProfile,
-                                isVerified: _isVerified,
                                 showBackButton: !widget.isTabRoot,
                                 onNotifications: () =>
                                     WorkerNotificationsSheet.show(context),

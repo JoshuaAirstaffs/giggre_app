@@ -8,6 +8,10 @@ enum EntranceAnimationType { fadeIn, fadeInSlideUp }
 // it fade in (and optionally slide up) as it enters the screen, instead of
 // every instance firing together as soon as the page mounts. Give staggered
 // children increasing `delay` values for a sequenced reveal.
+//
+// With the system's Reduce Motion / Remove animations setting on, it skips
+// the slide and the stagger and only fades in briefly, so content still
+// arrives softly without anything moving across the screen.
 class EntranceAnimation extends StatefulWidget {
   const EntranceAnimation({
     super.key,
@@ -51,10 +55,20 @@ class _EntranceAnimationState extends State<EntranceAnimation>
     _progress = CurvedAnimation(parent: _controller, curve: widget.curve);
   }
 
+  static const _reducedDuration = Duration(milliseconds: 150);
+
+  bool get _reduceMotion =>
+      MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
   void _onVisibilityChanged(VisibilityInfo info) {
     if (_triggered || info.visibleFraction < widget.visibleFraction) return;
+    // Reported after a short delay, so this may already be gone
+    if (!mounted) return;
     _triggered = true;
-    if (widget.delay == Duration.zero) {
+    if (_reduceMotion) {
+      _controller.duration = _reducedDuration;
+      _controller.forward();
+    } else if (widget.delay == Duration.zero) {
       _controller.forward();
     } else {
       _delayTimer = Timer(widget.delay, () {
@@ -80,7 +94,8 @@ class _EntranceAnimationState extends State<EntranceAnimation>
         child: widget.child,
         builder: (context, child) {
           Widget result = Opacity(opacity: _progress.value, child: child);
-          if (widget.type == EntranceAnimationType.fadeInSlideUp) {
+          if (widget.type == EntranceAnimationType.fadeInSlideUp &&
+              !_reduceMotion) {
             result = Transform.translate(
               offset: Offset(0, (1 - _progress.value) * widget.slideOffset),
               child: result,
