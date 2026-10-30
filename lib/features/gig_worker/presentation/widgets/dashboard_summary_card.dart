@@ -4,6 +4,7 @@ import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/widgets/earnings_breakdown_dialog.dart';
+import '../../../../core/widgets/unverified_limit_progress.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,6 +167,9 @@ class EarningsSummaryCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(subtitle, style: const TextStyle(color: kSub, fontSize: 12)),
+          // Unverified earning limit — shows only for unverified users while
+          // the admin limit is on; otherwise takes no space.
+          const UnverifiedLimitProgressCard(embedded: true),
         ],
       ),
     );

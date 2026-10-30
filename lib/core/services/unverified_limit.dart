@@ -44,19 +44,8 @@ Future<bool> guardUnverifiedLimit(
 
     final totalsSnap = await db.collection('transaction_totals').doc(uid).get(server);
     final fx = await FxRates.fetch();
-    final raw = totalsSnap.data() ?? const {};
-    // Totals from an earlier period (or before an admin reset) don't count.
-    final totals = (raw['periodKey'] ?? '0|never|all') == unverifiedLimitPeriodKey(cfg)
-        ? raw
-        : const <String, dynamic>{};
-    double usedUsd = 0;
-    for (final side in ['worker', 'host']) {
-      final m = totals[side];
-      if (m is! Map) continue;
-      m.forEach((ccy, v) {
-        if (v is num && ccy is String) usedUsd += _toUsd(fx, v.toDouble(), ccy);
-      });
-    }
+    final usedUsd =
+        unverifiedLimitUsage(totalsSnap.data(), cfg, fx).totalUsd;
     final newUsd = amount > 0 ? _toUsd(fx, amount, currencyCode) : 0.0;
     // Small epsilon so float rounding never blocks an exact-fit amount.
     if (usedUsd + newUsd <= maxUsd + 0.005) return true;
@@ -136,6 +125,38 @@ String unverifiedLimitPeriodKey(Map<String, dynamic> cfg, [DateTime? now]) {
       bucket = 'all';
   }
   return '$epoch|$p|$bucket';
+}
+
+class UnverifiedLimitUsage {
+  final double workerUsd;
+  final double hostUsd;
+  const UnverifiedLimitUsage(this.workerUsd, this.hostUsd);
+  double get totalUsd => workerUsd + hostUsd;
+}
+
+/// What the user has used in the current period, in USD (worker + host).
+/// Totals from an earlier period (or before an admin reset) count as zero.
+UnverifiedLimitUsage unverifiedLimitUsage(
+  Map<String, dynamic>? totals,
+  Map<String, dynamic> cfg,
+  FxRates fx,
+) {
+  final raw = totals ?? const <String, dynamic>{};
+  if ((raw['periodKey'] ?? '0|never|all') != unverifiedLimitPeriodKey(cfg)) {
+    return const UnverifiedLimitUsage(0, 0);
+  }
+  double side(String key) {
+    double sum = 0;
+    final m = raw[key];
+    if (m is Map) {
+      m.forEach((ccy, v) {
+        if (v is num && ccy is String) sum += _toUsd(fx, v.toDouble(), ccy);
+      });
+    }
+    return sum;
+  }
+
+  return UnverifiedLimitUsage(side('worker'), side('host'));
 }
 
 double _toUsd(FxRates fx, double amount, String ccy) {
