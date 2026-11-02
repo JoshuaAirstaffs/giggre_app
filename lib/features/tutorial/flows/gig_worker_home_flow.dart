@@ -2,7 +2,7 @@ import '../models/tutorial_flow.dart';
 import '../models/tutorial_step.dart';
 
 // All steps live on the worker dashboard (GigWorkerScreen); step 4's anchor
-// is the dashboard avatar.
+// is the Profile tab in WorkerShell's bottom bar.
 const gigWorkerHomeFlow = TutorialFlow(
   id: 'gigWorkerHome',
   steps: [
@@ -32,11 +32,11 @@ const gigWorkerHomeFlow = TutorialFlow(
           'can only apply to ones matching the skills a host requires.',
     ),
     TutorialStep(
-      id: 'gigWorkerHome.avatar',
-      anchorId: 'workerHome.avatar',
+      id: 'gigWorkerHome.profileTab',
+      anchorId: 'workerHome.profileTab',
       title: 'Manage your skills',
-      body: 'Tap your avatar to open your Profile, then choose My '
-          'Toolchest to add or manage the skills you’re qualified in.',
+      body: 'Tap Profile, then choose My Toolchest to add or manage the '
+          'skills you’re qualified in.',
     ),
     TutorialStep(
       id: 'gigWorkerHome.notifications',
