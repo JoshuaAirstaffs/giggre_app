@@ -8,20 +8,28 @@ import { loadFx, fromUsd, convertDown, perUsd } from "./fx";
 
 const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
 
-// ── Gig Wallet requests: Top Up (deposit) and Send (transfer) ──────────────
+// ── Gig Wallet requests: Top Up (deposit), Send (transfer), Withdraw ───────
 // Users REQUEST a wallet movement; an admin approves or rejects it in
 // giggre-admin (Wallet → Requests). Nothing moves without that approval.
 // PayMongo/GCash checkout is postponed, so top-ups are paid OUTSIDE the app
 // using a method admins list — e-wallet transfer, cash at the office, or a
 // remittance center — and the user submits the reference / official receipt
-// / control number (plus an optional photo) as proof. Withdraw is "coming
-// soon".
+// / control number (plus an optional photo) as proof. Withdrawals are paid
+// out the same ways, by an admin, outside the app.
 //
 //   deposit   nothing is held. A 'pending' top_up entry shows in the
 //             user's history; approval credits the wallet.
 //   transfer  verified users only. The amount is taken from the sender's
 //             wallet when requested (a 'pending' send entry = the hold);
 //             approval credits the recipient; rejection/cancel refunds.
+//   withdraw  verified users only. The amount is taken from the wallet when
+//             requested (a 'pending' withdraw entry = the hold). The user
+//             picks a payout method an admin listed and gives their payout
+//             details (e-wallet: account name + number; remittance: full
+//             name as on their ID + mobile; office: pick up in person). The
+//             admin pays it out, then approves with the payout reference /
+//             control number (required except for office pickup);
+//             rejection/cancel refunds.
 //
 // Config — general_config/wallet_requests (super-admin edited):
 //   enabled, deposit|transfer.{enabled, min, max, dailyMax} — in USD; a PHP
@@ -30,6 +38,8 @@ const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
 //   the amount at the rate locked when the request was made.
 //   depositAccounts [{kind: ewallet|office|remittance, method, accountName,
 //                     accountNumber, details}], depositNote
+//   withdrawMethods [{kind: ewallet|office|remittance, method, details}],
+//                    withdrawNote
 // A user may have only ONE pending wallet request at a time.
 //
 // Data (server-write only — see firestore.rules)
@@ -40,13 +50,14 @@ const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
 const db = () => admin.firestore();
 const FV = admin.firestore.FieldValue;
 
-export const WALLET_REQUEST_TYPES = ["deposit", "transfer"] as const;
+export const WALLET_REQUEST_TYPES = ["deposit", "transfer", "withdraw"] as const;
 type WType = (typeof WALLET_REQUEST_TYPES)[number];
 const ADMIN_PERMISSION = "wallet";
 const MAX_OPEN_REQUESTS = 1;
 const ABS_MAX = 1_000_000;
 const CONFIG_DOC = "wallet_requests";
-const LABEL: Record<WType, string> = { deposit: "Top up", transfer: "Send" };
+const LABEL: Record<WType, string> = { deposit: "Top up", transfer: "Send", withdraw: "Withdraw" };
+const METHOD_KINDS = ["ewallet", "office", "remittance"] as const;
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 const toMoney = (n: number) => Math.round(n * 100) / 100;
@@ -65,8 +76,29 @@ const maskName = (name: string) => {
   return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
 };
 
+const methodKindOf = (v: unknown): string =>
+  (METHOD_KINDS as readonly string[]).includes(String(v)) ? String(v) : "ewallet";
+/** "0917 *** 4567"-style mask for the user's own history line. */
+const maskNumber = (n: string | null) => {
+  if (!n) return null;
+  const d = n.replace(/\s+/g, "");
+  return d.length <= 4 ? d : `${"•".repeat(Math.min(6, d.length - 4))}${d.slice(-4)}`;
+};
+const withdrawTitle = (method: string | null, kind: string | null) =>
+  kind === "office" ? `Withdraw — pickup at ${method ?? "office"}`
+    : kind === "remittance" ? `Withdraw via ${method ?? "remittance"}`
+      : `Withdraw to ${method ?? "e-wallet"}`;
+function withdrawDoneMessage(s: { methodKind: string | null; method: string | null; payoutReference: string | null }, amt: string) {
+  if (s.methodKind === "office") return `You received ${amt} in cash at ${s.method ?? "the office"}.`;
+  if (s.methodKind === "remittance") {
+    return `${amt} is ready to claim at ${s.method ?? "the remittance center"}. Control number: ${s.payoutReference ?? "—"}. Bring a valid ID.`;
+  }
+  return `${amt} was sent to your ${s.method ?? "account"}.${s.payoutReference ? ` Reference: ${s.payoutReference}.` : ""}`;
+}
+
 interface Limits { enabled: boolean; min: number | null; max: number | null; dailyMax: number | null }
-interface WalletConfig { enabled: boolean; byType: Record<WType, Limits> }
+interface WithdrawMethod { kind: string; method: string }
+interface WalletConfig { enabled: boolean; byType: Record<WType, Limits>; withdrawMethods: WithdrawMethod[] }
 
 function parseConfig(d: FirebaseFirestore.DocumentData | undefined): WalletConfig {
   const byType = {} as Record<WType, Limits>;
@@ -74,7 +106,12 @@ function parseConfig(d: FirebaseFirestore.DocumentData | undefined): WalletConfi
     const r = (d?.[t] ?? {}) as Record<string, unknown>;
     byType[t] = { enabled: r.enabled === true, min: amountOf(r.min), max: amountOf(r.max), dailyMax: amountOf(r.dailyMax) };
   }
-  return { enabled: !!d && d.enabled !== false, byType };
+  const withdrawMethods: WithdrawMethod[] = Array.isArray(d?.withdrawMethods)
+    ? (d!.withdrawMethods as Record<string, unknown>[])
+      .map((m) => ({ kind: String(m?.kind ?? "ewallet"), method: str(m?.method) ?? "" }))
+      .filter((m) => m.method && (METHOD_KINDS as readonly string[]).includes(m.kind))
+    : [];
+  return { enabled: !!d && d.enabled !== false, byType, withdrawMethods };
 }
 
 interface Actor { uid: string; name: string; email: string | null }
@@ -151,7 +188,6 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
   const d = (request.data ?? {}) as Record<string, unknown>;
 
   const type = d.type as WType;
-  if (d.type === "withdraw") throw new HttpsError("failed-precondition", "Withdraw is coming soon.");
   if (!WALLET_REQUEST_TYPES.includes(type)) throw new HttpsError("invalid-argument", "Unknown request type.");
   const amount = amountOf(d.amount);
   if (amount == null) throw new HttpsError("invalid-argument", "Enter an amount above 0 with up to 2 decimals.");
@@ -162,9 +198,9 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
   }
 
   // Deposit proof
-  const method = type === "deposit" ? optText(d.method, 40, "Payment method") : null;
-  const methodKind = type === "deposit" && ["ewallet", "office", "remittance"].includes(String(d.methodKind))
-    ? String(d.methodKind) : null;
+  const hasMethod = type === "deposit" || type === "withdraw";
+  const method = hasMethod ? optText(d.method, 40, "Payment method") : null;
+  const methodKind = hasMethod ? methodKindOf(d.methodKind) : null;
   const reference = type === "deposit" ? optText(d.reference, 60, "Reference number") : null;
   if (type === "deposit" && (!reference || reference.length < 4)) {
     throw new HttpsError("invalid-argument", "Enter the reference number of your payment.");
@@ -173,9 +209,27 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
   if (proofPath && !proofPath.startsWith(`wallet_proofs/${uid}/`)) throw new HttpsError("invalid-argument", "Bad proof upload.");
   const proofUrl = proofPath ? optText(d.proofUrl, 1000, "Proof") : null;
 
+  // Withdraw payout details
+  let payoutName: string | null = null;
+  let payoutNumber: string | null = null;
+  if (type === "withdraw") {
+    payoutName = optText(d.payoutName, 80, "Name");
+    payoutNumber = optText(d.payoutNumber, 40, "Account / mobile number");
+    if (methodKindOf(d.methodKind) !== "office") {
+      if (!payoutName || payoutName.length < 2) throw new HttpsError("invalid-argument", "Enter the name on your account / ID.");
+      if (!payoutNumber || payoutNumber.replace(/\D/g, "").length < 7) {
+        throw new HttpsError("invalid-argument", "Enter a valid account or mobile number.");
+      }
+    }
+  }
+
   const config = parseConfig((await db().collection("general_config").doc(CONFIG_DOC).get()).data());
   const lim = config.byType[type];
   if (!config.enabled || !lim.enabled) throw new HttpsError("failed-precondition", `${LABEL[type]} isn't available right now.`);
+  if (type === "withdraw" && !config.withdrawMethods.some((m) =>
+    m.kind === methodKind && m.method.toLowerCase() === (method ?? "").toLowerCase())) {
+    throw new HttpsError("failed-precondition", `${method ?? "That payout method"} isn't available for withdrawals right now.`);
+  }
   const fx = await loadFx();
 
   let recipient: UserInfo | null = null;
@@ -211,8 +265,10 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
       tx.get(db().collection("wallet_requests").where("userId", "==", uid).where("status", "==", "pending")),
     ]);
     if (!userSnap.exists) throw new HttpsError("failed-precondition", "Your account profile is missing.");
-    if (type === "transfer" && userSnap.data()?.isVerified !== "verified") {
-      throw new HttpsError("permission-denied", "Only verified accounts can send money. Verify your account first.");
+    if (type !== "deposit" && userSnap.data()?.isVerified !== "verified") {
+      throw new HttpsError("permission-denied", type === "transfer"
+        ? "Only verified accounts can send money. Verify your account first."
+        : "Only verified accounts can withdraw. Verify your account first.");
     }
     if (openSnap.size >= MAX_OPEN_REQUESTS) {
       const o = openSnap.docs[0]?.data();
@@ -237,7 +293,7 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
     const recipientAmount = recipient ? convertDown(fx, amount, ccy, recipientCcy!) : null;
     if (recipient && (recipientAmount ?? 0) <= 0) throw new HttpsError("out-of-range", "That amount is too small to send.");
     const bal = toMoney(Number(wSnap.data()?.balance) || 0);
-    if (type === "transfer" && bal < amount) {
+    if (type !== "deposit" && bal < amount) {
       throw new HttpsError("failed-precondition", `Your GigCash balance is only ${money(bal, ccy)}.`);
     }
 
@@ -246,6 +302,7 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
     tx.create(reqRef, {
       type, status: "pending", amount, currencyCode: ccy, note,
       method, methodKind, reference, proofPath, proofUrl,
+      payoutName, payoutNumber, payoutReference: null,
       userId: uid, userName: requester.name, userCode: requester.code,
       recipientId: recipient?.uid ?? null, recipientName: recipient?.name ?? null, recipientCode: recipient?.code ?? null,
       recipientAmount, recipientCurrency: recipientCcy,
@@ -259,13 +316,20 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
         status: "pending", balanceAfter: bal, meta: { requestId: reqRef.id, reference, applied: false }, createdAt: now,
       });
     } else {
+      // Send / Withdraw: the amount leaves the balance now (= the hold).
       const after = toMoney(bal - amount);
       tx.set(wRef, { balance: after, currencyCode: ccy, updatedAt: now }, { merge: true });
-      tx.create(txRef(uid, `wreq_${reqRef.id}`), {
-        amount: -amount, type: "send", title: `Send to ${recipient!.name}`, currencyCode: ccy,
-        status: "pending", balanceAfter: after,
-        meta: { requestId: reqRef.id, recipientId: recipient!.uid, recipientName: recipient!.name, note }, createdAt: now,
-      });
+      tx.create(txRef(uid, `wreq_${reqRef.id}`), type === "transfer"
+        ? {
+          amount: -amount, type: "send", title: `Send to ${recipient!.name}`, currencyCode: ccy,
+          status: "pending", balanceAfter: after,
+          meta: { requestId: reqRef.id, recipientId: recipient!.uid, recipientName: recipient!.name, note }, createdAt: now,
+        }
+        : {
+          amount: -amount, type: "withdraw", title: withdrawTitle(method, methodKind), currencyCode: ccy,
+          status: "pending", balanceAfter: after,
+          meta: { requestId: reqRef.id, method, methodKind, payoutName, payoutNumber: maskNumber(payoutNumber), note }, createdAt: now,
+        });
     }
     tx.set(dailyRef(uid, day), { dayKey: day, [type]: FV.increment(cents(amount)), updatedAt: now }, { merge: true });
     return { requestId: reqRef.id, status: "pending", duplicate: false, requester, ccy, recipientAmount: recipientAmount ?? 0 };
@@ -277,7 +341,9 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
     const who = `${result.requester.name}${result.requester.code ? ` (${result.requester.code})` : ""}`;
     const what = type === "deposit"
       ? `submitted a top up of ${money(amount, result.ccy)} via ${method ?? "manual payment"} (ref ${reference})`
-      : `wants to send ${money(amount, result.ccy)}${converted} to ${recipient!.name}${recipient!.code ? ` (${recipient!.code})` : ""}`;
+      : type === "withdraw"
+        ? `wants to withdraw ${money(amount, result.ccy)} via ${method}${payoutNumber ? ` to ${payoutName} · ${payoutNumber}` : methodKind === "office" ? " (office pickup)" : ""}`
+        : `wants to send ${money(amount, result.ccy)}${converted} to ${recipient!.name}${recipient!.code ? ` (${recipient!.code})` : ""}`;
     try {
       await db().collection("admin_notifications").add({
         type: "wallet_request", requiredPermission: ADMIN_PERMISSION,
@@ -293,7 +359,11 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
     await notifyWalletUser(uid, `${LABEL[type]} request submitted`,
       type === "deposit"
         ? `Your top up of ${money(amount, result.ccy)} is waiting for Giggre to confirm your payment.`
-        : `Sending ${money(amount, result.ccy)} to ${recipient!.name} is waiting for review. The amount is on hold until it's decided.`,
+        : type === "withdraw"
+          ? methodKind === "office"
+            ? `Your withdrawal of ${money(amount, result.ccy)} is on hold for pickup at ${method}. Bring a valid ID; Giggre completes it when you receive the cash.`
+            : `Your withdrawal of ${money(amount, result.ccy)} via ${method} is waiting for Giggre to pay it out. The amount is on hold until then.`
+          : `Sending ${money(amount, result.ccy)} to ${recipient!.name} is waiting for review. The amount is on hold until it's decided.`,
       { requestId: result.requestId, status: "pending", requestType: type });
   }
   return { requestId: result.requestId, status: result.status };
@@ -302,9 +372,9 @@ export const createWalletRequest = onCall(OPTS, async (request) => {
 // ── Settle ──────────────────────────────────────────────────────────────────
 
 type Outcome = "approved" | "rejected" | "cancelled";
-interface Settled { type: WType; amount: number; ccy: string; userId: string; userName: string; userCode: string | null; recipientId: string | null; recipientName: string | null; recipientAmount: number; recipientCcy: string }
+interface Settled { method: string | null; methodKind: string | null; payoutReference: string | null; type: WType; amount: number; ccy: string; userId: string; userName: string; userCode: string | null; recipientId: string | null; recipientName: string | null; recipientAmount: number; recipientCcy: string }
 
-async function settle(requestId: string, outcome: Outcome, opts: { actor?: Actor; ownerUid?: string; note?: string | null }): Promise<Settled> {
+async function settle(requestId: string, outcome: Outcome, opts: { actor?: Actor; ownerUid?: string; note?: string | null; payoutReference?: string | null }): Promise<Settled> {
   const reqRef = db().collection("wallet_requests").doc(requestId);
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(reqRef);
@@ -336,6 +406,12 @@ async function settle(requestId: string, outcome: Outcome, opts: { actor?: Actor
         const after = toMoney(bal + amount);
         tx.set(walletRef(uid), { balance: after, currencyCode: ccy, updatedAt: now, ...(wSnap.exists ? {} : { createdAt: now }) }, { merge: true });
         tx.set(mainTx, { status: "completed", balanceAfter: after, "meta": { requestId, reference: r.reference ?? null, applied: true } }, { merge: true });
+      } else if (type === "withdraw") {
+        // Already taken from the balance at request time; just complete it.
+        if (r.methodKind !== "office" && !opts.payoutReference) {
+          throw new HttpsError("invalid-argument", "Enter the payout reference / control number.");
+        }
+        tx.set(mainTx, { status: "completed", meta: { payoutReference: opts.payoutReference ?? null } }, { merge: true });
       } else {
         tx.set(mainTx, { status: "completed" }, { merge: true });
         const rBal = toMoney(Number(rWallet?.data()?.balance) || 0);
@@ -357,8 +433,9 @@ async function settle(requestId: string, outcome: Outcome, opts: { actor?: Actor
         const after = toMoney(bal + amount);
         tx.set(mainTx, { status: "reversed" }, { merge: true });
         tx.set(walletRef(uid), { balance: after, updatedAt: now }, { merge: true });
+        const what = type === "withdraw" ? "Withdrawal" : "Send";
         tx.create(txRef(uid, `wreq_${requestId}_refund`), {
-          amount, type: "refund", title: outcome === "cancelled" ? "Send cancelled — refund" : "Send rejected — refund",
+          amount, type: "refund", title: outcome === "cancelled" ? `${what} cancelled — refund` : `${what} rejected — refund`,
           currencyCode: ccy, status: "completed", balanceAfter: after, meta: { requestId }, createdAt: now,
         });
       }
@@ -370,8 +447,10 @@ async function settle(requestId: string, outcome: Outcome, opts: { actor?: Actor
       status: outcome, decidedAt: now,
       decidedBy: opts.actor?.uid ?? opts.ownerUid ?? null, decidedByName: opts.actor?.name ?? null,
       decisionNote: opts.note ?? null, updatedAt: now,
+      ...(type === "withdraw" && outcome === "approved" ? { payoutReference: opts.payoutReference ?? null } : {}),
     });
-    return { type, amount, ccy, userId: uid, userName: r.userName ?? "Giggre user", userCode: r.userCode ?? null, recipientId: rid, recipientName: r.recipientName ?? null,
+    return { method: str(r.method), methodKind: str(r.methodKind), payoutReference: opts.payoutReference ?? null,
+      type, amount, ccy, userId: uid, userName: r.userName ?? "Giggre user", userCode: r.userCode ?? null, recipientId: rid, recipientName: r.recipientName ?? null,
       recipientAmount: toMoney(Number(r.recipientAmount) || amount), recipientCcy: str(r.recipientCurrency) ?? ccy };
   });
 }
@@ -385,12 +464,15 @@ export const decideWalletRequest = onCall(OPTS, async (request) => {
   const outcome: Outcome = d.decision === "approve" ? "approved" : "rejected";
   const note = optText(d.note, 200, "Note");
   if (outcome === "rejected" && !note) throw new HttpsError("invalid-argument", "Give the user a reason for the rejection.");
+  const payoutReference = optText(d.reference, 60, "Payout reference");
 
-  const s = await settle(requestId, outcome, { actor, note });
+  const s = await settle(requestId, outcome, { actor, note, payoutReference });
   const amt = money(s.amount, s.ccy);
   if (outcome === "approved") {
     await notifyWalletUser(s.userId, `${LABEL[s.type]} approved`,
-      s.type === "deposit" ? `${amt} was added to your Gig Wallet.` : `${amt} was sent to ${s.recipientName ?? "the recipient"}.`,
+      s.type === "deposit" ? `${amt} was added to your Gig Wallet.`
+        : s.type === "withdraw" ? withdrawDoneMessage(s, amt)
+          : `${amt} was sent to ${s.recipientName ?? "the recipient"}.`,
       { requestId, status: "approved", requestType: s.type });
     if (s.type === "transfer" && s.recipientId) {
       const got = money(s.recipientAmount, s.recipientCcy);
@@ -399,12 +481,12 @@ export const decideWalletRequest = onCall(OPTS, async (request) => {
     }
   } else {
     await notifyWalletUser(s.userId, `${LABEL[s.type]} request rejected`,
-      `Your ${LABEL[s.type].toLowerCase()} of ${amt} was rejected${note ? `: ${note}` : "."}${s.type === "transfer" ? ` ${amt} was refunded to your Gig Wallet.` : ""}`,
+      `Your ${LABEL[s.type].toLowerCase()} of ${amt} was rejected${note ? `: ${note}` : "."}${s.type !== "deposit" ? ` ${amt} was refunded to your Gig Wallet.` : ""}`,
       { requestId, status: "rejected", requestType: s.type });
   }
   await logWalletActivity(actor, outcome === "approved" ? "wallet_request_approved" : "wallet_request_rejected",
-    `${outcome === "approved" ? "Approved" : "Rejected"} ${LABEL[s.type].toLowerCase()} of ${amt} for ${s.userName}${s.userCode ? ` (${s.userCode})` : ""}${s.type === "transfer" ? ` → ${s.recipientName}` : ""}${note ? ` — ${note}` : ""}`,
-    requestId, s.userName, { type: s.type, amount: s.amount, userId: s.userId, recipientId: s.recipientId, note });
+    `${outcome === "approved" ? "Approved" : "Rejected"} ${LABEL[s.type].toLowerCase()} of ${amt} for ${s.userName}${s.userCode ? ` (${s.userCode})` : ""}${s.type === "transfer" ? ` → ${s.recipientName}` : ""}${s.type === "withdraw" ? ` via ${s.method ?? "manual payout"}${s.payoutReference ? ` (ref ${s.payoutReference})` : ""}` : ""}${note ? ` — ${note}` : ""}`,
+    requestId, s.userName, { type: s.type, amount: s.amount, userId: s.userId, recipientId: s.recipientId, note, payoutReference: s.payoutReference });
   return { status: outcome };
 });
 

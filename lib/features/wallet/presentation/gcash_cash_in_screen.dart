@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
 
-import '../../../core/providers/current_user_provider.dart';
 import '../../../core/services/fx_rates.dart';
 import '../../../core/utils/currency_formatter.dart';
 
 import '../../../core/theme/profile_tab_theme.dart';
+import '../services/wallet_currency.dart';
 import '../services/wallet_requests_service.dart';
 import 'top_up_payment_screen.dart';
 import 'widgets/wallet_page_header.dart';
@@ -48,10 +47,10 @@ class GcashCashInScreen extends StatefulWidget {
 
 class _GcashCashInScreenState extends State<GcashCashInScreen> {
   final _controller = TextEditingController();
-  /// The user's currency symbol: $ by default, ₱ for users located in the
-  /// Philippines (CurrentUserProvider / CurrencyFormatter).
+  /// Symbol of the Gig Wallet's own currency (WalletCurrency): ₱ for a
+  /// PHP wallet, else $.
   String get _symbol => CurrencyFormatter.symbol(
-    context.read<CurrentUserProvider>().currencyCode,
+    WalletCurrency.of(context),
   );
   NumberFormat get _money =>
       NumberFormat.currency(symbol: '$_symbol ', decimalDigits: 2);
@@ -59,7 +58,7 @@ class _GcashCashInScreenState extends State<GcashCashInScreen> {
 
   /// Limits are set in USD (admin) — convert to the user's currency.
   FxRates? _fx;
-  String get _ccy => context.read<CurrentUserProvider>().currencyCode;
+  String get _ccy => WalletCurrency.of(context);
   double _inMine(double? usd, double fallback) =>
       usd == null ? fallback : (_fx?.fromUsd(usd, _ccy) ?? usd);
   double get _min => _inMine(_config?.deposit.min, _kMinCashIn);

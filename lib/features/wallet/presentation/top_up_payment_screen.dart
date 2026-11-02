@@ -5,12 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
 
-import '../../../core/providers/current_user_provider.dart';
 import '../../../core/utils/currency_formatter.dart';
 
 import '../../../core/theme/profile_tab_theme.dart';
+import '../services/wallet_currency.dart';
 import '../services/wallet_requests_service.dart';
 import 'widgets/wallet_page_header.dart';
 
@@ -44,10 +43,10 @@ class TopUpPaymentScreen extends StatefulWidget {
 
 class _TopUpPaymentScreenState extends State<TopUpPaymentScreen> {
   final _ref = TextEditingController();
-  /// The user's currency symbol: $ by default, ₱ for users located in the
-  /// Philippines (CurrentUserProvider / CurrencyFormatter).
+  /// Symbol of the Gig Wallet's own currency (WalletCurrency): ₱ for a
+  /// PHP wallet, else $.
   String get _symbol => CurrencyFormatter.symbol(
-    context.read<CurrentUserProvider>().currencyCode,
+    WalletCurrency.of(context),
   );
   NumberFormat get _money =>
       NumberFormat.currency(symbol: _symbol, decimalDigits: 2);

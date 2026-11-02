@@ -3,13 +3,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
 
-import '../../../core/providers/current_user_provider.dart';
 import '../../../core/services/fx_rates.dart';
 import '../../../core/utils/currency_formatter.dart';
 
 import '../../../core/theme/profile_tab_theme.dart';
+import '../services/wallet_currency.dart';
 import '../services/wallet_requests_service.dart';
 import 'widgets/wallet_page_header.dart';
 
@@ -35,10 +34,10 @@ class SendAmountScreen extends StatefulWidget {
 class _SendAmountScreenState extends State<SendAmountScreen> {
   final _amount = TextEditingController();
   final _note = TextEditingController();
-  /// The user's currency symbol: $ by default, ₱ for users located in the
-  /// Philippines (CurrentUserProvider / CurrencyFormatter).
+  /// Symbol of the Gig Wallet's own currency (WalletCurrency): ₱ for a
+  /// PHP wallet, else $.
   String get _symbol => CurrencyFormatter.symbol(
-    context.read<CurrentUserProvider>().currencyCode,
+    WalletCurrency.of(context),
   );
   NumberFormat get _money =>
       NumberFormat.currency(symbol: _symbol, decimalDigits: 2);
@@ -67,7 +66,7 @@ class _SendAmountScreenState extends State<SendAmountScreen> {
 
   /// Limits are set in USD (admin); shown and checked in the user's currency.
   FxRates? _fx;
-  String get _ccy => context.read<CurrentUserProvider>().currencyCode;
+  String get _ccy => WalletCurrency.of(context);
   bool get _ratesReady =>
       _fx != null && _fx!.knows(_ccy) && _fx!.knows(widget.recipient.currencyCode);
   double? _mine(double? usd) => usd == null ? null : _fx?.fromUsd(usd, _ccy);

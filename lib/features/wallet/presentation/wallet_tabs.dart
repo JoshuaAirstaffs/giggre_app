@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -191,7 +192,7 @@ class WalletHero extends StatelessWidget {
                             icon: Icons.account_balance_rounded,
                             label: 'Withdraw',
                             color: deep,
-                            enabled: false,
+                            enabled: pending == null,
                             onTap: onWithdraw,
                           ),
                         ),
@@ -348,7 +349,9 @@ class WalletStatsStrip extends StatelessWidget {
         pending += t.amount.abs();
         continue;
       }
-      if (t.status != 'completed') continue;
+      // Reversed holds and their refunds cancel out — neither is real
+      // money in or out.
+      if (t.status != 'completed' || t.isRefund) continue;
       if (t.createdAt != null && t.createdAt!.isBefore(since)) continue;
       if (t.amount >= 0) {
         moneyIn += t.amount;
@@ -452,7 +455,7 @@ enum WalletFilter {
 
   bool test(WalletTx t) => switch (this) {
     WalletFilter.all => true,
-    WalletFilter.moneyIn => t.isIn && t.status == 'completed',
+    WalletFilter.moneyIn => t.isIn && t.status == 'completed' && !t.isRefund,
     WalletFilter.moneyOut => !t.isIn && t.status == 'completed',
     WalletFilter.pending => t.status == 'pending',
   };
@@ -553,7 +556,7 @@ List<Widget> walletActivitySlivers(
       )),
     ];
   }
-  final items = txs!.where(filter.test).toList();
+  final items = collapseRefunds(txs!).where(filter.test).toList();
   if (items.isEmpty) {
     return [
       chips,
@@ -637,7 +640,7 @@ List<Widget> walletActivitySlivers(
 ({Color color, String label}) _statusStyle(String status) => switch (status) {
   'pending' => (color: _amber, label: 'Pending'),
   'failed' => (color: kSub, label: 'Not approved'),
-  'reversed' => (color: kSub, label: 'Reversed'),
+  'reversed' => (color: kSub, label: 'Refunded'),
   _ => (color: kWalletIn, label: 'Completed'),
 };
 
@@ -835,9 +838,9 @@ class _WalletRequestTileState extends State<WalletRequestTile> {
       builder: (ctx) => AlertDialog(
         title: Text('Cancel this ${r.label.toLowerCase()}?'),
         content: Text(
-          r.type == 'transfer'
-              ? '${walletCash(r.amount, r.currencyCode ?? widget.fallbackCurrency)} goes back to your Gig Wallet.'
-              : 'Giggre will no longer review this top up. If you already paid, contact support instead.',
+          r.type == 'deposit'
+              ? 'Giggre will no longer review this top up. If you already paid, contact support instead.'
+              : '${walletCash(r.amount, r.currencyCode ?? widget.fallbackCurrency)} goes back to your Gig Wallet.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep it')),
@@ -867,11 +870,14 @@ class _WalletRequestTileState extends State<WalletRequestTile> {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final st = _requestStatus(r.status);
     final isSend = r.type == 'transfer';
-    final typeColor = isSend ? kWalletOut : kWalletIn;
+    final isWithdraw = r.type == 'withdraw';
+    final isOut = isSend || isWithdraw;
+    final typeColor = isOut ? kWalletOut : kWalletIn;
     final date = r.isPending ? r.createdAt : (r.decidedAt ?? r.createdAt);
     final subtitle = [
       if (isSend && r.recipientName != null) 'To ${r.recipientName}',
-      if (!isSend && r.reference != null) 'Ref ${r.reference}',
+      if (isWithdraw && r.payoutNumber != null) 'To ${r.payoutNumber}',
+      if (r.type == 'deposit' && r.reference != null) 'Ref ${r.reference}',
       if (date != null) DateFormat('MMM d · h:mm a').format(date.toLocal()),
     ].join(' · ');
 
@@ -891,7 +897,15 @@ class _WalletRequestTileState extends State<WalletRequestTile> {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(color: typeColor.withValues(alpha: 0.13), shape: BoxShape.circle),
-                child: Icon(isSend ? Icons.north_east_rounded : Icons.add_card_rounded, color: typeColor, size: 19),
+                child: Icon(
+                  isSend
+                      ? Icons.north_east_rounded
+                      : isWithdraw
+                          ? Icons.account_balance_rounded
+                          : Icons.add_card_rounded,
+                  color: typeColor,
+                  size: 19,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -899,7 +913,11 @@ class _WalletRequestTileState extends State<WalletRequestTile> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      isSend ? 'Send' : 'Top up${r.method == null ? '' : ' via ${r.method}'}',
+                      isSend
+                          ? 'Send'
+                          : isWithdraw
+                              ? 'Withdraw${r.method == null ? '' : ' · ${r.method}'}'
+                              : 'Top up${r.method == null ? '' : ' via ${r.method}'}',
                       style: TextStyle(color: onSurface, fontSize: 14, fontWeight: FontWeight.w600),
                     ),
                     if (subtitle.isNotEmpty)
@@ -911,7 +929,7 @@ class _WalletRequestTileState extends State<WalletRequestTile> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '${isSend ? '−' : '+'}${walletCash(r.amount, r.currencyCode ?? widget.fallbackCurrency)}',
+                    '${isOut ? '−' : '+'}${walletCash(r.amount, r.currencyCode ?? widget.fallbackCurrency)}',
                     style: TextStyle(
                       color: r.status == 'approved' ? typeColor : onSurface,
                       fontSize: 15,
@@ -925,6 +943,31 @@ class _WalletRequestTileState extends State<WalletRequestTile> {
               ),
             ],
           ),
+          if (isWithdraw && r.status == 'approved' && r.payoutReference?.isNotEmpty == true) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    r.methodKind == DepositKind.remittance
+                        ? 'Control no. ${r.payoutReference} — claim it with a valid ID.'
+                        : 'Reference: ${r.payoutReference}',
+                    style: TextStyle(color: onSurface, fontSize: 12.5, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: r.payoutReference!));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+                  },
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.copy_rounded, size: 16, color: kSub),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (r.decisionNote?.isNotEmpty == true) ...[
             const SizedBox(height: 8),
             Text('Reason: ${r.decisionNote}', style: const TextStyle(color: kSub, fontSize: 12, height: 1.35)),
@@ -934,7 +977,13 @@ class _WalletRequestTileState extends State<WalletRequestTile> {
               children: [
                 Expanded(
                   child: Text(
-                    isSend ? 'Amount on hold until a Giggre admin reviews it.' : 'Giggre is confirming your payment.',
+                    isSend
+                        ? 'Amount on hold until a Giggre admin reviews it.'
+                        : isWithdraw
+                            ? r.methodKind == DepositKind.office
+                                ? 'On hold for pickup. Bring a valid ID.'
+                                : 'On hold until Giggre pays it out.'
+                            : 'Giggre is confirming your payment.',
                     style: const TextStyle(color: kSub, fontSize: 12),
                   ),
                 ),
@@ -993,7 +1042,13 @@ class WalletInfoTab extends StatelessWidget {
           title: 'Withdraw',
           icon: Icons.account_balance_rounded,
           accent: accent,
-          steps: const ['Cashing out to GCash or a bank is coming soon.'],
+          steps: const [
+            'Choose how to receive it: your e-wallet, cash pickup at a Giggre office, or a remittance center.',
+            'Enter the amount and where to send it. It goes on hold in your wallet right away.',
+            'Giggre pays it out, then sends you the reference or control number.',
+            'If it is rejected or you cancel, the amount comes back.',
+          ],
+          footnote: 'Only verified accounts can withdraw.',
         ),
         const SizedBox(height: 12),
         _InfoCard(

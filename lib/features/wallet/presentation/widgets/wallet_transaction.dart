@@ -32,6 +32,11 @@ class WalletTx {
 
   bool get isIn => amount >= 0;
 
+  /// A refund that only gives back a hold (Send / Withdraw / conversion that
+  /// was rejected or cancelled). It isn't new money: with the reversed hold
+  /// it nets to zero, so it's left out of "money in" totals.
+  bool get isRefund => type == 'refund';
+
   factory WalletTx.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final d = doc.data() ?? const {};
     return WalletTx(
@@ -92,8 +97,28 @@ String walletTxTypeLabel(String type) => switch (type) {
   _ => 'Transaction',
 };
 
-String walletTxStatusLabel(String status) =>
-    status.isEmpty ? '' : status[0].toUpperCase() + status.substring(1);
+String walletTxStatusLabel(String status) => switch (status) {
+  '' => '',
+  'reversed' => 'Refunded',
+  _ => status[0].toUpperCase() + status.substring(1),
+};
+
+/// History without the separate refund line when its reversed hold is in
+/// the same list: a rejected / cancelled Send or Withdraw shows as ONE entry
+/// (struck through, "Refunded") instead of a −₱500 and a +₱500 pair.
+/// Ids follow walletRequests.ts / gigPointsRequests.ts:
+///   hold wreq_{id}     → refund wreq_{id}_refund
+///   hold gpconv_{id}_hold → refund gpconv_{id}_refund
+List<WalletTx> collapseRefunds(List<WalletTx> txs) {
+  final reversed = {for (final t in txs) if (t.status == 'reversed') t.id};
+  bool covered(WalletTx t) {
+    if (!t.isRefund || !t.id.endsWith('_refund')) return false;
+    final base = t.id.substring(0, t.id.length - '_refund'.length);
+    return reversed.contains(base) || reversed.contains('${base}_hold');
+  }
+
+  return txs.where((t) => !covered(t)).toList();
+}
 
 Color walletTxStatusColor(String status) => switch (status) {
   'completed' => kWalletIn,

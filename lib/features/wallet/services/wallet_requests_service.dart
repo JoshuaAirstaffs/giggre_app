@@ -8,7 +8,8 @@ import 'package:flutter/foundation.dart';
 import 'package:giggre_app/main.dart' show flavor;
 
 // Gig Wallet requests (functions/src/walletRequests.ts): Top Up with manual
-// proof and Send to another user, both approved by a Giggre admin. The app
+// proof, Send to another user and Withdraw (paid out manually), all approved
+// by a Giggre admin. The app
 // never writes a balance — it only calls these callables and reads.
 
 final _functionsRegion = flavor == 'prod' ? 'us-central1' : 'asia-east2';
@@ -80,21 +81,40 @@ class DepositAccount {
   });
 }
 
+/// A way Giggre pays out a withdrawal (giggre-admin → Gig Wallet → Settings →
+/// Withdraw methods). Same kinds as top ups:
+///   ewallet    — Giggre sends it to the user's GCash / Maya / bank account
+///   office     — the user picks up cash at the office (method = office name)
+///   remittance — Giggre sends it by padala; the user claims it with the
+///                control number
+class WithdrawMethod {
+  final DepositKind kind;
+  final String method;
+  final String details;
+  const WithdrawMethod(this.kind, this.method, [this.details = '']);
+}
+
 /// general_config/wallet_requests — missing doc = closed. Limits are in USD;
 /// convert with FxRates before showing them to a PHP user.
 class WalletRequestConfig {
   final bool enabled;
   final WalletAmountLimits deposit;
   final WalletAmountLimits transfer;
+  final WalletAmountLimits withdraw;
   final List<DepositAccount> depositAccounts;
   final String depositNote;
+  final List<WithdrawMethod> withdrawMethods;
+  final String withdrawNote;
 
   const WalletRequestConfig({
     required this.enabled,
     required this.deposit,
     required this.transfer,
+    this.withdraw = WalletAmountLimits.closed,
     this.depositAccounts = const [],
     this.depositNote = '',
+    this.withdrawMethods = const [],
+    this.withdrawNote = '',
   });
 
   static const closed = WalletRequestConfig(
@@ -102,6 +122,9 @@ class WalletRequestConfig {
     deposit: WalletAmountLimits.closed,
     transfer: WalletAmountLimits.closed,
   );
+
+  bool get canWithdraw =>
+      enabled && withdraw.enabled && withdrawMethods.isNotEmpty;
 
   bool get canTopUp => enabled && deposit.enabled;
 
@@ -143,12 +166,28 @@ class WalletRequestConfig {
         }
       }
     }
+    final methods = <WithdrawMethod>[];
+    final rawW = d['withdrawMethods'];
+    if (rawW is List) {
+      for (final a in rawW) {
+        if (a is Map && a['method'] is String && (a['method'] as String).trim().isNotEmpty) {
+          methods.add(WithdrawMethod(
+            DepositKind.parse(a['kind']),
+            (a['method'] as String).trim(),
+            a['details'] as String? ?? '',
+          ));
+        }
+      }
+    }
     return WalletRequestConfig(
       enabled: d['enabled'] != false,
       deposit: lim(d['deposit']),
       transfer: lim(d['transfer']),
+      withdraw: lim(d['withdraw']),
       depositAccounts: accounts,
       depositNote: d['depositNote'] as String? ?? '',
+      withdrawMethods: methods,
+      withdrawNote: d['withdrawNote'] as String? ?? '',
     );
   }
 }
@@ -156,7 +195,7 @@ class WalletRequestConfig {
 /// wallet_requests/{id} (owner-readable).
 class WalletRequest {
   final String id;
-  final String type; // 'deposit' | 'transfer'
+  final String type; // 'deposit' | 'transfer' | 'withdraw'
   final String status; // pending | approved | rejected | cancelled
   final double amount;
 
@@ -166,6 +205,13 @@ class WalletRequest {
   final String? reference;
   final String? note;
   final String? method;
+  final DepositKind? methodKind;
+
+  /// Withdraw: where it's paid out, and the admin's payout reference /
+  /// remittance control number once approved.
+  final String? payoutName;
+  final String? payoutNumber;
+  final String? payoutReference;
 
   /// Rejection reason (only shown for rejected requests).
   final String? decisionNote;
@@ -182,6 +228,10 @@ class WalletRequest {
     this.reference,
     this.note,
     this.method,
+    this.methodKind,
+    this.payoutName,
+    this.payoutNumber,
+    this.payoutReference,
     this.decisionNote,
     this.createdAt,
     this.decidedAt,
@@ -189,7 +239,11 @@ class WalletRequest {
 
   bool get isPending => status == 'pending';
 
-  String get label => type == 'transfer' ? 'Send' : 'Top up';
+  String get label => switch (type) {
+    'transfer' => 'Send',
+    'withdraw' => 'Withdrawal',
+    _ => 'Top up',
+  };
 
   factory WalletRequest.fromSnapshot(DocumentSnapshot<Map<String, dynamic>> s) {
     final d = s.data() ?? const <String, dynamic>{};
@@ -203,6 +257,10 @@ class WalletRequest {
       reference: d['reference'] as String?,
       note: d['note'] as String?,
       method: d['method'] as String?,
+      methodKind: d['methodKind'] == null ? null : DepositKind.parse(d['methodKind']),
+      payoutName: d['payoutName'] as String?,
+      payoutNumber: d['payoutNumber'] as String?,
+      payoutReference: d['payoutReference'] as String?,
       decisionNote: d['status'] == 'rejected' ? d['decisionNote'] as String? : null,
       createdAt: d['createdAt'] is Timestamp
           ? (d['createdAt'] as Timestamp).toDate()
@@ -353,6 +411,27 @@ class WalletRequestsService {
       'amount': amount,
       'recipientId': recipientId,
       'clientRequestId': clientRequestId,
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+    });
+    return (res.data as Map)['requestId'] as String;
+  });
+
+  static Future<String> createWithdraw({
+    required double amount,
+    required WithdrawMethod method,
+    required String clientRequestId,
+    String? payoutName,
+    String? payoutNumber,
+    String? note,
+  }) => _guard(() async {
+    final res = await _fn('createWalletRequest').call({
+      'type': 'withdraw',
+      'amount': amount,
+      'method': method.method,
+      'methodKind': method.kind.name,
+      'clientRequestId': clientRequestId,
+      if (payoutName != null && payoutName.trim().isNotEmpty) 'payoutName': payoutName.trim(),
+      if (payoutNumber != null && payoutNumber.trim().isNotEmpty) 'payoutNumber': payoutNumber.trim(),
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
     });
     return (res.data as Map)['requestId'] as String;

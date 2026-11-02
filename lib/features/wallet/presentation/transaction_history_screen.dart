@@ -1,10 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/profile_tab_theme.dart';
 import 'transaction_details_screen.dart';
+import '../services/wallet_currency.dart';
 import 'widgets/wallet_page_header.dart';
 import 'widgets/wallet_transaction.dart';
 
@@ -44,7 +43,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<ProfileTabTokens>()!;
     final accent = walletAccentFor(widget.role);
-    final userCurrency = context.watch<CurrentUserProvider>().currencyCode;
+    final userCurrency = WalletCurrency.of(context);
 
     return Scaffold(
       backgroundColor: tokens.screenBg,
@@ -102,13 +101,14 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                       ),
                     );
                   }
-                  final txs = snap.data!.docs
-                      .map(WalletTx.fromDoc)
+                  final txs = collapseRefunds(
+                    snap.data!.docs.map(WalletTx.fromDoc).toList(),
+                  )
                       .where(
                         (t) => switch (_filter) {
                           _Filter.all => true,
-                          _Filter.moneyIn => t.isIn,
-                          _Filter.moneyOut => !t.isIn,
+                          _Filter.moneyIn => t.isIn && !t.isRefund,
+                          _Filter.moneyOut => !t.isIn && t.status != 'reversed',
                         },
                       )
                       .toList();

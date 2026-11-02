@@ -8,8 +8,11 @@ import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../services/wallet_currency.dart';
 import '../services/wallet_requests_service.dart';
 import 'cash_in_methods_screen.dart';
+import 'withdraw_methods_screen.dart';
+import '../../../core/widgets/account_not_verified_modal.dart';
 import 'choose_recipient_screen.dart';
 import 'security_privacy_centre_screen.dart';
 import 'wallet_tabs.dart';
@@ -22,8 +25,8 @@ enum _Tab { activity, requests, info }
 ///
 /// Read-only over server-written data: wallets/{uid} and its transactions
 /// (functions/src/wallet.ts) and wallet_requests (walletRequests.ts).
-/// Top Up and Send are requests a Giggre admin approves; Withdraw is not
-/// available yet. Blue in Worker mode, gold in Host mode.
+/// Top Up, Send and Withdraw are requests a Giggre admin approves.
+/// Blue in Worker mode, gold in Host mode.
 class WalletScreen extends StatefulWidget {
   const WalletScreen({super.key, this.role});
 
@@ -39,6 +42,11 @@ class _WalletScreenState extends State<WalletScreen> {
 
   String? _uid;
   Stream<DocumentSnapshot<Map<String, dynamic>>>? _wallet;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _ccySub;
+
+  /// The wallet's own currency (wallets/{uid}.currencyCode) — balance,
+  /// history and request amounts are all in it.
+  String? _walletCcy;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _txSub;
   StreamSubscription<List<WalletRequest>>? _reqSub;
 
@@ -69,6 +77,15 @@ class _WalletScreenState extends State<WalletScreen> {
     if (uid == null) return;
     _wallet = FirebaseFirestore.instance.collection('wallets').doc(uid).snapshots(
       includeMetadataChanges: true,
+    );
+    _ccySub?.cancel();
+    _ccySub = FirebaseFirestore.instance.collection('wallets').doc(uid).snapshots().listen(
+      (s) {
+        final c = s.data()?['currencyCode'] as String?;
+        WalletCurrency.set(uid, c);
+        if (mounted && c != null && c != _walletCcy) setState(() => _walletCcy = c);
+      },
+      onError: (Object e) => debugPrint('[Wallet] currency: $e'),
     );
     _listenTxs();
     _reqSub?.cancel();
@@ -147,6 +164,7 @@ class _WalletScreenState extends State<WalletScreen> {
   void dispose() {
     _txSub?.cancel();
     _reqSub?.cancel();
+    _ccySub?.cancel();
     super.dispose();
   }
 
@@ -156,9 +174,6 @@ class _WalletScreenState extends State<WalletScreen> {
     }
     return null;
   }
-
-  void _snack(String text) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
   /// One request at a time (enforced on the server too).
   bool _blockedByPending() {
@@ -170,7 +185,7 @@ class _WalletScreenState extends State<WalletScreen> {
         title: const Text('You have a request in review'),
         content: Text(
           'Your ${p.label.toLowerCase()} of '
-          '${walletCash(p.amount, p.currencyCode ?? context.read<CurrentUserProvider>().currencyCode)} '
+          '${walletCash(p.amount, p.currencyCode ?? WalletCurrency.of(context))} '
           'is waiting for a Giggre admin. You can make a new request once it '
           'is approved or rejected, or cancel it from the Requests tab.',
         ),
@@ -198,7 +213,31 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
-  void _withdraw() => _snack('Withdraw is coming soon.');
+  /// Withdraw: verified accounts only (checked on the server too), one
+  /// request at a time, then method → amount → payout details.
+  Future<void> _withdraw() async {
+    if (_blockedByPending()) return;
+    final user = context.read<CurrentUserProvider>();
+    if (user.isVerified != 'verified') {
+      final status = await fetchLatestVerificationStatus();
+      if (!mounted) return;
+      if (status != 'verified') {
+        await showAccountNotVerifiedModal(
+          context,
+          onStatusRechecked: (s) {
+            if (mounted) context.read<CurrentUserProvider>().updateVerificationStatus(s);
+          },
+        );
+        return;
+      }
+      user.updateVerificationStatus(status);
+    }
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => WithdrawMethodsScreen(role: widget.role)),
+    );
+  }
 
   void _openSecurity() => Navigator.push(
     context,
@@ -208,7 +247,9 @@ class _WalletScreenState extends State<WalletScreen> {
   @override
   Widget build(BuildContext context) {
     final bg = Theme.of(context).scaffoldBackgroundColor;
-    final userCurrency = context.watch<CurrentUserProvider>().currencyCode;
+    // Everything on this screen is in the wallet's currency; the user's
+    // location currency is only the fallback before the wallet has one.
+    final userCurrency = _walletCcy ?? context.watch<CurrentUserProvider>().currencyCode;
     final uid = _uid;
 
     return Scaffold(

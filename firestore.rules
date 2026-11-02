@@ -120,13 +120,15 @@ service cloud.firestore {
     }
 
     function isValidWalletRequestConfig(d) {
-      return d.keys().hasOnly(['enabled', 'deposit', 'transfer', 'withdraw', 'depositAccounts', 'depositNote', 'updatedAt', 'updatedBy']) &&
+      return d.keys().hasOnly(['enabled', 'deposit', 'transfer', 'withdraw', 'depositAccounts', 'depositNote', 'withdrawMethods', 'withdrawNote', 'updatedAt', 'updatedBy']) &&
         d.get('enabled', true) is bool &&
         (!('deposit' in d) || isValidWalletTypeLimits(d.deposit)) &&
         (!('transfer' in d) || isValidWalletTypeLimits(d.transfer)) &&
         (!('withdraw' in d) || isValidWalletTypeLimits(d.withdraw)) &&
         (!('depositAccounts' in d) || (d.depositAccounts is list && d.depositAccounts.size() <= 5)) &&
-        (!('depositNote' in d) || (d.depositNote is string && d.depositNote.size() <= 500));
+        (!('depositNote' in d) || (d.depositNote is string && d.depositNote.size() <= 500)) &&
+        (!('withdrawMethods' in d) || (d.withdrawMethods is list && d.withdrawMethods.size() <= 5)) &&
+        (!('withdrawNote' in d) || (d.withdrawNote is string && d.withdrawNote.size() <= 500));
     }
 
     // general_config/fx_rates: live USD→PHP rate written by fx.ts; super
