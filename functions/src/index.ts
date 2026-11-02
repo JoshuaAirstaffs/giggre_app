@@ -66,11 +66,17 @@ export const onChatMessageCreated = onDocumentCreated(
     const participants: string[] = room.participants ?? [];
     const isSupport = room.isSupport === true;
 
-    const recipients = participants.length
-      ? participants.filter((p) => p !== senderId)
-      : isSupport && room.userId && room.userId !== senderId
-      ? [room.userId as string]
-      : [];
+    // A pending message request (directMessages.ts) lands silently in the
+    // recipient's Requests until they accept it.
+    const pendingFor =
+      room.requestStatus === "pending" ? (room.requestTo as string) : null;
+    const recipients = (
+      participants.length
+        ? participants.filter((p) => p !== senderId)
+        : isSupport && room.userId && room.userId !== senderId
+        ? [room.userId as string]
+        : []
+    ).filter((uid) => uid !== pendingFor);
     if (!recipients.length) return;
 
     const gigId = (room.gigId as string) ?? "";
@@ -1457,6 +1463,14 @@ export { awardMonthlyBadges } from "./badges";
 // ── Referral tree ───────────────────────────────────────────────────────────
 // The app's My Referrals → Referral tree. See functions/src/referralTree.ts.
 export { getMyReferralTree } from "./referralTree";
+
+// User search + direct message requests. See functions/src/directMessages.ts.
+export {
+  syncPublicProfile,
+  backfillPublicProfiles,
+  startDirectChat,
+  onMessageRequestAccepted,
+} from "./directMessages";
 
 // ── Gig Points ──────────────────────────────────────────────────────────────
 // Awards points to workers on host-approved gig completion, plus admin-only

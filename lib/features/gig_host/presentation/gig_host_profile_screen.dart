@@ -28,6 +28,7 @@ import 'widgets/favorite_workers_sheet.dart';
 import 'widgets/ratings_given_sheet.dart';
 import 'widgets/payment_history_sheet.dart';
 import 'widgets/notifications_sheet.dart';
+import '../../chat/searchable_switch.dart';
 
 class GigHostProfileScreen extends StatefulWidget {
   const GigHostProfileScreen({super.key});
@@ -1291,6 +1292,14 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
                                     themeProvider.setDark(value),
                               ),
                             ),
+                          ),
+                          _Divider(isDark: isDark),
+                          _MenuRow(
+                            icon: Icons.person_search_rounded,
+                            iconColor: kBlue,
+                            label: 'Let others find me in search',
+                            onTap: SearchableSwitch.toggle,
+                            trailing: const SearchableSwitch(),
                           ),
                           _Divider(isDark: isDark),
                           _MenuRow(

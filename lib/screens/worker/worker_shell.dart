@@ -11,6 +11,7 @@ import '../../features/tutorial/widgets/tutorial_anchor.dart';
 import '../chat/home_chat.dart';
 import '../host/host_shell.dart';
 import '../../features/gig_worker/presentation/saved_screen.dart';
+import 'package:giggre_app/features/chat/message_requests.dart';
 
 const _kNavActive = Color(0xFF2B6FB5);
 const _kNavInactive = Color(0xFF9AA5B5);
@@ -146,6 +147,8 @@ class _WorkerShellState extends State<WorkerShell> {
                   participants.firstWhere((p) => p != uid, orElse: () => '')
                       as String;
               if (otherUid.isEmpty) continue;
+              // Unanswered message requests don't light the Chat badge
+              if (hiddenFromInbox(room.data(), uid)) continue;
               final sub = FirebaseFirestore.instance
                   .collection('chat_rooms')
                   .doc(room.id)

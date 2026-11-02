@@ -155,6 +155,32 @@ service cloud.firestore {
         !isAdmin();
     }
 
+    // A favorite-worker chat created by the host's app: exactly the two of
+    // them, the room id derived from their uids, the other person in the
+    // creator's favoriteWorkerIds, and no request fields.
+    function isFavoriteDirectRoom(roomId) {
+      let p = request.resource.data.participants;
+      let other = p[0] == request.auth.uid ? p[1] : p[0];
+      return p.size() == 2 &&
+        request.auth.uid in p &&
+        other != request.auth.uid &&
+        (roomId == 'dm_' + p[0] + '_' + p[1] ||
+          roomId == 'dm_' + p[1] + '_' + p[0]) &&
+        other in get(/databases/$(database)/documents/users/$(request.auth.uid))
+          .data.get('favoriteWorkerIds', []) &&
+        !request.resource.data.keys()
+          .hasAny(['requestStatus', 'requestedBy', 'requestTo']);
+    }
+
+    // Message requests (startDirectChat): while pending only the asker can
+    // write, and once declined the asker can't.
+    function requestAllowsMessage(roomId, senderUid) {
+      let room = get(/databases/$(database)/documents/chat_rooms/$(roomId)).data;
+      let status = room.get('requestStatus', 'accepted');
+      return status == 'accepted' ||
+        (status == 'pending' && room.get('requestedBy', '') == senderUid);
+    }
+
     // Gig chat rooms have a 2-uid `participants` array (support tickets use
     // `userId` instead and are never blockable through this). True if the
     // *other* participant has senderUid in their own blockedUsers list.
@@ -184,6 +210,17 @@ service cloud.firestore {
     // Denying those writes would break older clients to protect dead data.
     function ratingAggregateKeys() {
       return ['ratingWorker', 'ratingHost'];
+    }
+
+    // Fields the app writes on ANOTHER user's doc:
+    //   referrals         — referrer's counters/level at signup (register/welcome)
+    //   incomingCall, outgoingCall — call signalling (lib/features/call/)
+    //   slot, acceptanceRate — quick-gig dispatch (quick_gig_matching_service)
+    //   earnings          — host-confirmed manual payment (earnings_service)
+    //   fcmTokens         — stale-token cleanup (push_notification_service)
+    function crossUserUserKeys() {
+      return ['referrals', 'incomingCall', 'outgoingCall', 'slot',
+        'acceptanceRate', 'earnings', 'fcmTokens'];
     }
 
     function touchesRatingAggregate() {
@@ -241,10 +278,20 @@ service cloud.firestore {
       // ratingWorker/ratingHost are server-only in both directions — a client
       // can neither seed them at registration nor edit them later. No app
       // version has ever written them, so this needs no rollout phasing.
-      allow create: if isAuth() &&
+      allow create: if (isUser(uid) || isAdmin()) &&
         !request.resource.data.keys().hasAny(ratingAggregateKeys());
-      allow update: if isAuth() && (!touchesRatingAggregate() || isAdmin());
-      allow delete: if isAuth();
+      // Owners edit their own doc (minus the rating aggregates). Other users
+      // may touch only the fields the app legitimately writes on someone
+      // else's doc — see crossUserUserKeys(); name, email, phone,
+      // verification, blocks and the rest are owner/admin only.
+      allow update: if isAdmin() || (
+        isAuth() && !touchesRatingAggregate() && (
+          isUser(uid) ||
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(crossUserUserKeys())
+        )
+      );
+      allow delete: if isUser(uid) || isAdmin();
 
       // ─── User Documents ──────────────────────────────────────
       match /documents/{docId} {
@@ -257,11 +304,12 @@ service cloud.firestore {
       }
 
       // ─── Referrals List ──────────────────────────────────────
-      // Owner and admins can read; any authenticated user can write
-      // (needed so a new user's registration can write to the referrer's sub-collection)
+      // Owner and admins can read. A new user's registration writes their
+      // own entry (doc id = their uid) into the referrer's sub-collection.
       match /referrals_list/{referredId} {
         allow read: if isUser(uid) || isAdmin();
-        allow write: if isAuth();
+        allow create: if isUser(referredId);
+        allow update, delete: if isAdmin();
       }
 
       // ─── Badges ──────────────────────────────────────────────
@@ -333,6 +381,15 @@ service cloud.firestore {
     }
 
 
+    // ─── Public profiles (user search) ─────────────────────────
+    // Mirrored from users/{uid} by syncPublicProfile
+    // (functions/src/directMessages.ts): name, photo, verification and
+    // rating averages only.
+    match /publicProfiles/{uid} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+
     // ─── Chat Rooms ────────────────────────────────────────────
     match /chat_rooms/{roomId} {
       // get: single-doc reads (support + gig chats + non-existent doc check)
@@ -348,14 +405,36 @@ service cloud.firestore {
         request.auth.uid in resource.data.participants ||
         isAdmin()
       );
+      // Direct chats (dm_*) come from startDirectChat. The one client-side
+      // path left is a host messaging a favorite worker, which needs no
+      // request (worker_message_action.dart).
       allow create: if isAuth() && (
-        request.resource.data.userId == request.auth.uid ||
-        request.auth.uid in request.resource.data.participants
+        roomId.matches('dm_.*')
+          ? isFavoriteDirectRoom(roomId)
+          : (request.resource.data.userId == request.auth.uid ||
+             request.auth.uid in request.resource.data.participants) &&
+            !request.resource.data.keys()
+              .hasAny(['requestStatus', 'requestedBy', 'requestTo'])
       );
-      allow update: if isAuth() && (
-        resource.data.userId == request.auth.uid ||
-        request.auth.uid in resource.data.participants ||
-        isAdmin()
+      // Participants can't be changed, and the request fields only by the
+      // person asked: pending → accepted/declined, or declined → accepted.
+      allow update: if isAdmin() || (
+        isAuth() && (
+          resource.data.userId == request.auth.uid ||
+          request.auth.uid in resource.data.participants
+        ) &&
+        !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['participants', 'requestedBy', 'requestTo']) &&
+        (
+          !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['requestStatus']) ||
+          (
+            resource.data.get('requestTo', '') == request.auth.uid &&
+            resource.data.requestStatus in ['pending', 'declined'] &&
+            request.resource.data.requestStatus in ['accepted', 'declined'] &&
+            request.resource.data.requestStatus != resource.data.requestStatus
+          )
+        )
       );
       allow delete: if isAdmin();
 
@@ -371,7 +450,8 @@ service cloud.firestore {
         allow create: if isAuth() && (
           get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.userId == request.auth.uid
           || request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.participants
-        ) && !isBlockedSender(roomId, request.auth.uid);
+        ) && !isBlockedSender(roomId, request.auth.uid)
+          && requestAllowsMessage(roomId, request.auth.uid);
       }
     }
 

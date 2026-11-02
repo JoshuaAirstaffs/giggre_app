@@ -9,6 +9,8 @@ import 'package:giggre_app/features/call/voice_call_screen.dart';
 import 'package:giggre_app/features/call/video_call_screen.dart';
 import 'package:giggre_app/main.dart' show navigatorKey;
 import 'package:giggre_app/screens/chat/chat.dart';
+import 'package:giggre_app/features/chat/message_requests.dart';
+import 'package:giggre_app/features/chat/user_search_screen.dart';
 
 // Support auto-replies are authored as HTML (rendered properly inside the
 // conversation via flutter_html) — this list preview is a single-line
@@ -131,6 +133,8 @@ class _HomeChatState extends State<HomeChat>
                       as String;
 
               if (otherUid.isEmpty) continue;
+              // Unanswered message requests don't light the badge
+              if (hiddenFromInbox(room.data(), uid)) continue;
 
               final sub = FirebaseFirestore.instance
                   .collection('chat_rooms')
@@ -260,6 +264,13 @@ class _HomeChatState extends State<HomeChat>
         ),
         actions: [
           IconButton(
+            icon: Icon(Icons.search_rounded, color: onSurface),
+            tooltip: 'Find people',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const UserSearchScreen()),
+            ),
+          ),
+          IconButton(
             icon: Icon(Icons.info_outline_rounded, color: onSurface),
             tooltip: 'About deleting messages',
             onPressed: () => _showDeleteInfoModal(context),
@@ -381,10 +392,20 @@ class _GigChatsTabState extends State<_GigChatsTab> {
         // Blocking a peer no longer hides this room from the list — the
         // conversation stays visible (with history), it's just no longer
         // possible to send/receive messages in it. See Chat's _isBlocked.
-        final docs = List.of(
-          snap.data?.docs ??
-              const <QueryDocumentSnapshot<Map<String, dynamic>>>[],
-        );
+        final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+        final all = snap.data?.docs ??
+            const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+        final requestCount = all
+            .where(
+              (d) =>
+                  d.data()['requestStatus'] == 'pending' &&
+                  isRequestToMe(d.data(), myUid) &&
+                  !isEmptyDirectChat(d.data()),
+            )
+            .length;
+        final docs = all
+            .where((d) => !hiddenFromInbox(d.data(), myUid))
+            .toList();
         docs.sort((a, b) {
           final aTime = a.data()['lastMessageAt'] as Timestamp?;
           final bTime = b.data()['lastMessageAt'] as Timestamp?;
@@ -393,6 +414,13 @@ class _GigChatsTabState extends State<_GigChatsTab> {
           if (bTime == null) return -1;
           return bTime.compareTo(aTime);
         });
+
+        final requestsEntry = _RequestsEntry(
+          count: requestCount,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const _MessageRequestsScreen()),
+          ),
+        );
 
         if (docs.isEmpty) {
           return Center(
@@ -406,15 +434,23 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'No gig chats yet',
+                  'No chats yet',
                   style: TextStyle(color: Colors.grey.shade400, fontSize: 14),
                 ),
+                const SizedBox(height: 4),
+                Text(
+                  'Tap the search icon to find people',
+                  style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                ),
+                if (requestCount > 0) ...[
+                  const SizedBox(height: 16),
+                  requestsEntry,
+                ],
               ],
             ),
           );
         }
 
-        final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
         final missedDocs =
             docs.where((d) => d.data()['missedCallFor'] == myUid).toList()
               ..sort((a, b) {
@@ -429,6 +465,11 @@ class _GigChatsTabState extends State<_GigChatsTab> {
 
         return Column(
           children: [
+            if (requestCount > 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                child: SizedBox(width: double.infinity, child: requestsEntry),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: Row(
@@ -545,6 +586,166 @@ class _GigChatsTabState extends State<_GigChatsTab> {
             isGigChat: true,
             gigId: data['gigId'] as String? ?? '',
             peerUid: peerUid,
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ── Message requests ──────────────────────────────────────────────────────────
+
+/// "Message requests (n)" row above the chat list.
+class _RequestsEntry extends StatelessWidget {
+  const _RequestsEntry({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Material(
+      color: kBlue.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.mark_chat_unread_outlined, color: kBlue),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(
+                  count == 1
+                      ? '1 message request'
+                      : '$count message requests',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: onSurface.withValues(alpha: 0.5),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Chats from people the user hasn't worked with, waiting for Accept or
+/// Decline. Declined ones stay here so they can still be accepted.
+class _MessageRequestsScreen extends StatefulWidget {
+  const _MessageRequestsScreen();
+
+  @override
+  State<_MessageRequestsScreen> createState() => _MessageRequestsScreenState();
+}
+
+class _MessageRequestsScreenState extends State<_MessageRequestsScreen> {
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+  final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    _stream = FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .where('participants', arrayContains: _uid)
+        .snapshots();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        title: Text(
+          'Message requests',
+          style: TextStyle(
+            color: onSurface,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: _stream,
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final docs = (snap.data?.docs ?? const [])
+              .where(
+                (d) =>
+                    isRequestToMe(d.data(), _uid) &&
+                    !isEmptyDirectChat(d.data()),
+              )
+              .toList()
+            ..sort((a, b) {
+              final aTime = a.data()['lastMessageAt'] as Timestamp?;
+              final bTime = b.data()['lastMessageAt'] as Timestamp?;
+              if (aTime == null || bTime == null) return 0;
+              return bTime.compareTo(aTime);
+            });
+
+          if (docs.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Text(
+                  'No message requests. When someone you haven’t worked '
+                  'with messages you, it shows up here first.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: onSurface.withValues(alpha: 0.6),
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: docs.length,
+            itemBuilder: (context, i) {
+              final data = docs[i].data();
+              final participants =
+                  (data['participants'] as List<dynamic>?) ?? [];
+              final peerUid =
+                  participants.firstWhere((p) => p != _uid, orElse: () => '')
+                      as String;
+              // The asker created the room, so they're createdByName
+              final peerName = (data['createdByName'] as String?) ?? '';
+              final declined = data['requestStatus'] == 'declined';
+              final rawDate = data['lastMessageAt'] ?? data['createdAt'];
+              return _ChatHomeItem(
+                roomId: docs[i].id,
+                sendTo: peerName.isNotEmpty ? peerName : 'Someone',
+                subject: 'Direct message',
+                message: declined
+                    ? 'Declined'
+                    : (data['lastMessage'] as String?) ?? '',
+                status: data['status'] as String? ?? 'open',
+                date: rawDate is Timestamp ? rawDate.toDate() : null,
+                isGigChat: true,
+                peerUid: peerUid,
+              );
+            },
           );
         },
       ),

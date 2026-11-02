@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../services/delete_acc_service.dart';
+import '../../chat/searchable_switch.dart';
 import '../../home/presentation/blocked_users_screen.dart';
 import 'widgets/worker_widgets.dart';
 
@@ -197,6 +198,15 @@ class _WorkerSettingsScreenState extends State<WorkerSettingsScreen> {
                 const SectionLabel('ACCOUNT'),
                 const SizedBox(height: 8),
                 MenuCard(children: [
+                  MenuRow(
+                    icon: Icons.person_search_rounded,
+                    iconColor: kBlue,
+                    label: 'Let others find me in search',
+                    onTap: SearchableSwitch.toggle,
+                    showArrow: false,
+                    trailing: const SearchableSwitch(),
+                  ),
+                  const WorkerDivider(),
                   MenuRow(
                     icon: Icons.block_rounded,
                     iconColor: kSub,
