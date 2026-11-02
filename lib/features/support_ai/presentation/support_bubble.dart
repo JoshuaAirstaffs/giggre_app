@@ -17,6 +17,8 @@ import 'dart:math' as math;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/profile_tab_theme.dart';
+
 import '../services/support_chat_service.dart';
 import '../services/support_chat_store.dart';
 import 'support_destinations.dart';
@@ -29,13 +31,13 @@ typedef TalkToPersonCallback =
 class _Palette {
   static const workerGradient = [Color(0xFF2B6FB5), Color(0xFF1F4D80)];
   static const hostGradient = [Color(0xFFF0A830), Color(0xFFD88810)];
-  static const surface = Color(0xFFFFFFFF);
-  static const border = Color(0xFFE4E9F0);
-  static const background = Color(0xFFF4F6FA);
-  static const textPrimary = Color(0xFF1A202C);
-  static const textSecondary = Color(0xFF4A5568);
   static const radius = 16.0;
 }
+
+// Surfaces and text follow the app's light/dark theme; only the role
+// gradients above are fixed.
+ProfileTabTokens _tokens(BuildContext context) =>
+    Theme.of(context).extension<ProfileTabTokens>()!;
 
 // ---------------------------------------------------------------------------
 // Floating bubble
@@ -262,7 +264,7 @@ class _ChatPopover extends StatelessWidget {
     final tailX = math.max(24.0, math.min(centerX - left, width - 24.0));
     // Above: the tail hangs off the white input bar. Below: off the header.
     final tailColor = above
-        ? _Palette.surface
+        ? _tokens(context).cardSurface
         : Color.lerp(gradient.first, gradient.last, tailX / width)!;
 
     final curved = CurvedAnimation(
@@ -292,7 +294,7 @@ class _ChatPopover extends StatelessWidget {
                     top: above ? 0 : _tail,
                     bottom: above ? _tail : 0,
                     child: Material(
-                      color: _Palette.background,
+                      color: _tokens(context).screenBg,
                       elevation: 12,
                       shadowColor: Colors.black45,
                       borderRadius: BorderRadius.circular(20),
@@ -606,9 +608,9 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
   Widget _emptyState() => ListView(
     padding: const EdgeInsets.all(20),
     children: [
-      const Text(
+      Text(
         'Hi! I’m Gab, Giggre’s AI assistant. Ask me how to do something and I’ll guide you through the steps. For now I can only explain things. I can’t post gigs or make changes to your account, but I’m still learning and getting better.',
-        style: TextStyle(fontSize: 15, color: _Palette.textSecondary),
+        style: TextStyle(fontSize: 15, color: _tokens(context).textSecondary),
       ),
       const SizedBox(height: 16),
       ..._suggestions.map(
@@ -620,11 +622,17 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               decoration: BoxDecoration(
-                color: _Palette.surface,
-                border: Border.all(color: _Palette.border),
+                color: _tokens(context).cardSurface,
+                border: Border.all(color: _tokens(context).cardBorder),
                 borderRadius: BorderRadius.circular(_Palette.radius),
               ),
-              child: Text(s, style: const TextStyle(fontSize: 14)),
+              child: Text(
+                s,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: _tokens(context).textPrimary,
+                ),
+              ),
             ),
           ),
         ),
@@ -663,8 +671,11 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
       icon: Icon(destination.icon, size: 18),
       label: Text(destination.label),
       style: OutlinedButton.styleFrom(
-        foregroundColor: widget.gradient.last,
-        backgroundColor: _Palette.surface,
+        // The deeper gradient stop is too dark to read on the dark surface
+        foregroundColor: Theme.of(context).brightness == Brightness.dark
+            ? widget.gradient.first
+            : widget.gradient.last,
+        backgroundColor: _tokens(context).cardSurface,
         side: BorderSide(color: widget.gradient.first),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(_Palette.radius),
@@ -683,8 +694,8 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
       ),
       decoration: BoxDecoration(
         gradient: isUser ? LinearGradient(colors: widget.gradient) : null,
-        color: isUser ? null : _Palette.surface,
-        border: isUser ? null : Border.all(color: _Palette.border),
+        color: isUser ? null : _tokens(context).cardSurface,
+        border: isUser ? null : Border.all(color: _tokens(context).cardBorder),
         borderRadius: BorderRadius.circular(_Palette.radius),
       ),
       child:
@@ -694,7 +705,7 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
             style: TextStyle(
               fontSize: 14.5,
               height: 1.4,
-              color: isUser ? Colors.white : _Palette.textPrimary,
+              color: isUser ? Colors.white : _tokens(context).textPrimary,
             ),
           ),
     ),
@@ -737,16 +748,19 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
       child: Text(
         text,
         textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 12.5, color: _Palette.textSecondary),
+        style: TextStyle(
+          fontSize: 12.5,
+          color: _tokens(context).textSecondary,
+        ),
       ),
     );
   }
 
   Widget _inputBar() => Container(
     padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-    decoration: const BoxDecoration(
-      color: _Palette.surface,
-      border: Border(top: BorderSide(color: _Palette.border)),
+    decoration: BoxDecoration(
+      color: _tokens(context).cardSurface,
+      border: Border(top: BorderSide(color: _tokens(context).cardBorder)),
     ),
     child: Row(
       children: [
@@ -759,8 +773,10 @@ class _SupportChatSheetState extends State<SupportChatSheet> {
             maxLength: 1000,
             textInputAction: TextInputAction.send,
             onSubmitted: _send,
-            decoration: const InputDecoration(
+            style: TextStyle(color: _tokens(context).textPrimary),
+            decoration: InputDecoration(
               hintText: 'Type your question',
+              hintStyle: TextStyle(color: _tokens(context).textMuted),
               border: InputBorder.none,
               counterText: '',
             ),
@@ -809,10 +825,10 @@ class _ThinkingIndicatorState extends State<_ThinkingIndicator>
 
   @override
   Widget build(BuildContext context) {
-    const style = TextStyle(
+    final style = TextStyle(
       fontSize: 14.5,
       height: 1.4,
-      color: _Palette.textSecondary,
+      color: _tokens(context).textSecondary,
     );
     return AnimatedBuilder(
       animation: _controller,
@@ -820,11 +836,11 @@ class _ThinkingIndicatorState extends State<_ThinkingIndicator>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          const Text('Thinking', style: style),
+          Text('Thinking', style: style),
           for (var i = 0; i < _dots; i++)
             Transform.translate(
               offset: Offset(0, _offset(i)),
-              child: const Text('.', style: style),
+              child: Text('.', style: style),
             ),
         ],
       ),
