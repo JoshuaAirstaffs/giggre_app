@@ -44,6 +44,12 @@ const _kMarqueeRows = [_kRow1, _kRow2, _kRow3, _kRow1Reversed, _kRow2];
 const _kRowSpeeds = [18.0, 26.0, 21.0, 23.0, 19.0];
 const _kRowReverse = [true, false, true, false, true];
 const _kRowOffsets = [0.0, 25.0, 50.0, 75.0, 100.0];
+const _kRowPitch = 102.0;
+
+// Widest the welcome copy/CTAs and the login/signup sheet grow. Unfolded
+// foldables and tablets centre them instead of stretching edge to edge.
+const double _kMaxWelcomeWidth = 420;
+const double _kMaxSheetWidth = 560;
 
 // ── Country data (same list/format as the standalone signup screen) ───────
 class _Country {
@@ -993,7 +999,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 250),
                     curve: Curves.easeOutCubic,
-                    width: double.infinity,
+                    width: min(media.size.width, _kMaxSheetWidth),
                     height: panelHeight,
                     decoration: BoxDecoration(
                       color: tokens.cardSurface,
@@ -1151,135 +1157,145 @@ class _WelcomeContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottomSafe = MediaQuery.of(context).padding.bottom;
-    final screenHeight = MediaQuery.of(context).size.height;
 
-    return Stack(
-      children: [
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: screenHeight * 0.5,
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: const [0.0, 0.28, 1.0],
-                  colors: [
-                    tokens.screenBg.withValues(alpha: 0),
-                    tokens.screenBg,
-                    tokens.screenBg,
-                  ],
+    // Anchored to the bottom; on a screen too short for the whole block
+    // (unfolded foldables in landscape, small phones with large text) it
+    // scrolls instead of overflowing. The fade lives on the block itself so
+    // the marquee never shows through the copy, whatever its height.
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              IgnorePointer(
+                child: Container(
+                  height: 96,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        tokens.screenBg.withValues(alpha: 0),
+                        tokens.screenBg,
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
+              ColoredBox(
+                color: tokens.screenBg,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: _kMaxWelcomeWidth),
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(28, 0, 28, 32 + bottomSafe),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Image.asset('assets/images/logo.png', height: 48),
+                          const SizedBox(height: 22),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Column(
+                              children: [
+                                _SloganLine(
+                                  lead: 'Need Help? ',
+                                  alignment: Alignment.centerLeft,
+                                  tokens: tokens,
+                                ),
+                                _SloganLine(
+                                  lead: 'Want Cash? ',
+                                  alignment: Alignment.centerRight,
+                                  tokens: tokens,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Find work or get trusted help near you. Fast, fair, and local.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 12, color: tokens.textMuted),
+                          ),
+                          const SizedBox(height: 26),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 52,
+                            child: ElevatedButton(
+                              onPressed: onCreateAccount,
+                              style:
+                                  ElevatedButton.styleFrom(
+                                    elevation: 0,
+                                    padding: EdgeInsets.zero,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(26),
+                                    ),
+                                  ).copyWith(
+                                    backgroundColor: WidgetStateProperty.all(
+                                      Colors.transparent,
+                                    ),
+                                    shadowColor: WidgetStateProperty.all(
+                                      Colors.transparent,
+                                    ),
+                                  ),
+                              child: Ink(
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [_kGold, _kGoldDeep],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  borderRadius: BorderRadius.circular(26),
+                                ),
+                                child: const Center(
+                                  child: Text(
+                                    'Create account',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 52,
+                            child: OutlinedButton(
+                              onPressed: onLogIn,
+                              style: OutlinedButton.styleFrom(
+                                backgroundColor: tokens.cardSurface,
+                                side: BorderSide(color: tokens.cardBorder, width: 1.5),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(26),
+                                ),
+                              ),
+                              child: Text(
+                                'Log In',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: tokens.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        Align(
-          alignment: Alignment.bottomCenter,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(28, 0, 28, 32 + bottomSafe),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.asset('assets/images/logo.png', height: 48),
-                const SizedBox(height: 22),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 40),
-                  child: Column(
-                    children: [
-                      _SloganLine(
-                        lead: 'Need Help? ',
-                        alignment: Alignment.centerLeft,
-                        tokens: tokens,
-                      ),
-                      _SloganLine(
-                        lead: 'Want Cash? ',
-                        alignment: Alignment.centerRight,
-                        tokens: tokens,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Find work or get trusted help near you. Fast, fair, and local.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: tokens.textMuted),
-                ),
-                const SizedBox(height: 26),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: onCreateAccount,
-                    style:
-                        ElevatedButton.styleFrom(
-                          elevation: 0,
-                          padding: EdgeInsets.zero,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(26),
-                          ),
-                        ).copyWith(
-                          backgroundColor: WidgetStateProperty.all(
-                            Colors.transparent,
-                          ),
-                          shadowColor: WidgetStateProperty.all(
-                            Colors.transparent,
-                          ),
-                        ),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [_kGold, _kGoldDeep],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(26),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'Create account',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: OutlinedButton(
-                    onPressed: onLogIn,
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: tokens.cardSurface,
-                      side: BorderSide(color: tokens.cardBorder, width: 1.5),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(26),
-                      ),
-                    ),
-                    child: Text(
-                      'Log In',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: tokens.textPrimary,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -1298,22 +1314,25 @@ class _SloganLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return Align(
       alignment: alignment,
-      child: Text.rich(
-        TextSpan(
-          style: const TextStyle(fontSize: 20, height: 1.25),
-          children: [
-            TextSpan(
-              text: lead,
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                color: tokens.textPrimary,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text.rich(
+          TextSpan(
+            style: const TextStyle(fontSize: 20, height: 1.25),
+            children: [
+              TextSpan(
+                text: lead,
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: tokens.textPrimary,
+                ),
               ),
-            ),
-            const TextSpan(
-              text: 'Giggre it!',
-              style: TextStyle(fontWeight: FontWeight.w900, color: _kGold),
-            ),
-          ],
+              const TextSpan(
+                text: 'Giggre it!',
+                style: TextStyle(fontWeight: FontWeight.w900, color: _kGold),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1357,11 +1376,19 @@ class _Marquee extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.of(context).padding.top;
+    final media = MediaQuery.of(context);
+    final topPad = media.padding.top;
+    // Tall phones (Flip-style) would otherwise show a bare band between the
+    // last row and the welcome copy; rows beyond the first five reuse them.
+    final rowCount = max(
+      _kMarqueeRows.length,
+      ((media.size.height - topPad - 20) / _kRowPitch).ceil(),
+    );
     return Stack(
-      children: List.generate(_kMarqueeRows.length, (i) {
+      children: List.generate(rowCount, (n) {
+        final i = n % _kMarqueeRows.length;
         return Positioned(
-          top: topPad + 20 + i * 102,
+          top: topPad + 20 + n * _kRowPitch,
           left: 0,
           right: 0,
           height: 116,
