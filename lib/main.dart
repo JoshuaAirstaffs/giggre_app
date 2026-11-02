@@ -23,6 +23,7 @@ import 'core/widgets/main_navigation.dart';
 import 'core/widgets/app_update_checker.dart';
 import 'core/widgets/location_gate.dart';
 import 'core/theme/theme_provider.dart';
+import 'core/utils/app_orientation.dart';
 import 'features/tutorial/controller/tutorial_controller.dart';
 import 'features/tutorial/services/tutorial_service.dart';
 import 'features/tutorial/widgets/tutorial_overlay.dart';
@@ -75,6 +76,8 @@ final GlobalKey<NavigatorState> callNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Portrait on phones, free rotation on tablets (see app_orientation.dart)
+  restoreAppOrientations();
   String? firebaseError;
   try {
     try {
@@ -461,8 +464,10 @@ class _PendingDeletionScreen extends StatelessWidget {
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: () async {
-                    await DeleteAccountService.cancelDeletion(context);
-                    onCancelled();
+                    final cancelled = await DeleteAccountService.cancelDeletion(
+                      context,
+                    );
+                    if (cancelled) onCancelled();
                   },
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF1B6CA8),

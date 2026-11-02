@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import 'package:giggre_app/screens/app_contents/help_faq.dart';
 import 'package:giggre_app/screens/app_contents/privacy_policy.dart';
 import 'package:giggre_app/screens/app_contents/terms_and_conditions.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -29,6 +31,7 @@ import 'package:giggre_app/screens/app_contents/about_giggre.dart';
 import 'package:giggre_app/screens/giggre-updates.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/profile_tab_theme.dart';
+import '../../../core/utils/app_orientation.dart';
 import '../../../services/delete_acc_service.dart';
 import '../../auth/presentation/welcome_screen.dart';
 import '../../../screens/host/host_shell.dart';
@@ -38,6 +41,15 @@ import '../../wallet/presentation/wallet_screen.dart';
 import 'profile_tab.dart';
 import '../../gig_points/presentation/gig_points_button.dart';
 import '../../gig_points/presentation/gig_points_screen.dart';
+
+// Widest the home column grows; wider screens (tablets) centre it
+const double _kMaxContentWidth = 600;
+
+// Gold or blue used *as text* shifts per theme to stay at 4.5:1 or more
+// (kGold itself is ~1.9:1 on the light background).
+Color _goldText(bool isDark) => isDark ? kGold : const Color(0xFF8F5A00);
+Color _blueText(bool isDark) =>
+    isDark ? const Color(0xFF5AA2F0) : const Color(0xFF0359B0);
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -50,9 +62,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _userName = '';
   String _photoUrl = '';
   String? _selectedRole;
-  bool _saving = false;
   bool _hasUpdate = false;
-  bool _pendingDeletion = false;
   String _deletionStatus = 'pending_deletion';
   List<Map<String, dynamic>> _updates = [];
   bool _internetAvailable = true;
@@ -136,8 +146,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           .get();
 
       // sortNumber 0 = hidden/unpublished in giggre-admin.
+      // An item missing its date or text (e.g. a half-filled admin draft) is
+      // skipped rather than crashing the cast in UpdateCard below.
       final items = response.docs
           .where((doc) => ((doc.data()['sortNumber'] as num?) ?? 0) > 0)
+          .where((doc) {
+            final data = doc.data();
+            return data['dateCreated'] is Timestamp &&
+                data['title'] is String &&
+                data['body'] is String;
+          })
           .map((doc) {
         final data = doc.data();
         if (data['dateCreated'] is Timestamp) {
@@ -155,129 +173,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return bDate.compareTo(aDate);
       });
 
-      setState(() => _updates = items);
+      if (mounted) setState(() => _updates = items);
     } catch (e) {
       debugPrint('Error fetching updates: $e');
     }
   }
 
-  void _showBetaModal() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        final cardColor = Theme.of(ctx).cardColor;
-        final borderColor = Theme.of(ctx).dividerColor;
-        final onSurface = Theme.of(ctx).colorScheme.onSurface;
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          child: Container(
-            padding: const EdgeInsets.all(28),
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: borderColor),
-              boxShadow: [
-                BoxShadow(
-                  color: kBlue.withValues(alpha: 0.12),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    color: kAmber.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.science_outlined,
-                      color: kAmber,
-                      size: 32,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: kAmber.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: kAmber.withValues(alpha: 0.4)),
-                  ),
-                  child: const Text(
-                    'BETA VERSION',
-                    style: TextStyle(
-                      color: kAmber,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'You\'re using a Beta build',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: onSurface,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Giggre is still in early access. Some features may be incomplete, change without notice, or behave unexpectedly.\n\nWe appreciate your patience as we continue building.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: kSub, fontSize: 13.5, height: 1.6),
-                ),
-                const SizedBox(height: 28),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kBlue,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                    ),
-                    child: const Text(
-                      'Got it, let\'s go!',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Future<void> _loadUser() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .get();
+    // Offline with nothing cached, get() throws; Home keeps its "Welcome back"
+    // defaults and pull-to-refresh retries.
+    final DocumentSnapshot<Map<String, dynamic>> doc;
+    try {
+      doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    } catch (e) {
+      debugPrint('Error loading user: $e');
+      return;
+    }
     final data = doc.data();
     if (!mounted) return;
     setState(() {
@@ -305,10 +218,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ? reqSnap.docs.first['status'] as String
           : 'pending_deletion';
       if (!mounted) return;
-      setState(() {
-        _pendingDeletion = true;
-        _deletionStatus = status;
-      });
+      setState(() => _deletionStatus = status);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _showPendingDeletionModal();
       });
@@ -317,6 +227,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _showPendingDeletionModal() {
     final isApproved = _deletionStatus == 'approved';
+    var cancelling = false;
 
     showDialog(
       context: context,
@@ -375,39 +286,63 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ? 'Your account deletion request has been approved by the admin. The deletion process will be completed after 30 days from the date you submitted your request. After completion, your profile and account details cannot be restored. Your account will be permanently deactivated, and your identity will be anonymized in shared gig records and other related history data.'
                       : 'Your account deletion request is pending admin review. Once approved, the deletion process will be completed after 30 days from the date you submitted your request. You can cancel this request at any time to restore full access.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
-                    color: Colors.grey,
+                    color: Theme.of(
+                      ctx,
+                    ).extension<ProfileTabTokens>()!.textSecondary,
                     height: 1.5,
                   ),
                 ),
                 const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: () async {
-                      await DeleteAccountService.cancelDeletion(ctx);
-                      if (ctx.mounted) {
-                        Navigator.pop(ctx);
-                        setState(() {
-                          _pendingDeletion = false;
-                          _deletionStatus = 'pending_deletion';
-                        });
-                      }
-                    },
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF1B6CA8),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                // Busy while cancelling so a second tap can't fire it twice;
+                // the dialog only lifts once the cancellation really saved.
+                StatefulBuilder(
+                  builder: (ctx, setButtonState) => SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: cancelling
+                          ? null
+                          : () async {
+                              setButtonState(() => cancelling = true);
+                              final cancelled =
+                                  await DeleteAccountService.cancelDeletion(ctx);
+                              if (!ctx.mounted) return;
+                              if (!cancelled) {
+                                setButtonState(() => cancelling = false);
+                                return;
+                              }
+                              Navigator.pop(ctx);
+                              setState(
+                                () => _deletionStatus = 'pending_deletion',
+                              );
+                            },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF1B6CA8),
+                        disabledBackgroundColor:
+                            const Color(0xFF1B6CA8).withValues(alpha: 0.6),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                    ),
-                    child: const Text(
-                      'Cancel Deletion',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      child: cancelling
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                                semanticsLabel: 'Cancelling deletion',
+                              ),
+                            )
+                          : const Text(
+                              'Cancel Deletion',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                     ),
                   ),
                 ),
@@ -430,9 +365,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     await clearing;
                     await FirebaseAuth.instance.signOut();
                   },
-                  child: const Text(
+                  child: Text(
                     'Log Out',
-                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                    style: TextStyle(
+                      color: Theme.of(
+                        ctx,
+                      ).extension<ProfileTabTokens>()!.textSecondary,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
               ],
@@ -443,21 +383,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  // The saved role only picks where the next login lands, so Continue never
+  // waits on it: Firestore applies the write locally at once and only
+  // completes this future after the server confirms, which offline can be
+  // never. A rejected write (e.g. rules) puts the previous choice back.
   Future<void> _selectRole(String role) async {
-    if (_saving) return;
-    setState(() {
-      _saving = true;
-      _selectedRole = role;
-    });
+    if (role == _selectedRole) return;
+    final previous = _selectedRole;
+    setState(() => _selectedRole = role);
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
+    if (uid == null) return;
+    try {
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'role': role,
       });
+    } catch (e) {
+      debugPrint('Error saving role: $e');
+      if (!mounted || _selectedRole != role) return;
+      setState(() => _selectedRole = previous);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            role == 'host'
+                ? "Couldn't switch to Gig Host. Please try again."
+                : "Couldn't switch to Gig Worker. Please try again.",
+          ),
+        ),
+      );
     }
-
-    if (mounted) setState(() => _saving = false);
   }
 
   void _openProfile() {
@@ -468,7 +422,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           body: ProfileTab(
             initialRole: _selectedRole ?? 'worker',
             isTabRoot: false,
-            onLogout: _logout,
+            // ProfileTab confirms first, as in the shells; another dialog here
+            // made Home's Log Out ask twice.
+            onLogout: _performLogout,
           ),
         ),
       ),
@@ -489,111 +445,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _logout() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Theme.of(context).cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 54,
-                height: 54,
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.logout_rounded,
-                  color: Colors.redAccent,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                'Log Out?',
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                "You'll need to sign back in to access your account.",
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: kSub, height: 1.55),
-              ),
-              const SizedBox(height: 22),
-              const Divider(height: 0.5, thickness: 0.5),
-              IntrinsicHeight(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextButton(
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: const RoundedRectangleBorder(
-                            borderRadius: BorderRadius.only(
-                              bottomLeft: Radius.circular(20),
-                            ),
-                          ),
-                        ),
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text(
-                          'Cancel',
-                          style: TextStyle(color: kSub, fontSize: 15),
-                        ),
-                      ),
-                    ),
-                    const VerticalDivider(width: 0.5, thickness: 0.5),
-                    Expanded(
-                      child: TextButton(
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: const RoundedRectangleBorder(
-                            borderRadius: BorderRadius.only(
-                              bottomRight: Radius.circular(20),
-                            ),
-                          ),
-                        ),
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text(
-                          'Log Out',
-                          style: TextStyle(
-                            color: Colors.redAccent,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (confirm == true) {
-      if (!mounted) return;
-      await performSignOut(context);
-    }
+  Future<void> _performLogout() async {
+    if (!mounted) return;
+    await performSignOut(context);
   }
 
   final GlobalKey<RefreshIndicatorState> _refreshKey =
       GlobalKey<RefreshIndicatorState>();
-  int _refreshGeneration = 0;
+  final _carouselKey = GlobalKey<_TestimonialCarouselState>();
 
+  // Reloads the data in place. It used to also re-key every section, which
+  // replayed all the entrance animations and rebuilt the carousel, restarting
+  // its video, on every pull.
   Future<void> _refreshAll() async {
-    await Future.wait([_loadUser(), _fetchUpdates()]);
-    if (mounted) setState(() => _refreshGeneration++);
+    await Future.wait([
+      _loadUser(),
+      _fetchUpdates(),
+      if (_carouselKey.currentState case final carousel?)
+        carousel.refreshSlides(),
+    ]);
   }
 
   void _openGiggreMenu() {
@@ -610,59 +480,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
 
     return Scaffold(
       backgroundColor: bgColor,
-      // Location off is handled app-wide by LocationGate (main.dart).
-      bottomSheet: !_internetAvailable
-          ? SafeArea(
-              child: Container(
-                width: double.infinity,
-                color: Colors.red.shade700,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.wifi_off_rounded, color: Colors.white, size: 20),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'No internet connection. Some features may not work.',
-                        style: TextStyle(color: Colors.white, fontSize: 13),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : null,
       appBar: AppBar(
         backgroundColor: bgColor,
         elevation: 0,
         scrolledUnderElevation: 0,
         automaticallyImplyLeading: false,
         titleSpacing: 20,
-        title: GestureDetector(
-          onTap: _openGiggreMenu,
-          child: Image.asset('assets/images/logo.png', height: 32),
+        title: Semantics(
+          button: true,
+          label: 'Giggre menu',
+          excludeSemantics: true,
+          child: GestureDetector(
+            onTap: _openGiggreMenu,
+            child: Image.asset('assets/images/logo.png', height: 32),
+          ),
         ),
         actions: [
           // Gig Points sits directly beside the profile (ProfileTab) button.
           GigPointsButton(onTap: _openGigPoints),
-          const SizedBox(width: 8),
-          _IconSquareButton(icon: Icons.person_rounded, onTap: _openProfile),
-          const SizedBox(width: 8),
+          // Gaps are 4 less than they look: each square button below carries
+          // 4pt of extra touch area on every side.
+          const SizedBox(width: 4),
+          _IconSquareButton(
+            icon: Icons.person_rounded,
+            label: 'Profile',
+            onTap: _openProfile,
+          ),
           _IconSquareButton(
             icon: Icons.account_balance_wallet_rounded,
+            label: 'Wallet',
             onTap: _openWallet,
           ),
+          // Log out lives in Profile, as in the worker/host shells, not one
+          // tap from Wallet. The square ends 20pt in, on the content's edge.
           const SizedBox(width: 16),
-          _IconSquareButton(icon: Icons.logout_rounded, onTap: _logout),
-          const SizedBox(width: 10),
         ],
       ),
       body: SafeArea(
@@ -670,19 +525,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           stream: _activeGigStream,
           builder: (context, activeGigSnap) {
             final activeGig = activeGigSnap.data;
-            return Stack(
+            // Stacked, not overlaid: the offline banner used to be a
+            // Scaffold bottomSheet drawn over the active gig bar, hiding the
+            // gig right when connection trouble makes it matter most. The
+            // content also ends above both, with no guessed bar height.
+            return Column(
               children: [
-                _buildHomeContent(
-                  context,
-                  bottomPadding: activeGig != null ? 16 + 86 : 16,
-                ),
-                if (activeGig != null)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: ActiveGigBar(gig: activeGig),
-                  ),
+                Expanded(child: _buildHomeContent(context)),
+                // Location off is handled app-wide by LocationGate (main.dart).
+                if (!_internetAvailable) const _OfflineBanner(),
+                if (activeGig != null) ActiveGigBar(gig: activeGig),
               ],
             );
           },
@@ -691,26 +543,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildHomeContent(
-    BuildContext context, {
-    required double bottomPadding,
-  }) {
+  Widget _buildHomeContent(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final onSurface = Theme.of(context).colorScheme.onSurface;
+    final secondaryText = Theme.of(
+      context,
+    ).extension<ProfileTabTokens>()!.textSecondary;
     final firstName = _userName.split(' ').first;
     final currentYear = DateTime.now().year;
+    // On tablets the column stops at _kMaxContentWidth and centres, instead
+    // of stretching the carousel and role cards across the whole screen;
+    // phones keep the plain 20pt gutters.
+    final viewport =
+        MediaQuery.sizeOf(context).width -
+        MediaQuery.paddingOf(context).horizontal;
+    final gutter = math.max(20.0, (viewport - _kMaxContentWidth) / 2);
     return RefreshIndicator(
       key: _refreshKey,
       onRefresh: _refreshAll,
       color: kGold,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(20, 16, 20, bottomPadding),
+        padding: EdgeInsets.fromLTRB(gutter, 16, gutter, 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── 2. Profile strip ──────────────────────────
             EntranceAnimation(
-              key: ValueKey('profile-$_refreshGeneration'),
               type: EntranceAnimationType.fadeInSlideUp,
               child: Row(
                 children: [
@@ -737,6 +596,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           firstName.isNotEmpty
                               ? 'Hey, $firstName 👋'
                               : 'Welcome back 👋',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: onSurface,
                             fontSize: 22,
@@ -744,9 +605,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                         ),
                         const SizedBox(height: 2),
-                        const Text(
+                        Text(
                           'Choose a mode to get started',
-                          style: TextStyle(color: kSub, fontSize: 13),
+                          style: TextStyle(color: secondaryText, fontSize: 13),
                         ),
                       ],
                     ),
@@ -758,55 +619,60 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             // ── Update banner (preserved) ─────────────────
             if (_hasUpdate) ...[
               const SizedBox(height: 14),
-              GestureDetector(
-                onTap: AppUpdateChecker.promptUpdateNow,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: kBlue.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: kBlue.withValues(alpha: 0.25)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.system_update_rounded,
-                        color: kBlue,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Text(
-                          'A new version of Giggre is available!',
-                          style: TextStyle(
+              Semantics(
+                button: true,
+                label: 'A new version of Giggre is available. Update',
+                excludeSemantics: true,
+                child: GestureDetector(
+                  onTap: AppUpdateChecker.promptUpdateNow,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: kBlue.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: kBlue.withValues(alpha: 0.25)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.system_update_rounded,
+                          color: _blueText(isDark),
+                          size: 18,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'A new version of Giggre is available!',
+                            style: TextStyle(
+                              color: _blueText(isDark),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
                             color: kBlue,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            'Update',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: kBlue,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text(
-                          'Update',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -816,17 +682,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
             // ── 3. Image carousel ─────────────────────────
             EntranceAnimation(
-              key: ValueKey('carousel-$_refreshGeneration'),
               type: EntranceAnimationType.fadeInSlideUp,
               delay: const Duration(milliseconds: 80),
-              child: _TestimonialCarousel(key: ValueKey(_refreshGeneration)),
+              child: _TestimonialCarousel(key: _carouselKey),
             ),
 
             const SizedBox(height: 24),
 
             // ── 4. Role segmented control ─────────────────
             EntranceAnimation(
-              key: ValueKey('role-$_refreshGeneration'),
               type: EntranceAnimationType.fadeInSlideUp,
               delay: const Duration(milliseconds: 160),
               child: _RoleSegmentedControl(
@@ -839,135 +703,138 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (_selectedRole != null) ...[
               const SizedBox(height: 16),
               EntranceAnimation(
-                key: ValueKey('continue-$_refreshGeneration'),
                 type: EntranceAnimationType.fadeInSlideUp,
                 child: SizedBox(
                   width: double.infinity,
                   height: 52,
                   child: ElevatedButton(
-                    onPressed: _saving
-                        ? null
-                        : () {
-                            if (_selectedRole == 'host') {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const HostShell(),
-                                ),
-                              );
-                            } else {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const WorkerShell(),
-                                ),
-                              );
-                            }
-                          },
+                    onPressed: () {
+                      if (_selectedRole == 'host') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const HostShell(),
+                          ),
+                        );
+                      } else {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const WorkerShell(),
+                          ),
+                        );
+                      }
+                    },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _selectedRole == 'worker'
                           ? kBlue
                           : kGold,
+                      // White on both fills by design choice, though white on
+                      // kGold is ~2.0:1 (below 4.5:1)
                       foregroundColor: Colors.white,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
                     ),
-                    child: _saving
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            _selectedRole == 'worker'
+                                ? 'Continue as Gig Worker'
+                                : 'Continue as Gig Host',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
                             ),
-                          )
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _selectedRole == 'worker'
-                                    ? 'Continue as Gig Worker'
-                                    : 'Continue as Gig Host',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              const Icon(Icons.arrow_forward_rounded, size: 20),
-                            ],
                           ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.arrow_forward_rounded, size: 20),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ],
 
-            const SizedBox(height: 28),
-
             // ── 6. Giggre Updates section ─────────────────
-            EntranceAnimation(
-              key: ValueKey('updates-header-$_refreshGeneration'),
-              delay: const Duration(milliseconds: 240),
-              child: Row(
-                children: [
-                  Text(
-                    'Giggre Updates',
-                    style: TextStyle(
-                      color: onSurface,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => GiggreUpdates()),
-                    ),
-                    child: const Text(
-                      'See all',
+            // Hidden with nothing to show (none published, or offline on a
+            // fresh install): a lone header and See all read as broken.
+            if (_updates.isNotEmpty) ...[
+              // 16 + the 12pt See all touch padding = the usual 28 gap
+              const SizedBox(height: 16),
+              EntranceAnimation(
+                delay: const Duration(milliseconds: 240),
+                child: Row(
+                  children: [
+                    Text(
+                      'Giggre Updates',
                       style: TextStyle(
-                        color: kGold,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
+                        color: onSurface,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            ..._updates
-                .take(3)
-                .toList()
-                .asMap()
-                .entries
-                .map(
-                  (entry) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: EntranceAnimation(
-                      key: ValueKey('update-${entry.key}-$_refreshGeneration'),
-                      type: EntranceAnimationType.fadeInSlideUp,
-                      delay: Duration(milliseconds: 280 + entry.key * 60),
-                      child: UpdateCard(
-                        title: entry.value['title'] as String,
-                        date: entry.value['dateCreated'] as DateTime,
-                        category: entry.value['category'] as String,
-                        description: entry.value['body'] as String,
+                    const Spacer(),
+                    // Padded to a 44pt touch area; the text stays flush
+                    // right with the cards below
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => GiggreUpdates()),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 0, 14),
+                        child: Text(
+                          'See all',
+                          style: TextStyle(
+                            color: _goldText(isDark),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
+              ),
+              const SizedBox(height: 2),
 
-            const SizedBox(height: 16),
+              ..._updates
+                  .take(3)
+                  .toList()
+                  .asMap()
+                  .entries
+                  .map(
+                    (entry) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: EntranceAnimation(
+                        type: EntranceAnimationType.fadeInSlideUp,
+                        delay: Duration(milliseconds: 280 + entry.key * 60),
+                        child: UpdateCard(
+                          title: entry.value['title'] as String,
+                          date: entry.value['dateCreated'] as DateTime,
+                          category:
+                              entry.value['category'] as String? ?? 'Update',
+                          description: entry.value['body'] as String,
+                        ),
+                      ),
+                    ),
+                  ),
+
+              const SizedBox(height: 16),
+            ] else
+              const SizedBox(height: 28),
 
             // ── Footer ────────────────────────────────────
             EntranceAnimation(
-              key: ValueKey('footer-$_refreshGeneration'),
               delay: const Duration(milliseconds: 320),
               child: Container(
                 width: double.infinity,
@@ -985,18 +852,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       width: 94,
                       height: 64,
                     ),
-                    const Text(
+                    Text(
                       'The fastest way to find gigs or get help near you.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, color: kSub),
+                      style: TextStyle(fontSize: 12, color: secondaryText),
                     ),
                     const SizedBox(height: 8),
                     const Divider(),
-                    const SizedBox(height: 8),
+                    // Spacing here comes from the links' own touch padding
+                    // (8 across, 14 down), which keeps the 16pt gaps
                     Wrap(
                       alignment: WrapAlignment.center,
-                      spacing: 16,
-                      runSpacing: 8,
                       children: [
                         _FooterLink('About', AboutGiggre()),
                         _FooterLink('Terms', TermsAndConditions()),
@@ -1005,13 +871,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         _FooterLink('Contact Us', ContactUs()),
                       ],
                     ),
-                    const SizedBox(height: 14),
                     Text(
                       'Copyright © $currentYear Giggre. All rights reserved.',
-                      style: const TextStyle(fontSize: 12, color: kSub),
+                      style: TextStyle(fontSize: 12, color: secondaryText),
                     ),
                   ],
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Offline banner (above the active gig bar)
+// ─────────────────────────────────────────────
+class _OfflineBanner extends StatelessWidget {
+  const _OfflineBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    // liveRegion: screen readers announce it when it appears
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        width: double.infinity,
+        color: Colors.red.shade700,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: const Row(
+          children: [
+            Icon(Icons.wifi_off_rounded, color: Colors.white, size: 20),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'No internet connection. Some features may not work.',
+                style: TextStyle(color: Colors.white, fontSize: 13),
               ),
             ),
           ],
@@ -1026,23 +923,51 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 // ─────────────────────────────────────────────
 class _IconSquareButton extends StatelessWidget {
   final IconData icon;
+  // Read by screen readers and shown on long-press, as GigPointsButton does
+  final String label;
   final VoidCallback onTap;
 
-  const _IconSquareButton({required this.icon, required this.onTap});
+  const _IconSquareButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Theme.of(context).dividerColor),
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        label: label,
+        excludeSemantics: true,
+        // 36pt square to look at, 44pt to touch (the iOS minimum)
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Center(
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Theme.of(context).dividerColor),
+                ),
+                child: Icon(
+                  icon,
+                  color: Theme.of(
+                    context,
+                  ).extension<ProfileTabTokens>()!.textSecondary,
+                  size: 19,
+                ),
+              ),
+            ),
+          ),
         ),
-        child: Icon(icon, color: kSub, size: 19),
       ),
     );
   }
@@ -1084,6 +1009,9 @@ class _RoleSegmentedControl extends StatelessWidget {
                   subtitle: 'Find gigs & earn money',
                   isSelected: selectedRole == 'worker',
                   selectedColor: kBlue,
+                  selectedForeground: Colors.white,
+                  // White subtitle too: white70 on kBlue drops under 4.5:1
+                  selectedSubtle: Colors.white,
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(15),
                     bottomLeft: Radius.circular(15),
@@ -1099,6 +1027,10 @@ class _RoleSegmentedControl extends StatelessWidget {
                   subtitle: 'Post gigs & find talent',
                   isSelected: selectedRole == 'host',
                   selectedColor: kGold,
+                  // White by design choice, matching the Worker card, though
+                  // white on kGold is ~2.0:1 (below 4.5:1)
+                  selectedForeground: Colors.white,
+                  selectedSubtle: Colors.white,
                   borderRadius: const BorderRadius.only(
                     topRight: Radius.circular(15),
                     bottomRight: Radius.circular(15),
@@ -1120,6 +1052,9 @@ class _RoleHalf extends StatelessWidget {
   final String subtitle;
   final bool isSelected;
   final Color selectedColor;
+  // Label/icon and subtitle colours on the selected fill
+  final Color selectedForeground;
+  final Color selectedSubtle;
   final BorderRadius borderRadius;
   final VoidCallback onTap;
 
@@ -1129,6 +1064,8 @@ class _RoleHalf extends StatelessWidget {
     required this.subtitle,
     required this.isSelected,
     required this.selectedColor,
+    required this.selectedForeground,
+    required this.selectedSubtle,
     required this.borderRadius,
     required this.onTap,
   });
@@ -1136,41 +1073,55 @@ class _RoleHalf extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textColor = isSelected
-        ? Colors.white
+        ? selectedForeground
         : Theme.of(context).colorScheme.onSurface;
-    final subColor = isSelected ? Colors.white70 : kSub;
+    final unselectedSubtle = Theme.of(
+      context,
+    ).extension<ProfileTabTokens>()!.textSecondary;
+    final subColor = isSelected ? selectedSubtle : unselectedSubtle;
 
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? selectedColor
-              : selectedColor.withValues(alpha: 0),
-          borderRadius: borderRadius,
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: isSelected ? Colors.white : kSub, size: 26),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: textColor,
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
+    // Selection is otherwise only the fill colour; say it for screen readers
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: '$label, $subtitle',
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? selectedColor
+                : selectedColor.withValues(alpha: 0),
+            borderRadius: borderRadius,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                color: isSelected ? selectedForeground : unselectedSubtle,
+                size: 26,
               ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: subColor, fontSize: 11),
-            ),
-          ],
+              const SizedBox(height: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: subColor, fontSize: 11),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1188,10 +1139,21 @@ class _FooterLink extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 12pt text padded to a 44pt-tall touch area
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () =>
           Navigator.push(context, MaterialPageRoute(builder: (_) => screen)),
-      child: Text(label, style: const TextStyle(fontSize: 12, color: kBlue)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: _blueText(Theme.of(context).brightness == Brightness.dark),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1503,52 +1465,61 @@ class _GiggreMenu extends StatelessWidget {
                         Text(
                           version,
                           style: TextStyle(
-                            color: tokens.textMuted,
+                            color: tokens.textSecondary,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                         const SizedBox(width: 8),
                         if (hasPendingUpdate)
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.pop(context);
-                              onUpdate();
-                            },
-                            child: Container(
-                              height: 20,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                              ),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: kBlue,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Text(
-                                'Update Available',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w700,
+                          Semantics(
+                            button: true,
+                            label: 'Update available. Update Giggre',
+                            excludeSemantics: true,
+                            child: GestureDetector(
+                              onTap: () {
+                                Navigator.pop(context);
+                                onUpdate();
+                              },
+                              child: Container(
+                                height: 22,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                ),
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: kBlue,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Text(
+                                  'Update Available',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
                             ),
                           )
                         else
                           Container(
-                            height: 20,
+                            height: 22,
                             padding: const EdgeInsets.symmetric(horizontal: 8),
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                               color: _kMenuGreen.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: const Text(
+                            child: Text(
                               '✓ Latest',
                               style: TextStyle(
-                                color: _kMenuGreen,
-                                fontSize: 9.5,
+                                // Darker/lighter than the tint's green so the
+                                // small label clears 4.5:1 in each theme
+                                color: isDark
+                                    ? const Color(0xFF4CC38E)
+                                    : const Color(0xFF1F7A51),
+                                fontSize: 11,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -1561,7 +1532,7 @@ class _GiggreMenu extends StatelessWidget {
                 Text(
                   'The fastest way to find gigs or get help near you',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: subtleText, fontSize: 10.5),
+                  style: TextStyle(color: tokens.textSecondary, fontSize: 11),
                 ),
                 const SizedBox(height: 16),
                 Container(height: 1, color: tokens.divider),
@@ -1668,8 +1639,9 @@ class _CarouselItem {
 
   bool get hasVideo => video.isNotEmpty;
 
-  /// Country used when the user's location couldn't be detected (location
-  /// off, permission denied, lookup failed) — they see the US slides.
+  /// Country used when neither the user's location nor a PHP currency says
+  /// otherwise (location off, permission denied, lookup failed) — they see
+  /// the US slides.
   static const defaultCountry = 'US';
 
   bool showsIn(String? countryCode) =>
@@ -1707,8 +1679,12 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
   PageRoute<void>? _subscribedRoute;
   List<_CarouselItem> _slides = [];
   bool _loading = true;
-  // Starts with sound on; one choice applies to every video slide
-  bool _muted = false;
+  // Sound of the video playing now. Each play sets it fresh: a video's first
+  // play on this device has sound, every replay starts muted (see
+  // _PlayedVideos). The mute button switches it either way, and the choice
+  // carries on if the video is paused or covered and then resumes.
+  bool _muted = true;
+  final _playedVideos = _PlayedVideos();
   final CarouselSliderController _carousel = CarouselSliderController();
   final _videos = _CarouselVideoCache();
   // Slide whose video already advanced the carousel — two copies of a slide
@@ -1764,7 +1740,22 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
     _carousel.nextPage();
   }
 
+  // Pull-to-refresh: new slides without remounting, so a playing video and
+  // the current position carry on
+  Future<void> refreshSlides() => _fetchSlides();
+
+  // A video slide calls this as it starts playing from the beginning, and
+  // gets back whether to start muted
+  bool _onPlayStart(String videoUrl) {
+    final replay = _playedVideos.contains(videoUrl);
+    _playedVideos.add(videoUrl);
+    if (_muted != replay && mounted) setState(() => _muted = replay);
+    return replay;
+  }
+
   Future<void> _fetchSlides() async {
+    // Before any slide can play, so a first play is never mistaken
+    await _playedVideos.load();
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('app_content')
@@ -1812,11 +1803,13 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
       );
     }
 
-    // Only the slides meant for this user's country (US until a location is
-    // detected). Filtered here rather than at fetch time so a country
-    // detected after loading still applies.
+    // Only the slides meant for this user's country. Until a location is
+    // detected, a stored PHP currency still means the Philippines (USD is
+    // also the provider's unset default, so it can't say US); otherwise US.
+    // Filtered here rather than at fetch time so a country detected after
+    // loading still applies.
     final countryCode = context.select<CurrentUserProvider, String?>(
-      (p) => p.countryCode,
+      (p) => p.countryCode ?? (p.currencyCode == 'PHP' ? 'PH' : null),
     );
     final slides = _slides.where((s) => s.showsIn(countryCode)).toList();
 
@@ -1825,6 +1818,11 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
     final current = _current.clamp(0, slides.length - 1);
     // A lone slide stays put — no auto-advance, looping, swipe or dots.
     final hasMultiple = slides.length > 1;
+    // Reduce Motion, or a screen reader that can't keep up with slides
+    // changing under it: no auto-advance, people swipe through themselves.
+    final media = MediaQuery.of(context);
+    final autoAdvance =
+        hasMultiple && !media.disableAnimations && !media.accessibleNavigation;
     // A video slide holds the carousel until it finishes, then advances itself.
     final currentIsVideo = slides[current].hasVideo;
 
@@ -1843,7 +1841,7 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
                 padEnds: false,
                 enlargeCenterPage: false,
                 autoPlay:
-                    hasMultiple && !currentIsVideo && !_covered && _inView,
+                    autoAdvance && !currentIsVideo && !_covered && _inView,
                 enableInfiniteScroll: hasMultiple,
                 scrollPhysics: hasMultiple
                     ? null
@@ -1870,7 +1868,9 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
                   loop: !hasMultiple,
                   muted: _muted,
                   onToggleMute: () => setState(() => _muted = !_muted),
-                  onFinished: hasMultiple ? () => _advanceFrom(index) : null,
+                  onPlayStart: _onPlayStart,
+                  // Without auto-advance a finished video just stops
+                  onFinished: autoAdvance ? () => _advanceFrom(index) : null,
                 );
               },
             ),
@@ -1944,6 +1944,9 @@ class _VideoSlideItem extends StatefulWidget {
   final bool loop;
   final bool muted;
   final VoidCallback onToggleMute;
+  // Called as playback starts from the beginning; returns whether to start
+  // muted (true for a replay)
+  final bool Function(String videoUrl) onPlayStart;
   final VoidCallback? onFinished;
 
   const _VideoSlideItem({
@@ -1955,6 +1958,7 @@ class _VideoSlideItem extends StatefulWidget {
     required this.loop,
     required this.muted,
     required this.onToggleMute,
+    required this.onPlayStart,
     this.onFinished,
   });
 
@@ -1973,6 +1977,10 @@ class _VideoSlideItemState extends State<_VideoSlideItem>
   Timer? _endTimer;
   // While the video is open full screen, that page handles its ending
   bool _fullscreen = false;
+  // Where the lone looping slide was on the last tick, and whether its
+  // first lap has wrapped round yet (see _onTick)
+  Duration _lastPosition = Duration.zero;
+  bool _lapped = false;
   // Paused by the viewer — shared with the full screen page so both agree
   final _paused = ValueNotifier<bool>(false);
   // False while the app is in the background or the phone is locked. Handled
@@ -2039,7 +2047,11 @@ class _VideoSlideItemState extends State<_VideoSlideItem>
         });
       }
       if (!_on) return;
-      await controller.setVolume(widget.muted ? 0 : 1);
+      // First play on this device with sound, a replay muted
+      final startMuted = widget.onPlayStart(widget.videoUrl);
+      _lastPosition = Duration.zero;
+      _lapped = false;
+      await controller.setVolume(startMuted ? 0 : 1);
       await controller.setLooping(widget.loop);
       await controller.seekTo(Duration.zero);
       if (!mounted || !_on) return;
@@ -2081,6 +2093,21 @@ class _VideoSlideItemState extends State<_VideoSlideItem>
 
   void _onTick() {
     final v = _controller?.value;
+    // A lone slide loops on one player, so its second lap is a replay too:
+    // mute once as it wraps round. Later laps keep whatever the viewer picks.
+    if (widget.loop &&
+        v != null &&
+        v.isInitialized &&
+        _on &&
+        !_fullscreen &&
+        !_lapped) {
+      final wrapped = v.position + const Duration(seconds: 1) < _lastPosition;
+      _lastPosition = v.position;
+      if (wrapped) {
+        _lapped = true;
+        widget.onPlayStart(widget.videoUrl);
+      }
+    }
     if (v == null ||
         !v.isInitialized ||
         widget.loop ||
@@ -2193,6 +2220,7 @@ class _VideoSlideItemState extends State<_VideoSlideItem>
                 builder: (context, paused, _) => _AutoHideControls(
                   pinned: paused,
                   onTap: _togglePlay,
+                  semanticsLabel: paused ? 'Video, paused' : 'Video, playing',
                   controls: [
                     if (paused)
                       Center(
@@ -2208,25 +2236,14 @@ class _VideoSlideItemState extends State<_VideoSlideItem>
                       bottom: 10,
                       child: _VideoCountdown(controller: controller),
                     ),
+                    // Clears the always-on mute button below (10 + 44 + 8 gap)
                     Positioned(
-                      right: 10,
+                      right: 62,
                       bottom: 10,
-                      child: Row(
-                        children: [
-                          _VideoOverlayButton(
-                            icon: widget.muted
-                                ? Icons.volume_off_rounded
-                                : Icons.volume_up_rounded,
-                            label: widget.muted ? 'Unmute' : 'Mute',
-                            onTap: widget.onToggleMute,
-                          ),
-                          const SizedBox(width: 8),
-                          _VideoOverlayButton(
-                            icon: Icons.fullscreen_rounded,
-                            label: 'Full screen',
-                            onTap: _openFullscreen,
-                          ),
-                        ],
+                      child: _VideoOverlayButton(
+                        icon: Icons.fullscreen_rounded,
+                        label: 'Full screen',
+                        onTap: _openFullscreen,
                       ),
                     ),
                   ],
@@ -2239,6 +2256,19 @@ class _VideoSlideItemState extends State<_VideoSlideItem>
                       child: VideoPlayer(controller),
                     ),
                   ),
+                ),
+              ),
+            // Always up, not behind a tap: sound must be one tap from off
+            if (_ready && controller != null)
+              Positioned(
+                right: 10,
+                bottom: 10,
+                child: _VideoOverlayButton(
+                  icon: widget.muted
+                      ? Icons.volume_off_rounded
+                      : Icons.volume_up_rounded,
+                  label: widget.muted ? 'Unmute' : 'Mute',
+                  onTap: widget.onToggleMute,
                 ),
               ),
           ],
@@ -2309,8 +2339,9 @@ class _VideoOverlayButton extends StatelessWidget {
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: onTap,
+        // 12 around a 20pt icon = 44pt, the iOS minimum touch size
         child: Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(12),
           child: Icon(
             icon,
             color: Colors.white,
@@ -2364,8 +2395,9 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
   @override
   void dispose() {
     widget.controller.removeListener(_onTick);
-    // Back to portrait with the status/navigation bars on
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    // Back to the app's rule (portrait on phones, free on tablets) with the
+    // status/navigation bars on — not a hard portrait lock, which stuck iPads
+    restoreAppOrientations();
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
@@ -2485,12 +2517,15 @@ class _AutoHideControls extends StatefulWidget {
   final List<Widget> controls;
   final bool pinned;
   final VoidCallback? onTap;
+  // Names the video for screen readers, whose tap then plays or pauses it
+  final String? semanticsLabel;
 
   const _AutoHideControls({
     required this.child,
     required this.controls,
     this.pinned = false,
     this.onTap,
+    this.semanticsLabel,
   });
 
   @override
@@ -2547,10 +2582,15 @@ class _AutoHideControlsState extends State<_AutoHideControls> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap ?? _toggle,
-          child: widget.child,
+        Semantics(
+          container: true,
+          button: widget.semanticsLabel != null,
+          label: widget.semanticsLabel,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onTap ?? _toggle,
+            child: widget.child,
+          ),
         ),
         IgnorePointer(
           ignoring: !_visible,
@@ -2574,6 +2614,44 @@ class _AutoHideControlsState extends State<_AutoHideControls> {
         ),
       ],
     );
+  }
+}
+
+/// Carousel videos that have already played on this device, by URL — a newly
+/// uploaded video has a new URL, so it counts as unplayed. Kept in
+/// shared_preferences across launches and capped, oldest first, so it can't
+/// grow without end as slides are replaced.
+class _PlayedVideos {
+  static const _prefsKey = 'home_carousel_played_videos';
+  static const _max = 50;
+
+  List<String> _urls = const [];
+  bool _loaded = false;
+
+  Future<void> load() async {
+    if (_loaded) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _urls = prefs.getStringList(_prefsKey) ?? const [];
+    } catch (e) {
+      // Unreadable: every video counts as new, so plays with sound once
+      debugPrint('Played videos load failed: $e');
+    }
+    _loaded = true;
+  }
+
+  bool contains(String url) => _urls.contains(url);
+
+  void add(String url) {
+    if (_urls.contains(url)) return;
+    final urls = [..._urls, url];
+    _urls = urls.length > _max ? urls.sublist(urls.length - _max) : urls;
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setStringList(_prefsKey, _urls))
+        .catchError((Object e) {
+          debugPrint('Played videos save failed: $e');
+          return false;
+        });
   }
 }
 

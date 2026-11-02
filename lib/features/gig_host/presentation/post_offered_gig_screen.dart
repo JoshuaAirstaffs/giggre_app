@@ -389,7 +389,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (!await guardUnverifiedLimit(
       context,
-      amount: (double.tryParse(_budgetCtrl.text.trim()) ?? 0),
+      // Each selected worker is paid the budget, like Quick/Open Gig slots.
+      amount: (double.tryParse(_budgetCtrl.text.trim()) ?? 0) *
+          (_selectedWorkers.isEmpty ? 1 : _selectedWorkers.length),
       currencyCode: context.read<CurrentUserProvider>().currencyCode,
       action: LimitAction.post,
     )) {

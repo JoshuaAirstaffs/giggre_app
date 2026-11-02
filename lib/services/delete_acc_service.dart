@@ -112,11 +112,13 @@ class DeleteAccountService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  //  Cancel a pending deletion request within the 30-day window.
+  //  Cancel a pending deletion request within the 30-day window. Returns
+  //  whether the account is no longer pending deletion, so callers only lift
+  //  the deletion lock when it really is.
   // ─────────────────────────────────────────────────────────────────────────────
-  static Future<void> cancelDeletion(BuildContext context) async {
+  static Future<bool> cancelDeletion(BuildContext context) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) return false;
 
     try {
       final db = FirebaseFirestore.instance;
@@ -128,12 +130,14 @@ class DeleteAccountService {
           .limit(1)
           .get();
 
-      if (snap.docs.isEmpty) return;
-
-      await snap.docs.first.reference.update({
-        'status': 'cancelled',
-        'cancelledAt': FieldValue.serverTimestamp(),
-      });
+      // No open request left: still clear the user's flag below, or the
+      // deletion lock would come back on the next launch.
+      if (snap.docs.isNotEmpty) {
+        await snap.docs.first.reference.update({
+          'status': 'cancelled',
+          'cancelledAt': FieldValue.serverTimestamp(),
+        });
+      }
 
       await db.collection('users').doc(user.uid).update({
         'pendingDeletion': FieldValue.delete(),
@@ -156,10 +160,12 @@ class DeleteAccountService {
           ),
         );
       }
+      return true;
     } catch (_) {
       if (context.mounted) {
         _showError(context, 'Failed to cancel deletion. Please try again.');
       }
+      return false;
     }
   }
 
