@@ -40,7 +40,9 @@ Future<void> placeCall({
         : VoiceCallScreen(channelName: ch, token: tk),
   );
 
-  if (result != null && gigId != null) {
+  // Direct chats pass an empty gigId; logging one wrote to a shared,
+  // bogus `gig_` room.
+  if (result != null && gigId != null && gigId.isNotEmpty) {
     await logCallToGigChat(
       gigId: gigId,
       peerUid: targetUserId,

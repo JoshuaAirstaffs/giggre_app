@@ -227,7 +227,26 @@ class _ChatState extends State<Chat> {
   // Either direction of block disables the composer and call actions — the
   // peer's own block of me isn't something I can undo from here (unlike
   // _isBlocked, which shows an Unblock option), it just needs to be reflected.
-  bool get _chatDisabled => _isBlocked || _isBlockedByPeer;
+  bool get _chatDisabled =>
+      _isBlocked || _isBlockedByPeer || _requestBlocksSending;
+
+  // Message requests (direct chats started from user search — see
+  // functions/src/directMessages.ts). Null for every other kind of chat.
+  String? _requestStatus;
+  String? _requestTo;
+  // A search-started direct chat: no gig and no host/worker sides.
+  bool _isDirect = false;
+  bool _requestBusy = false;
+
+  bool get _isRequestRecipient =>
+      _requestTo != null && _requestTo == _uid;
+  // Pending: only the asker writes. Declined: neither does until the person
+  // asked accepts after all. The rules enforce the same.
+  bool get _requestBlocksSending =>
+      (_requestStatus == 'pending' && _isRequestRecipient) ||
+      _requestStatus == 'declined';
+  bool get _requestBlocksCalls =>
+      _requestStatus != null && _requestStatus != 'accepted';
   // True once the room doc exists in Firestore — false for lazy gig chats
   // until the first message is sent.
   bool _roomCreated = true;
@@ -601,6 +620,16 @@ class _ChatState extends State<Chat> {
               setState(() => _isGigChat = true);
             }
 
+            final requestStatus = data['requestStatus'] as String?;
+            final isDirect = data['isDirect'] as bool? ?? false;
+            if (requestStatus != _requestStatus || isDirect != _isDirect) {
+              setState(() {
+                _requestStatus = requestStatus;
+                _requestTo = data['requestTo'] as String?;
+                _isDirect = isDirect;
+              });
+            }
+
             if (_viewerIsWorker == null) {
               final workerUid = data['workerUid'] as String?;
               final hostUid = data['hostUid'] as String?;
@@ -613,11 +642,13 @@ class _ChatState extends State<Chat> {
               if (resolvedRole != null) {
                 setState(() => _viewerIsWorker = resolvedRole);
               } else if (widget.roomId.startsWith('dm_') &&
+                  !isDirect &&
                   createdByUid.isNotEmpty) {
-                // Direct messages (directMessageRoomId, worker_message_action.
-                // dart) have no gig to look up at all — but they're only ever
-                // created by WorkerMessageAction, always from the host side,
-                // so whoever created the room IS the host by construction.
+                // Favorite-worker chats (directMessageRoomId, worker_message_
+                // action.dart) have no gig to look up at all — but they're
+                // only ever created by WorkerMessageAction, always from the
+                // host side, so whoever created the room IS the host. Search
+                // chats (isDirect) have no sides and are skipped above.
                 final isWorker = currentUid != createdByUid;
                 debugPrint(
                   '[Chat] role resolved from DM room creator: '
@@ -730,6 +761,18 @@ class _ChatState extends State<Chat> {
     if (_roomCreated || widget.gigChatParams == null) return;
     final p = widget.gigChatParams!;
     final isWorker = _viewerIsWorker;
+    // Search chats are created by startDirectChat before this screen opens;
+    // a send racing the first room snapshot mustn't overwrite that doc.
+    if (widget.roomId.startsWith('dm_')) {
+      final existing = await FirebaseFirestore.instance
+          .collection('chat_rooms')
+          .doc(widget.roomId)
+          .get();
+      if (existing.exists) {
+        if (mounted) setState(() => _roomCreated = true);
+        return;
+      }
+    }
     await FirebaseFirestore.instance
         .collection('chat_rooms')
         .doc(widget.roomId)
@@ -1895,7 +1938,123 @@ class _ChatState extends State<Chat> {
       _isGigChat &&
       widget.gigChatParams != null &&
       !_chatDisabled &&
+      !_requestBlocksCalls &&
       !_isResolved;
+
+  Future<void> _answerRequest(bool accept) async {
+    if (_requestBusy) return;
+    setState(() => _requestBusy = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('chat_rooms')
+          .doc(widget.roomId)
+          .update({'requestStatus': accept ? 'accepted' : 'declined'});
+    } catch (e) {
+      debugPrint('[Chat] answer request failed: $e');
+      if (mounted) {
+        SnackbarHelper.showError(
+          context,
+          "Couldn't update this request. Please try again.",
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _requestBusy = false);
+    }
+  }
+
+  // Shown instead of the composer while the person asked hasn't accepted,
+  // or after a decline (to either side).
+  Widget _requestBar(bool isDark, Color onSurface) {
+    final name = _peerName ?? 'This person';
+    final String text;
+    final bool canAnswer;
+    if (_isRequestRecipient) {
+      text = _requestStatus == 'declined'
+          ? 'You declined this message request.'
+          : '$name wants to message you. Accept to reply, or decline.';
+      canAnswer = true;
+    } else {
+      text = '$name isn’t accepting messages from you.';
+      canAnswer = false;
+    }
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.35,
+                color: onSurface.withValues(alpha: 0.75),
+              ),
+            ),
+            if (canAnswer) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (_requestStatus == 'pending') ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _requestBusy
+                            ? null
+                            : () => _answerRequest(false),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(44),
+                        ),
+                        child: const Text('Decline'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _requestBusy
+                          ? null
+                          : () => _answerRequest(true),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: kBlue,
+                        minimumSize: const Size.fromHeight(44),
+                      ),
+                      child: const Text('Accept'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Above the composer for the person who asked, until it's answered.
+  Widget _requestSentNote(Color onSurface) => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
+    child: Text(
+      'Message request sent. ${_peerName ?? 'They'} will see your messages '
+      'once they accept.',
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: 12,
+        height: 1.35,
+        color: onSurface.withValues(alpha: 0.6),
+      ),
+    ),
+  );
 
   Future<void> _callPeer({required bool isVideo}) async {
     final p = widget.gigChatParams;
@@ -1972,9 +2131,13 @@ class _ChatState extends State<Chat> {
                   ),
                 ),
                 Text(
-                  _isGigChat
-                      ? 'Gig conversation'
-                      : 'We\'ll respond within 24–48 hours',
+                  !_isGigChat
+                      ? 'We\'ll respond within 24–48 hours'
+                      : _requestStatus == 'pending'
+                      ? 'Message request'
+                      : _isDirect
+                      ? 'Direct message'
+                      : 'Gig conversation',
                   style: TextStyle(
                     color: onSurface.withValues(alpha: 0.5),
                     fontSize: 10,
@@ -1986,7 +2149,7 @@ class _ChatState extends State<Chat> {
         ),
         actions: (_isGigChat && widget.gigChatParams != null)
             ? [
-                if (!_chatDisabled) ...[
+                if (!_chatDisabled && !_requestBlocksCalls) ...[
                   CallUserAction(
                     targetUserId: widget.gigChatParams!.peerUid,
                     targetUserName: widget.gigChatParams!.peerName,
@@ -2131,6 +2294,13 @@ class _ChatState extends State<Chat> {
                   ),
           ),
 
+          if (_requestStatus == 'pending' &&
+              !_isRequestRecipient &&
+              !_isResolved &&
+              !_isBlocked &&
+              !_isBlockedByPeer)
+            _requestSentNote(onSurface),
+
           // ── Input bar / resolved banner ──────────────────────────────────
           if (_isResolved)
             Container(
@@ -2246,6 +2416,8 @@ class _ChatState extends State<Chat> {
                 ),
               ),
             )
+          else if (_requestBlocksSending)
+            _requestBar(isDark, onSurface)
           else
             Container(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),

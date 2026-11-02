@@ -49,6 +49,9 @@ class UserProfileScreen extends StatefulWidget {
   /// (the applicant list declines them, for instance).
   final Future<void> Function()? onBlocked;
 
+  /// When set, a Message action opens a chat with them (user search).
+  final Future<void> Function()? onMessage;
+
   const UserProfileScreen({
     super.key,
     required this.uid,
@@ -57,6 +60,7 @@ class UserProfileScreen extends StatefulWidget {
     required this.role,
     this.matchSkillsForCompletedGigs = const [],
     this.onBlocked,
+    this.onMessage,
   });
 
   static Future<void> push(
@@ -67,6 +71,7 @@ class UserProfileScreen extends StatefulWidget {
     required RateeRole role,
     List<String> matchSkillsForCompletedGigs = const [],
     Future<void> Function()? onBlocked,
+    Future<void> Function()? onMessage,
   }) {
     if (uid.isEmpty) return Future.value();
     return Navigator.of(context).push(
@@ -78,6 +83,7 @@ class UserProfileScreen extends StatefulWidget {
           role: role,
           matchSkillsForCompletedGigs: matchSkillsForCompletedGigs,
           onBlocked: onBlocked,
+          onMessage: onMessage,
         ),
       ),
     );
@@ -411,6 +417,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   ),
                 ),
                 if (!_isSelf) ...[
+                  if (widget.onMessage != null && !_blocked) ...[
+                    const SizedBox(width: 10),
+                    _barIconButton(
+                      icon: Icons.chat_bubble_outline_rounded,
+                      tooltip: 'Message',
+                      onPressed: _blocking ? null : widget.onMessage,
+                    ),
+                  ],
                   const SizedBox(width: 10),
                   _barIconButton(
                     icon: Icons.flag_outlined,
