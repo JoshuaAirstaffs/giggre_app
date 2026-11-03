@@ -19,7 +19,6 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:giggre_app/features/chat/user_search_screen.dart'
     show openDirectChat;
@@ -234,14 +233,6 @@ class _LiveSupportBubbleState extends State<LiveSupportBubble> {
     // This widget sits above the navigator, so route through its context
     final navContext = widget.navigatorKey.currentContext;
     if (support == null || navContext == null || _opening) return;
-    // FAKE-ERROR: deliberate red screen on tap, debug builds only. Remove
-    // this block (and _FakeErrorPage below) to make the bubble work again.
-    if (kDebugMode) {
-      Navigator.of(navContext).push(
-        MaterialPageRoute(builder: (_) => const _FakeErrorPage()),
-      );
-      return;
-    }
     setState(() => _opening = true);
     await openDirectChat(navContext, peerUid: support, peerName: _supportName);
     if (mounted) setState(() => _opening = false);
@@ -306,18 +297,6 @@ class _LiveSupportBubbleState extends State<LiveSupportBubble> {
       },
     );
   }
-}
-
-// FAKE-ERROR: throws "Null check operator used on a null value" while
-// building, which Flutter shows as its red error screen in debug builds.
-class _FakeErrorPage extends StatelessWidget {
-  const _FakeErrorPage();
-
-  static String? _roomId;
-
-  @override
-  Widget build(BuildContext context) =>
-      Scaffold(body: Center(child: Text(_roomId!)));
 }
 
 /// The Giggre logo on a white disc (it's orange and blue, so it reads on
