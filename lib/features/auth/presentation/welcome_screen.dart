@@ -1325,8 +1325,15 @@ class _SloganLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: alignment,
+    // A small fixed stagger around the center (not edge-pinned), so the two
+    // lines stay close together on wide screens like foldables.
+    const stagger = 36.0;
+    final toLeft = alignment == Alignment.centerLeft;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: toLeft ? 0 : stagger,
+        right: toLeft ? stagger : 0,
+      ),
       child: FittedBox(
         fit: BoxFit.scaleDown,
         child: Text.rich(

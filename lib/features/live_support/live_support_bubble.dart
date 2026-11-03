@@ -203,6 +203,12 @@ class _LiveSupportBubbleState extends State<LiveSupportBubble> {
 
   void _onUser(User? user) {
     if (user?.uid == _myUid) return;
+    // Hiding lasts until sign-out, so the next sign-in shows the bubble again.
+    // (Reopening the app signed in keeps it hidden.)
+    if (user == null && _myUid != null && _docked) {
+      _pos = null; // back to the default spot on the right edge
+      _setDocked(false);
+    }
     _configSub?.cancel();
     _unreadSub?.cancel();
     _currentSupportUid = null;
@@ -325,7 +331,14 @@ class _LiveSupportBubbleState extends State<LiveSupportBubble> {
       _overHide = false;
     });
     if (hide) {
-      _setDocked(true, right: _pos!.dx + _size / 2 >= screen.width / 2);
+      final right = _pos!.dx + _size / 2 >= screen.width / 2;
+      // Park the bubble on that edge so it never comes back mid-screen,
+      // where it was dropped on the hide target.
+      _pos = Offset(
+        right ? screen.width - _size - 12 : 12.0,
+        _maxY(screen, padding),
+      );
+      _setDocked(true, right: right);
     } else {
       _snapToEdge(screen, padding);
     }
@@ -420,6 +433,7 @@ class _LiveSupportBubbleState extends State<LiveSupportBubble> {
                           size: _size,
                           opening: _opening,
                           hasUnread: _hasUnread,
+                          tailRight: pos.dx + _size / 2 >= screen.width / 2,
                           onTap: _open,
                         ),
                       ),
@@ -488,6 +502,10 @@ class _CornerTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // White disappeared on light screens, so light mode gets a soft slate
+    // fill and a little less transparency.
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fill = isDark ? _surface(context) : const Color(0xFFCBD5E1);
     const r = Radius.circular(10);
     final shape = BorderRadius.horizontal(
       left: right ? r : Radius.zero,
@@ -507,9 +525,9 @@ class _CornerTab extends StatelessWidget {
             // See-through so it stays out of the way; the unread dot below
             // stays fully visible.
             Opacity(
-              opacity: 0.6,
+              opacity: isDark ? 0.6 : 0.8,
               child: Material(
-                color: _surface(context),
+                color: fill,
                 elevation: 3,
                 shadowColor: Colors.black.withValues(alpha: 0.35),
                 shape: RoundedRectangleBorder(
@@ -565,38 +583,63 @@ Color _edge(BuildContext context) =>
     ? Colors.white.withValues(alpha: 0.12)
     : Colors.black.withValues(alpha: 0.06);
 
-/// The Giggre logo on a disc, with a red dot for an unread reply.
+/// The Giggre logo in a chat-bubble shape, with a red dot for an unread reply.
 class _BubbleFace extends StatelessWidget {
   const _BubbleFace({
     required this.size,
     required this.opening,
     required this.hasUnread,
+    required this.tailRight,
     required this.onTap,
   });
 
   final double size;
   final bool opening;
   final bool hasUnread;
+  // Tail on the side facing the screen edge the bubble sits on
+  final bool tailRight;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // No outline: a strong shadow lifts the shape off the app's white (or
+    // dark) screens, where the plain fill alone vanished.
+    final shape = _ChatBubbleBorder(tailRight: tailRight);
+    final fill = _surface(context);
     return SizedBox(
       width: size,
       height: size,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
+          // Extra wide, soft shadow in the bubble's own shape, beneath
+          // Material's tighter one
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _ShapeShadowPainter(
+                shape: shape,
+                color: Colors.black.withValues(alpha: isDark ? 0.6 : 0.35),
+              ),
+            ),
+          ),
           Material(
-            color: _surface(context),
-            shape: CircleBorder(side: BorderSide(color: _edge(context))),
-            elevation: 6,
-            shadowColor: Colors.black.withValues(alpha: 0.35),
+            color: fill,
+            shape: shape,
+            elevation: 12,
+            shadowColor: Colors.black.withValues(alpha: isDark ? 0.9 : 0.6),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
+              customBorder: shape,
               onTap: onTap,
               child: Padding(
-                padding: const EdgeInsets.all(7),
+                // Logo centred in the body, above the tail
+                padding: const EdgeInsets.fromLTRB(
+                  8,
+                  6,
+                  8,
+                  6 + _ChatBubbleBorder.tail,
+                ),
                 child: opening
                     ? const Center(
                         child: SizedBox(
@@ -614,8 +657,8 @@ class _BubbleFace extends StatelessWidget {
           ),
           if (hasUnread)
             Positioned(
-              top: 1,
-              right: 1,
+              top: -3,
+              right: -3,
               child: Container(
                 width: 15,
                 height: 15,
@@ -630,4 +673,93 @@ class _BubbleFace extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A blurred copy of [shape], drawn a little below it, as a soft shadow.
+class _ShapeShadowPainter extends CustomPainter {
+  const _ShapeShadowPainter({required this.shape, required this.color});
+
+  final ShapeBorder shape;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = shape
+        .getOuterPath(Offset.zero & size)
+        .shift(const Offset(0, 6));
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ShapeShadowPainter old) =>
+      old.shape != shape || old.color != color;
+}
+
+/// A rounded-square speech bubble with a small tail at one bottom corner.
+class _ChatBubbleBorder extends OutlinedBorder {
+  const _ChatBubbleBorder({required this.tailRight, super.side});
+
+  final bool tailRight;
+
+  static const tail = 8.0;
+  static const _radius = 18.0;
+
+  Path _path(Rect r) {
+    final bottom = r.bottom - tail;
+    final body = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(r.left, r.top, r.right, bottom),
+          const Radius.circular(_radius),
+        ),
+      );
+    // Wedge from the bottom edge out to a point at the corner
+    final wedge = tailRight
+        ? (Path()
+            ..moveTo(r.right - 30, bottom - 1)
+            ..lineTo(r.right - 2, r.bottom)
+            ..lineTo(r.right - 10, bottom - 12)
+            ..close())
+        : (Path()
+            ..moveTo(r.left + 30, bottom - 1)
+            ..lineTo(r.left + 2, r.bottom)
+            ..lineTo(r.left + 10, bottom - 12)
+            ..close());
+    return Path.combine(PathOperation.union, body, wedge);
+  }
+
+  @override
+  Path getOuterPath(Rect rect, {TextDirection? textDirection}) => _path(rect);
+
+  @override
+  Path getInnerPath(Rect rect, {TextDirection? textDirection}) =>
+      _path(rect.deflate(side.strokeInset));
+
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
+    if (side.style == BorderStyle.none || side.width == 0) return;
+    canvas.drawPath(_path(rect.deflate(side.width / 2)), side.toPaint());
+  }
+
+  @override
+  _ChatBubbleBorder copyWith({BorderSide? side}) =>
+      _ChatBubbleBorder(tailRight: tailRight, side: side ?? this.side);
+
+  @override
+  ShapeBorder scale(double t) =>
+      _ChatBubbleBorder(tailRight: tailRight, side: side.scale(t));
+
+  @override
+  bool operator ==(Object other) =>
+      other is _ChatBubbleBorder &&
+      other.tailRight == tailRight &&
+      other.side == side;
+
+  @override
+  int get hashCode => Object.hash(tailRight, side);
 }
