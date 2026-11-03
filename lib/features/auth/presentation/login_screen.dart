@@ -15,6 +15,7 @@ import '../../../utils/user_utils.dart';
 import 'register_screen.dart';
 import '../../../services/sound_service.dart';
 import '../../../main.dart';
+import 'social_sign_in_button.dart';
 
 // ── Design tokens (shared accents — identical across light/dark) ───────────
 const _kGold = Color(0xFFF0A830);
@@ -1000,80 +1001,24 @@ class _SocialLogoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final appleBg = isDark ? Colors.transparent : Colors.white;
-    final appleFg = isDark ? Colors.white : Colors.black;
     return Column(
       children: [
         Row(
           children: [
             Expanded(
-              child: SizedBox(
-                height: 52,
-                child: OutlinedButton.icon(
-                  onPressed: isGoogleLoading ? null : onGoogleTap,
-                  icon: isGoogleLoading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Image.asset(
-                          'assets/images/g-logo.png',
-                          width: 22,
-                          height: 22,
-                        ),
-                  label: Text(
-                    'Google',
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w700,
-                      color: tokens.textPrimary,
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: tokens.cardBorder),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                  ),
-                ),
+              child: SocialSignInButton(
+                provider: SocialProvider.google,
+                loading: isGoogleLoading,
+                onPressed: onGoogleTap,
               ),
             ),
             if (_showApple) ...[
               const SizedBox(width: 12),
               Expanded(
-                child: SizedBox(
-                  height: 52,
-                  child: ElevatedButton.icon(
-                    onPressed: isAppleLoading ? null : onAppleTap,
-                    icon: isAppleLoading
-                        ? SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: appleFg,
-                            ),
-                          )
-                        : Icon(Icons.apple, color: appleFg, size: 22),
-                    label: Text(
-                      'Apple',
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                        color: appleFg,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: appleBg,
-                      elevation: 0,
-                      side: BorderSide(color: tokens.cardBorder),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                    ),
-                  ),
+                child: SocialSignInButton(
+                  provider: SocialProvider.apple,
+                  loading: isAppleLoading,
+                  onPressed: onAppleTap,
                 ),
               ),
             ],

@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:giggre_app/features/call/video_call_screen.dart';
+import 'package:giggre_app/features/live_support/live_support_bubble.dart'; // TEMP: live support
 
 class IncomingVideoCallScreen extends StatefulWidget {
   final String callerId;
@@ -30,7 +31,7 @@ class IncomingVideoCallScreen extends StatefulWidget {
 }
 
 class _IncomingVideoCallScreenState extends State<IncomingVideoCallScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, HidesLiveSupport { // TEMP: live support
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
   final AudioPlayer _audioPlayer = AudioPlayer();

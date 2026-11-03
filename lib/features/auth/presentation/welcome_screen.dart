@@ -22,6 +22,7 @@ import 'register_screen.dart';
 import 'package:giggre_app/features/tutorial_videos/tutorial_videos_row.dart';
 import 'package:giggre_app/features/tutorial_videos/tutorial_videos_service.dart';
 import '../../../services/sound_service.dart';
+import 'social_sign_in_button.dart';
 
 // Lets _MarqueeRow pause its ticker while a screen (e.g. Terms/Privacy) covers
 // this one, and resume when the user comes back.
@@ -2719,67 +2720,22 @@ class _SocialLogoRow extends StatelessWidget {
     // Android/web would need a separate Service ID + redirect URI we
     // haven't configured, so the button is hidden there for now.
     final showApple = !kIsWeb && (Platform.isIOS || Platform.isMacOS);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final appleBg = isDark ? Colors.transparent : Colors.white;
-    final appleFg = isDark ? Colors.white : Colors.black;
     return Row(
       children: [
         Expanded(
-          child: SizedBox(
-            height: 52,
-            child: OutlinedButton.icon(
-              onPressed: isGoogleLoading ? null : onGoogleTap,
-              icon: isGoogleLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
-              label: Text(
-                'Google',
-                style: TextStyle(
-                  fontSize: 14.5,
-                  fontWeight: FontWeight.w700,
-                  color: tokens.textPrimary,
-                ),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: tokens.cardBorder),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-              ),
-            ),
+          child: SocialSignInButton(
+            provider: SocialProvider.google,
+            loading: isGoogleLoading,
+            onPressed: onGoogleTap,
           ),
         ),
         if (showApple) ...[
           const SizedBox(width: 12),
           Expanded(
-            child: SizedBox(
-              height: 52,
-              child: ElevatedButton.icon(
-                onPressed: isAppleLoading ? null : onAppleTap,
-                icon: isAppleLoading
-                    ? SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: appleFg),
-                      )
-                    : Icon(Icons.apple, color: appleFg, size: 22),
-                label: Text(
-                  'Apple',
-                  style: TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w700,
-                    color: appleFg,
-                  ),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: appleBg,
-                  elevation: 0,
-                  side: BorderSide(color: tokens.cardBorder),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                ),
-              ),
+            child: SocialSignInButton(
+              provider: SocialProvider.apple,
+              loading: isAppleLoading,
+              onPressed: onAppleTap,
             ),
           ),
         ],

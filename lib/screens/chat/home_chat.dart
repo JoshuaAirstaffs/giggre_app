@@ -11,6 +11,7 @@ import 'package:giggre_app/main.dart' show navigatorKey;
 import 'package:giggre_app/screens/chat/chat.dart';
 import 'package:giggre_app/features/chat/message_requests.dart';
 import 'package:giggre_app/features/chat/user_search_screen.dart';
+import 'package:giggre_app/features/live_support/live_support_bubble.dart'; // TEMP: live support
 
 // Support auto-replies are authored as HTML (rendered properly inside the
 // conversation via flutter_html) — this list preview is a single-line
@@ -1378,6 +1379,8 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
     }
   }
 
+  bool get _isLiveSupport => isLiveSupportAccount(widget.peerUid); // TEMP: live support
+
   Future<void> _fetchPeerPhoto() async {
     try {
       final doc = await FirebaseFirestore.instance
@@ -1531,16 +1534,19 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
                   widget.isGigChat
                       ? CircleAvatar(
                           radius: 20,
-                          backgroundColor: const Color(
-                            0xFF3B82F6,
-                          ).withValues(alpha: 0.15),
-                          backgroundImage:
-                              (_peerPhotoUrl != null &&
-                                  _peerPhotoUrl!.isNotEmpty)
+                          backgroundColor: _isLiveSupport // TEMP: live support
+                              ? Colors.white
+                              : const Color(0xFF3B82F6).withValues(alpha: 0.15),
+                          backgroundImage: _isLiveSupport // TEMP: live support
+                              ? liveSupportAvatar
+                              : (_peerPhotoUrl != null &&
+                                    _peerPhotoUrl!.isNotEmpty)
                               ? CachedNetworkImageProvider(_peerPhotoUrl!)
                               : null,
                           child:
-                              (_peerPhotoUrl == null || _peerPhotoUrl!.isEmpty)
+                              !_isLiveSupport && // TEMP: live support
+                                  (_peerPhotoUrl == null ||
+                                      _peerPhotoUrl!.isEmpty)
                               ? const Icon(
                                   Icons.person_rounded,
                                   color: Color(0xFF3B82F6),
