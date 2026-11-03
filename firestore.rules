@@ -832,6 +832,12 @@ service cloud.firestore {
           (request.resource.data.resetEpoch is number && request.resource.data.resetEpoch > 0));
     }
 
+    // TEMP: live support — { enabled, supportUid }, read by the floating
+    // support bubble (lib/features/live_support/) and functions/src/liveSupport.ts.
+    match /general_config/live_support {
+      allow read: if isAuth();
+    }
+
     match /general_config/{docId} {
       allow read: if isAdmin();
       // gig_points / gig_points_requests / wallet_requests have their own

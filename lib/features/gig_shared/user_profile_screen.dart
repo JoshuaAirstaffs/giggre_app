@@ -20,6 +20,7 @@ import 'review_card.dart';
 import 'user_profile_sheet.dart';
 import 'work_history.dart';
 import 'work_history_widgets.dart';
+import 'package:giggre_app/features/live_support/live_support_bubble.dart'; // TEMP: live support
 
 /// Full-screen profile for the other party on a gig — the same information as
 /// [showUserProfileSheet] with room to breathe: the complete review history
@@ -425,6 +426,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       onPressed: _blocking ? null : widget.onMessage,
                     ),
                   ],
+                  // TEMP: live support — Giggre Support can't be reported or blocked
+                  if (!isLiveSupportAccount(widget.uid)) ...[
                   const SizedBox(width: 10),
                   _barIconButton(
                     icon: Icons.flag_outlined,
@@ -448,6 +451,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     tint: _blocked ? null : _headerPalette.unverified,
                     onPressed: _blocking || _blocked ? null : _block,
                   ),
+                  ],
                 ],
               ],
             ),

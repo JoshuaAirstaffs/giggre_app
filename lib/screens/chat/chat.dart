@@ -25,6 +25,7 @@ import 'package:giggre_app/helpers/snackbar_helper.dart';
 import 'package:giggre_app/features/call/call_log.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:provider/provider.dart';
+import 'package:giggre_app/features/live_support/live_support_bubble.dart'; // TEMP: live support
 
 // ── Local message model ────────────────────────────────────────────────────────
 class _Msg {
@@ -157,7 +158,8 @@ class Chat extends StatefulWidget {
   State<Chat> createState() => _ChatState();
 }
 
-class _ChatState extends State<Chat> {
+class _ChatState extends State<Chat>
+    with HidesLiveSupport { // TEMP: live support
   final _msgController = TextEditingController();
   // Anchors the quick-reply popup menu to the button that opens it.
   final _quickReplyButtonKey = GlobalKey();
@@ -1934,11 +1936,16 @@ class _ChatState extends State<Chat> {
         : 'Type a message...';
   }
 
+  // TEMP: live support — no calls, block or report with Giggre Support
+  bool get _isLiveSupportPeer =>
+      isLiveSupportAccount(widget.gigChatParams?.peerUid);
+
   bool get _canCallPeer =>
       _isGigChat &&
       widget.gigChatParams != null &&
       !_chatDisabled &&
       !_requestBlocksCalls &&
+      !_isLiveSupportPeer && // TEMP: live support
       !_isResolved;
 
   Future<void> _answerRequest(bool accept) async {
@@ -2149,7 +2156,9 @@ class _ChatState extends State<Chat> {
         ),
         actions: (_isGigChat && widget.gigChatParams != null)
             ? [
-                if (!_chatDisabled && !_requestBlocksCalls) ...[
+                if (!_chatDisabled &&
+                    !_requestBlocksCalls &&
+                    !_isLiveSupportPeer) ...[ // TEMP: live support
                   CallUserAction(
                     targetUserId: widget.gigChatParams!.peerUid,
                     targetUserName: widget.gigChatParams!.peerName,
@@ -2165,6 +2174,7 @@ class _ChatState extends State<Chat> {
                     viewerIsWorker: _viewerIsWorker,
                   ),
                 ],
+                if (!_isLiveSupportPeer) // TEMP: live support
                 PopupMenuButton<String>(
                   icon: Icon(
                     Icons.more_vert,
@@ -2255,6 +2265,7 @@ class _ChatState extends State<Chat> {
                       }
 
                       final canReport =
+                          !_isLiveSupportPeer && // TEMP: live support
                           !msg.isCallLog &&
                           !msg.isMe &&
                           !msg.isSupport &&

@@ -9,6 +9,7 @@ import {
   Timestamp,
   getFirestore,
 } from "firebase-admin/firestore";
+import { involvesLiveSupport } from "./liveSupport"; // TEMP: live support
 import { sendPushToUser } from "./push";
 import { firestoreTriggerRegion } from "./region";
 
@@ -235,11 +236,25 @@ export const startDirectChat = onCall(OPTS, async (request) => {
     );
   }
 
+  // TEMP: live support — the support account is open to everyone, so its
+  // chats skip the request, the search opt-out and the daily limit.
+  const isSupportChat = await involvesLiveSupport(uid, peerUid);
+
   const roomId = directRoomId(uid, peerUid);
   const roomRef = db().collection("chat_rooms").doc(roomId);
   const existing = await roomRef.get();
   if (existing.exists) {
     const room = existing.data() as Data;
+    // A request already sent either way opens up; a decline only reopens
+    // when the person who declined starts the chat again.
+    if (
+      isSupportChat &&
+      (room.requestStatus === "pending" ||
+        (room.requestStatus === "declined" && room.requestTo === uid))
+    ) {
+      await roomRef.update({ requestStatus: "accepted" });
+      return { roomId, requestStatus: "accepted", peerName: peer.name ?? "" };
+    }
     return {
       roomId,
       // Rooms from before requests existed (favorites) are open chats
@@ -248,7 +263,8 @@ export const startDirectChat = onCall(OPTS, async (request) => {
     };
   }
 
-  const connected = await alreadyConnected(uid, peerUid, me, peer);
+  const connected =
+    isSupportChat || (await alreadyConnected(uid, peerUid, me, peer));
   if (!connected && !isSearchable(peer)) {
     // Opted out of search: reachable only by people they already know
     throw new HttpsError(
