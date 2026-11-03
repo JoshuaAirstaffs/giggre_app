@@ -1569,14 +1569,19 @@ class _ChatState extends State<Chat>
                       children: [
                         CircleAvatar(
                           radius: 36,
-                          backgroundColor: accent.withValues(alpha: 0.12),
-                          backgroundImage:
-                              (_peerPhotoUrl != null &&
-                                  _peerPhotoUrl!.isNotEmpty)
+                          backgroundColor: _isLiveSupportPeer // TEMP: live support
+                              ? Colors.white
+                              : accent.withValues(alpha: 0.12),
+                          backgroundImage: _isLiveSupportPeer // TEMP: live support
+                              ? liveSupportAvatar
+                              : (_peerPhotoUrl != null &&
+                                    _peerPhotoUrl!.isNotEmpty)
                               ? CachedNetworkImageProvider(_peerPhotoUrl!)
                               : null,
                           child:
-                              (_peerPhotoUrl == null || _peerPhotoUrl!.isEmpty)
+                              !_isLiveSupportPeer && // TEMP: live support
+                                  (_peerPhotoUrl == null ||
+                                      _peerPhotoUrl!.isEmpty)
                               ? Icon(
                                   Icons.person_rounded,
                                   color: accent,
@@ -2098,14 +2103,17 @@ class _ChatState extends State<Chat>
             _isGigChat
                 ? CircleAvatar(
                     radius: 16,
-                    backgroundColor: const Color(
-                      0xFF3B82F6,
-                    ).withValues(alpha: 0.15),
-                    backgroundImage:
-                        (_peerPhotoUrl != null && _peerPhotoUrl!.isNotEmpty)
+                    backgroundColor: _isLiveSupportPeer // TEMP: live support
+                        ? Colors.white
+                        : const Color(0xFF3B82F6).withValues(alpha: 0.15),
+                    backgroundImage: _isLiveSupportPeer // TEMP: live support
+                        ? liveSupportAvatar
+                        : (_peerPhotoUrl != null && _peerPhotoUrl!.isNotEmpty)
                         ? CachedNetworkImageProvider(_peerPhotoUrl!)
                         : null,
-                    child: (_peerPhotoUrl == null || _peerPhotoUrl!.isEmpty)
+                    child:
+                        !_isLiveSupportPeer && // TEMP: live support
+                            (_peerPhotoUrl == null || _peerPhotoUrl!.isEmpty)
                         ? const Icon(
                             Icons.person_rounded,
                             color: Color(0xFF3B82F6),

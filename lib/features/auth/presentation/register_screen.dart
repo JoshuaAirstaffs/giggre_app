@@ -16,6 +16,7 @@ import 'phone_autofill.dart';
 import 'welcome_screen.dart';
 import '../../../services/sound_service.dart';
 import 'dart:math';
+import 'social_sign_in_button.dart';
 
 // ─────────────────────────────────────────────
 //  Country model & data
@@ -1961,54 +1962,20 @@ class _SocialLogoRow extends StatelessWidget {
       children: [
         SizedBox(
           width: double.infinity,
-          height: 54,
-          child: OutlinedButton.icon(
-            onPressed: isGoogleLoading ? null : onGoogleTap,
-            icon: isGoogleLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : Image.asset('assets/images/g-logo.png', width: 22, height: 22),
-            label: Text(
-              isGoogleLoading ? 'Signing in...' : 'Continue with Google',
-              style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87),
-            ),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: Colors.grey[400]!),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-            ),
+          child: SocialSignInButton(
+            provider: SocialProvider.google,
+            loading: isGoogleLoading,
+            onPressed: onGoogleTap,
           ),
         ),
         if (showApple) ...[
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
-            height: 54,
-            child: ElevatedButton.icon(
-              onPressed: isAppleLoading ? null : onAppleTap,
-              icon: isAppleLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.apple, color: Colors.white, size: 22),
-              label: Text(
-                isAppleLoading ? 'Signing in...' : 'Continue with Apple',
-                style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.black,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-              ),
+            child: SocialSignInButton(
+              provider: SocialProvider.apple,
+              loading: isAppleLoading,
+              onPressed: onAppleTap,
             ),
           ),
         ],

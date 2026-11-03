@@ -20,6 +20,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:giggre_app/features/chat/user_search_screen.dart'
     show openDirectChat;
 
@@ -33,6 +35,10 @@ String? _currentSupportUid;
 /// block or report actions (chat.dart).
 bool isLiveSupportAccount(String? uid) =>
     uid != null && uid.isNotEmpty && uid == _currentSupportUid;
+
+/// Giggre Support's picture in chats (the account has no photo): the logo,
+/// shown on a white circle.
+const liveSupportAvatar = AssetImage('assets/icons/logo_app.png');
 
 /// Why the bubble is hidden right now: the top route (popups, full-screen
 /// maps) or a chat screen that's open.
@@ -129,8 +135,21 @@ class LiveSupportBubble extends StatefulWidget {
 
 class _LiveSupportBubbleState extends State<LiveSupportBubble> {
   static const _size = 58.0;
+  // Drop target shown at the bottom middle while dragging
+  static const _hideSize = 56.0;
+  static const _hideReach = 64.0;
+  // The tab the bubble tucks into once hidden
+  static const _tabWidth = 22.0;
+  static const _tabHeight = 42.0;
+  static const _prefsDocked = 'live_support_docked';
+  static const _prefsDockRight = 'live_support_dock_right';
 
   Offset? _pos;
+  bool _dragging = false;
+  bool _overHide = false;
+  // Hidden into the corner tab (remembered across launches)
+  bool _docked = false;
+  bool _dockRight = true;
   StreamSubscription<User?>? _authSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _configSub;
   StreamSubscription<bool>? _unreadSub;
@@ -144,6 +163,34 @@ class _LiveSupportBubbleState extends State<LiveSupportBubble> {
     super.initState();
     // The config is only readable signed in, so (re)subscribe per account
     _authSub = FirebaseAuth.instance.authStateChanges().listen(_onUser);
+    _loadDock();
+  }
+
+  Future<void> _loadDock() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        _docked = prefs.getBool(_prefsDocked) ?? false;
+        _dockRight = prefs.getBool(_prefsDockRight) ?? true;
+      });
+    } catch (e) {
+      debugPrint('[LiveSupport] prefs: $e');
+    }
+  }
+
+  Future<void> _setDocked(bool docked, {bool? right}) async {
+    setState(() {
+      _docked = docked;
+      if (right != null) _dockRight = right;
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsDocked, docked);
+      await prefs.setBool(_prefsDockRight, _dockRight);
+    } catch (e) {
+      debugPrint('[LiveSupport] prefs: $e');
+    }
   }
 
   @override
@@ -247,7 +294,53 @@ class _LiveSupportBubbleState extends State<LiveSupportBubble> {
 
   // Clear of the status bar and bottom nav bars
   double _clampY(double y, Size screen, EdgeInsets padding) =>
-      y.clamp(padding.top + 72, screen.height - padding.bottom - _size - 100);
+      y.clamp(padding.top + 72, _maxY(screen, padding));
+
+  double _maxY(Size screen, EdgeInsets padding) =>
+      screen.height - padding.bottom - _size - 100;
+
+  Offset _hideCenter(Size screen, EdgeInsets padding) =>
+      Offset(screen.width / 2, screen.height - padding.bottom - 72);
+
+  void _onDrag(DragUpdateDetails d, Size screen, EdgeInsets padding) {
+    // Free to move anywhere on screen while held, so it can reach the target
+    final next = _pos! + d.delta;
+    final pos = Offset(
+      next.dx.clamp(0.0, screen.width - _size),
+      next.dy.clamp(padding.top, screen.height - padding.bottom - _size),
+    );
+    final center = pos + const Offset(_size / 2, _size / 2);
+    final over = (center - _hideCenter(screen, padding)).distance < _hideReach;
+    if (over && !_overHide) HapticFeedback.selectionClick();
+    setState(() {
+      _pos = pos;
+      _overHide = over;
+    });
+  }
+
+  void _onDragEnd(Size screen, EdgeInsets padding) {
+    final hide = _overHide;
+    setState(() {
+      _dragging = false;
+      _overHide = false;
+    });
+    if (hide) {
+      _setDocked(true, right: _pos!.dx + _size / 2 >= screen.width / 2);
+    } else {
+      _snapToEdge(screen, padding);
+    }
+  }
+
+  /// Out of the corner tab, back to a bubble on the same side.
+  void _undock(Size screen, EdgeInsets padding) {
+    setState(() {
+      _pos = Offset(
+        _dockRight ? screen.width - _size - 12 : 12.0,
+        _maxY(screen, padding),
+      );
+    });
+    _setDocked(false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -258,12 +351,16 @@ class _LiveSupportBubbleState extends State<LiveSupportBubble> {
     }
 
     final screen = media.size;
+    final padding = media.padding;
     // Right side, above where the Gab bubble sits
     _pos ??= Offset(screen.width - _size - 12, screen.height - _size - 220);
-    final pos = Offset(
-      _pos!.dx.clamp(12.0, screen.width - _size - 12),
-      _clampY(_pos!.dy, screen, media.padding),
-    );
+    final pos = _dragging
+        ? _pos!
+        : Offset(
+            _pos!.dx.clamp(12.0, screen.width - _size - 12),
+            _clampY(_pos!.dy, screen, padding),
+          );
+    final hideCenter = _hideCenter(screen, padding);
 
     return ValueListenableBuilder<bool>(
       valueListenable: _Visibility.hidden,
@@ -272,26 +369,64 @@ class _LiveSupportBubbleState extends State<LiveSupportBubble> {
         if (hidden || media.viewInsets.bottom > 0) {
           return const SizedBox.shrink();
         }
-        return AnimatedPositioned(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-          left: pos.dx,
-          top: pos.dy,
-          child: GestureDetector(
-            onPanUpdate: (d) => setState(() => _pos = pos + d.delta),
-            onPanEnd: (_) => _snapToEdge(screen, media.padding),
-            child: Semantics(
-              button: true,
-              label: _hasUnread
-                  ? 'Chat with $_supportName, new message'
-                  : 'Chat with $_supportName',
-              child: _BubbleFace(
-                size: _size,
-                opening: _opening,
-                hasUnread: _hasUnread,
-                onTap: _open,
-              ),
-            ),
+        // Fills the screen but only its children take touches, so the app
+        // underneath stays usable.
+        return Positioned.fill(
+          child: Stack(
+            children: [
+              if (_dragging)
+                Positioned(
+                  left: hideCenter.dx - _hideSize / 2,
+                  top: hideCenter.dy - _hideSize / 2,
+                  child: IgnorePointer(child: _HideTarget(active: _overHide)),
+                ),
+              if (_docked)
+                Positioned(
+                  right: _dockRight ? 0 : null,
+                  left: _dockRight ? null : 0,
+                  top: _maxY(screen, padding) + _size - _tabHeight,
+                  child: _CornerTab(
+                    right: _dockRight,
+                    hasUnread: _hasUnread,
+                    onTap: () => _undock(screen, padding),
+                  ),
+                )
+              else
+                AnimatedPositioned(
+                  // Follows the finger exactly while dragging
+                  duration: _dragging
+                      ? Duration.zero
+                      : const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  left: pos.dx,
+                  top: pos.dy,
+                  child: GestureDetector(
+                    onPanStart: (_) => setState(() {
+                      _pos = pos;
+                      _dragging = true;
+                    }),
+                    onPanUpdate: (d) => _onDrag(d, screen, padding),
+                    onPanEnd: (_) => _onDragEnd(screen, padding),
+                    onPanCancel: () => _onDragEnd(screen, padding),
+                    child: Semantics(
+                      button: true,
+                      label: _hasUnread
+                          ? 'Chat with $_supportName, new message'
+                          : 'Chat with $_supportName',
+                      child: AnimatedScale(
+                        scale: _overHide ? 0.8 : 1,
+                        duration: const Duration(milliseconds: 120),
+                        child: _BubbleFace(
+                          size: _size,
+                          opening: _opening,
+                          hasUnread: _hasUnread,
+                          onTap: _open,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         );
       },
@@ -299,8 +434,138 @@ class _LiveSupportBubbleState extends State<LiveSupportBubble> {
   }
 }
 
-/// The Giggre logo on a white disc (it's orange and blue, so it reads on
-/// white in both themes), with a red dot for an unread reply.
+/// The "drop here to hide" circle at the bottom middle while dragging. Grows
+/// when the bubble is over it.
+class _HideTarget extends StatelessWidget {
+  const _HideTarget({required this.active});
+
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: active ? 1.2 : 1,
+      duration: const Duration(milliseconds: 120),
+      child: Container(
+        width: _LiveSupportBubbleState._hideSize,
+        height: _LiveSupportBubbleState._hideSize,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: active
+              ? const Color(0xFFEF4444)
+              : Colors.black.withValues(alpha: 0.55),
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.visibility_off_rounded,
+          color: Colors.white,
+          size: 24,
+        ),
+      ),
+    );
+  }
+}
+
+/// The hidden bubble: a small tab flush with the screen edge, near the bottom
+/// corner. Tapping it brings the bubble back.
+class _CornerTab extends StatelessWidget {
+  const _CornerTab({
+    required this.right,
+    required this.hasUnread,
+    required this.onTap,
+  });
+
+  final bool right;
+  final bool hasUnread;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const r = Radius.circular(10);
+    final shape = BorderRadius.horizontal(
+      left: right ? r : Radius.zero,
+      right: right ? Radius.zero : r,
+    );
+    return Semantics(
+      button: true,
+      label: hasUnread
+          ? 'Show $_supportName, new message'
+          : 'Show $_supportName',
+      child: SizedBox(
+        width: _LiveSupportBubbleState._tabWidth,
+        height: _LiveSupportBubbleState._tabHeight,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // See-through so it stays out of the way; the unread dot below
+            // stays fully visible.
+            Opacity(
+              opacity: 0.6,
+              child: Material(
+                color: _surface(context),
+                elevation: 3,
+                shadowColor: Colors.black.withValues(alpha: 0.35),
+                shape: RoundedRectangleBorder(
+                  borderRadius: shape,
+                  side: BorderSide(color: _edge(context)),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onTap,
+                  child: const SizedBox.expand(
+                    child: Padding(
+                      padding: EdgeInsets.all(3),
+                      child: Image(
+                        image: liveSupportAvatar,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (hasUnread)
+              Positioned(
+                top: -4,
+                left: right ? -4 : null,
+                right: right ? null : -4,
+                child: Container(
+                  width: 13,
+                  height: 13,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: _surface(context), width: 2),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Bubble and tab surface: white in light mode, the app's dark card colour in
+/// dark mode (the logo's orange and blue read on both).
+Color _surface(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? const Color(0xFF1E293B)
+    : Colors.white;
+
+Color _edge(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? Colors.white.withValues(alpha: 0.12)
+    : Colors.black.withValues(alpha: 0.06);
+
+/// The Giggre logo on a disc, with a red dot for an unread reply.
 class _BubbleFace extends StatelessWidget {
   const _BubbleFace({
     required this.size,
@@ -323,10 +588,8 @@ class _BubbleFace extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Material(
-            color: Colors.white,
-            shape: CircleBorder(
-              side: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
-            ),
+            color: _surface(context),
+            shape: CircleBorder(side: BorderSide(color: _edge(context))),
             elevation: 6,
             shadowColor: Colors.black.withValues(alpha: 0.35),
             clipBehavior: Clip.antiAlias,
@@ -359,7 +622,7 @@ class _BubbleFace extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: const Color(0xFFEF4444),
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
+                  border: Border.all(color: _surface(context), width: 2),
                 ),
               ),
             ),
