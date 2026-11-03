@@ -27,6 +27,7 @@ import 'core/utils/app_orientation.dart';
 import 'features/tutorial/controller/tutorial_controller.dart';
 import 'features/tutorial/services/tutorial_service.dart';
 import 'features/tutorial/widgets/tutorial_overlay.dart';
+import 'features/live_support/live_support_bubble.dart'; // TEMP: live support
 import 'services/delete_acc_service.dart';
 import 'firebase_options_dev.dart' as dev;
 import 'firebase_options_prod.dart' as prod;
@@ -655,12 +656,16 @@ class GiggreApp extends StatelessWidget {
           child: Stack(
             children: [
               child ?? const SizedBox(),
+              LiveSupportBubble(navigatorKey: navigatorKey), // TEMP: live support
               LocationGate(navigatorKey: navigatorKey),
             ],
           ),
         ),
       ),
-      navigatorObservers: [welcomeRouteObserver],
+      navigatorObservers: [
+        welcomeRouteObserver,
+        liveSupportRouteObserver, // TEMP: live support
+      ],
       home: firebaseError != null
           ? _FirebaseErrorScreen(firebaseError!)
           : const _MaintenanceGate(),
