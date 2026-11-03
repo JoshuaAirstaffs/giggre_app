@@ -19,6 +19,8 @@ import '../../../main.dart';
 import 'dashboard_screen.dart';
 import 'phone_autofill.dart';
 import 'register_screen.dart';
+import 'package:giggre_app/features/tutorial_videos/tutorial_videos_row.dart';
+import 'package:giggre_app/features/tutorial_videos/tutorial_videos_service.dart';
 import '../../../services/sound_service.dart';
 
 // Lets _MarqueeRow pause its ticker while a screen (e.g. Terms/Privacy) covers
@@ -1220,6 +1222,16 @@ class _WelcomeContent extends StatelessWidget {
                             textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 12, color: tokens.textMuted),
                           ),
+                          // Admin's tutorial videos (Content Management →
+                          // Tutorial Videos → Welcome); hidden when none.
+                          TutorialVideosRow(
+                            placement: TutorialPlacement.welcome,
+                            padding: const EdgeInsets.only(top: 20),
+                            textColor: tokens.textPrimary,
+                            mutedColor: tokens.textMuted,
+                            cardColor: tokens.cardSurface,
+                            borderColor: tokens.cardBorder,
+                          ),
                           const SizedBox(height: 26),
                           SizedBox(
                             width: double.infinity,
@@ -1765,6 +1777,15 @@ class _LoginPanel extends StatelessWidget {
               ),
             ],
           ),
+          TutorialVideosRow(
+            placement: TutorialPlacement.login,
+            title: 'Need help logging in?',
+            padding: const EdgeInsets.only(top: 18),
+            textColor: tokens.textPrimary,
+            mutedColor: tokens.textMuted,
+            cardColor: tokens.cardSurface,
+            borderColor: tokens.cardBorder,
+          ),
         ],
       ),
     );
@@ -2075,6 +2096,15 @@ class _SignupPanel extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+          TutorialVideosRow(
+            placement: TutorialPlacement.signup,
+            title: 'How to register',
+            padding: const EdgeInsets.only(top: 18),
+            textColor: tokens.textPrimary,
+            mutedColor: tokens.textMuted,
+            cardColor: tokens.cardSurface,
+            borderColor: tokens.cardBorder,
           ),
         ],
       ),

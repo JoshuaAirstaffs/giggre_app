@@ -40,6 +40,7 @@ import '../../gig_host/presentation/widgets/payment_history_sheet.dart';
 import '../../gig_host/presentation/widgets/ratings_given_sheet.dart';
 import '../../gig_host/presentation/host_gigs_screen.dart';
 import '../../tutorial_demo/demo_hub_screen.dart';
+import '../../tutorial_videos/video_tutorials_screen.dart';
 
 const _kProfileStatsModeKey = 'profile_stats_mode';
 
@@ -1119,6 +1120,19 @@ class _ProfileTabState extends State<ProfileTab> {
                         context,
                         MaterialPageRoute(
                           builder: (_) => const TutorialDemoHubScreen(),
+                        ),
+                      ),
+                    ),
+                    _ActionDivider(tokens: tokens),
+                    _ActionRow(
+                      icon: Icons.ondemand_video_rounded,
+                      iconColor: kBlue,
+                      label: 'Video Tutorials',
+                      tokens: tokens,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const VideoTutorialsScreen(),
                         ),
                       ),
                     ),
