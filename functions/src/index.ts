@@ -1505,6 +1505,17 @@ export {
   onMessageRequestAccepted,
 } from "./directMessages";
 
+// Group chats. See functions/src/groupChats.ts.
+export {
+  createGroup,
+  addGroupMembers,
+  removeGroupMember,
+  leaveGroup,
+  updateGroup,
+  makeGroupAdmin,
+  onGroupMessageCreated,
+} from "./groupChats";
+
 // ── Gig Points ──────────────────────────────────────────────────────────────
 // Awards points to workers on host-approved gig completion, plus admin-only
 // adjustment and blocked-award retry callables. See functions/src/gigPoints.ts.

@@ -474,6 +474,63 @@ service cloud.firestore {
       }
     }
 
+    // ─── Group Chats ───────────────────────────────────────────
+    // Created and re-membered only by functions/src/groupChats.ts. Members
+    // may touch just their own entry in lastRead (read marker) and mutedBy.
+    match /group_chats/{groupId} {
+      allow get: if isAuth() && (
+        resource == null ||
+        request.auth.uid in resource.data.participants ||
+        isAdmin()
+      );
+      allow list: if isAuth() && (
+        request.auth.uid in resource.data.participants || isAdmin()
+      );
+      allow create, delete: if false;
+      allow update: if isAuth() &&
+        request.auth.uid in resource.data.participants &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['lastRead', 'mutedBy']) &&
+        request.resource.data.lastRead.diff(resource.data.lastRead)
+          .affectedKeys().hasOnly([request.auth.uid]) &&
+        request.resource.data.mutedBy.diff(resource.data.mutedBy)
+          .affectedKeys().hasOnly([request.auth.uid]) &&
+        (!(request.auth.uid in request.resource.data.lastRead) ||
+          (request.resource.data.lastRead[request.auth.uid] is timestamp &&
+           request.resource.data.lastRead[request.auth.uid] <= request.time)) &&
+        (!(request.auth.uid in request.resource.data.mutedBy) ||
+          request.resource.data.mutedBy[request.auth.uid] == true);
+
+      function groupMembers() {
+        return get(/databases/$(database)/documents/group_chats/$(groupId))
+          .data.participants;
+      }
+
+      // System lines ("Ana joined") come from the functions only. The
+      // onGroupMessageCreated trigger overwrites senderName with the real one.
+      match /messages/{messageId} {
+        allow read: if isAuth() && (
+          request.auth.uid in groupMembers() || isAdmin()
+        );
+        allow create: if isAuth() &&
+          request.auth.uid in groupMembers() &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.resource.data.type in ['text', 'image', 'location'] &&
+          request.resource.data.createdAt == request.time &&
+          request.resource.data.keys().hasOnly([
+            'senderId', 'senderName', 'type', 'text', 'createdAt',
+            'imageUrl', 'location', 'locationAddress'
+          ]) &&
+          (request.resource.data.type != 'location' ||
+            request.resource.data.location is latlng) &&
+          (!('text' in request.resource.data) || (
+            request.resource.data.text is string &&
+            request.resource.data.text.size() <= 4000
+          ));
+        allow update, delete: if isAdmin();
+      }
+    }
+
     // ─── User Reports ──────────────────────────────────────────
     // Effectively create-only for regular users: the one exception is
     // reading back a report THEY filed (never another user's), which

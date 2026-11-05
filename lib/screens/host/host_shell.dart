@@ -19,6 +19,7 @@ import '../chat/home_chat.dart';
 import '../worker/worker_shell.dart';
 import 'host_speed_dial.dart';
 import 'package:giggre_app/features/chat/message_requests.dart';
+import 'package:giggre_app/features/group_chat/group_chat_service.dart';
 
 const _kNavActive = Color(0xFFD88810);
 const _kNavInactive = Color(0xFF9AA5B5);
@@ -58,6 +59,8 @@ class _HostShellState extends State<HostShell>
 
   bool _hasUnreadSupport = false;
   bool _hasUnreadGig = false;
+  bool _hasUnreadGroup = false;
+  StreamSubscription<bool>? _groupUnreadSub;
   StreamSubscription? _supportRoomsSub;
   final List<StreamSubscription> _supportMsgSubs = [];
   StreamSubscription? _gigRoomsSub;
@@ -68,6 +71,12 @@ class _HostShellState extends State<HostShell>
     super.initState();
     _listenForUnreadSupport();
     _listenForUnreadGig();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _groupUnreadSub = GroupChatService.anyUnread(uid).listen(
+        (v) => mounted ? setState(() => _hasUnreadGroup = v) : null,
+      );
+    }
   }
 
   @override
@@ -77,6 +86,7 @@ class _HostShellState extends State<HostShell>
       s.cancel();
     }
     _gigRoomsSub?.cancel();
+    _groupUnreadSub?.cancel();
     for (final s in _gigMsgSubs) {
       s.cancel();
     }
@@ -295,7 +305,7 @@ class _HostShellState extends State<HostShell>
             body: IndexedStack(index: _tabIndex, children: tabs),
             bottomNavigationBar: _HostBottomNavBar(
               currentIndex: _tabIndex,
-              hasUnreadChat: _hasUnreadSupport || _hasUnreadGig,
+              hasUnreadChat: _hasUnreadSupport || _hasUnreadGig || _hasUnreadGroup,
               onTap: _selectTab,
               onPostGigTap: _toggleDial,
             ),

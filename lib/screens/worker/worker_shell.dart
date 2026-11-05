@@ -12,6 +12,7 @@ import '../chat/home_chat.dart';
 import '../host/host_shell.dart';
 import '../../features/gig_worker/presentation/saved_screen.dart';
 import 'package:giggre_app/features/chat/message_requests.dart';
+import 'package:giggre_app/features/group_chat/group_chat_service.dart';
 
 const _kNavActive = Color(0xFF2B6FB5);
 const _kNavInactive = Color(0xFF9AA5B5);
@@ -49,6 +50,8 @@ class _WorkerShellState extends State<WorkerShell> {
 
   bool _hasUnreadSupport = false;
   bool _hasUnreadGig = false;
+  bool _hasUnreadGroup = false;
+  StreamSubscription<bool>? _groupUnreadSub;
   StreamSubscription? _supportRoomsSub;
   final List<StreamSubscription> _supportMsgSubs = [];
   StreamSubscription? _gigRoomsSub;
@@ -59,6 +62,12 @@ class _WorkerShellState extends State<WorkerShell> {
     super.initState();
     _listenForUnreadSupport();
     _listenForUnreadGig();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _groupUnreadSub = GroupChatService.anyUnread(uid).listen(
+        (v) => mounted ? setState(() => _hasUnreadGroup = v) : null,
+      );
+    }
   }
 
   @override
@@ -68,6 +77,7 @@ class _WorkerShellState extends State<WorkerShell> {
       s.cancel();
     }
     _gigRoomsSub?.cancel();
+    _groupUnreadSub?.cancel();
     for (final s in _gigMsgSubs) {
       s.cancel();
     }
@@ -209,7 +219,7 @@ class _WorkerShellState extends State<WorkerShell> {
       body: IndexedStack(index: _index, children: tabs),
       bottomNavigationBar: _WorkerBottomNavBar(
         currentIndex: _index,
-        hasUnreadChat: _hasUnreadSupport || _hasUnreadGig,
+        hasUnreadChat: _hasUnreadSupport || _hasUnreadGig || _hasUnreadGroup,
         onTap: _selectTab,
       ),
     );

@@ -11,6 +11,10 @@ import 'package:giggre_app/main.dart' show navigatorKey;
 import 'package:giggre_app/screens/chat/chat.dart';
 import 'package:giggre_app/features/chat/message_requests.dart';
 import 'package:giggre_app/features/chat/user_search_screen.dart';
+import 'package:giggre_app/features/group_chat/create_group_screen.dart';
+import 'package:giggre_app/features/group_chat/group_chat_screen.dart';
+import 'package:giggre_app/features/group_chat/group_chat_service.dart';
+import 'package:giggre_app/features/group_chat/group_widgets.dart';
 import 'package:giggre_app/features/live_support/live_support_bubble.dart'; // TEMP: live support
 
 // Support auto-replies are authored as HTML (rendered properly inside the
@@ -45,6 +49,8 @@ class _HomeChatState extends State<HomeChat>
   late final TabController _tabController;
   bool _hasUnread = false;
   bool _hasUnreadGig = false;
+  bool _hasUnreadGroup = false;
+  StreamSubscription<bool>? _groupUnreadSub;
   final List<StreamSubscription> _roomSubs = [];
   StreamSubscription? _gigRoomsStreamSub;
   final List<StreamSubscription> _gigRoomSubs = [];
@@ -55,11 +61,18 @@ class _HomeChatState extends State<HomeChat>
     _tabController = TabController(length: 2, vsync: this);
     _listenForUnread();
     _listenForUnreadGig();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _groupUnreadSub = GroupChatService.anyUnread(uid).listen(
+        (v) => mounted ? setState(() => _hasUnreadGroup = v) : null,
+      );
+    }
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _groupUnreadSub?.cancel();
     for (final sub in _roomSubs) sub.cancel();
     _gigRoomsStreamSub?.cancel();
     for (final sub in _gigRoomSubs) sub.cancel();
@@ -265,6 +278,13 @@ class _HomeChatState extends State<HomeChat>
         ),
         actions: [
           IconButton(
+            icon: Icon(Icons.group_add_outlined, color: onSurface),
+            tooltip: 'New group',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CreateGroupScreen()),
+            ),
+          ),
+          IconButton(
             icon: Icon(Icons.search_rounded, color: onSurface),
             tooltip: 'Find people',
             onPressed: () => Navigator.of(context).push(
@@ -292,7 +312,7 @@ class _HomeChatState extends State<HomeChat>
                 clipBehavior: Clip.none,
                 children: [
                   const Icon(Icons.chat_bubble_outline_rounded),
-                  if (_hasUnreadGig)
+                  if (_hasUnreadGig || _hasUnreadGroup)
                     Positioned(
                       top: -2,
                       right: -2,
@@ -353,6 +373,7 @@ class _GigChatsTab extends StatefulWidget {
 
 class _GigChatsTabState extends State<_GigChatsTab> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _groupStream;
   // "Missed calls" filter — rooms where the peer's last call to me went
   // unanswered and hasn't been followed up by another call since (see
   // missedCallFor in call_log.dart).
@@ -368,10 +389,31 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               .collection('chat_rooms')
               .where('participants', arrayContains: uid)
               .snapshots();
+    _groupStream = uid == null
+        ? const Stream.empty()
+        : GroupChatService.myGroups(uid);
   }
 
   @override
   Widget build(BuildContext context) {
+    // Groups (group_chats) are listed together with the one-to-one rooms.
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _groupStream,
+      builder: (context, groupSnap) {
+        if (groupSnap.hasError) {
+          debugPrint('GigChatsTab groups error: ${groupSnap.error}');
+        }
+        final groups = groupSnap.data?.docs ??
+            const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+        return _buildRooms(context, groups);
+      },
+    );
+  }
+
+  Widget _buildRooms(
+    BuildContext context,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> groups,
+  ) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _stream,
       builder: (context, snap) {
@@ -423,7 +465,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
           ),
         );
 
-        if (docs.isEmpty) {
+        if (docs.isEmpty && groups.isEmpty) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -440,7 +482,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Tap the search icon to find people',
+                  'Tap the search icon to find people, or start a group',
                   style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
                 ),
                 if (requestCount > 0) ...[
@@ -501,7 +543,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               ),
             ),
             Expanded(
-              child: shown.isEmpty
+              child: shown.isEmpty && (_missedOnly || groups.isEmpty)
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -522,7 +564,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                         ],
                       ),
                     )
-                  : _buildList(shown),
+                  : _buildList(shown, _missedOnly ? const [] : groups),
             ),
           ],
         );
@@ -530,13 +572,47 @@ class _GigChatsTabState extends State<_GigChatsTab> {
     );
   }
 
-  Widget _buildList(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  Widget _buildList(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> rooms,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> groups,
+  ) {
+    // Rooms arrive already sorted (or in missed-call order); groups are
+    // slotted in by their latest message.
+    final docs = [...rooms];
+    if (groups.isNotEmpty) {
+      DateTime? at(QueryDocumentSnapshot<Map<String, dynamic>> d) =>
+          (d.data()['lastMessageAt'] as Timestamp?)?.toDate();
+      docs
+        ..addAll(groups)
+        ..sort((a, b) {
+          final ta = at(a), tb = at(b);
+          if (ta == null && tb == null) return 0;
+          if (ta == null) return 1;
+          if (tb == null) return -1;
+          return tb.compareTo(ta);
+        });
+    }
+    final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
     return RefreshIndicator(
       onRefresh: () async => setState(() {}),
       child: ListView.builder(
         padding: const EdgeInsets.all(8),
         itemCount: docs.length,
         itemBuilder: (context, i) {
+          if (docs[i].reference.parent.id == 'group_chats') {
+            final id = docs[i].id;
+            return GroupListTile(
+              key: ValueKey('group_$id'),
+              groupId: id,
+              group: docs[i].data(),
+              myUid: myUid,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => GroupChatScreen(groupId: id),
+                ),
+              ),
+            );
+          }
           final data = docs[i].data();
           final rawDate = _missedOnly
               ? (data['missedCallAt'] ?? data['lastMessageAt'])
