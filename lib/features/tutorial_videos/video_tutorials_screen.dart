@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../core/providers/current_user_provider.dart';
 
 import 'tutorial_region.dart';
+import 'tutorial_search.dart';
 import 'tutorial_videos_row.dart';
 import 'tutorial_videos_service.dart';
 
 /// Profile → Settings → Video Tutorials: every published tutorial video with
 /// the "Video Tutorials" placement (stored as `help`), in the admin's order,
 /// in Tagalog for users in the Philippines when there's a Tagalog version.
+/// The search bar matches titles, descriptions and admin keywords in both
+/// languages, with synonyms and typo tolerance (tutorial_search.dart).
 class VideoTutorialsScreen extends StatefulWidget {
   const VideoTutorialsScreen({super.key});
 
@@ -17,11 +23,34 @@ class VideoTutorialsScreen extends StatefulWidget {
 class _VideoTutorialsScreenState extends State<VideoTutorialsScreen> {
   late final Stream<List<TutorialVideo>> _stream =
       TutorialVideosService.forPlacement(TutorialPlacement.help);
+  final _search = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
     TutorialRegion.ensure(context);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Re-run when the user's detected country / currency changes (GPS
+    // detection after login can land a few seconds later).
+    CurrentUserProvider? user;
+    try {
+      user = Provider.of<CurrentUserProvider>(context);
+    } catch (_) {}
+    if (user != null) {
+      final u = user;
+      WidgetsBinding.instance.addPostFrameCallback((_) => TutorialRegion.syncUser(u));
+    }
   }
 
   @override
@@ -42,10 +71,12 @@ class _VideoTutorialsScreenState extends State<VideoTutorialsScreen> {
             if (!snap.hasData && !snap.hasError) {
               return const Center(child: CircularProgressIndicator());
             }
-            final videos = (snap.data ?? const <TutorialVideo>[])
+            final all = snap.data ?? const <TutorialVideo>[];
+            // Search the full video (both languages), then show the user's version.
+            final videos = searchTutorialVideos(all, _query)
                 .map((v) => v.forRegion(philippines: ph ?? false))
                 .toList();
-            if (videos.isEmpty) {
+            if (all.isEmpty) {
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(32),
@@ -64,11 +95,84 @@ class _VideoTutorialsScreenState extends State<VideoTutorialsScreen> {
                 ),
               );
             }
-            return ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              itemCount: videos.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 14),
-              itemBuilder: (context, i) => _VideoCard(video: videos[i]),
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: TextField(
+                    controller: _search,
+                    onChanged: (v) => setState(() => _query = v),
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: 'Search videos, e.g. "sign up" or "top up"',
+                      hintStyle: TextStyle(color: muted, fontSize: 13.5),
+                      prefixIcon: Icon(Icons.search_rounded, color: muted),
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Clear',
+                              icon: Icon(Icons.close_rounded, color: muted),
+                              onPressed: () {
+                                _search.clear();
+                                setState(() => _query = '');
+                              },
+                            ),
+                      filled: true,
+                      fillColor: Theme.of(context).cardColor,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: Theme.of(context).dividerColor),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: Theme.of(context).dividerColor),
+                      ),
+                    ),
+                  ),
+                ),
+                if (_query.trim().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        videos.isEmpty
+                            ? ''
+                            : '${videos.length} video${videos.length == 1 ? '' : 's'} found',
+                        style: TextStyle(color: muted, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: videos.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.search_off_rounded, size: 40, color: muted),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'No videos match "${_query.trim()}".\nTry another word, like "register" or "wallet".',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: muted, fontSize: 13.5, height: 1.4),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                          itemCount: videos.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 14),
+                          itemBuilder: (context, i) => _VideoCard(video: videos[i]),
+                        ),
+                ),
+              ],
             );
           },
         ),

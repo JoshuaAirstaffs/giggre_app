@@ -15,6 +15,7 @@ import '../../../utils/user_utils.dart';
 import 'register_screen.dart';
 import '../../../services/sound_service.dart';
 import '../../../main.dart';
+import 'package:giggre_app/core/services/public_lookup_service.dart';
 import 'social_sign_in_button.dart';
 
 // ── Design tokens (shared accents — identical across light/dark) ───────────
@@ -208,13 +209,11 @@ class _LoginScreenState extends State<LoginScreen> {
         // Firebase Auth. If it doesn't, this is really a sign-up — send the
         // user straight to the name/phone/referral form (no Register screen
         // needed) without creating an Auth account until they finish it.
-        final existingQuery = await FirebaseFirestore.instance
-            .collection('users')
-            .where('email', isEqualTo: googleUser.email)
-            .limit(1)
-            .get();
+        // users/{uid} isn't readable before sign-in — ask the server.
+        final hasAccount =
+            await PublicLookupService.accountExists(googleUser.email);
 
-        if (existingQuery.docs.isEmpty) {
+        if (!hasAccount) {
           if (mounted) {
             Navigator.push(
               context,
@@ -294,15 +293,12 @@ class _LoginScreenState extends State<LoginScreen> {
           appleCredential.familyName,
         ].where((s) => s != null && s.isNotEmpty).join(' ');
 
-        final existingQuery = appleEmail == null
+        // users/{uid} isn't readable before sign-in — ask the server.
+        final hasAccount = appleEmail == null
             ? null
-            : await FirebaseFirestore.instance
-                  .collection('users')
-                  .where('email', isEqualTo: appleEmail)
-                  .limit(1)
-                  .get();
+            : await PublicLookupService.accountExists(appleEmail);
 
-        if (existingQuery != null && existingQuery.docs.isEmpty) {
+        if (hasAccount == false) {
           if (mounted) {
             Navigator.push(
               context,

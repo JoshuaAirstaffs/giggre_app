@@ -223,6 +223,22 @@ service cloud.firestore {
         'acceptanceRate', 'earnings', 'fcmTokens'];
     }
 
+    // Verification status (users/{uid}.isVerified) is granted ONLY by admins
+    // (giggre-admin → Verification) — Send, Withdraw, the unverified earning
+    // limit and referral rewards all trust it. The owner's app may only ask
+    // for review ('pending', verification_screen submit) or withdraw it
+    // ('unverified', cancel), and never once they are verified.
+    function ownerVerificationChangeOk() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isVerified']) ||
+        (request.resource.data.isVerified in ['pending', 'unverified'] &&
+          resource.data.get('isVerified', 'unverified') != 'verified');
+    }
+
+    // A new account always starts unverified (register / welcome screens).
+    function ownerCreateVerificationOk() {
+      return request.resource.data.get('isVerified', 'unverified') == 'unverified';
+    }
+
     function touchesRatingAggregate() {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasAny(ratingAggregateKeys());
@@ -273,12 +289,15 @@ service cloud.firestore {
 
     // ─── Users ─────────────────────────────────────────────────
     match /users/{uid} {
-      // Public read — allows unauthenticated referral code lookup during registration
-      allow read: if true;
+      // Signed-in users only (was public). The two lookups the app makes
+      // before sign-in — "does this email have an account?" (Google/Apple)
+      // and referral-code validation — go through the checkAccountExists /
+      // lookupReferralCode callables (functions/src/publicLookups.ts).
+      allow read: if isAuth();
       // ratingWorker/ratingHost are server-only in both directions — a client
       // can neither seed them at registration nor edit them later. No app
       // version has ever written them, so this needs no rollout phasing.
-      allow create: if (isUser(uid) || isAdmin()) &&
+      allow create: if (isAdmin() || (isUser(uid) && ownerCreateVerificationOk())) &&
         !request.resource.data.keys().hasAny(ratingAggregateKeys());
       // Owners edit their own doc (minus the rating aggregates). Other users
       // may touch only the fields the app legitimately writes on someone
@@ -286,7 +305,7 @@ service cloud.firestore {
       // verification, blocks and the rest are owner/admin only.
       allow update: if isAdmin() || (
         isAuth() && !touchesRatingAggregate() && (
-          isUser(uid) ||
+          (isUser(uid) && ownerVerificationChangeOk()) ||
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(crossUserUserKeys())
         )
@@ -954,8 +973,13 @@ service cloud.firestore {
 
     // ─── Verification Requests ─────────────────────────────────
     match /verification_requests/{userId} {
-      allow read, create: if request.auth != null &&
+      allow read: if request.auth != null &&
         request.auth.uid == userId;
+      // A user's own request always starts as 'pending' — only admins
+      // decide (verified / rejected).
+      allow create: if request.auth != null &&
+        request.auth.uid == userId &&
+        request.resource.data.get('status', '') == 'pending';
       allow update: if request.auth != null &&
         request.auth.uid == userId &&
         request.resource.data.status in ['pending', 'cancelled'];

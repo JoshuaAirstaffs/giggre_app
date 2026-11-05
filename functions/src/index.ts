@@ -1515,3 +1515,5 @@ export {
 // Live USD→PHP rate for Gig Points / Gig Wallet. See functions/src/fx.ts.
 export { refreshFxRates, adminRefreshFxRates } from "./fx";
 export { adminUnverifiedUsage } from "./unverifiedLimits";
+// Pre-sign-in lookups (users/{uid} is no longer publicly readable).
+export { checkAccountExists, lookupReferralCode } from "./publicLookups";
