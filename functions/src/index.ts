@@ -2,6 +2,7 @@ import { setGlobalOptions } from "firebase-functions/v2";
 import {
   onDocumentCreated,
   onDocumentUpdated,
+  onDocumentWritten,
 } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
@@ -320,6 +321,38 @@ export const onSkillRequestStatusChanged = onDocumentUpdated(
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       }),
     ]);
+  }
+);
+
+// ── New verification request (admin notification) ──────────────────────────
+// verification_requests/{uid} is one doc per user (VerificationScreen
+// _submit sets it with merge), so a first submission and a resubmission after
+// a rejection / cancel are both "status became pending". Drops an entry in
+// giggre-admin's notification bell for admins with the Verification module.
+export const onVerificationRequestSubmitted = onDocumentWritten(
+  "verification_requests/{uid}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!after || after.status !== "pending" || before?.status === "pending") return;
+    const name = (after.name as string) || (after.email as string) || "A user";
+    const attempt = Number(after.attemptCount) || 1;
+    try {
+      await admin.firestore().collection("admin_notifications").add({
+        type: "verification_request",
+        requiredPermission: "verification",
+        title: attempt > 1 ? "Verification resubmitted" : "New verification request",
+        message: `${name} submitted their ID for verification${attempt > 1 ? ` (attempt ${attempt})` : ""}. Review it in Verification.`,
+        link: "/verification",
+        sourceCollection: "verification_requests",
+        sourceId: event.params.uid,
+        meta: { userId: after.userId ?? event.params.uid, name: after.name || null, email: after.email || null },
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        readBy: {},
+      });
+    } catch (err) {
+      console.error("[onVerificationRequestSubmitted] admin notification failed", err);
+    }
   }
 );
 
