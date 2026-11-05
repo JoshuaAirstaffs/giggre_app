@@ -1,7 +1,9 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/providers/current_user_provider.dart';
 import 'tutorial_region.dart';
 import 'tutorial_video_player_screen.dart';
 import 'tutorial_videos_service.dart';
@@ -45,6 +47,21 @@ class _TutorialVideosRowState extends State<TutorialVideosRow> {
   void initState() {
     super.initState();
     TutorialRegion.ensure(context);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Re-run when the user's detected country / currency changes (GPS
+    // detection after login can land a few seconds later).
+    CurrentUserProvider? user;
+    try {
+      user = Provider.of<CurrentUserProvider>(context);
+    } catch (_) {}
+    if (user != null) {
+      final u = user;
+      WidgetsBinding.instance.addPostFrameCallback((_) => TutorialRegion.syncUser(u));
+    }
   }
 
   @override

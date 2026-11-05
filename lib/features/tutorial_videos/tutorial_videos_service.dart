@@ -33,6 +33,9 @@ class TutorialVideo {
   final int? durationSec;
   final int order;
 
+  /// Extra search words set by the admin (Video Tutorials search).
+  final List<String> keywords;
+
   /// The Tagalog version (title/description fall back to English), or null.
   final TutorialVideo? tagalog;
 
@@ -48,6 +51,7 @@ class TutorialVideo {
     required this.thumbnailUrl,
     required this.durationSec,
     required this.order,
+    this.keywords = const [],
     this.tagalog,
   });
 
@@ -93,6 +97,11 @@ class TutorialVideo {
       thumbnailUrl: str(d['thumbnailUrl']),
       durationSec: (d['durationSec'] as num?)?.round(),
       order: (d['order'] as num?)?.toInt() ?? 0,
+      keywords: [
+        if (d['keywords'] is List)
+          for (final k in d['keywords'] as List)
+            if (k is String && k.trim().isNotEmpty) k.trim(),
+      ],
       tagalog: null,
     );
     if (v.title.isEmpty || !v.playable) return null;
@@ -130,6 +139,7 @@ class TutorialVideo {
       thumbnailUrl: thumbnailUrl,
       durationSec: durationSec,
       order: order,
+      keywords: keywords,
       tagalog: tl,
     );
   }

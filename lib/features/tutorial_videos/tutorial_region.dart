@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:geolocator/geolocator.dart';
@@ -11,8 +14,12 @@ import '../../core/utils/country_check.dart';
 /// user is in the Philippines. English is the default whenever it's unknown.
 ///
 /// Works before sign-in, without ever showing a permission prompt:
-///   1. signed in → the country the app already detected (GPS, the same one
-///      that picks ₱ vs $) — CurrentUserProvider.countryCode
+///   1. signed in → the same region Gig Wallet uses for ₱ / $ (see
+///      [syncUser]): the wallet's currency (wallets/{uid}.currencyCode,
+///      PHP = Philippines); with no wallet yet, the country the app detects
+///      from GPS at login (CurrentUserProvider.countryCode) or the account
+///      currency; if none is known it runs the same GPS detection
+///      (ensureCountryCode) and updates as soon as it lands
 ///   2. the last country seen on this device (saved from 1 or 3)
 ///   3. GPS, only if location permission was already granted
 ///   4. a hint from the phone: Philippine time zone, or a PH / Filipino locale
@@ -21,6 +28,10 @@ class TutorialRegion {
   TutorialRegion._();
 
   static const _prefsKey = 'tutorial_videos_country';
+  // A manual English/Tagalog switch existed briefly; its saved choice is
+  // cleared so only the detection decides.
+  static const _oldManualKey = 'tutorial_videos_lang';
+  static bool _cleanedUp = false;
 
   /// null while still unknown; rows wait for it so the right language shows
   /// from the start.
@@ -31,17 +42,21 @@ class TutorialRegion {
 
   /// Starts (or refreshes) detection. Cheap to call from every row.
   static Future<void> ensure(BuildContext context) async {
-    String? signedIn;
+    if (!_cleanedUp) {
+      _cleanedUp = true;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove(_oldManualKey);
+      } catch (_) {}
+    }
+    if (!context.mounted) return;
+    CurrentUserProvider? user;
     try {
-      signedIn = context.read<CurrentUserProvider>().countryCode;
+      user = context.read<CurrentUserProvider>();
     } catch (_) {
       // No provider above this context.
     }
-    if (signedIn != null && signedIn.isNotEmpty) {
-      _set(signedIn == 'PH');
-      _save(signedIn);
-      return;
-    }
+    if (user != null && syncUser(user)) return;
     if (_started) return;
     _started = true;
 
@@ -53,6 +68,59 @@ class TutorialRegion {
       _set(_deviceHintsPhilippines());
     }
     _tryGps();
+  }
+
+  /// Follows the signed-in user's geolocation (the same detection Gig Wallet
+  /// uses for ₱ / $). Call whenever CurrentUserProvider changes. Returns true
+  /// when it decided the region.
+  static bool syncUser(CurrentUserProvider user) {
+    final uid = user.uid;
+    if (uid == null) return false;
+    _watchWallet(uid);
+    // Same rule as Gig Wallet: its currency decides ₱ (Philippines) or $.
+    final walletCcy = _walletCcy;
+    if (walletCcy != null) {
+      _set(walletCcy == 'PHP');
+      return true;
+    }
+    final country = user.countryCode;
+    if (country != null && country.isNotEmpty) {
+      _set(country == 'PH');
+      _save(country);
+      return true;
+    }
+    // Country not detected yet: start the GPS detection (no-op if running or
+    // done); meanwhile a PHP currency already means the Philippines.
+    user.ensureCountryCode();
+    if (user.currencyCode == 'PHP') {
+      _set(true);
+      return true;
+    }
+    return false;
+  }
+
+  // ── Gig Wallet currency (wallets/{uid}.currencyCode) ──────────────────────
+  static String? _walletUid;
+  static String? _walletCcy;
+  static StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _walletSub;
+
+  static void _watchWallet(String uid) {
+    if (_walletUid == uid) return;
+    _walletSub?.cancel();
+    _walletUid = uid;
+    _walletCcy = null;
+    _walletSub = FirebaseFirestore.instance.collection('wallets').doc(uid).snapshots().listen(
+      (s) {
+        if (_walletUid != uid) return;
+        final c = s.data()?['currencyCode'];
+        if (c is String && c.trim().isNotEmpty) {
+          _walletCcy = c.trim().toUpperCase();
+          _set(_walletCcy == 'PHP');
+          _save(_walletCcy == 'PHP' ? 'PH' : 'US');
+        }
+      },
+      onError: (Object e) => debugPrint('[TutorialRegion] wallet: $e'),
+    );
   }
 
   static void _set(bool ph) {

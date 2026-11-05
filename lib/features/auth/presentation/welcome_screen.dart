@@ -22,6 +22,7 @@ import 'register_screen.dart';
 import 'package:giggre_app/features/tutorial_videos/tutorial_videos_row.dart';
 import 'package:giggre_app/features/tutorial_videos/tutorial_videos_service.dart';
 import '../../../services/sound_service.dart';
+import 'package:giggre_app/core/services/public_lookup_service.dart';
 import 'social_sign_in_button.dart';
 
 // Lets _MarqueeRow pause its ticker while a screen (e.g. Terms/Privacy) covers
@@ -295,13 +296,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         // Firebase Auth. If it doesn't, this is really a sign-up — send the
         // user straight to the name/phone/referral form (no Register screen
         // needed) without creating an Auth account until they finish it.
-        final existingQuery = await FirebaseFirestore.instance
-            .collection('users')
-            .where('email', isEqualTo: googleUser.email)
-            .limit(1)
-            .get();
+        // users/{uid} isn't readable before sign-in — ask the server.
+        final hasAccount =
+            await PublicLookupService.accountExists(googleUser.email);
 
-        if (existingQuery.docs.isEmpty) {
+        if (!hasAccount) {
           if (mounted) {
             Navigator.push(
               context,
@@ -377,15 +376,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 .where((s) => s != null && s.isNotEmpty)
                 .join(' ');
 
-        final existingQuery = appleEmail == null
+        // users/{uid} isn't readable before sign-in — ask the server.
+        final hasAccount = appleEmail == null
             ? null
-            : await FirebaseFirestore.instance
-                .collection('users')
-                .where('email', isEqualTo: appleEmail)
-                .limit(1)
-                .get();
+            : await PublicLookupService.accountExists(appleEmail);
 
-        if (existingQuery != null && existingQuery.docs.isEmpty) {
+        if (hasAccount == false) {
           if (mounted) {
             Navigator.push(
               context,
@@ -589,26 +585,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     }
   }
 
-  Future<Map<String, dynamic>?> _validateReferralCode(String code) async {
-    try {
-      final query = await FirebaseFirestore.instance
-          .collection('users')
-          .where('referrals.referral_code', isEqualTo: code)
-          .limit(1)
-          .get();
-      if (query.docs.isNotEmpty) {
-        final userDoc = query.docs.first;
-        return {
-          'userId': userDoc.id,
-          'name': userDoc.data()['name'] ?? 'User',
-          'email': userDoc.data()['email'] ?? '',
-        };
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
+  Future<Map<String, dynamic>?> _validateReferralCode(String code) =>
+      // users/{uid} isn't readable before sign-in — the server checks it.
+      PublicLookupService.lookupReferral(code);
 
   Future<void> _updateReferralLevel(String referrerId) async {
     try {

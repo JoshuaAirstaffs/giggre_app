@@ -16,6 +16,7 @@ import 'phone_autofill.dart';
 import 'welcome_screen.dart';
 import '../../../services/sound_service.dart';
 import 'dart:math';
+import 'package:giggre_app/core/services/public_lookup_service.dart';
 import 'social_sign_in_button.dart';
 
 // ─────────────────────────────────────────────
@@ -494,26 +495,9 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
     }
   }
 
-  Future<Map<String, dynamic>?> _validateReferralCode(String code) async {
-    try {
-      final query = await FirebaseFirestore.instance
-          .collection('users')
-          .where('referrals.referral_code', isEqualTo: code)
-          .limit(1)
-          .get();
-      if (query.docs.isNotEmpty) {
-        final userDoc = query.docs.first;
-        return {
-          'userId': userDoc.id,
-          'name': userDoc.data()['name'] ?? 'User',
-          'email': userDoc.data()['email'] ?? '',
-        };
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
+  Future<Map<String, dynamic>?> _validateReferralCode(String code) =>
+      // users/{uid} isn't readable before sign-in — the server checks it.
+      PublicLookupService.lookupReferral(code);
 
   Future<void> _updateReferralLevel(String referrerId) async {
     try {
@@ -1231,27 +1215,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  Future<Map<String, dynamic>?> _validateReferralCode(String code) async {
-    try {
-      final query = await FirebaseFirestore.instance
-          .collection('users')
-          .where('referrals.referral_code', isEqualTo: code)
-          .limit(1)
-          .get();
-      debugPrint('query.docs: ${query.docs.toString()}');
-      if (query.docs.isNotEmpty) {
-        final userDoc = query.docs.first;
-        return {
-          'userId': userDoc.id,
-          'name': userDoc.data()['name'] ?? 'User',
-          'email': userDoc.data()['email'] ?? '',
-        };
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
+  Future<Map<String, dynamic>?> _validateReferralCode(String code) =>
+      // users/{uid} isn't readable before sign-in — the server checks it.
+      PublicLookupService.lookupReferral(code);
 
   Future<void> _updateReferralLevel(String referrerId) async {
     try {
