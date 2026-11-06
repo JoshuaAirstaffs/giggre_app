@@ -50,6 +50,7 @@ class _HostShellState extends State<HostShell>
   // (they stay mounted the whole time via IndexedStack below).
   int _homeVisitGen = 0;
   int _profileVisitGen = 0;
+  int _chatVisitGen = 0;
 
   bool _dialOpen = false;
   late final AnimationController _dialCtrl = AnimationController(
@@ -217,6 +218,7 @@ class _HostShellState extends State<HostShell>
   void _selectTab(int i) {
     if (_dialOpen) _closeDial();
     setState(() {
+      if (i == 2 && _tabIndex != 2) _chatVisitGen++;
       _tabIndex = i;
       if (i == 0) _homeVisitGen++;
       if (i == 3) _profileVisitGen++;
@@ -279,7 +281,7 @@ class _HostShellState extends State<HostShell>
         animationGeneration: _homeVisitGen,
       ),
       HostGigsScreen(uid: uid, isTabRoot: true),
-      const HomeChat(showBackButton: false),
+      HomeChat(showBackButton: false, visitGeneration: _chatVisitGen),
       Scaffold(
         body: ProfileTab(
           initialRole: 'host',

@@ -38,7 +38,15 @@ class HomeChat extends StatefulWidget {
   // the auto back arrow since there's no route to pop within the tab.
   final bool showBackButton;
 
-  const HomeChat({super.key, this.showBackButton = true});
+  /// Bumped by the app shell each time the Chats tab is opened, so a search
+  /// left from the previous visit is cleared.
+  final int visitGeneration;
+
+  const HomeChat({
+    super.key,
+    this.showBackButton = true,
+    this.visitGeneration = 0,
+  });
 
   @override
   State<HomeChat> createState() => _HomeChatState();
@@ -51,6 +59,15 @@ class _HomeChatState extends State<HomeChat>
   bool _hasUnreadGig = false;
   bool _hasUnreadGroup = false;
   StreamSubscription<bool>? _groupUnreadSub;
+  final _resetSearch = ValueNotifier<int>(0);
+
+  @override
+  void didUpdateWidget(HomeChat oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.visitGeneration != widget.visitGeneration) {
+      _resetSearch.value++;
+    }
+  }
   final List<StreamSubscription> _roomSubs = [];
   StreamSubscription? _gigRoomsStreamSub;
   final List<StreamSubscription> _gigRoomSubs = [];
@@ -58,7 +75,11 @@ class _HomeChatState extends State<HomeChat>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 2, vsync: this)
+      ..addListener(() {
+        // Leaving Gig Chats (for Support) clears its search too.
+        if (!_tabController.indexIsChanging) _resetSearch.value++;
+      });
     _listenForUnread();
     _listenForUnreadGig();
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -73,6 +94,7 @@ class _HomeChatState extends State<HomeChat>
   void dispose() {
     _tabController.dispose();
     _groupUnreadSub?.cancel();
+    _resetSearch.dispose();
     for (final sub in _roomSubs) sub.cancel();
     _gigRoomsStreamSub?.cancel();
     for (final sub in _gigRoomSubs) sub.cancel();
@@ -356,7 +378,7 @@ class _HomeChatState extends State<HomeChat>
       ),
       body: TabBarView(
         controller: _tabController,
-        children: const [_GigChatsTab(), _SupportTab()],
+        children: [_GigChatsTab(resetSearch: _resetSearch), const _SupportTab()],
       ),
     );
   }
@@ -365,7 +387,10 @@ class _HomeChatState extends State<HomeChat>
 // ── Gig Chats Tab ─────────────────────────────────────────────────────────────
 
 class _GigChatsTab extends StatefulWidget {
-  const _GigChatsTab();
+  const _GigChatsTab({required this.resetSearch});
+
+  /// Fires when the user leaves and comes back; clears the search.
+  final ValueNotifier<int> resetSearch;
 
   @override
   State<_GigChatsTab> createState() => _GigChatsTabState();
@@ -378,10 +403,40 @@ class _GigChatsTabState extends State<_GigChatsTab> {
   // unanswered and hasn't been followed up by another call since (see
   // missedCallFor in call_log.dart).
   bool _missedOnly = false;
+  final _search = TextEditingController();
+  String _query = '';
+  Timer? _searchDebounce;
+
+  @override
+  void dispose() {
+    widget.resetSearch.removeListener(_clearSearch);
+    _searchDebounce?.cancel();
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    if (_search.text.isEmpty && _query.isEmpty) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _search.clear();
+      _query = '';
+    });
+  }
+
+  // Filters once typing pauses, not on every keystroke.
+  void _onSearchChanged(String v) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _query = v);
+    });
+  }
 
   @override
   void initState() {
     super.initState();
+    widget.resetSearch.addListener(_clearSearch);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     _stream = uid == null
         ? const Stream.empty()
@@ -504,7 +559,27 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                 if (bTime == null) return -1;
                 return bTime.compareTo(aTime);
               });
-        final shown = _missedOnly ? missedDocs : docs;
+        final byTab = _missedOnly ? missedDocs : docs;
+        final q = _query.trim().toLowerCase();
+        final shown = q.isEmpty
+            ? byTab
+            : byTab
+                  .where(
+                    (d) => _peerName(d.data(), myUid).toLowerCase().contains(q),
+                  )
+                  .toList();
+        // Groups are listed under All only, and searched by group name.
+        final shownGroups = _missedOnly
+            ? const <QueryDocumentSnapshot<Map<String, dynamic>>>[]
+            : q.isEmpty
+            ? groups
+            : groups
+                  .where(
+                    (g) => ((g.data()['name'] as String?) ?? '')
+                        .toLowerCase()
+                        .contains(q),
+                  )
+                  .toList();
 
         return Column(
           children: [
@@ -513,6 +588,20 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                 padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
                 child: SizedBox(width: double.infinity, child: requestsEntry),
               ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _SearchChatsField(
+                controller: _search,
+                onChanged: _onSearchChanged,
+                onClear: () {
+                  _searchDebounce?.cancel();
+                  setState(() {
+                    _search.clear();
+                    _query = '';
+                  });
+                },
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: Row(
@@ -543,7 +632,32 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               ),
             ),
             Expanded(
-              child: shown.isEmpty && (_missedOnly || groups.isEmpty)
+              child: shown.isEmpty && shownGroups.isEmpty && q.isNotEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.search_off_rounded,
+                              size: 48,
+                              color: Colors.grey,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'No chats match "${_query.trim()}"',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.grey.shade400,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : shown.isEmpty && shownGroups.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -564,12 +678,23 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                         ],
                       ),
                     )
-                  : _buildList(shown, _missedOnly ? const [] : groups),
+                  : _buildList(shown, shownGroups),
             ),
           ],
         );
       },
     );
+  }
+
+  // The other person's name as this user sees it. If the current user created
+  // the room, the peer is sendTo; if they're the receiver, it's createdByName.
+  String _peerName(Map<String, dynamic> data, String uid) {
+    final createdByUid = data['createdByUid'] as String? ?? '';
+    final createdByName = data['createdByName'] as String? ?? '';
+    final sendTo = data['sendTo'] as String? ?? 'Gig Chat';
+    return (createdByUid.isNotEmpty && uid != createdByUid)
+        ? (createdByName.isNotEmpty ? createdByName : sendTo)
+        : sendTo;
   }
 
   Widget _buildList(
@@ -625,16 +750,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               participants.firstWhere((p) => p != uid, orElse: () => '')
                   as String;
 
-          // Resolve the correct display name for the peer.
-          // If the current user created the room, the peer is sendTo.
-          // If the current user is the receiver, the peer is createdByName.
-          final createdByUid = data['createdByUid'] as String? ?? '';
-          final createdByName = data['createdByName'] as String? ?? '';
-          final sendTo = data['sendTo'] as String? ?? 'Gig Chat';
-          final peerDisplayName =
-              (createdByUid.isNotEmpty && uid != createdByUid)
-              ? (createdByName.isNotEmpty ? createdByName : sendTo)
-              : sendTo;
+          final peerDisplayName = _peerName(data, uid);
 
           // Gig chats are stored as plain text (never HTML), and the room
           // doc is shared by both participants — 'You' is only correct
@@ -654,6 +770,9 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               : lastMessage;
 
           return _ChatHomeItem(
+            // Keyed so a row's loaded photo and unread state stay with its
+            // chat when search or a new message reorders the list.
+            key: ValueKey(docs[i].id),
             roomId: docs[i].id,
             sendTo: peerDisplayName,
             subject: data['subject'] as String? ?? 'Gig Chat',
@@ -665,6 +784,50 @@ class _GigChatsTabState extends State<_GigChatsTab> {
             peerUid: peerUid,
           );
         },
+      ),
+    );
+  }
+}
+
+/// Filters the Gig Chats list by the other person's name.
+class _SearchChatsField extends StatelessWidget {
+  const _SearchChatsField({
+    required this.controller,
+    required this.onChanged,
+    required this.onClear,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return TextField(
+      controller: controller,
+      onChanged: onChanged,
+      textInputAction: TextInputAction.search,
+      onTapOutside: (_) => FocusScope.of(context).unfocus(),
+      style: const TextStyle(fontSize: 14),
+      decoration: InputDecoration(
+        hintText: 'Search chats',
+        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+        suffixIcon: controller.text.isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'Clear',
+                icon: const Icon(Icons.close_rounded, size: 18),
+                onPressed: onClear,
+              ),
+        isDense: true,
+        filled: true,
+        fillColor: isDark ? kCard : Colors.white,
+        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(24),
+          borderSide: BorderSide.none,
+        ),
       ),
     );
   }
@@ -811,6 +974,7 @@ class _MessageRequestsScreenState extends State<_MessageRequestsScreen> {
               final declined = data['requestStatus'] == 'declined';
               final rawDate = data['lastMessageAt'] ?? data['createdAt'];
               return _ChatHomeItem(
+                key: ValueKey(docs[i].id),
                 roomId: docs[i].id,
                 sendTo: peerName.isNotEmpty ? peerName : 'Someone',
                 subject: 'Direct message',
@@ -1402,6 +1566,7 @@ class _SupportTabState extends State<_SupportTab> {
               : lastMessage;
 
           return _ChatHomeItem(
+            key: ValueKey(room['roomId'] ?? i),
             roomId: room['roomId'] ?? '',
             sendTo: room['sendTo'] ?? '',
             subject: room['subject'] ?? 'No subject',
@@ -1419,6 +1584,7 @@ class _SupportTabState extends State<_SupportTab> {
 
 class _ChatHomeItem extends StatefulWidget {
   const _ChatHomeItem({
+    super.key,
     required this.subject,
     required this.message,
     required this.status,
@@ -1445,14 +1611,34 @@ class _ChatHomeItem extends StatefulWidget {
 }
 
 class _ChatHomeItemState extends State<_ChatHomeItem> {
+  // Photo URLs fetched this session ('' = no photo), so rows that search
+  // hides and shows again don't read the user doc again.
+  static final Map<String, String> _photoCache = {};
+
   String? _peerPhotoUrl;
+  late final String _unreadKey;
+  late final _UnreadWatch _unread;
 
   @override
   void initState() {
     super.initState();
     if (widget.isGigChat && widget.peerUid.isNotEmpty) {
-      _fetchPeerPhoto();
+      final cached = _photoCache[widget.peerUid];
+      if (cached != null) {
+        _peerPhotoUrl = cached.isEmpty ? null : cached;
+      } else {
+        _fetchPeerPhoto();
+      }
     }
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    _unreadKey = '$uid|${widget.isGigChat}|${widget.roomId}';
+    _unread = _UnreadWatch.acquire(_unreadKey, _unreadQuery);
+  }
+
+  @override
+  void dispose() {
+    _unread.release(_unreadKey);
+    super.dispose();
   }
 
   bool get _isLiveSupport => isLiveSupportAccount(widget.peerUid); // TEMP: live support
@@ -1463,36 +1649,28 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
           .collection('users')
           .doc(widget.peerUid)
           .get();
-      if (!mounted) return;
       final url = doc.data()?['photoUrl'] as String?;
+      _photoCache[widget.peerUid] = url ?? '';
+      if (!mounted) return;
       if (url != null && url.isNotEmpty) {
         setState(() => _peerPhotoUrl = url);
       }
     } catch (_) {}
   }
 
-  late final Stream<bool> _unreadStream = widget.isGigChat
-      ? FirebaseFirestore.instance
-            .collection('chat_rooms')
-            .doc(widget.roomId)
-            .collection('messages')
-            .where('hasSeen', isEqualTo: false)
-            .where(
-              'senderId',
-              isNotEqualTo: FirebaseAuth.instance.currentUser?.uid ?? '',
-            )
-            .limit(1)
-            .snapshots()
-            .map((snap) => snap.docs.isNotEmpty)
-      : FirebaseFirestore.instance
-            .collection('chat_rooms')
-            .doc(widget.roomId)
-            .collection('messages')
-            .where('isSupport', isEqualTo: true)
-            .where('hasSeen', isEqualTo: false)
-            .limit(1)
-            .snapshots()
-            .map((snap) => snap.docs.isNotEmpty);
+  Query<Map<String, dynamic>> _unreadQuery() {
+    final messages = FirebaseFirestore.instance
+        .collection('chat_rooms')
+        .doc(widget.roomId)
+        .collection('messages')
+        .where('hasSeen', isEqualTo: false);
+    return widget.isGigChat
+        ? messages.where(
+            'senderId',
+            isNotEqualTo: FirebaseAuth.instance.currentUser?.uid ?? '',
+          )
+        : messages.where('isSupport', isEqualTo: true);
+  }
 
   Future<void> _markMessagesAsSeen() async {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -1590,10 +1768,9 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final backgroundColor = isDarkMode ? kCard : Colors.white;
 
-    return StreamBuilder<bool>(
-      stream: _unreadStream,
-      builder: (context, snapshot) {
-        final hasUnread = snapshot.data ?? false;
+    return ValueListenableBuilder<bool>(
+      valueListenable: _unread.value,
+      builder: (context, hasUnread, _) {
 
         return GestureDetector(
           onTap: _onTap,
@@ -1726,5 +1903,45 @@ class _ChatHomeItemState extends State<_ChatHomeItem> {
         );
       },
     );
+  }
+}
+
+/// One unread listener per chat row, shared by every row showing that chat
+/// and kept for a minute after the last one goes. Search hides and re-shows
+/// rows constantly; without this each change closed and re-opened a
+/// Firestore query per chat.
+class _UnreadWatch {
+  _UnreadWatch._(Query<Map<String, dynamic>> query) {
+    _sub = query.limit(1).snapshots().listen(
+      (snap) => value.value = snap.docs.isNotEmpty,
+      onError: (Object e) => debugPrint('[HomeChat] unread stream error: $e'),
+    );
+  }
+
+  static final Map<String, _UnreadWatch> _all = {};
+
+  final ValueNotifier<bool> value = ValueNotifier(false);
+  late final StreamSubscription<QuerySnapshot<Map<String, dynamic>>> _sub;
+  int _users = 0;
+  Timer? _closeTimer;
+
+  static _UnreadWatch acquire(
+    String key,
+    Query<Map<String, dynamic>> Function() query,
+  ) {
+    final watch = _all.putIfAbsent(key, () => _UnreadWatch._(query()));
+    watch._users++;
+    watch._closeTimer?.cancel();
+    watch._closeTimer = null;
+    return watch;
+  }
+
+  void release(String key) {
+    if (--_users > 0) return;
+    _closeTimer = Timer(const Duration(minutes: 1), () {
+      _sub.cancel();
+      value.dispose();
+      _all.remove(key);
+    });
   }
 }

@@ -39,9 +39,11 @@ class _WorkerShellState extends State<WorkerShell> {
   // (they stay mounted the whole time via IndexedStack below).
   int _homeVisitGen = 0;
   int _profileVisitGen = 0;
+  int _chatVisitGen = 0;
 
   void _selectTab(int i) {
     setState(() {
+      if (i == 2 && _index != 2) _chatVisitGen++;
       _index = i;
       if (i == 0) _homeVisitGen++;
       if (i == 3) _profileVisitGen++;
@@ -200,7 +202,7 @@ class _WorkerShellState extends State<WorkerShell> {
         animationGeneration: _homeVisitGen,
       ),
       SavedScreen(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
-      const HomeChat(showBackButton: false),
+      HomeChat(showBackButton: false, visitGeneration: _chatVisitGen),
       Scaffold(
         body: ProfileTab(
           initialRole: 'worker',
