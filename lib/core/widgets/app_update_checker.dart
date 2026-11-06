@@ -129,6 +129,18 @@ class _AppUpdateCheckerState extends State<AppUpdateChecker>
 
     debugPrint('[AppUpdate] Current version : ${packageInfo.version}');
     debugPrint('[AppUpdate] Store version   : $storeVersion');
+    // The App Store Connect version must be the pubspec version name, three
+    // numbers. A store version like "2.9" (shipped with 2.4.9) compares as
+    // newer than every installed build and nags up-to-date users forever,
+    // so anything else is treated as a release mistake and never prompts.
+    if (!_threePartVersion.hasMatch(storeVersion) ||
+        !_threePartVersion.hasMatch(packageInfo.version)) {
+      debugPrint(
+        '[AppUpdate] → Skipped: versions must look like 1.2.3 '
+        '(store "$storeVersion", app "${packageInfo.version}")',
+      );
+      return;
+    }
     if (!_isNewerVersion(current: packageInfo.version, store: storeVersion)) {
       debugPrint('[AppUpdate] → No update available');
       return;
@@ -146,6 +158,8 @@ class _AppUpdateCheckerState extends State<AppUpdateChecker>
     AppUpdateChecker.updateAvailable.value = true;
     _showUpdateDialog(releaseNotes: notes);
   }
+
+  static final _threePartVersion = RegExp(r'^\d+\.\d+\.\d+$');
 
   bool _isNewerVersion({required String current, required String store}) {
     final c = current.split('.').map((s) => int.tryParse(s) ?? 0).toList();
