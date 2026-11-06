@@ -1,31 +1,89 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
+import 'package:giggre_app/core/widgets/avatar_image.dart';
 import 'package:giggre_app/features/chat/user_search_screen.dart';
 import 'package:giggre_app/features/group_chat/group_chat_service.dart';
 
 const _avatarTint = Color(0xFF3B82F6);
 
-/// A group's photo, or a people icon when it has none.
+// White initials on each of these measure 5.02–6.29:1. Blue is left out so a
+// group never looks like the blue person placeholder.
+const _groupColors = [
+  Color(0xFF0F766E), // teal
+  Color(0xFF7C3AED), // violet
+  Color(0xFFBE123C), // rose
+  Color(0xFFB45309), // amber
+  Color(0xFF15803D), // green
+  Color(0xFFC2410C), // orange
+  Color(0xFF0E7490), // cyan
+];
+
+final _initialChar = RegExp(r'[\p{L}\p{N}]', unicode: true);
+
+/// "Weekend Crew" → "WC", "Sunday" → "S", "🔥" → "" (falls back to the icon).
+String groupInitials(String name) {
+  final letters = <String>[];
+  for (final word in name.trim().split(RegExp(r'\s+'))) {
+    final m = _initialChar.firstMatch(word);
+    if (m != null) letters.add(m.group(0)!.toUpperCase());
+    if (letters.length == 2) break;
+  }
+  return letters.join();
+}
+
+/// A group's photo; without one, its initials on a color fixed by its id
+/// (so the same group is always the same color), or a people icon when
+/// there's no id or usable name yet.
 class GroupAvatar extends StatelessWidget {
-  const GroupAvatar({super.key, this.photoUrl, this.radius = 20});
+  const GroupAvatar({
+    super.key,
+    this.photoUrl,
+    this.radius = 20,
+    this.groupId,
+    this.name,
+  });
 
   final String? photoUrl;
   final double radius;
+  final String? groupId;
+  final String? name;
 
   @override
   Widget build(BuildContext context) {
     final url = photoUrl;
+    if (url != null && url.isNotEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: _avatarTint.withValues(alpha: 0.15),
+        backgroundImage: avatarImage(context, url, radius),
+      );
+    }
+    final id = groupId;
+    final initials = groupInitials(name ?? '');
+    if (id != null && id.isNotEmpty && initials.isNotEmpty) {
+      final hash = id.codeUnits.fold<int>(
+        0,
+        (h, c) => (h * 31 + c) & 0x7fffffff,
+      );
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: _groupColors[hash % _groupColors.length],
+        child: Text(
+          initials,
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: radius * (initials.length > 1 ? 0.72 : 0.85),
+            letterSpacing: 0.5,
+          ),
+        ),
+      );
+    }
     return CircleAvatar(
       radius: radius,
       backgroundColor: _avatarTint.withValues(alpha: 0.15),
-      backgroundImage: url != null && url.isNotEmpty
-          ? CachedNetworkImageProvider(url)
-          : null,
-      child: url == null || url.isEmpty
-          ? Icon(Icons.groups_rounded, color: _avatarTint, size: radius * 1.1)
-          : null,
+      child: Icon(Icons.groups_rounded, color: _avatarTint, size: radius * 1.1),
     );
   }
 }
@@ -43,10 +101,53 @@ class PersonAvatar extends StatelessWidget {
     return CircleAvatar(
       radius: radius,
       backgroundColor: _avatarTint.withValues(alpha: 0.15),
-      backgroundImage: url != null ? CachedNetworkImageProvider(url) : null,
+      backgroundImage: url != null ? avatarImage(context, url, radius) : null,
       child: url == null
           ? Icon(Icons.person_rounded, color: _avatarTint, size: radius * 1.1)
           : null,
+    );
+  }
+}
+
+/// A name followed by the verified check when the person is verified, the
+/// same mark user search shows. The check is announced as "Verified".
+class VerifiedName extends StatelessWidget {
+  const VerifiedName({
+    super.key,
+    required this.name,
+    required this.verified,
+    this.style,
+    this.checkSize = 16,
+  });
+
+  final String name;
+  final bool verified;
+  final TextStyle? style;
+  final double checkSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style,
+          ),
+        ),
+        if (verified) ...[
+          const SizedBox(width: 4),
+          Icon(
+            Icons.verified_rounded,
+            size: checkSize,
+            color: blueText(context),
+            semanticLabel: 'Verified',
+          ),
+        ],
+      ],
     );
   }
 }
@@ -119,11 +220,12 @@ class _ContactPickerState extends State<ContactPicker> {
             onAction: () => _explainMissing(context),
           ),
         if (widget.selected.isNotEmpty)
-          SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+          // Sized by its chips (not a fixed height), so large text sizes
+          // don't clip them.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
               children: [
                 for (final p in widget.contacts.where(
                   (p) => widget.selected.contains(p.uid),
@@ -297,7 +399,7 @@ class _PickerNote extends StatelessWidget {
               onPressed: onAction,
               style: TextButton.styleFrom(
                 foregroundColor: blueText(context),
-                minimumSize: const Size(44, 44),
+                minimumSize: const Size(48, 48),
                 padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
               child: Text(
@@ -362,7 +464,7 @@ class _PickerEmpty extends StatelessWidget {
               FilledButton.tonal(
                 onPressed: onAction,
                 style: FilledButton.styleFrom(
-                  minimumSize: const Size(0, 44),
+                  minimumSize: const Size(0, 48),
                   foregroundColor: blueText(context),
                   backgroundColor: blueText(context).withValues(alpha: 0.12),
                 ),
@@ -424,85 +526,106 @@ class GroupListTile extends StatelessWidget {
         ? last
         : '${senderId == myUid ? 'You' : senderName.split(' ').first}: $last';
 
-    return GestureDetector(
+    // One announcement per row: "Weekend Crew, unread, muted, Ana: see
+    // you at 9, Tue 3:04 PM, button".
+    final label = [
+      group['name'] as String? ?? 'Group',
+      if (unread) 'unread',
+      if (muted) 'muted',
+      if (preview.isNotEmpty) preview,
+      if (at != null) _listTime(at),
+    ].join(', ');
+    return Semantics(
+      button: true,
+      label: label,
+      // excludeSemantics drops the inner GestureDetector's action too, so
+      // the tap is exposed here.
       onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          color: isDark ? kCard : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            GroupAvatar(photoUrl: group['photoUrl'] as String?),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          group['name'] as String? ?? 'Group',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      if (muted) ...[
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.notifications_off_outlined,
-                          size: 14,
-                          color: sub,
-                        ),
-                      ],
-                      if (unread) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: kBlue,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text(
-                            'New',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            color: isDark ? kCard : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              GroupAvatar(
+                photoUrl: group['photoUrl'] as String?,
+                groupId: groupId,
+                name: group['name'] as String?,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            group['name'] as String? ?? 'Group',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 14,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
+                        if (muted) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.notifications_off_outlined,
+                            size: 14,
+                            color: sub,
+                          ),
+                        ],
+                        if (unread) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: kBlue,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'New',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                        if (at != null) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            _listTime(at),
+                            style: TextStyle(fontSize: 11, color: sub),
+                          ),
+                        ],
                       ],
-                      if (at != null) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          _listTime(at),
-                          style: TextStyle(fontSize: 11, color: sub),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    preview,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: sub),
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      preview,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: sub),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

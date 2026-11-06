@@ -17,9 +17,9 @@ import 'package:giggre_app/features/live_support/live_support_bubble.dart'
     show HidesLiveSupport; // TEMP: live support
 import 'package:giggre_app/features/reports/models/report_content_type.dart';
 import 'package:giggre_app/features/reports/report_service.dart';
+import 'package:giggre_app/screens/chat/chat.dart' show ChatLocationBubble;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class GroupChatScreen extends StatefulWidget {
   const GroupChatScreen({super.key, required this.groupId});
@@ -79,15 +79,52 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   String get _myName => context.read<CurrentUserProvider>().currentName ?? '';
 
   Future<void> _run(String label, Future<void> Function() send) async {
-    final pending = _Pending(label);
+    final pending = _Pending(label, send);
     setState(() => _pending.add(pending));
+    await _attempt(pending);
+  }
+
+  Future<void> _attempt(_Pending pending) async {
     try {
-      await send();
-    } catch (e) {
-      if (mounted) showGroupError(context, e);
-    } finally {
+      await pending.send();
       if (mounted) setState(() => _pending.remove(pending));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => pending.failed = true);
+      showGroupError(context, e);
     }
+  }
+
+  void _onFailedTap(_Pending pending) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.refresh_rounded, color: blueText(ctx)),
+              title: const Text('Try again'),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() => pending.failed = false);
+                _attempt(pending);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded),
+              title: const Text("Remove (it wasn't sent)"),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() => _pending.remove(pending));
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _sendText() async {
@@ -327,6 +364,8 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                     GroupAvatar(
                       photoUrl: group?['photoUrl'] as String?,
                       radius: 18,
+                      groupId: widget.groupId,
+                      name: group?['name'] as String?,
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -404,12 +443,24 @@ class _GroupChatScreenState extends State<GroupChatScreen>
       itemCount: count,
       itemBuilder: (context, i) {
         if (i < pending.length) {
-          return _Bubble(
+          final p = pending[i];
+          final bubble = _Bubble(
             isMe: true,
-            text: pending[i].label,
+            text: p.label,
             isDark: isDark,
             pending: true,
-            isLastInRun: i == 0,
+            failed: p.failed,
+            // A failed one always shows its "Not sent" line.
+            isLastInRun: i == 0 || p.failed,
+          );
+          if (!p.failed) return bubble;
+          return Semantics(
+            button: true,
+            label: '${p.label}, not sent',
+            onTapHint: 'Try again or remove',
+            onTap: () => _onFailedTap(p),
+            excludeSemantics: true,
+            child: GestureDetector(onTap: () => _onFailedTap(p), child: bubble),
           );
         }
         final j = i - pending.length;
@@ -537,9 +588,13 @@ class _GroupChatScreenState extends State<GroupChatScreen>
   }
 }
 
+/// A photo or location on its way (or failed). Kept until the server copy
+/// arrives; a failure stays put with Retry / Remove instead of vanishing.
 class _Pending {
-  _Pending(this.label);
+  _Pending(this.label, this.send);
   final String label;
+  final Future<void> Function() send;
+  bool failed = false;
 }
 
 bool _sameDay(DateTime a, DateTime b) =>
@@ -575,19 +630,19 @@ class _RoundButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: color,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Icon(icon, color: iconColor, size: 22),
-          ),
-        ),
+    // Same 42 px circle as before, but the tap area is padded to 48 px
+    // (the old one was only the 42 px circle).
+    return IconButton.filled(
+      tooltip: tooltip,
+      onPressed: onTap,
+      icon: Icon(icon, size: 22),
+      style: IconButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: iconColor,
+        fixedSize: const Size(42, 42),
+        minimumSize: const Size(42, 42),
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.padded,
       ),
     );
   }
@@ -606,6 +661,7 @@ class _Bubble extends StatelessWidget {
     this.senderName,
     this.sender,
     this.pending = false,
+    this.failed = false,
     this.isLastInRun = true,
   });
 
@@ -620,6 +676,7 @@ class _Bubble extends StatelessWidget {
   final String? senderName;
   final GroupPerson? sender;
   final bool pending;
+  final bool failed;
   final bool isLastInRun;
 
   @override
@@ -641,14 +698,22 @@ class _Bubble extends StatelessWidget {
 
     Widget body;
     if (media) {
-      body = _ImageMessage(url: imageUrl!, radius: radius);
-    } else if (mapCard) {
-      body = _LocationMessage(
-        location: location!,
-        address: address,
-        isMe: isMe,
-        bg: bg,
+      body = _ImageMessage(
+        url: imageUrl!,
         radius: radius,
+        label: isMe
+            ? 'Your photo'
+            : 'Photo from ${sender?.name ?? senderName ?? 'a member'}',
+      );
+    } else if (mapCard) {
+      // Same map preview as one-to-one chats.
+      body = ClipRRect(
+        borderRadius: radius,
+        child: ChatLocationBubble(
+          location: location!,
+          address: address,
+          isDark: isDark,
+        ),
       );
     } else {
       body = Container(
@@ -682,7 +747,10 @@ class _Bubble extends StatelessWidget {
           Flexible(
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                maxWidth: MediaQuery.sizeOf(context).width * 0.75,
+                maxWidth: (MediaQuery.sizeOf(context).width * 0.75).clamp(
+                  0,
+                  kChatBubbleMaxWidth,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: isMe
@@ -692,15 +760,36 @@ class _Bubble extends StatelessWidget {
                   if (senderName != null && senderName!.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(left: 4, bottom: 3),
-                      child: Text(
-                        senderName!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      child: VerifiedName(
+                        name: senderName!,
+                        verified: sender?.isVerified ?? false,
                         style: chatSenderStyle(context),
+                        checkSize: 13,
                       ),
                     ),
                   Opacity(opacity: pending ? 0.6 : 1, child: body),
-                  if (isLastInRun) ...[
+                  if (failed) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.error_outline_rounded,
+                          size: 14,
+                          color: chatFailedColor(context),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Not sent · Tap to retry',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: chatFailedColor(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else if (isLastInRun) ...[
                     const SizedBox(height: 3),
                     pending
                         ? Icon(
@@ -725,39 +814,60 @@ class _Bubble extends StatelessWidget {
 }
 
 class _ImageMessage extends StatelessWidget {
-  const _ImageMessage({required this.url, required this.radius});
+  const _ImageMessage({
+    required this.url,
+    required this.radius,
+    required this.label,
+  });
   final String url;
   final BorderRadius radius;
+  // Read by VoiceOver / TalkBack, e.g. "Photo from Ana".
+  final String label;
+
+  void _open(BuildContext context) => Navigator.of(context).push(
+    MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => _PhotoViewer(url: url),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => _PhotoViewer(url: url),
-        ),
-      ),
-      child: ClipRRect(
-        borderRadius: radius,
-        child: CachedNetworkImage(
-          imageUrl: url,
-          width: 220,
-          height: 260,
-          fit: BoxFit.cover,
-          placeholder: (_, _) => Container(
+    return Semantics(
+      button: true,
+      image: true,
+      label: label,
+      onTapHint: 'View full screen',
+      onTap: () => _open(context),
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: () => _open(context),
+        child: ClipRRect(
+          borderRadius: radius,
+          child: CachedNetworkImage(
+            imageUrl: url,
             width: 220,
             height: 260,
-            color: Colors.grey.withValues(alpha: 0.2),
-            alignment: Alignment.center,
-            child: const CircularProgressIndicator(strokeWidth: 2),
-          ),
-          errorWidget: (_, _, _) => Container(
-            width: 220,
-            height: 120,
-            color: Colors.grey.withValues(alpha: 0.2),
-            alignment: Alignment.center,
-            child: const Icon(Icons.broken_image_outlined),
+            fit: BoxFit.cover,
+            // Decode near bubble size, not the upload's full 1600 px: ~60%
+            // less memory per photo. 1.5x the width leaves room for the
+            // cover crop of portrait and ordinary landscape shots.
+            memCacheWidth: (220 * 1.5 * MediaQuery.devicePixelRatioOf(context))
+                .round(),
+            placeholder: (_, _) => Container(
+              width: 220,
+              height: 260,
+              color: Colors.grey.withValues(alpha: 0.2),
+              alignment: Alignment.center,
+              child: const CircularProgressIndicator(strokeWidth: 2),
+            ),
+            errorWidget: (_, _, _) => Container(
+              width: 220,
+              height: 120,
+              color: Colors.grey.withValues(alpha: 0.2),
+              alignment: Alignment.center,
+              child: const Icon(Icons.broken_image_outlined),
+            ),
           ),
         ),
       ),
@@ -781,88 +891,6 @@ class _PhotoViewer extends StatelessWidget {
         child: InteractiveViewer(
           maxScale: 4,
           child: CachedNetworkImage(imageUrl: url, fit: BoxFit.contain),
-        ),
-      ),
-    );
-  }
-}
-
-class _LocationMessage extends StatelessWidget {
-  const _LocationMessage({
-    required this.location,
-    required this.address,
-    required this.isMe,
-    required this.bg,
-    required this.radius,
-  });
-
-  final GeoPoint location;
-  final String? address;
-  final bool isMe;
-  final Color bg;
-  final BorderRadius radius;
-
-  Future<void> _open() => launchUrl(
-    Uri.parse(
-      'https://www.google.com/maps/search/?api=1'
-      '&query=${location.latitude},${location.longitude}',
-    ),
-    mode: LaunchMode.externalApplication,
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    final fg = isMe ? Colors.white : null;
-    return Material(
-      color: bg,
-      borderRadius: radius,
-      child: InkWell(
-        borderRadius: radius,
-        onTap: _open,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: (isMe ? Colors.white : blueText(context)).withValues(
-                    alpha: 0.15,
-                  ),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.location_on_rounded,
-                  color: isMe ? Colors.white : blueText(context),
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Flexible(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      address ?? 'Shared location',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 13.5, color: fg),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Open in Maps',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: isMe ? Colors.white : blueText(context),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );

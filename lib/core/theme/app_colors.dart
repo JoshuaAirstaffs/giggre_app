@@ -40,3 +40,15 @@ Color blueText(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
     ? const Color(0xFF7AB8F7)
     : const Color(0xFF0360BE);
+
+/// Widest a chat bubble gets. Phones never reach it; on an unfolded Fold,
+/// tablets and landscape it keeps lines short enough to read (~60 chars)
+/// instead of stretching across the screen.
+const double kChatBubbleMaxWidth = 420;
+
+/// "Not sent · Tap to retry" in both chats: red.shade700 on the light chat
+/// background (4.55:1), red.shade300 on dark kBg (5.9:1).
+Color chatFailedColor(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? Colors.red.shade300
+    : Colors.red.shade700;

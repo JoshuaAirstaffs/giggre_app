@@ -326,36 +326,50 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
                 children: [
                   const SizedBox(height: 24),
                   Center(
-                    child: GestureDetector(
+                    child: Semantics(
+                      button: iAmAdmin,
+                      image: true,
+                      label: iAmAdmin ? 'Change group photo' : 'Group photo',
                       onTap: iAmAdmin
                           ? () => _changePhoto(photo?.isNotEmpty == true)
                           : null,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          GroupAvatar(photoUrl: photo, radius: 48),
-                          if (iAmAdmin)
-                            Positioned(
-                              right: -2,
-                              bottom: -2,
-                              child: Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: kBlue,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: theme.scaffoldBackgroundColor,
-                                    width: 2,
+                      excludeSemantics: true,
+                      child: GestureDetector(
+                        onTap: iAmAdmin
+                            ? () => _changePhoto(photo?.isNotEmpty == true)
+                            : null,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            GroupAvatar(
+                              photoUrl: photo,
+                              radius: 48,
+                              groupId: widget.groupId,
+                              name: name,
+                            ),
+                            if (iAmAdmin)
+                              Positioned(
+                                right: -2,
+                                bottom: -2,
+                                child: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: kBlue,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: theme.scaffoldBackgroundColor,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: const Icon(
+                                    Icons.photo_camera_rounded,
+                                    size: 16,
+                                    color: Colors.white,
                                   ),
                                 ),
-                                child: const Icon(
-                                  Icons.photo_camera_rounded,
-                                  size: 16,
-                                  color: Colors.white,
-                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -378,7 +392,6 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
                         if (iAmAdmin)
                           IconButton(
                             tooltip: 'Rename group',
-                            visualDensity: VisualDensity.compact,
                             icon: Icon(
                               Icons.edit_outlined,
                               size: 18,
@@ -457,11 +470,26 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
                         for (final uid in sorted)
                           ListTile(
                             leading: PersonAvatar(person: _people[uid]),
-                            title: Text(
-                              uid == _uid ? 'You' : _people[uid]?.name ?? '…',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            title: VerifiedName(
+                              name: uid == _uid
+                                  ? 'You'
+                                  : _people[uid]?.name ?? '…',
+                              verified: _people[uid]?.isVerified ?? false,
                             ),
+                            // Trust at a glance: how they're rated, same
+                            // wording as user search.
+                            subtitle: _people[uid] == null
+                                ? null
+                                : Text(
+                                    _people[uid]!.ratingLine ??
+                                        'No ratings yet',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: chatMetaColor(context),
+                                    ),
+                                  ),
                             // The creator shows as Creator (even though
                             // they're an admin too); later admins as Admin.
                             trailing: uid == creator

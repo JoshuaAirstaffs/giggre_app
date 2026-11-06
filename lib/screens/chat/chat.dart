@@ -5,7 +5,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_html/flutter_html.dart' hide Marker;
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -16,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/core/services/content_filter_service.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
+import 'package:giggre_app/core/widgets/avatar_image.dart';
 import 'package:giggre_app/core/theme/map_style.dart';
 import 'package:giggre_app/core/widgets/content_rejection_modal.dart';
 import 'package:giggre_app/features/reports/models/report_content_type.dart';
@@ -68,6 +68,12 @@ class _Msg {
 
   bool get isCallLog => callType != null;
 
+  // Set when an attachment failed to send: it stays in the list (not
+  // pending, so a later confirmed upload can't be matched to it) with
+  // Try again / Remove.
+  final File? failedFile;
+  bool get failed => failedFile != null;
+
   const _Msg({
     this.id,
     required this.text,
@@ -88,6 +94,7 @@ class _Msg {
     this.callType,
     this.callStatus,
     this.callDuration = 0,
+    this.failedFile,
   });
 
   _Msg copyWith({
@@ -98,6 +105,7 @@ class _Msg {
     DateTime? time,
     bool? isDeleted,
     String? attachmentUrl,
+    File? failedFile,
   }) => _Msg(
     id: id ?? this.id,
     text: text,
@@ -118,6 +126,7 @@ class _Msg {
     callType: callType,
     callStatus: callStatus,
     callDuration: callDuration,
+    failedFile: failedFile ?? this.failedFile,
   );
 }
 
@@ -1313,25 +1322,70 @@ class _ChatState extends State<Chat>
     } catch (e) {
       debugPrint('Send attachment error: $e');
       if (mounted) {
-        setState(
-          () => _msgs.removeWhere(
+        final denied = e is FirebaseException && e.code == 'permission-denied';
+        setState(() {
+          final idx = _msgs.indexWhere(
             (m) =>
                 m.pending &&
                 m.attachmentType == attachmentType &&
                 m.attachmentName == attachmentName,
-          ),
-        );
-        if (e is FirebaseException && e.code == 'permission-denied') {
+          );
+          if (idx == -1) return;
+          // Can't message them anymore: nothing to retry, drop it. Anything
+          // else stays as "Not sent · Tap to retry".
+          if (denied) {
+            _msgs.removeAt(idx);
+          } else {
+            _msgs[idx] = _msgs[idx].copyWith(pending: false, failedFile: file);
+          }
+        });
+        if (denied) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('You can no longer message this user.'),
             ),
           );
         } else {
-          _showErrorSnack("Couldn't send attachment. Please try again.");
+          _showErrorSnack("Couldn't send that. Tap it to try again.");
         }
       }
     }
+  }
+
+  void _onFailedTap(_Msg msg) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.refresh_rounded, color: blueText(ctx)),
+              title: const Text('Try again'),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() => _msgs.remove(msg));
+                _sendAttachment(
+                  file: msg.failedFile!,
+                  attachmentType: msg.attachmentType ?? 'file',
+                  attachmentName: msg.attachmentName ?? 'file',
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded),
+              title: const Text("Remove (it wasn't sent)"),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() => _msgs.remove(msg));
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   // ── Mark seen ──────────────────────────────────────────────────────────────
@@ -1576,7 +1630,7 @@ class _ChatState extends State<Chat>
                               ? liveSupportAvatar
                               : (_peerPhotoUrl != null &&
                                     _peerPhotoUrl!.isNotEmpty)
-                              ? CachedNetworkImageProvider(_peerPhotoUrl!)
+                              ? avatarImage(context, _peerPhotoUrl!, 36)
                               : null,
                           child:
                               !_isLiveSupportPeer && // TEMP: live support
@@ -2109,7 +2163,7 @@ class _ChatState extends State<Chat>
                     backgroundImage: _isLiveSupportPeer // TEMP: live support
                         ? liveSupportAvatar
                         : (_peerPhotoUrl != null && _peerPhotoUrl!.isNotEmpty)
-                        ? CachedNetworkImageProvider(_peerPhotoUrl!)
+                        ? avatarImage(context, _peerPhotoUrl!, 16)
                         : null,
                     child:
                         !_isLiveSupportPeer && // TEMP: live support
@@ -2305,7 +2359,14 @@ class _ChatState extends State<Chat>
                                 : '',
                             isGigChat: _isGigChat,
                             peerPhotoUrl: _peerPhotoUrl,
-                            isLastInGroup: !_groupsWithNext(j),
+                            peerName: _isGigChat
+                                ? (widget.gigChatParams?.peerName ?? '')
+                                : 'Giggre Support',
+                            onFailedTap: msg.failed
+                                ? () => _onFailedTap(msg)
+                                : null,
+                            isLastInGroup:
+                                !_groupsWithNext(j) || msg.failed,
                           ),
                         ),
                       );
@@ -2563,6 +2624,8 @@ class _MessageBubble extends StatelessWidget {
     required this.timeStr,
     required this.isGigChat,
     this.peerPhotoUrl,
+    this.peerName = '',
+    this.onFailedTap,
     this.isLastInGroup = true,
   });
 
@@ -2571,6 +2634,10 @@ class _MessageBubble extends StatelessWidget {
   final String timeStr;
   final bool isGigChat;
   final String? peerPhotoUrl;
+  // For screen readers ("Photo from Ana").
+  final String peerName;
+  // Set when msg.failed: Try again / Remove.
+  final VoidCallback? onFailedTap;
   // Consecutive messages from the same sender are grouped (see
   // _ChatState._groupsWithNext): only the last one in a group shows the
   // avatar, the time/seen row and the bubble's tail corner.
@@ -2588,6 +2655,20 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bubble = _bubble(context);
+    final retry = onFailedTap;
+    if (retry == null) return bubble;
+    return Semantics(
+      button: true,
+      label: '${msg.text}, not sent',
+      onTapHint: 'Try again or remove',
+      onTap: retry,
+      excludeSemantics: true,
+      child: GestureDetector(onTap: retry, child: bubble),
+    );
+  }
+
+  Widget _bubble(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(bottom: isLastInGroup ? 10 : 2),
       child: Row(
@@ -2610,7 +2691,7 @@ class _MessageBubble extends StatelessWidget {
                       ).withValues(alpha: 0.15),
                       backgroundImage:
                           (peerPhotoUrl != null && peerPhotoUrl!.isNotEmpty)
-                          ? CachedNetworkImageProvider(peerPhotoUrl!)
+                          ? avatarImage(context, peerPhotoUrl!, 12)
                           : null,
                       child: (peerPhotoUrl == null || peerPhotoUrl!.isEmpty)
                           ? const Icon(
@@ -2636,176 +2717,209 @@ class _MessageBubble extends StatelessWidget {
             const SizedBox(width: 6),
           ],
           Flexible(
-            child: Column(
-              crossAxisAlignment: msg.isMe
-                  ? CrossAxisAlignment.end
-                  : CrossAxisAlignment.start,
-              children: [
-                Opacity(
-                  // Slightly dim pending messages like Messenger does
-                  opacity: msg.pending ? 0.6 : 1.0,
-                  child: Container(
-                    padding: _isEdgeToEdgeMedia
-                        ? EdgeInsets.zero
-                        : const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                    clipBehavior: Clip.antiAlias,
-                    decoration: BoxDecoration(
-                      border: _isEdgeToEdgeMedia
-                          ? null
-                          : msg.isDeleted
-                          ? Border.all(
-                              color: Colors.grey.withValues(alpha: 0.4),
-                              width: 1,
-                            )
-                          : (msg.isMe && !msg.isAutoReply)
-                          ? null
-                          : Border.all(
-                              color: msg.isMe
-                                  ? Colors.white.withValues(alpha: 0.3)
-                                  : isGigChat
-                                  ? const Color(0xFF3B82F6)
-                                  : kAmber,
-                              width: 1.5,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: kChatBubbleMaxWidth,
+              ),
+              child: Column(
+                crossAxisAlignment: msg.isMe
+                    ? CrossAxisAlignment.end
+                    : CrossAxisAlignment.start,
+                children: [
+                  Opacity(
+                    // Slightly dim pending messages like Messenger does
+                    opacity: msg.pending || msg.failed ? 0.6 : 1.0,
+                    child: Container(
+                      padding: _isEdgeToEdgeMedia
+                          ? EdgeInsets.zero
+                          : const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
                             ),
-                      color: _isEdgeToEdgeMedia
-                          ? Colors.transparent
-                          : msg.isDeleted
-                          ? (isDark
-                                ? Colors.grey.shade800.withValues(alpha: 0.4)
-                                : Colors.grey.shade200.withValues(alpha: 0.6))
-                          : msg.isMe
-                          ? kBlue
-                          : isDark
-                          ? Colors.grey.shade800
-                          : Colors.grey.shade200,
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(16),
-                        topRight: const Radius.circular(16),
-                        bottomLeft: Radius.circular(
-                          !msg.isMe && isLastInGroup ? 4 : 16,
-                        ),
-                        bottomRight: Radius.circular(
-                          msg.isMe && isLastInGroup ? 4 : 16,
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                        border: _isEdgeToEdgeMedia
+                            ? null
+                            : msg.isDeleted
+                            ? Border.all(
+                                color: Colors.grey.withValues(alpha: 0.4),
+                                width: 1,
+                              )
+                            : (msg.isMe && !msg.isAutoReply)
+                            ? null
+                            : Border.all(
+                                color: msg.isMe
+                                    ? Colors.white.withValues(alpha: 0.3)
+                                    : isGigChat
+                                    ? const Color(0xFF3B82F6)
+                                    : kAmber,
+                                width: 1.5,
+                              ),
+                        color: _isEdgeToEdgeMedia
+                            ? Colors.transparent
+                            : msg.isDeleted
+                            ? (isDark
+                                  ? Colors.grey.shade800.withValues(alpha: 0.4)
+                                  : Colors.grey.shade200.withValues(alpha: 0.6))
+                            : msg.isMe
+                            ? kBlue
+                            : isDark
+                            ? Colors.grey.shade800
+                            : Colors.grey.shade200,
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(16),
+                          topRight: const Radius.circular(16),
+                          bottomLeft: Radius.circular(
+                            !msg.isMe && isLastInGroup ? 4 : 16,
+                          ),
+                          bottomRight: Radius.circular(
+                            msg.isMe && isLastInGroup ? 4 : 16,
+                          ),
                         ),
                       ),
-                    ),
-                    child: msg.isDeleted
-                        ? Text(
-                            'Message has been removed',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontStyle: FontStyle.italic,
-                              color: Colors.grey.shade500,
-                            ),
-                          )
-                        : msg.location != null
-                        ? _LocationBubble(
-                            location: msg.location!,
-                            address: msg.locationAddress,
-                            isDark: isDark,
-                          )
-                        : msg.attachmentType == 'image'
-                        ? _ImageAttachmentBubble(url: msg.attachmentUrl)
-                        : msg.attachmentType == 'video'
-                        ? _VideoAttachmentBubble(url: msg.attachmentUrl)
-                        : msg.attachmentType == 'file'
-                        ? _FileAttachmentBubble(
+                      child: msg.isDeleted
+                          ? Text(
+                              'Message has been removed',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontStyle: FontStyle.italic,
+                                color: Colors.grey.shade500,
+                              ),
+                            )
+                          : msg.location != null
+                          ? ChatLocationBubble(
+                              location: msg.location!,
+                              address: msg.locationAddress,
+                              isDark: isDark,
+                            )
+                          : msg.attachmentType == 'image'
+                          ? _ImageAttachmentBubble(
                             url: msg.attachmentUrl,
-                            name: msg.attachmentName ?? 'File',
-                            isMe: msg.isMe,
+                            label: msg.isMe
+                                ? 'Your photo'
+                                : peerName.isEmpty
+                                ? 'Photo'
+                                : 'Photo from $peerName',
                           )
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (msg.isAutoReply) ...[
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.auto_fix_high,
-                                      size: 15,
-                                      color: msg.isMe
-                                          ? Colors.white70
-                                          : Colors.grey.shade600,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Auto-Reply',
-                                      style: TextStyle(
-                                        fontSize: 12,
+                          : msg.attachmentType == 'video'
+                          ? _VideoAttachmentBubble(url: msg.attachmentUrl)
+                          : msg.attachmentType == 'file'
+                          ? _FileAttachmentBubble(
+                              url: msg.attachmentUrl,
+                              name: msg.attachmentName ?? 'File',
+                              isMe: msg.isMe,
+                            )
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (msg.isAutoReply) ...[
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.auto_fix_high,
+                                        size: 15,
                                         color: msg.isMe
                                             ? Colors.white70
                                             : Colors.grey.shade600,
-                                        fontWeight: FontWeight.w500,
                                       ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                              _isHtml
-                                  ? Html(
-                                      data: msg.text,
-                                      style: {
-                                        'body': Style(
-                                          fontSize: FontSize(14),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Auto-Reply',
+                                        style: TextStyle(
+                                          fontSize: 12,
                                           color: msg.isMe
-                                              ? Colors.white
-                                              : isDark
-                                              ? Colors.white
-                                              : Colors.black87,
-                                          margin: Margins.zero,
-                                          padding: HtmlPaddings.zero,
+                                              ? Colors.white70
+                                              : Colors.grey.shade600,
+                                          fontWeight: FontWeight.w500,
                                         ),
-                                        'div': Style(
-                                          margin: Margins.zero,
-                                          padding: HtmlPaddings.zero,
-                                        ),
-                                      },
-                                    )
-                                  : Text(
-                                      msg.text,
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: msg.isMe ? Colors.white : null,
                                       ),
-                                    ),
-                            ],
-                          ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+                                _isHtml
+                                    ? Html(
+                                        data: msg.text,
+                                        style: {
+                                          'body': Style(
+                                            fontSize: FontSize(14),
+                                            color: msg.isMe
+                                                ? Colors.white
+                                                : isDark
+                                                ? Colors.white
+                                                : Colors.black87,
+                                            margin: Margins.zero,
+                                            padding: HtmlPaddings.zero,
+                                          ),
+                                          'div': Style(
+                                            margin: Margins.zero,
+                                            padding: HtmlPaddings.zero,
+                                          ),
+                                        },
+                                      )
+                                    : Text(
+                                        msg.text,
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: msg.isMe ? Colors.white : null,
+                                        ),
+                                      ),
+                              ],
+                            ),
+                    ),
                   ),
-                ),
-                if (isLastInGroup || msg.pending) ...[
-                  const SizedBox(height: 3),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    spacing: 4,
-                    children: [
-                      if (msg.pending)
+                  if (msg.failed) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                         Icon(
-                          Icons.access_time,
-                          size: 12,
-                          semanticLabel: 'Sending',
-                          color: chatMetaColor(context),
-                        )
-                      else
-                        Text(timeStr, style: chatMetaStyle(context)),
-                      if (msg.isMe &&
-                          (isGigChat
-                              ? msg.hasSeenByPeer
-                              : msg.hasSeenBySupport))
-                        Icon(
-                          Icons.done_all,
-                          size: 13,
-                          semanticLabel: 'Seen',
-                          color: chatMetaColor(context),
+                          Icons.error_outline_rounded,
+                          size: 14,
+                          color: chatFailedColor(context),
                         ),
-                    ],
-                  ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Not sent · Tap to retry',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: chatFailedColor(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else if (isLastInGroup || msg.pending) ...[
+                    const SizedBox(height: 3),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      spacing: 4,
+                      children: [
+                        if (msg.pending)
+                          Icon(
+                            Icons.access_time,
+                            size: 12,
+                            semanticLabel: 'Sending',
+                            color: chatMetaColor(context),
+                          )
+                        else
+                          Text(timeStr, style: chatMetaStyle(context)),
+                        if (msg.isMe &&
+                            (isGigChat
+                                ? msg.hasSeenByPeer
+                                : msg.hasSeenBySupport))
+                          Icon(
+                            Icons.done_all,
+                            size: 13,
+                            semanticLabel: 'Seen',
+                            color: chatMetaColor(context),
+                          ),
+                      ],
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ],
@@ -2819,9 +2933,11 @@ class _MessageBubble extends StatelessWidget {
 // non-interactive Google Map with a pin, the reverse-geocoded address (when
 // available), and a tap-through to open the coordinates in the device's
 // maps app. Neither sending nor viewing is role-gated — either side of a
-// gig chat can share their location.
-class _LocationBubble extends StatelessWidget {
-  const _LocationBubble({
+// gig chat can share their location. Also used by group chats
+// (lib/features/group_chat/group_chat_screen.dart).
+class ChatLocationBubble extends StatelessWidget {
+  const ChatLocationBubble({
+    super.key,
     required this.location,
     required this.address,
     required this.isDark,
@@ -2907,17 +3023,17 @@ class _LocationBubble extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: _openInMaps,
-              child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.map_rounded, color: kBlue, size: 14),
-                    SizedBox(width: 6),
+                    Icon(Icons.map_rounded, color: blueText(context), size: 14),
+                    const SizedBox(width: 6),
                     Text(
                       'Open in Maps',
                       style: TextStyle(
-                        color: kBlue,
+                        color: blueText(context),
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
@@ -2938,9 +3054,11 @@ class _LocationBubble extends StatelessWidget {
 // spinner placeholder until the confirmed doc (with a real download URL)
 // replaces it.
 class _ImageAttachmentBubble extends StatelessWidget {
-  const _ImageAttachmentBubble({required this.url});
+  const _ImageAttachmentBubble({required this.url, required this.label});
 
   final String? url;
+  // Read by VoiceOver / TalkBack, e.g. "Photo from Ana".
+  final String label;
 
   void _openFullscreen(BuildContext context, String url) {
     showDialog<void>(
@@ -2981,13 +3099,24 @@ class _ImageAttachmentBubble extends StatelessWidget {
         child: const Center(child: CircularProgressIndicator()),
       );
     }
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      image: true,
+      label: label,
+      onTapHint: 'View full screen',
+      onTap: () => _openFullscreen(context, url),
+      excludeSemantics: true,
+      child: GestureDetector(
       onTap: () => _openFullscreen(context, url),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 220, maxHeight: 220),
         child: Image.network(
           url,
           fit: BoxFit.cover,
+          // Decode near bubble size instead of the full upload; 1.5x the
+          // width keeps the cover crop sharp. Full screen stays full size.
+          cacheWidth: (220 * 1.5 * MediaQuery.devicePixelRatioOf(context))
+              .round(),
           loadingBuilder: (_, child, progress) => progress == null
               ? child
               : const SizedBox(
@@ -3002,6 +3131,7 @@ class _ImageAttachmentBubble extends StatelessWidget {
             child: const Icon(Icons.broken_image_outlined),
           ),
         ),
+      ),
       ),
     );
   }

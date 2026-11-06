@@ -30,10 +30,38 @@ class GroupChatException implements Exception {
 /// Name and photo of a person, from publicProfiles (readable by any
 /// signed-in user, never carries an email or phone).
 class GroupPerson {
-  const GroupPerson({required this.uid, required this.name, this.photoUrl});
+  const GroupPerson({
+    required this.uid,
+    required this.name,
+    this.photoUrl,
+    this.isVerified = false,
+    this.workerRating,
+    this.hostRating,
+  });
   final String uid;
   final String name;
   final String? photoUrl;
+  final bool isVerified;
+  // Averages; null when they have no ratings in that role yet.
+  final double? workerRating;
+  final double? hostRating;
+
+  /// Same wording as user search results: "★ 4.8 as Gig Worker · ★ 4.6 as
+  /// Gig Host", or null when there are no ratings.
+  String? get ratingLine {
+    final parts = [
+      if (workerRating != null)
+        '★ ${workerRating!.toStringAsFixed(1)} as Gig Worker',
+      if (hostRating != null) '★ ${hostRating!.toStringAsFixed(1)} as Gig Host',
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+}
+
+double? _average(Object? v) {
+  if (v is! Map) return null;
+  final count = (v['count'] as num?)?.toInt() ?? 0;
+  return count > 0 ? (v['average'] as num?)?.toDouble() : null;
 }
 
 class GroupChatService {
@@ -105,6 +133,9 @@ class GroupChatService {
                 ? (data['name'] as String).trim()
                 : 'Giggre user',
             photoUrl: photo != null && photo.isNotEmpty ? photo : null,
+            isVerified: data['isVerified'] == true,
+            workerRating: _average(data['ratingWorker']),
+            hostRating: _average(data['ratingHost']),
           );
         }
         for (final u in chunk) {
@@ -130,7 +161,10 @@ class GroupChatService {
   /// are only caught by the server's error.
   static Future<List<GroupPerson>> contacts(String uid) async {
     final results = await Future.wait([
-      _db.collection('chat_rooms').where('participants', arrayContains: uid).get(),
+      _db
+          .collection('chat_rooms')
+          .where('participants', arrayContains: uid)
+          .get(),
       _db.collection('users').doc(uid).get(),
     ]);
     final rooms = results[0] as QuerySnapshot<Map<String, dynamic>>;
