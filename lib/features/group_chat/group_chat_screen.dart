@@ -199,7 +199,10 @@ class _GroupChatScreenState extends State<GroupChatScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: kBlue),
+              leading: Icon(
+                Icons.photo_library_outlined,
+                color: blueText(context),
+              ),
               title: const Text('Photo'),
               onTap: () {
                 Navigator.pop(ctx);
@@ -207,7 +210,10 @@ class _GroupChatScreenState extends State<GroupChatScreen>
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined, color: kBlue),
+              leading: Icon(
+                Icons.photo_camera_outlined,
+                color: blueText(context),
+              ),
               title: const Text('Camera'),
               onTap: () {
                 Navigator.pop(ctx);
@@ -215,7 +221,10 @@ class _GroupChatScreenState extends State<GroupChatScreen>
               },
             ),
             ListTile(
-              leading: const Icon(Icons.location_on_outlined, color: kBlue),
+              leading: Icon(
+                Icons.location_on_outlined,
+                color: blueText(context),
+              ),
               title: const Text('Share my location'),
               onTap: () {
                 Navigator.pop(ctx);
@@ -685,11 +694,9 @@ class _Bubble extends StatelessWidget {
                       padding: const EdgeInsets.only(left: 4, bottom: 3),
                       child: Text(
                         senderName!,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade500,
-                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: chatSenderStyle(context),
                       ),
                     ),
                   Opacity(opacity: pending ? 0.6 : 1, child: body),
@@ -698,15 +705,13 @@ class _Bubble extends StatelessWidget {
                     pending
                         ? Icon(
                             Icons.access_time,
-                            size: 10,
-                            color: Colors.grey.shade400,
+                            size: 12,
+                            semanticLabel: 'Sending',
+                            color: chatMetaColor(context),
                           )
                         : Text(
                             time == null ? '' : _time(time!),
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey.shade400,
-                            ),
+                            style: chatMetaStyle(context),
                           ),
                   ],
                 ],
@@ -822,12 +827,14 @@ class _LocationMessage extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: (isMe ? Colors.white : kBlue).withValues(alpha: 0.15),
+                  color: (isMe ? Colors.white : blueText(context)).withValues(
+                    alpha: 0.15,
+                  ),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.location_on_rounded,
-                  color: isMe ? Colors.white : kBlue,
+                  color: isMe ? Colors.white : blueText(context),
                   size: 20,
                 ),
               ),
@@ -848,7 +855,7 @@ class _LocationMessage extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: isMe ? Colors.white70 : kBlue,
+                        color: isMe ? Colors.white : blueText(context),
                       ),
                     ),
                   ],
@@ -922,11 +929,7 @@ class _DayDivider extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Text(
         label,
-        style: TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w600,
-          color: Colors.grey.shade500,
-        ),
+        style: chatMetaStyle(context).copyWith(fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -943,17 +946,32 @@ class _NotInGroup extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.group_off_outlined, size: 48, color: Colors.grey),
+            Icon(
+              Icons.group_off_outlined,
+              size: 48,
+              color: chatMetaColor(context),
+            ),
             const SizedBox(height: 12),
             Text(
               "You're no longer in this group",
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 14),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.85),
+              ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               'You left, were removed, or the group was deleted.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.4,
+                color: chatMetaColor(context),
+              ),
             ),
           ],
         ),

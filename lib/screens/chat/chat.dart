@@ -2786,25 +2786,21 @@ class _MessageBubble extends StatelessWidget {
                       if (msg.pending)
                         Icon(
                           Icons.access_time,
-                          size: 10,
-                          color: Colors.grey.shade400,
+                          size: 12,
+                          semanticLabel: 'Sending',
+                          color: chatMetaColor(context),
                         )
                       else
-                        Text(
-                          timeStr,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey.shade400,
-                          ),
-                        ),
+                        Text(timeStr, style: chatMetaStyle(context)),
                       if (msg.isMe &&
                           (isGigChat
                               ? msg.hasSeenByPeer
                               : msg.hasSeenBySupport))
                         Icon(
                           Icons.done_all,
-                          size: 12,
-                          color: Colors.grey.shade400,
+                          size: 13,
+                          semanticLabel: 'Seen',
+                          color: chatMetaColor(context),
                         ),
                     ],
                   ),

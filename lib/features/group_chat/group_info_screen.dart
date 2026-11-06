@@ -104,12 +104,18 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: kBlue),
+              leading: Icon(
+                Icons.photo_library_outlined,
+                color: blueText(context),
+              ),
               title: const Text('Choose a photo'),
               onTap: () => Navigator.pop(ctx, 'gallery'),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined, color: kBlue),
+              leading: Icon(
+                Icons.photo_camera_outlined,
+                color: blueText(context),
+              ),
               title: const Text('Take a photo'),
               onTap: () => Navigator.pop(ctx, 'camera'),
             ),
@@ -290,6 +296,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
           }
           final members = List<String>.from(group['participants'] as List);
           final admins = Set<String>.from(group['admins'] as List? ?? const []);
+          final creator = group['createdBy'] as String? ?? '';
           if (!members.contains(_uid)) {
             return const Center(child: Text("You're no longer in this group."));
           }
@@ -298,11 +305,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
           final name = group['name'] as String? ?? 'Group';
           final photo = group['photoUrl'] as String?;
           final muted = GroupChatService.isMuted(group, _uid);
-          // You first, then admins, then everyone by name.
+          // You first, then the creator, then admins, then everyone by name.
           final sorted = [...members]
             ..sort((a, b) {
               if (a == _uid) return -1;
               if (b == _uid) return 1;
+              if (a == creator) return -1;
+              if (b == creator) return 1;
               final aa = admins.contains(a), ba = admins.contains(b);
               if (aa != ba) return aa ? -1 : 1;
               return (_people[a]?.name ?? '').toLowerCase().compareTo(
@@ -428,16 +437,18 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
                           ListTile(
                             leading: CircleAvatar(
                               radius: 20,
-                              backgroundColor: kBlue.withValues(alpha: 0.12),
-                              child: const Icon(
+                              backgroundColor: blueText(
+                                context,
+                              ).withValues(alpha: 0.12),
+                              child: Icon(
                                 Icons.person_add_alt_1_rounded,
-                                color: kBlue,
+                                color: blueText(context),
                               ),
                             ),
-                            title: const Text(
+                            title: Text(
                               'Add people',
                               style: TextStyle(
-                                color: kBlue,
+                                color: blueText(context),
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -451,25 +462,12 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            trailing: admins.contains(uid)
-                                ? Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 3,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: kBlue.withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: const Text(
-                                      'Admin',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: kBlue,
-                                      ),
-                                    ),
-                                  )
+                            // The creator shows as Creator (even though
+                            // they're an admin too); later admins as Admin.
+                            trailing: uid == creator
+                                ? const _RoleBadge(label: 'Creator')
+                                : admins.contains(uid)
+                                ? const _RoleBadge(label: 'Admin')
                                 : null,
                             onTap: uid == _uid || _people[uid] == null
                                 ? null
@@ -525,6 +523,31 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _RoleBadge extends StatelessWidget {
+  const _RoleBadge({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final blue = blueText(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: blue.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: blue,
+        ),
       ),
     );
   }

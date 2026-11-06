@@ -45,7 +45,10 @@ Future<void> openDirectChat(
 /// Find anyone on Giggre by name and message them. Opened from the Chats
 /// header. People who've turned off "Let others find me" don't appear.
 class UserSearchScreen extends StatefulWidget {
-  const UserSearchScreen({super.key});
+  const UserSearchScreen({super.key, this.initialQuery = ''});
+
+  /// Pre-fills and runs a search (the Chats list's "Find … on Giggre").
+  final String initialQuery;
 
   @override
   State<UserSearchScreen> createState() => _UserSearchScreenState();
@@ -68,6 +71,13 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
   void initState() {
     super.initState();
     _loadBlocked();
+    final q = widget.initialQuery.trim();
+    if (q.isNotEmpty) {
+      _controller.text = q;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _run(q);
+      });
+    }
   }
 
   @override

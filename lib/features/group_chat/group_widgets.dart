@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
+import 'package:giggre_app/features/chat/user_search_screen.dart';
 import 'package:giggre_app/features/group_chat/group_chat_service.dart';
 
 const _avatarTint = Color(0xFF3B82F6);
@@ -108,6 +109,15 @@ class _ContactPickerState extends State<ContactPicker> {
             ),
           ),
         ),
+        if (widget.contacts.isNotEmpty)
+          _PickerNote(
+            text: atMax
+                ? 'Groups can have up to $maxGroupMembers people, '
+                      "including you. Remove someone to pick another."
+                : "Only people you've chatted with are listed.",
+            action: atMax ? null : 'Someone missing?',
+            onAction: () => _explainMissing(context),
+          ),
         if (widget.selected.isNotEmpty)
           SizedBox(
             height: 44,
@@ -132,18 +142,28 @@ class _ContactPickerState extends State<ContactPicker> {
           ),
         Expanded(
           child: widget.contacts.isEmpty
-              ? const _PickerEmpty(
-                  title: 'No chats yet',
+              ? _PickerEmpty(
+                  title: 'No one to add yet',
                   body:
-                      'You can add people you already have a chat with. '
-                      'Message someone first, then make a group.',
+                      "Groups are made from people you've already chatted "
+                      'with. Message someone first, then come back.',
+                  action: 'Find people',
+                  onAction: () => _openPeopleSearch(context, ''),
+                )
+              : shown.isEmpty && q.isEmpty
+              ? const _PickerEmpty(
+                  title: 'Everyone is already here',
+                  body: 'Everyone you chat with is already in this group.',
                 )
               : shown.isEmpty
               ? _PickerEmpty(
-                  title: q.isEmpty ? 'Everyone is already here' : 'No matches',
-                  body: q.isEmpty
-                      ? 'All your chats are already in this group.'
-                      : 'Only people you already chat with show up here.',
+                  title: 'No one named "${_query.trim()}" in your chats',
+                  body:
+                      'To add someone new, message them first. If they '
+                      'get it as a message request, they need to accept it '
+                      'before you can add them.',
+                  action: 'Find "${_query.trim()}" on Giggre',
+                  onAction: () => _openPeopleSearch(context, _query.trim()),
                 )
               : ListView.builder(
                   itemCount: shown.length,
@@ -176,31 +196,183 @@ class _ContactPickerState extends State<ContactPicker> {
   }
 }
 
-class _PickerEmpty extends StatelessWidget {
-  const _PickerEmpty({required this.title, required this.body});
-  final String title;
-  final String body;
+void _openPeopleSearch(BuildContext context, String query) {
+  Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => UserSearchScreen(initialQuery: query)),
+  );
+}
+
+/// "Someone missing?": who can be added, and how to fix it.
+void _explainMissing(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (ctx) {
+      final muted = Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.7);
+      Widget line(IconData icon, String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 20, color: blueText(ctx)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(text, style: TextStyle(fontSize: 14, color: muted)),
+            ),
+          ],
+        ),
+      );
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Who you can add',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 16),
+              line(
+                Icons.chat_bubble_outline_rounded,
+                'People you have a chat with: a gig chat, a chat with a '
+                'favorite worker, or a message they accepted.',
+              ),
+              line(
+                Icons.schedule_rounded,
+                "Not yet: someone who hasn't accepted your message request, "
+                "or someone you've never messaged, like a worker who only "
+                'applied to your gig.',
+              ),
+              line(
+                Icons.block_rounded,
+                "Never: people you've blocked or who blocked you.",
+              ),
+              const SizedBox(height: 4),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: kBlue,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _openPeopleSearch(context, '');
+                  },
+                  child: const Text('Message someone new'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// One line of context under the picker's search field.
+class _PickerNote extends StatelessWidget {
+  const _PickerNote({required this.text, this.action, this.onAction});
+  final String text;
+  final String? action;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
+    final muted = Theme.of(
+      context,
+    ).colorScheme.onSurface.withValues(alpha: 0.65);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 8, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(text, style: TextStyle(fontSize: 12.5, color: muted)),
+          ),
+          if (action != null)
+            TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                foregroundColor: blueText(context),
+                minimumSize: const Size(44, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              child: Text(
+                action!,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PickerEmpty extends StatelessWidget {
+  const _PickerEmpty({
+    required this.title,
+    required this.body,
+    this.action,
+    this.onAction,
+  });
+  final String title;
+  final String body;
+  final String? action;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.group_outlined, size: 48, color: Colors.grey),
+            Icon(
+              Icons.group_outlined,
+              size: 48,
+              color: onSurface.withValues(alpha: 0.35),
+            ),
             const SizedBox(height: 12),
             Text(
               title,
-              style: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: onSurface.withValues(alpha: 0.85),
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               body,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+              style: TextStyle(
+                color: onSurface.withValues(alpha: 0.65),
+                fontSize: 13,
+                height: 1.4,
+              ),
             ),
+            if (action != null) ...[
+              const SizedBox(height: 20),
+              FilledButton.tonal(
+                onPressed: onAction,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 44),
+                  foregroundColor: blueText(context),
+                  backgroundColor: blueText(context).withValues(alpha: 0.12),
+                ),
+                child: Text(
+                  action!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ],
         ),
       ),

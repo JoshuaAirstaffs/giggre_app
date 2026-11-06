@@ -78,7 +78,10 @@ class _HomeChatState extends State<HomeChat>
     _tabController = TabController(length: 2, vsync: this)
       ..addListener(() {
         // Leaving Gig Chats (for Support) clears its search too.
-        if (!_tabController.indexIsChanging) _resetSearch.value++;
+        if (!_tabController.indexIsChanging) {
+          _resetSearch.value++;
+          if (mounted) setState(() {});
+        }
       });
     _listenForUnread();
     _listenForUnreadGig();
@@ -281,6 +284,48 @@ class _HomeChatState extends State<HomeChat>
     );
   }
 
+  /// New chat (find someone on Giggre) or New group.
+  void _showNewSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _NewOption(
+                icon: Icons.person_add_alt_1_rounded,
+                title: 'New chat',
+                subtitle: 'Find someone on Giggre',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const UserSearchScreen()),
+                  );
+                },
+              ),
+              _NewOption(
+                icon: Icons.group_add_rounded,
+                title: 'New group',
+                subtitle: "With people you've already chatted with",
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const CreateGroupScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
@@ -299,20 +344,6 @@ class _HomeChatState extends State<HomeChat>
           ),
         ),
         actions: [
-          IconButton(
-            icon: Icon(Icons.group_add_outlined, color: onSurface),
-            tooltip: 'New group',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const CreateGroupScreen()),
-            ),
-          ),
-          IconButton(
-            icon: Icon(Icons.search_rounded, color: onSurface),
-            tooltip: 'Find people',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const UserSearchScreen()),
-            ),
-          ),
           IconButton(
             icon: Icon(Icons.info_outline_rounded, color: onSurface),
             tooltip: 'About deleting messages',
@@ -376,6 +407,21 @@ class _HomeChatState extends State<HomeChat>
           ],
         ),
       ),
+      floatingActionButton:
+          _tabController.index == 0 &&
+              MediaQuery.viewInsetsOf(context).bottom == 0
+          ? FloatingActionButton.extended(
+              heroTag: 'chats_new',
+              backgroundColor: kBlue,
+              foregroundColor: Colors.white,
+              onPressed: () => _showNewSheet(context),
+              icon: const Icon(Icons.edit_square, size: 20),
+              label: const Text(
+                'New',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            )
+          : null,
       body: TabBarView(
         controller: _tabController,
         children: [_GigChatsTab(resetSearch: _resetSearch), const _SupportTab()],
@@ -537,7 +583,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Tap the search icon to find people, or start a group',
+                  'Tap New to message someone or start a group',
                   style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
                 ),
                 if (requestCount > 0) ...[
@@ -603,7 +649,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Row(
                 children: [
                   ChoiceChip(
@@ -653,6 +699,8 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                                 fontSize: 14,
                               ),
                             ),
+                            const SizedBox(height: 20),
+                            _FindOnGiggre(query: _query.trim()),
                           ],
                         ),
                       ),
@@ -678,7 +726,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                         ],
                       ),
                     )
-                  : _buildList(shown, shownGroups),
+                  : _buildList(shown, shownGroups, findQuery: q.isEmpty ? null : _query.trim()),
             ),
           ],
         );
@@ -699,8 +747,9 @@ class _GigChatsTabState extends State<_GigChatsTab> {
 
   Widget _buildList(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> rooms,
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> groups,
-  ) {
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> groups, {
+    String? findQuery,
+  }) {
     // Rooms arrive already sorted (or in missed-call order); groups are
     // slotted in by their latest message.
     final docs = [...rooms];
@@ -721,9 +770,17 @@ class _GigChatsTabState extends State<_GigChatsTab> {
     return RefreshIndicator(
       onRefresh: () async => setState(() {}),
       child: ListView.builder(
-        padding: const EdgeInsets.all(8),
-        itemCount: docs.length,
+        // Bottom room so the New button never covers the last chat.
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 96),
+        itemCount: docs.length + (findQuery == null ? 0 : 1),
         itemBuilder: (context, i) {
+          if (i == docs.length) {
+            // After the matching chats: the same name among everyone.
+            return Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: _FindOnGiggre(query: findQuery!),
+            );
+          }
           if (docs[i].reference.parent.id == 'group_chats') {
             final id = docs[i].id;
             return GroupListTile(
@@ -785,6 +842,93 @@ class _GigChatsTabState extends State<_GigChatsTab> {
           );
         },
       ),
+    );
+  }
+}
+
+/// "Find "ana" on Giggre": takes a chat search over to people search.
+class _FindOnGiggre extends StatelessWidget {
+  const _FindOnGiggre({required this.query});
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: isDark ? kCard : Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => UserSearchScreen(initialQuery: query),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: blueText(context).withValues(alpha: 0.12),
+                child: Icon(Icons.person_search_rounded, color: blueText(context)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    text: 'Find ',
+                    children: [
+                      TextSpan(
+                        text: '"$query"',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const TextSpan(text: ' on Giggre'),
+                    ],
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: blueText(context),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: blueText(context)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NewOption extends StatelessWidget {
+  const _NewOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      leading: CircleAvatar(
+        radius: 22,
+        backgroundColor: blueText(context).withValues(alpha: 0.12),
+        child: Icon(icon, color: blueText(context)),
+      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(subtitle),
+      onTap: onTap,
     );
   }
 }

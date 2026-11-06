@@ -125,18 +125,31 @@ class GroupChatService {
 
   /// Everyone [uid] has an accepted one-to-one chat with (the same test as
   /// connectedPeers in groupChats.ts), sorted by name.
+  /// People this user has blocked are left out (the server would refuse
+  /// them anyway). Who blocked *them* isn't visible to the app, so those
+  /// are only caught by the server's error.
   static Future<List<GroupPerson>> contacts(String uid) async {
-    final rooms = await _db
-        .collection('chat_rooms')
-        .where('participants', arrayContains: uid)
-        .get();
+    final results = await Future.wait([
+      _db.collection('chat_rooms').where('participants', arrayContains: uid).get(),
+      _db.collection('users').doc(uid).get(),
+    ]);
+    final rooms = results[0] as QuerySnapshot<Map<String, dynamic>>;
+    final me = results[1] as DocumentSnapshot<Map<String, dynamic>>;
+    final blocked = ((me.data()?['blockedUsers'] as List?) ?? const [])
+        .whereType<String>()
+        .toSet();
     final peers = <String>{};
     for (final d in rooms.docs) {
       final room = d.data();
       final status = room['requestStatus'] as String? ?? 'accepted';
       if (status != 'accepted') continue;
       for (final p in (room['participants'] as List? ?? const [])) {
-        if (p is String && p != uid && !isLiveSupportAccount(p)) peers.add(p);
+        if (p is String &&
+            p != uid &&
+            !blocked.contains(p) &&
+            !isLiveSupportAccount(p)) {
+          peers.add(p);
+        }
       }
     }
     final people = await GroupChatService.people(peers);

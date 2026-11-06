@@ -74,9 +74,11 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 ),
               ),
               Text(
-                _selected.isEmpty
-                    ? 'Pick at least 2 people'
-                    : '${_selected.length} selected',
+                switch (_selected.length) {
+                  0 => 'Pick at least 2 people',
+                  1 => '1 selected · pick 1 more',
+                  final n => '$n selected',
+                },
                 style: TextStyle(
                   fontSize: 12,
                   color: onSurface.withValues(alpha: 0.6),
@@ -147,7 +149,11 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           Text(
             'Members can see each other\'s names and photos. '
             'You can add a group photo later.',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              color: chatMetaColor(context),
+            ),
           ),
           const SizedBox(height: 20),
           Text(
@@ -173,6 +179,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
             child: FilledButton(
               style: FilledButton.styleFrom(
                 backgroundColor: kBlue,
+                foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
