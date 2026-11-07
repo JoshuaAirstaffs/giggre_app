@@ -140,6 +140,36 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   String? _locationError;
   bool _useMapLocation = false;
 
+  // Currency of the gig's location, so the ₱/$ shown while filling the form
+  // matches what the gig is saved with. Looked up per source (GPS / map pin);
+  // until a lookup lands, the host's profile currency is shown.
+  String? _gpsCurrency;
+  String? _mapCurrency;
+  int _mapCurrencyLookup = 0;
+
+  String get _gigCurrency =>
+      (_useMapLocation ? _mapCurrency : _gpsCurrency) ??
+      context.read<CurrentUserProvider>().currencyCode;
+
+  // For build(): rebuilds when the profile currency (the fallback) changes.
+  String _watchGigCurrency() {
+    context.watch<CurrentUserProvider>();
+    return _gigCurrency;
+  }
+
+  Future<void> _lookupGpsCurrency(double lat, double lng) async {
+    final country = await countryCodeFromCoordinates(lat, lng);
+    if (!mounted || country == null) return;
+    setState(() => _gpsCurrency = CurrencyFormatter.countryToCurrency(country));
+  }
+
+  Future<void> _lookupMapCurrency(double lat, double lng) async {
+    final lookup = ++_mapCurrencyLookup;
+    final country = await countryCodeFromCoordinates(lat, lng);
+    if (!mounted || lookup != _mapCurrencyLookup || country == null) return;
+    setState(() => _mapCurrency = CurrencyFormatter.countryToCurrency(country));
+  }
+
   bool _posting = false;
   final _errorPlayer = AudioPlayer();
 
@@ -265,6 +295,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         _gpsPosition = pos;
         _loadingLocation = false;
       });
+      _lookupGpsCurrency(pos.latitude, pos.longitude);
 
       String address = 'GPS location ready';
       try {
@@ -361,7 +392,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         _address = result.address;
         _useMapLocation = true;
         _locationError = null;
+        _mapCurrency = null;
       });
+      _lookupMapCurrency(result.position.latitude, result.position.longitude);
     }
   }
 
@@ -392,7 +425,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       // Each selected worker is paid the budget, like Quick/Open Gig slots.
       amount: (double.tryParse(_budgetCtrl.text.trim()) ?? 0) *
           (_selectedWorkers.isEmpty ? 1 : _selectedWorkers.length),
-      currencyCode: context.read<CurrentUserProvider>().currencyCode,
+      currencyCode: _gigCurrency,
       action: LimitAction.post,
     )) {
       return;
@@ -456,7 +489,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     }
 
     // Fallback if gig-location geocoding fails during submit.
-    final fallbackCurrency = context.read<CurrentUserProvider>().currencyCode;
+    final fallbackCurrency = _gigCurrency;
 
     setState(() => _posting = true);
     try {
@@ -671,7 +704,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       return;
     }
     // Capture before async gap.
-    final currency = context.read<CurrentUserProvider>().currencyCode;
+    final currency = _gigCurrency;
     final name = await showDialog<String>(
       context: context,
       builder: (_) => TemplateNameDialog(initialName: title),
@@ -866,7 +899,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                       return null;
                     },
                     prefix: Text(
-                      '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
+                      '${CurrencyFormatter.symbol(_watchGigCurrency())} ',
                       style: const TextStyle(
                         color: _kPurple,
                         fontSize: 15,
