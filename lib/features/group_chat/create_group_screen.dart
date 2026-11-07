@@ -4,6 +4,10 @@ import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:giggre_app/features/group_chat/group_chat_screen.dart';
 import 'package:giggre_app/features/group_chat/group_chat_service.dart';
 import 'package:giggre_app/features/group_chat/group_widgets.dart';
+import 'package:giggre_app/helpers/snackbar_helper.dart';
+
+// TEMP switch: false blocks creating a group at the Next step.
+const _groupCreationEnabled = false;
 
 /// New group: pick at least two people from your chats, then name it.
 class CreateGroupScreen extends StatefulWidget {
@@ -22,6 +26,16 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   // Naming is its own route, so the platform back (iOS edge swipe, Android
   // back) returns here with the selection intact.
   void _next(List<GroupPerson> contacts) {
+    // TEMP: group creation is switched off for now. Next shows an error
+    // instead of the naming step. Set _groupCreationEnabled to true to
+    // turn it back on.
+    if (!_groupCreationEnabled) {
+      SnackbarHelper.showError(
+        context,
+        "Groups can't be created right now. Please try again later.",
+      );
+      return;
+    }
     final pickerRoute = ModalRoute.of(context)!;
     Navigator.of(context).push(
       MaterialPageRoute(
