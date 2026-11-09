@@ -1,3 +1,4 @@
+import '../../../../core/utils/distance_units.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -77,10 +78,7 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
     }
   }
 
-  String _fmtDistance(double meters) {
-    if (meters < 1000) return '${meters.round()} m away';
-    return '${(meters / 1000).toStringAsFixed(1)} km away';
-  }
+  String _fmtDistance(double meters) => '${DistanceUnits.format(meters)} away';
 
   Future<void> _openInGoogleMaps() async {
     final dest = widget.gig.position;

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/utils/distance_units.dart';
 import '../../../core/models/rating_summary.dart';
 import '../../../core/services/rating_service.dart';
 import 'package:flutter/foundation.dart';
@@ -13,13 +14,12 @@ class QuickGigMatchingService {
   static const _defaultReviewWindowSeconds = 30;
   static const _defaultSearchTimeoutMinutes = 5;
   static const _defaultMaxDispatchAttempts = 10;
-  static const _defaultMaxSearchRadiusKm = 10.0;
 
   static const _retryInterval = Duration(seconds: 15);
   static const _pollInterval = Duration(seconds: 3);
 
   // ── Fetch remote config ─────────────────────────────────────────────────────
-  static Future<({Duration reviewWindow, Duration searchTimeout, int maxAttempts, double maxSearchRadiusKm})>
+  static Future<({Duration reviewWindow, Duration searchTimeout, int maxAttempts, Map<String, dynamic> raw})>
       _fetchConfig() async {
     try {
       final doc = await FirebaseFirestore.instance
@@ -38,21 +38,18 @@ class QuickGigMatchingService {
       final maxAttempts =
           (data['max_dispatch_attempts'] as num?)?.toInt() ??
               _defaultMaxDispatchAttempts;
-      final maxSearchRadiusKm =
-          (data['max_search_radius_km'] as num?)?.toDouble() ??
-              _defaultMaxSearchRadiusKm;
       return (
         reviewWindow: reviewWindow,
         searchTimeout: searchTimeout,
         maxAttempts: maxAttempts,
-        maxSearchRadiusKm: maxSearchRadiusKm,
+        raw: data,
       );
     } catch (_) {
       return (
         reviewWindow: const Duration(seconds: _defaultReviewWindowSeconds),
         searchTimeout: const Duration(minutes: _defaultSearchTimeoutMinutes),
         maxAttempts: _defaultMaxDispatchAttempts,
-        maxSearchRadiusKm: _defaultMaxSearchRadiusKm,
+        raw: const <String, dynamic>{},
       );
     }
   }
@@ -89,7 +86,7 @@ class QuickGigMatchingService {
   static Future<Map<String, dynamic>?> _findBestWorker({
     required GeoPoint gigLocation,
     required List<String> exclude,
-    required double maxSearchRadiusKm,
+    required double? maxSearchRadiusKm, // null = no limit
     required String hostId,
   }) async {
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance
@@ -117,7 +114,7 @@ class QuickGigMatchingService {
       if (geo == null) continue;
 
       final dist = _distanceKm(gigLocation, geo);
-      if (dist > maxSearchRadiusKm) continue;
+      if (maxSearchRadiusKm != null && dist > maxSearchRadiusKm) continue;
 
       final rate = (data['acceptanceRate'] as num?)?.toDouble() ?? 1.0;
       // Shrunk toward the platform mean rather than the raw average, so an
@@ -360,7 +357,11 @@ class QuickGigMatchingService {
         final worker = await _findBestWorker(
           gigLocation: gigLocation,
           exclude: excluded,
-          maxSearchRadiusKm: config.maxSearchRadiusKm,
+          // Per-region radius: US gigs (USD) use the admin's miles value.
+          maxSearchRadiusKm: DistanceUnits.quickGigRadiusKm(
+            config.raw,
+            us: (gigData['currencyCode'] as String?)?.toUpperCase() == 'USD',
+          ),
           hostId: hostId,
         );
 
@@ -548,7 +549,11 @@ class QuickGigMatchingService {
         final worker = await _findBestWorker(
           gigLocation: gigLocation,
           exclude: excluded,
-          maxSearchRadiusKm: config.maxSearchRadiusKm,
+          // Per-region radius: US gigs (USD) use the admin's miles value.
+          maxSearchRadiusKm: DistanceUnits.quickGigRadiusKm(
+            config.raw,
+            us: (gigData['currencyCode'] as String?)?.toUpperCase() == 'USD',
+          ),
           hostId: hostId,
         );
 
@@ -742,7 +747,11 @@ class QuickGigMatchingService {
         final worker = await _findBestWorker(
           gigLocation: gigLocation,
           exclude: excluded,
-          maxSearchRadiusKm: config.maxSearchRadiusKm,
+          // Per-region radius: US gigs (USD) use the admin's miles value.
+          maxSearchRadiusKm: DistanceUnits.quickGigRadiusKm(
+            config.raw,
+            us: (gigData['currencyCode'] as String?)?.toUpperCase() == 'USD',
+          ),
           hostId: gigData['hostId'] as String? ?? '',
         );
 

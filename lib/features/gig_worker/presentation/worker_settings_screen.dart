@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../../core/utils/distance_units.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -505,7 +506,6 @@ class _ConfigSection extends StatelessWidget {
 
     final reassignment = d['allow_reassignment_after_exhaustion'];
     final maxAttempts = d['max_dispatch_attempts'];
-    final maxRadius = d['max_search_radius_km'];
     final reviewWindow = d['review_window_seconds'];
     final timeout = d['search_timeout_minutes'];
 
@@ -525,8 +525,8 @@ class _ConfigSection extends StatelessWidget {
         iconColor: kBlue,
       ),
       _ConfigRow(
-        label: 'Max Search Radius (km)',
-        value: maxRadius != null ? maxRadius.toString() : 'Unlimited',
+        label: 'Max Search Radius',
+        value: DistanceUnits.quickGigRadiusLabel(d),
         icon: Icons.radar_rounded,
         iconColor: Colors.tealAccent,
       ),

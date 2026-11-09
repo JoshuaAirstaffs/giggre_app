@@ -419,7 +419,7 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
         'nearby_gigs_v2',
         'Nearby Gigs',
         description:
-            'Notifications when a new gig is posted within 10km of you',
+            'Notifications when a new gig is posted near you',
         importance: Importance.max,
         sound: gigSound,
       ),

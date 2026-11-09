@@ -1,3 +1,4 @@
+import '../../core/utils/distance_units.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -67,6 +68,8 @@ class _HostShellState extends State<HostShell>
   @override
   void initState() {
     super.initState();
+    // Region → miles (US) or km for every distance shown (DistanceUnits).
+    DistanceUnits.ensure(context);
     _listenForUnreadSupport();
     _listenForUnreadGig();
   }

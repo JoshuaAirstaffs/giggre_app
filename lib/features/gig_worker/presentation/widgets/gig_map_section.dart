@@ -23,6 +23,7 @@ import '../../../../core/theme/map_style.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/distance_units.dart';
 import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/worker_active_gig.dart';
 import '../../../gig_shared/user_profile_screen.dart';
@@ -166,10 +167,7 @@ String _fmtHours(double hours) {
   return '$trimmed hr${hours == 1 ? '' : 's'}';
 }
 
-String formatGigDistance(double meters) {
-  if (meters < 1000) return '${meters.round()} m';
-  return '${(meters / 1000).toStringAsFixed(1)} km';
-}
+String formatGigDistance(double meters) => DistanceUnits.format(meters);
 
 // One doc read, shown on the gig sheet's host row (avatar + rating).
 // Gracefully returns nulls (hidden/fallback) on any failure.
@@ -432,7 +430,7 @@ Future<void> applyToOpenGig(
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'It\'s about ${distKm.round()} km from your current location. Make sure you\'re able to travel there before you take it.',
+                  'It\'s about ${DistanceUnits.formatKmRounded(distKm)} from your current location. Make sure you\'re able to travel there before you take it.',
                   style: TextStyle(
                     fontSize: 13,
                     color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
@@ -1693,7 +1691,13 @@ class _GigMapSectionState extends State<GigMapSection> {
   // Defaults: match the worker's own skills, within 10km.
   _SkillFilter _skillFilter = _SkillFilter.mySkills;
   String? _specificSkill;
-  double? _radiusKm = 10; // null = no radius limit
+  // null = no radius limit. Always km internally; chips show the region's
+  // unit (miles for US — see DistanceUnits). Default is 10 of the shown unit.
+  double? _radiusKm = 10;
+  bool _radiusTouched = false;
+  // Set by _allGigs when nothing is inside the radius and it fell back to
+  // the nearest gigs beyond it (null = not falling back).
+  double? _nearestFallbackM;
   List<String> _allSkillNames = [];
   // Date-only (time ignored) — null = no schedule filter. A gig with no
   // scheduledDate at all never matches once this is set (treated as stale
@@ -1974,6 +1978,9 @@ class _GigMapSectionState extends State<GigMapSection> {
     // has a value already on a second+ visit within the same app process.
     // Listening picks up the first-visit case too, once it arrives.
     _userProvider.addListener(_onProviderLocationChanged);
+    DistanceUnits.region.addListener(_onRegionChanged);
+    DistanceUnits.ensure(context);
+    if (DistanceUnits.miles) _radiusKm = DistanceUnits.toKm(10);
     _loadBaseIcons();
     _fetchAllSkills();
     if (!widget.fullScreen) _loadSavedViewMode();
@@ -2005,6 +2012,83 @@ class _GigMapSectionState extends State<GigMapSection> {
       _pendingCameraTarget = target;
     }
     widget.externalFocusRequest!.value = null;
+  }
+
+  // Region known → miles or km. Keep the default "10" in the shown unit
+  // until the worker picks a distance themselves.
+  void _onRegionChanged() {
+    if (!mounted) return;
+    setState(() {
+      if (!_radiusTouched) _radiusKm = DistanceUnits.toKm(10);
+    });
+  }
+
+  // Nothing inside the worker's distance → nearest gigs instead: pan the
+  // map to show the worker and the nearest one.
+  void _showNearestOnMap() {
+    final me = _myLocation;
+    final gigs = _allGigs;
+    if (me == null || gigs.isEmpty) return;
+    final g = gigs.first.position; // nearest-first while falling back
+    final south = me.latitude < g.latitude ? me.latitude : g.latitude;
+    final north = me.latitude < g.latitude ? g.latitude : me.latitude;
+    final west = me.longitude < g.longitude ? me.longitude : g.longitude;
+    final east = me.longitude < g.longitude ? g.longitude : me.longitude;
+    _setViewMode(_GigViewMode.map);
+    if (_useGoogleMaps) {
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngBounds(
+          LatLngBounds(southwest: LatLng(south, west), northeast: LatLng(north, east)),
+          60,
+        ),
+      );
+    } else if (_osmMapReady) {
+      _osmController.fitCamera(
+        fm.CameraFit.bounds(
+          bounds: fm.LatLngBounds(ll.LatLng(south, west), ll.LatLng(north, east)),
+          padding: const EdgeInsets.all(60),
+        ),
+      );
+    }
+  }
+
+  Widget _buildNearestFallbackBanner({bool showButton = true}) {
+    final nearest = _nearestFallbackM;
+    final radius = _radiusKm;
+    if (nearest == null || radius == null) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kAmber.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.near_me_rounded, color: kAmber, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'No gigs within ${DistanceUnits.formatKmRounded(radius)}. '
+              'Showing the nearest — ${DistanceUnits.format(nearest)} away.',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 12,
+                height: 1.3,
+              ),
+            ),
+          ),
+          if (showButton)
+            TextButton(
+              onPressed: _showNearestOnMap,
+              child: const Text('Show', style: TextStyle(fontWeight: FontWeight.w700)),
+            )
+          else
+            const SizedBox(width: 6),
+        ],
+      ),
+    );
   }
 
   void _onProviderLocationChanged() {
@@ -2439,7 +2523,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'It\'s about ${distKm.round()} km from your current location. Make sure you\'re able to travel there before you take it.',
+                    'It\'s about ${DistanceUnits.formatKmRounded(distKm)} from your current location. Make sure you\'re able to travel there before you take it.',
                     style: TextStyle(
                       fontSize: 13,
                       color: isDark
@@ -2698,6 +2782,7 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   void dispose() {
     _userProvider.removeListener(_onProviderLocationChanged);
+    DistanceUnits.region.removeListener(_onRegionChanged);
     widget.externalFocusRequest?.removeListener(_handleExternalFocusRequest);
     _googleMapController?.dispose();
     _osmController.dispose();
@@ -2749,19 +2834,6 @@ class _GigMapSectionState extends State<GigMapSection> {
 
     final myLoc = _myLocation;
 
-    final radiusKm = _radiusKm;
-    if (radiusKm != null && myLoc != null) {
-      gigs = gigs.where((g) {
-        final distM = Geolocator.distanceBetween(
-          myLoc.latitude,
-          myLoc.longitude,
-          g.position.latitude,
-          g.position.longitude,
-        );
-        return distM <= radiusKm * 1000;
-      }).toList();
-    }
-
     final scheduleDate = _scheduleDateFilter;
     if (scheduleDate != null) {
       gigs = gigs.where((g) {
@@ -2782,8 +2854,29 @@ class _GigMapSectionState extends State<GigMapSection> {
         gigs = gigs.where((g) => g.payType != 'hourly').toList();
     }
 
+    // Distance last, so that when nothing is inside the worker's radius we
+    // can fall back to the nearest gigs that match every other filter.
+    _nearestFallbackM = null;
+    final radiusKm = _radiusKm;
+    if (radiusKm != null && myLoc != null) {
+      double dist(GigMarkerData g) => Geolocator.distanceBetween(
+        myLoc.latitude,
+        myLoc.longitude,
+        g.position.latitude,
+        g.position.longitude,
+      );
+      final inside = gigs.where((g) => dist(g) <= radiusKm * 1000).toList();
+      if (inside.isNotEmpty || gigs.isEmpty) return inside;
+      final byDistance = [...gigs]..sort((a, b) => dist(a).compareTo(dist(b)));
+      final nearest = byDistance.take(_kNearestFallbackCount).toList();
+      _nearestFallbackM = dist(nearest.first);
+      return nearest;
+    }
+
     return gigs;
   }
+
+  static const int _kNearestFallbackCount = 10;
 
   bool get _hasActiveFilter =>
       _skillFilter != _SkillFilter.all ||
@@ -3501,6 +3594,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                               _skillFilter = _SkillFilter.all;
                               _specificSkill = null;
                               _radiusKm = null;
+                              _radiusTouched = true;
                               _scheduleDateFilter = null;
                               _pinDisplayMode = _PinDisplayMode.default_;
                               _payTypeFilter = _PayTypeFilter.all;
@@ -3509,6 +3603,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                               _skillFilter = _SkillFilter.all;
                               _specificSkill = null;
                               _radiusKm = null;
+                              _radiusTouched = true;
                               _scheduleDateFilter = null;
                               _pinDisplayMode = _PinDisplayMode.default_;
                               _payTypeFilter = _PayTypeFilter.all;
@@ -3628,17 +3723,28 @@ class _GigMapSectionState extends State<GigMapSection> {
                       children: _radiusOptions.map((r) {
                         final label = r == null
                             ? 'Any'
-                            : '${r.toStringAsFixed(0)} km';
+                            : '${r.toStringAsFixed(0)} ${DistanceUnits.unit}';
+                        final km = r == null ? null : DistanceUnits.toKm(r);
                         return choiceChip(
                           label: label,
-                          selected: _radiusKm == r,
+                          selected: km == null
+                              ? _radiusKm == null
+                              : _radiusKm != null && (_radiusKm! - km).abs() < 0.001,
                           onTap: () {
-                            setSheetState(() => _radiusKm = r);
-                            setState(() => _radiusKm = r);
+                            _radiusTouched = true;
+                            setSheetState(() => _radiusKm = km);
+                            setState(() => _radiusKm = km);
                           },
                         );
                       }).toList(),
                     ),
+                    if (_radiusKm != null && _myLocation != null) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'If nothing is within this distance, the nearest gigs are shown instead.',
+                        style: TextStyle(color: kSub, fontSize: 11),
+                      ),
+                    ],
                     if (_radiusKm != null && _myLocation == null) ...[
                       const SizedBox(height: 10),
                       const Text(
@@ -4034,11 +4140,13 @@ class _GigMapSectionState extends State<GigMapSection> {
           ],
         ),
         const SizedBox(height: 12),
-        if (_viewMode == _GigViewMode.map)
+        if (_viewMode == _GigViewMode.map) ...[
+          if (_nearestFallbackM != null) _buildNearestFallbackBanner(),
           EntranceAnimation(
             key: const ValueKey('map-block'),
             child: _buildMapBlock(context),
-          )
+          ),
+        ]
         else
           EntranceAnimation(
             key: const ValueKey('list-mode'),
@@ -4375,6 +4483,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         else if (filtered.isEmpty)
           _emptyListCard("No gigs match '${_searchQuery.trim()}'")
         else ...[
+          if (_nearestFallbackM != null) _buildNearestFallbackBanner(showButton: false),
           Column(
             children: [
               for (final entry
@@ -4436,10 +4545,7 @@ class _GigMapSectionState extends State<GigMapSection> {
     );
   }
 
-  String _fmtDistance(double meters) {
-    if (meters < 1000) return '${meters.round()} m';
-    return '${(meters / 1000).toStringAsFixed(1)} km';
-  }
+  String _fmtDistance(double meters) => DistanceUnits.format(meters);
 
   // Same field the host's own profile screen reads
   // (gig_host_profile_screen.dart) — one doc read, shown on the gig sheet's
@@ -4644,6 +4750,15 @@ class _GigMapSectionState extends State<GigMapSection> {
             ],
           ),
         ),
+
+        // Nothing within the worker's distance → nearest gigs note
+        if (_nearestFallbackM != null)
+          Positioned(
+            top: topPad + 60,
+            left: 12,
+            right: 12,
+            child: _buildNearestFallbackBanner(),
+          ),
 
         // Legend (bottom-left)
         Positioned(
