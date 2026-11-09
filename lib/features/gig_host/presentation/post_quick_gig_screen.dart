@@ -80,6 +80,36 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   // GSIN task type (admin catalog) — gives the gig its GSINS/GSKU codes.
   String? _taskTypeId;
 
+  // Currency of the gig's location, so the ₱/$ shown while filling the form
+  // matches what the gig is saved with. Looked up per source (GPS / map pin);
+  // until a lookup lands, the host's profile currency is shown.
+  String? _gpsCurrency;
+  String? _mapCurrency;
+  int _mapCurrencyLookup = 0;
+
+  String get _gigCurrency =>
+      (_useMapLocation ? _mapCurrency : _gpsCurrency) ??
+      context.read<CurrentUserProvider>().currencyCode;
+
+  // For build(): rebuilds when the profile currency (the fallback) changes.
+  String _watchGigCurrency() {
+    context.watch<CurrentUserProvider>();
+    return _gigCurrency;
+  }
+
+  Future<void> _lookupGpsCurrency(double lat, double lng) async {
+    final country = await countryCodeFromCoordinates(lat, lng);
+    if (!mounted || country == null) return;
+    setState(() => _gpsCurrency = CurrencyFormatter.countryToCurrency(country));
+  }
+
+  Future<void> _lookupMapCurrency(double lat, double lng) async {
+    final lookup = ++_mapCurrencyLookup;
+    final country = await countryCodeFromCoordinates(lat, lng);
+    if (!mounted || lookup != _mapCurrencyLookup || country == null) return;
+    setState(() => _mapCurrency = CurrencyFormatter.countryToCurrency(country));
+  }
+
   bool _posting = false;
   final _errorPlayer = AudioPlayer();
 
@@ -170,6 +200,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         _gpsPosition = pos;
         _loadingLocation = false;
       });
+      _lookupGpsCurrency(pos.latitude, pos.longitude);
 
       // Geocoding is best-effort
       try {
@@ -281,7 +312,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         _address = result.address;
         _useMapLocation = true;
         _locationError = null;
+        _mapCurrency = null;
       });
+      _lookupMapCurrency(result.position.latitude, result.position.longitude);
     }
   }
 
@@ -291,7 +324,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     if (!await guardUnverifiedLimit(
       context,
       amount: (double.tryParse(_budgetCtrl.text.trim()) ?? 0) * _workerSlots,
-      currencyCode: context.read<CurrentUserProvider>().currencyCode,
+      currencyCode: _gigCurrency,
       action: LimitAction.post,
     )) {
       return;
@@ -339,7 +372,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     }
 
     // Fallback if gig-location geocoding fails during submit.
-    final fallbackCurrency = context.read<CurrentUserProvider>().currencyCode;
+    final fallbackCurrency = _gigCurrency;
 
     setState(() => _posting = true);
     try {
@@ -522,7 +555,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       return;
     }
     // Capture before async gap.
-    final currency = context.read<CurrentUserProvider>().currencyCode;
+    final currency = _gigCurrency;
     final name = await showDialog<String>(
       context: context,
       builder: (_) => TemplateNameDialog(initialName: title),
@@ -692,7 +725,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                       return null;
                     },
                     prefix: Text(
-                      '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
+                      '${CurrencyFormatter.symbol(_watchGigCurrency())} ',
                       style: const TextStyle(
                         color: kAmber,
                         fontSize: 15,
@@ -1216,7 +1249,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     final cardColor = Theme.of(context).cardColor;
     final borderColor = Theme.of(context).dividerColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final currencyCode = context.read<CurrentUserProvider>().currencyCode;
+    final currencyCode = _gigCurrency;
     final rate = double.tryParse(_budgetCtrl.text.trim()) ?? 0;
 
     return Container(

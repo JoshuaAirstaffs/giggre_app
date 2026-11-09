@@ -1618,6 +1618,9 @@ class _GiggreMenuRow extends StatelessWidget {
 //  Testimonial Carousel  (images from Firestore)
 // ─────────────────────────────────────────────
 class _CarouselItem {
+  /// Firestore doc id: how the last slide shown is remembered, so reordering
+  /// or adding slides in giggre-admin doesn't move people to another one.
+  final String id;
   final String picture;
   final int sortNumber;
 
@@ -1631,6 +1634,7 @@ class _CarouselItem {
   final List<String> countries;
 
   const _CarouselItem({
+    required this.id,
     required this.picture,
     required this.sortNumber,
     this.video = '',
@@ -1648,9 +1652,10 @@ class _CarouselItem {
       countries.isEmpty ||
       countries.contains((countryCode ?? defaultCountry).toUpperCase());
 
-  factory _CarouselItem.fromMap(Map<String, dynamic> data) {
+  factory _CarouselItem.fromMap(String id, Map<String, dynamic> data) {
     final rawCountries = data['countries'];
     return _CarouselItem(
+      id: id,
       picture: data['picture'] as String? ?? '',
       sortNumber: (data['sortNumber'] as num?)?.toInt() ?? 0,
       video: data['video'] as String? ?? '',
@@ -1670,6 +1675,15 @@ class _TestimonialCarousel extends StatefulWidget {
 
 class _TestimonialCarouselState extends State<_TestimonialCarousel>
     with RouteAware {
+  // The last slide shown, so Home reopens on it: kept in memory for screens
+  // that rebuild Home (switching roles) and saved for the next app launch.
+  static const _lastSlideKey = 'home_carousel_last_slide';
+  static String? _lastSlideId;
+  static bool _lastSlideLoaded = false;
+  // Set on the carousel's first build, once the slides for this country
+  // are known: where it opens.
+  int? _initialPage;
+
   int _current = 0;
   // Another screen is on top of Home — the carousel stays mounted under it,
   // so videos must stop and auto-slide must not land on (and start) one.
@@ -1753,9 +1767,33 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
     return replay;
   }
 
+  static Future<void> _loadLastSlide() async {
+    if (_lastSlideLoaded) return;
+    _lastSlideLoaded = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _lastSlideId ??= prefs.getString(_lastSlideKey);
+    } catch (e) {
+      debugPrint('[Carousel] last slide: $e');
+    }
+  }
+
+  void _rememberSlide(_CarouselItem slide) {
+    if (_lastSlideId == slide.id) return;
+    _lastSlideId = slide.id;
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setString(_lastSlideKey, slide.id))
+        .catchError((Object e) {
+          debugPrint('[Carousel] save last slide: $e');
+          return false;
+        });
+  }
+
   Future<void> _fetchSlides() async {
     // Before any slide can play, so a first play is never mistaken
     await _playedVideos.load();
+    // Before the slides show, so the carousel opens on the right one
+    await _loadLastSlide();
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('app_content')
@@ -1765,7 +1803,7 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
 
       final items =
           snapshot.docs
-              .map((doc) => _CarouselItem.fromMap(doc.data()))
+              .map((doc) => _CarouselItem.fromMap(doc.id, doc.data()))
               // A slide shows with an image, a video, or both
               .where(
                 (item) =>
@@ -1815,6 +1853,14 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
 
     if (slides.isEmpty) return const SizedBox.shrink();
 
+    // First build with slides: open on the last one shown (if it still
+    // exists for this country), else the first.
+    if (_initialPage == null) {
+      final saved = slides.indexWhere((s) => s.id == _lastSlideId);
+      _initialPage = saved < 0 ? 0 : saved;
+      _current = _initialPage!;
+    }
+
     final current = _current.clamp(0, slides.length - 1);
     // A lone slide stays put — no auto-advance, looping, swipe or dots.
     final hasMultiple = slides.length > 1;
@@ -1838,6 +1884,7 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
               itemCount: slides.length,
               options: CarouselOptions(
                 viewportFraction: 1.0,
+                initialPage: _initialPage!,
                 padEnds: false,
                 enlargeCenterPage: false,
                 autoPlay:
@@ -1849,10 +1896,13 @@ class _TestimonialCarouselState extends State<_TestimonialCarousel>
                 autoPlayInterval: const Duration(seconds: 5),
                 autoPlayAnimationDuration: const Duration(milliseconds: 600),
                 autoPlayCurve: Curves.easeInOut,
-                onPageChanged: (index, _) => setState(() {
-                  _current = index;
-                  _advancedFrom = null;
-                }),
+                onPageChanged: (index, _) {
+                  setState(() {
+                    _current = index;
+                    _advancedFrom = null;
+                  });
+                  _rememberSlide(slides[index]);
+                },
               ),
               itemBuilder: (context, index, _) {
                 final slide = slides[index];

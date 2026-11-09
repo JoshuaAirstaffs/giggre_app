@@ -94,6 +94,36 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   String? _locationError;
   bool _useMapLocation = false;
 
+  // Currency of the gig's location, so the ₱/$ shown while filling the form
+  // matches what the gig is saved with. Looked up per source (GPS / map pin);
+  // until a lookup lands, the host's profile currency is shown.
+  String? _gpsCurrency;
+  String? _mapCurrency;
+  int _mapCurrencyLookup = 0;
+
+  String get _gigCurrency =>
+      (_useMapLocation ? _mapCurrency : _gpsCurrency) ??
+      context.read<CurrentUserProvider>().currencyCode;
+
+  // For build(): rebuilds when the profile currency (the fallback) changes.
+  String _watchGigCurrency() {
+    context.watch<CurrentUserProvider>();
+    return _gigCurrency;
+  }
+
+  Future<void> _lookupGpsCurrency(double lat, double lng) async {
+    final country = await countryCodeFromCoordinates(lat, lng);
+    if (!mounted || country == null) return;
+    setState(() => _gpsCurrency = CurrencyFormatter.countryToCurrency(country));
+  }
+
+  Future<void> _lookupMapCurrency(double lat, double lng) async {
+    final lookup = ++_mapCurrencyLookup;
+    final country = await countryCodeFromCoordinates(lat, lng);
+    if (!mounted || lookup != _mapCurrencyLookup || country == null) return;
+    setState(() => _mapCurrency = CurrencyFormatter.countryToCurrency(country));
+  }
+
   bool _posting = false;
   final _errorPlayer = AudioPlayer();
 
@@ -192,6 +222,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         _gpsPosition = pos;
         _loadingLocation = false;
       });
+      _lookupGpsCurrency(pos.latitude, pos.longitude);
 
       // Reverse geocode via Nominatim (works on web + mobile)
       try {
@@ -302,7 +333,9 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         _address = result.address;
         _useMapLocation = true;
         _locationError = null;
+        _mapCurrency = null;
       });
+      _lookupMapCurrency(result.position.latitude, result.position.longitude);
     }
   }
 
@@ -312,7 +345,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     if (!await guardUnverifiedLimit(
       context,
       amount: (double.tryParse(_budgetCtrl.text.trim()) ?? 0) * _workerSlots,
-      currencyCode: context.read<CurrentUserProvider>().currencyCode,
+      currencyCode: _gigCurrency,
       action: LimitAction.post,
     )) {
       return;
@@ -365,7 +398,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     }
 
     // Fallback if gig-location geocoding fails during submit.
-    final fallbackCurrency = context.read<CurrentUserProvider>().currencyCode;
+    final fallbackCurrency = _gigCurrency;
 
     setState(() => _posting = true);
     try {
@@ -554,7 +587,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       return;
     }
     // Capture before async gap.
-    final currency = context.read<CurrentUserProvider>().currencyCode;
+    final currency = _gigCurrency;
     final name = await showDialog<String>(
       context: context,
       builder: (_) => TemplateNameDialog(initialName: title),
@@ -755,7 +788,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                       return null;
                     },
                     prefix: Text(
-                      '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
+                      '${CurrencyFormatter.symbol(_watchGigCurrency())} ',
                       style: const TextStyle(
                         color: kBlue,
                         fontSize: 15,
@@ -1047,7 +1080,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     final cardColor = Theme.of(context).cardColor;
     final borderColor = Theme.of(context).dividerColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final currencyCode = context.read<CurrentUserProvider>().currencyCode;
+    final currencyCode = _gigCurrency;
     final rate = double.tryParse(_budgetCtrl.text.trim()) ?? 0;
 
     return Container(
