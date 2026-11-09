@@ -31,6 +31,7 @@ import '../../tutorial/widgets/tutorial_anchor.dart';
 import '../models/gig_template_model.dart';
 import '../models/open_gig_model.dart';
 import 'widgets/template_name_dialog.dart';
+import 'widgets/task_type_picker.dart';
 import 'widgets/skill_picker_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,6 +72,8 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   // Skills (loaded from Firestore /skills)
   List<Map<String, dynamic>> _skills = [];
   String? _selectedSkill;
+  // GSIN task type (admin catalog) — gives the gig its GSINS/GSKU codes.
+  String? _taskTypeId;
 
   // Experience level
   String _experienceLevel = 'entry';
@@ -433,7 +436,10 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         ratePerSlot: budget,
       );
 
-      await FirebaseFirestore.instance.collection('open_gigs').add(gig.toMap());
+      await FirebaseFirestore.instance.collection('open_gigs').add({
+        ...gig.toMap(),
+        if (_taskTypeId != null) 'taskTypeId': _taskTypeId,
+      });
 
       if (!mounted) return;
       setState(() => _posting = false);
@@ -691,6 +697,13 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                   child: _buildSkillDropdown(),
                 ),
                 const SizedBox(height: 20),
+
+                // ── Task type (GSIN) — hidden until the admin sets up task types ──
+                TaskTypeField(
+                  value: _taskTypeId,
+                  skill: _selectedSkill,
+                  onChanged: (v) => setState(() => _taskTypeId = v),
+                ),
 
                 // ── Experience Level ──────────────────────────────
                 _SectionLabel('Experience Level'),

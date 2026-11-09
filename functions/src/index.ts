@@ -1517,3 +1517,8 @@ export { refreshFxRates, adminRefreshFxRates } from "./fx";
 export { adminUnverifiedUsage } from "./unverifiedLimits";
 // Pre-sign-in lookups (users/{uid} is no longer publicly readable).
 export { checkAccountExists, lookupReferralCode } from "./publicLookups";
+// GSIN Library: GSINS / GSKU codes for gigs (admin-only identifiers).
+export {
+  onQuickGigAssignGsku, onOpenGigAssignGsku, onOfferedGigAssignGsku,
+  adminCreateGsinTaskType, adminAssignGigTaskType, adminBackfillGigCodes,
+} from "./gsin";

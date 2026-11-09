@@ -31,6 +31,7 @@ import '../models/gig_template_model.dart';
 import '../models/quick_gig_model.dart';
 import '../services/quick_gig_matching_service.dart';
 import 'widgets/template_name_dialog.dart';
+import 'widgets/task_type_picker.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Post Quick Gig Screen
@@ -75,6 +76,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   bool _loadingLocation = false;
   String? _locationError;
   bool _useMapLocation = false;
+
+  // GSIN task type (admin catalog) — gives the gig its GSINS/GSKU codes.
+  String? _taskTypeId;
 
   bool _posting = false;
   final _errorPlayer = AudioPlayer();
@@ -409,7 +413,10 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 
       final docRef = await FirebaseFirestore.instance
           .collection('quick_gigs')
-          .add(gig.toMap());
+          .add({
+            ...gig.toMap(),
+            if (_taskTypeId != null) 'taskTypeId': _taskTypeId,
+          });
 
       // Start smart dispatch in background (do not await)
       QuickGigMatchingService.startAutoSearch(
@@ -624,6 +631,12 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
+
+                // ── Task type (GSIN) — hidden until the admin sets up task types ──
+                TaskTypeField(
+                  value: _taskTypeId,
+                  onChanged: (v) => setState(() => _taskTypeId = v),
+                ),
 
                 // ── Description ───────────────────────────────────
                 _SectionLabel('Description'),
