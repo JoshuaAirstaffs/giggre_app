@@ -423,10 +423,13 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
           ? GeoPoint(_mapPosition!.latitude, _mapPosition!.longitude)
           : GeoPoint(_gpsPosition!.latitude, _gpsPosition!.longitude);
 
-      final gigCountry = await countryCodeFromCoordinates(
+      // One lookup gives both the currency's country and the place parts
+      // workers can search by (country, region, city, ZIP).
+      final place = await placeFromCoordinates(
         geoPoint.latitude,
         geoPoint.longitude,
       );
+      final gigCountry = place?.countryCode;
       final currency = gigCountry != null
           ? CurrencyFormatter.countryToCurrency(gigCountry)
           : fallbackCurrency;
@@ -472,6 +475,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       await FirebaseFirestore.instance.collection('open_gigs').add({
         ...gig.toMap(),
         if (_taskTypeId != null) 'taskTypeId': _taskTypeId,
+        if (place != null && place.parts.isNotEmpty) 'place': place.parts,
       });
 
       if (!mounted) return;

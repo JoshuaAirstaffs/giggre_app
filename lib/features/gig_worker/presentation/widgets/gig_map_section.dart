@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:giggre_app/core/services/unverified_limit.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -24,6 +25,7 @@ import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/distance_units.dart';
+import '../../../../helpers/snackbar_helper.dart';
 import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/worker_active_gig.dart';
 import '../../../gig_shared/user_profile_screen.dart';
@@ -90,7 +92,12 @@ class GigMarkerData {
     this.applicantCount = 0,
     this.workerSlots = 1,
     this.filledSlotCount = 0,
+    this.place = const {},
   });
+
+  // Country, region, state/province, city, ZIP saved when the gig was
+  // posted (empty on older gigs). Used by the list search.
+  final Map<String, String> place;
 
   bool get isMultiWorker => workerSlots > 1;
   int get openSlots => (workerSlots - filledSlotCount).clamp(0, workerSlots);
@@ -253,7 +260,30 @@ GigMarkerData? gigMarkerFromDoc(
     applicantCount: type == 'open' ? applicants.length : 0,
     workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
     filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
+    place: {
+      for (final MapEntry(:key, :value)
+          in ((data['place'] as Map?) ?? const {}).entries)
+        if (key is String && value is String) key: value,
+    },
   );
+}
+
+// Lowercase words of [text]; punctuation (commas, dashes) splits words.
+List<String> _searchWords(String text) => text
+    .toLowerCase()
+    .split(RegExp(r'[^\p{L}\p{N}]+', unicode: true))
+    .where((w) => w.isNotEmpty)
+    .toList();
+
+// True when every word typed starts a word somewhere in the gig's title,
+// host name, address or place (country, region, province, city, ZIP), in
+// any order: "makati 1226", "1226 makati" and "metro manila ph" all match.
+bool gigMatchesSearch(GigMarkerData g, List<String> queryWords) {
+  if (queryWords.isEmpty) return true;
+  final words = _searchWords(
+    [g.title, g.hostName, g.address, ...g.place.values].join(' '),
+  );
+  return queryWords.every((q) => words.any((w) => w.startsWith(q)));
 }
 
 const _kSharedMarkerSheetRouteName = 'gig_marker_sheet';
@@ -1688,7 +1718,11 @@ class _GigMapSectionState extends State<GigMapSection> {
   bool _isResolvingCountries = false;
 
   // ── Filters ──────────────────────────────────────────────────────────────
-  // Defaults: match the worker's own skills, within 10km.
+  // Defaults (see _applyDefaultFilters): a worker with no skills yet sees
+  // every gig at any distance; once they have skills, gigs matching them
+  // within the smallest distance that reaches the nearest gig needing one
+  // of their skills (No limit when there's none). A filter they saved
+  // themselves always wins.
   _SkillFilter _skillFilter = _SkillFilter.mySkills;
   String? _specificSkill;
   // null = no radius limit. Always km internally; chips show the region's
@@ -1698,6 +1732,12 @@ class _GigMapSectionState extends State<GigMapSection> {
   // Set by _allGigs when nothing is inside the radius and it fell back to
   // the nearest gigs beyond it (null = not falling back).
   double? _nearestFallbackM;
+  // Set by _allGigs when "My skills" matched nothing and it fell back to
+  // every gig (so a worker with skills never lands on an empty screen).
+  bool _noSkillMatches = false;
+  // True until saved filters load or the worker changes one; while true the
+  // defaults follow their skills (which can arrive after this screen opens).
+  bool _usingDefaultFilters = true;
   List<String> _allSkillNames = [];
   // Date-only (time ignored) — null = no schedule filter. A gig with no
   // scheduledDate at all never matches once this is set (treated as stale
@@ -1717,6 +1757,184 @@ class _GigMapSectionState extends State<GigMapSection> {
   String _searchQuery = '';
   static const int _kListPageSize = 10;
   int _visibleListCount = _kListPageSize;
+
+  // ── Saved filters ───────────────────────────────────────────────────────
+  // The worker's filter choices (skills, distance, date, pay type, pin
+  // display) are saved on their account (users/{uid}.gigFilters) when the
+  // filter sheet closes, so the app and the website share them. A copy on
+  // this phone shows them instantly while the account copy loads; the
+  // account copy wins. Same keys as the website's Browse page.
+  //
+  // PAUSED (2026-11-09): filters aren't saved to the account or phone for
+  // now, so every app start uses the dynamic defaults (_applyDefaultFilters).
+  // A choice still holds for the rest of the session (_savedFiltersCache).
+  // Existing users/{uid}.gigFilters data is left in place; flip this back to
+  // true to resume saving and loading it.
+  static const bool _kPersistFilters = false;
+  static final Map<String, Map<String, dynamic>> _savedFiltersCache = {};
+  String get _filtersPrefKey => 'gig_filters_${widget.uid}';
+
+  Map<String, dynamic> _filtersToJson() => {
+    'skill': _skillFilter.name,
+    'specificSkill': _specificSkill,
+    'radiusKm': _radiusKm,
+    'radiusSet': true, // distinguishes "No limit" (null) from not saved
+    'scheduleDate': _scheduleDateFilter == null
+        ? null
+        : DateFormat('yyyy-MM-dd').format(_scheduleDateFilter!),
+    'payType': _payTypeFilter.name,
+    'pinDisplay': _pinDisplayMode.name,
+  };
+
+  void _applyDefaultFilters() {
+    final hasSkills = widget.workerSkills.isNotEmpty;
+    _skillFilter = hasSkills ? _SkillFilter.mySkills : _SkillFilter.all;
+    _specificSkill = null;
+    _radiusKm = hasSkills ? _nearestSkillGigRadius() : null;
+  }
+
+  // Smallest distance option (1, 5, 10, 50, 100 km, or miles for US) that
+  // reaches the nearest open gig needing one of the worker's skills — a gig
+  // 4km away gives 5km. Null (No limit) when there's no such gig, it's further than
+  // 100km, or the worker's location isn't known yet.
+  double? _nearestSkillGigRadius() {
+    final me = _myLocation;
+    if (me == null) return null;
+    double? nearestKm;
+    for (final g in _unfilteredGigs) {
+      final needsMySkill = g.requiredSkills.any(
+        (s) => widget.workerSkills.any((ws) => _matchesSkill(ws, s)),
+      );
+      if (!needsMySkill) continue;
+      final km =
+          Geolocator.distanceBetween(
+            me.latitude,
+            me.longitude,
+            g.position.latitude,
+            g.position.longitude,
+          ) /
+          1000;
+      if (nearestKm == null || km < nearestKm) nearestKm = km;
+    }
+    if (nearestKm == null) return null;
+    // Options are in the shown unit (miles for US); _radiusKm is km.
+    for (final r in _radiusOptions) {
+      if (r == null) continue;
+      final km = DistanceUnits.toKm(r);
+      if (nearestKm <= km) return km;
+    }
+    return null;
+  }
+
+  void _applyFilters(Map<String, dynamic> j) {
+    _usingDefaultFilters = false;
+    // A saved distance is the worker's choice; region changes keep it.
+    if (j['radiusSet'] == true) _radiusTouched = true;
+    T byName<T extends Enum>(List<T> values, Object? name, T fallback) =>
+        values.firstWhere((v) => v.name == name, orElse: () => fallback);
+    _skillFilter = byName(_SkillFilter.values, j['skill'], _skillFilter);
+    _specificSkill = j['specificSkill'] as String?;
+    if (_skillFilter == _SkillFilter.specific && _specificSkill == null) {
+      _skillFilter = widget.workerSkills.isNotEmpty
+          ? _SkillFilter.mySkills
+          : _SkillFilter.all;
+    }
+    if (j['radiusSet'] == true) {
+      _radiusKm = (j['radiusKm'] as num?)?.toDouble();
+    }
+    // A date that has already passed would hide every gig, so it's dropped.
+    final date = DateTime.tryParse(j['scheduleDate'] as String? ?? '');
+    final now = DateTime.now();
+    _scheduleDateFilter =
+        date != null &&
+            !DateTime(
+              date.year,
+              date.month,
+              date.day,
+            ).isBefore(DateTime(now.year, now.month, now.day))
+        ? date
+        : null;
+    _payTypeFilter = byName(_PayTypeFilter.values, j['payType'], _payTypeFilter);
+    _pinDisplayMode = byName(
+      _PinDisplayMode.values,
+      j['pinDisplay'],
+      _pinDisplayMode,
+    );
+  }
+
+  // Uids whose account copy was already read this session.
+  static final Set<String> _accountFiltersLoaded = {};
+
+  Future<void> _loadSavedFilters() async {
+    final uid = widget.uid;
+    if (uid.isEmpty) return;
+    final cached = _savedFiltersCache[uid];
+    if (cached != null) {
+      _applyFilters(cached);
+    } else if (_kPersistFilters) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final raw = prefs.getString(_filtersPrefKey);
+        if (raw != null && mounted) {
+          final j = jsonDecode(raw) as Map<String, dynamic>;
+          _savedFiltersCache[uid] = j;
+          setState(() => _applyFilters(j));
+        }
+      } catch (e) {
+        debugPrint('[GigMap] saved filters (phone): $e');
+      }
+    }
+    if (!_kPersistFilters || _accountFiltersLoaded.contains(uid)) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      _accountFiltersLoaded.add(uid);
+      final remote = snap.data()?['gigFilters'];
+      if (remote is! Map || !mounted) return;
+      final j = Map<String, dynamic>.from(remote);
+      _savedFiltersCache[uid] = j;
+      setState(() => _applyFilters(j));
+      _storeFiltersOnPhone(j);
+    } catch (e) {
+      debugPrint('[GigMap] saved filters (account): $e');
+    }
+  }
+
+  void _storeFiltersOnPhone(Map<String, dynamic> j) {
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setString(_filtersPrefKey, jsonEncode(j)))
+        .catchError((_) => false);
+  }
+
+  // Filters as they were when the sheet opened; closing it unchanged saves
+  // nothing, so untouched defaults keep following the worker's skills.
+  String? _filtersAtSheetOpen;
+
+  void _saveFilters() {
+    final uid = widget.uid;
+    if (uid.isEmpty) return;
+    final j = _filtersToJson();
+    final opened = _filtersAtSheetOpen;
+    _filtersAtSheetOpen = null;
+    if (opened != null && opened == jsonEncode(j)) return;
+    _usingDefaultFilters = false;
+    final before = _savedFiltersCache[uid];
+    _savedFiltersCache[uid] = j;
+    // Only write when something changed: every write to the user doc also
+    // wakes its Cloud Function triggers.
+    if (!_kPersistFilters) return;
+    if (before != null && jsonEncode(before) == jsonEncode(j)) return;
+    _storeFiltersOnPhone(j);
+    // Tells the worker their choice sticks for next time.
+    if (mounted) SnackbarHelper.showSuccess(context, 'Filters saved');
+    FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .update({'gigFilters': j})
+        .catchError((Object e) => debugPrint('[GigMap] save filters: $e'));
+  }
 
   Future<void> _loadSavedViewMode() async {
     try {
@@ -1983,6 +2201,8 @@ class _GigMapSectionState extends State<GigMapSection> {
     if (DistanceUnits.miles) _radiusKm = DistanceUnits.toKm(10);
     _loadBaseIcons();
     _fetchAllSkills();
+    _applyDefaultFilters();
+    _loadSavedFilters();
     if (!widget.fullScreen) _loadSavedViewMode();
     final db = FirebaseFirestore.instance;
     _startOpenSub(db);
@@ -2019,7 +2239,9 @@ class _GigMapSectionState extends State<GigMapSection> {
   void _onRegionChanged() {
     if (!mounted) return;
     setState(() {
-      if (!_radiusTouched) _radiusKm = DistanceUnits.toKm(10);
+      if (!_radiusTouched && !_usingDefaultFilters) {
+        _radiusKm = DistanceUnits.toKm(10);
+      }
     });
   }
 
@@ -2050,6 +2272,65 @@ class _GigMapSectionState extends State<GigMapSection> {
         ),
       );
     }
+  }
+
+  // The fallback notes above the map/list: "no gigs need your skills" and
+  // "nothing within your distance". Empty when neither applies.
+  // [overMap]: drawn on top of the full-screen map, where plain text would be
+  // unreadable, so the skills note keeps its card there.
+  Widget _buildFallbackBanners({bool showButton = true, bool overMap = false}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_noSkillMatches)
+          overMap ? _buildNoSkillMatchesBanner() : _buildNoSkillMatchesNote(),
+        if (_nearestFallbackM != null)
+          _buildNearestFallbackBanner(showButton: showButton),
+      ],
+    );
+  }
+
+  static const _noSkillMatchesText =
+      'No gigs for your skills yet. Add more in your Toolchest.';
+
+  Widget _buildNoSkillMatchesNote() {
+    return const Padding(
+      padding: EdgeInsets.only(bottom: 10),
+      child: Text(
+        _noSkillMatchesText,
+        textAlign: TextAlign.center,
+        style: TextStyle(color: kSub, fontSize: 12, height: 1.35),
+      ),
+    );
+  }
+
+  Widget _buildNoSkillMatchesBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kAmber.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.work_outline_rounded, color: kAmber, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _noSkillMatchesText,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 12,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildNearestFallbackBanner({bool showButton = true}) {
@@ -2309,6 +2590,12 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   void didUpdateWidget(GigMapSection old) {
     super.didUpdateWidget(old);
+    // Skills load after this screen opens, and a worker can add their
+    // first skill later: keep untouched defaults in step with them.
+    if (_usingDefaultFilters &&
+        old.workerSkills.isEmpty != widget.workerSkills.isEmpty) {
+      _applyDefaultFilters();
+    }
   }
 
   void _startOpenSub(FirebaseFirestore db) {
@@ -2804,8 +3091,14 @@ class _GigMapSectionState extends State<GigMapSection> {
   bool _matchesSkill(String skill, String other) =>
       skill.toLowerCase().trim() == other.toLowerCase().trim();
 
-  List<GigMarkerData> get _allGigs {
-    var gigs = _unfilteredGigs;
+  List<GigMarkerData> get _allGigs => _filteredGigs();
+
+  // [applyRadius] false: a typed search looks past the distance limit, so
+  // searching another city or ZIP finds its gigs.
+  List<GigMarkerData> _filteredGigs({bool applyRadius = true}) {
+    final unfiltered = _unfilteredGigs;
+    var gigs = unfiltered;
+    _noSkillMatches = false;
 
     switch (_skillFilter) {
       case _SkillFilter.all:
@@ -2821,6 +3114,11 @@ class _GigMapSectionState extends State<GigMapSection> {
                   ),
             )
             .toList();
+        // No gig needs their skills → show every gig, with a note.
+        if (gigs.isEmpty && unfiltered.isNotEmpty) {
+          gigs = unfiltered;
+          _noSkillMatches = true;
+        }
       case _SkillFilter.specific:
         final skill = _specificSkill;
         if (skill != null) {
@@ -2856,6 +3154,7 @@ class _GigMapSectionState extends State<GigMapSection> {
 
     // Distance last, so that when nothing is inside the worker's radius we
     // can fall back to the nearest gigs that match every other filter.
+    if (!applyRadius) return gigs;
     _nearestFallbackM = null;
     final radiusKm = _radiusKm;
     if (radiusKm != null && myLoc != null) {
@@ -3230,7 +3529,8 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   // Same fullscreen map the "expand" button opens.
   void _openFullScreenMap(BuildContext context) {
-    Navigator.push(
+    // Filters changed on the full-screen map carry back here.
+    Navigator.push<void>(
       context,
       MaterialPageRoute(
         fullscreenDialog: true,
@@ -3250,7 +3550,11 @@ class _GigMapSectionState extends State<GigMapSection> {
           ),
         ),
       ),
-    );
+    ).then((_) {
+      if (!mounted) return;
+      final saved = _savedFiltersCache[widget.uid];
+      if (saved != null) setState(() => _applyFilters(saved));
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -3503,7 +3807,8 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   void _showFilterSheet(BuildContext context) {
     final skills = _allSkillNames;
-    showModalBottomSheet(
+    _filtersAtSheetOpen = jsonEncode(_filtersToJson());
+    showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
@@ -3976,7 +4281,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                           ),
                         ),
                         child: const Text(
-                          'Done',
+                          'Apply',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
@@ -3991,7 +4296,7 @@ class _GigMapSectionState extends State<GigMapSection> {
           },
         );
       },
-    );
+    ).whenComplete(_saveFilters);
   }
 
   static const Color _kSegActiveBg = Color(0xFF1F4D80);
@@ -4074,6 +4379,9 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   Widget build(BuildContext context) {
     _context = context;
+    // Untouched defaults follow the live gigs, location and skills (see
+    // _nearestSkillGigRadius); every change to those rebuilds this.
+    if (_usingDefaultFilters) _applyDefaultFilters();
     if (widget.fullScreen) return _buildFullScreenLayout(context);
 
     final onSurface = Theme.of(context).colorScheme.onSurface;
@@ -4141,7 +4449,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         ),
         const SizedBox(height: 12),
         if (_viewMode == _GigViewMode.map) ...[
-          if (_nearestFallbackM != null) _buildNearestFallbackBanner(),
+          _buildFallbackBanners(),
           EntranceAnimation(
             key: const ValueKey('map-block'),
             child: _buildMapBlock(context),
@@ -4420,16 +4728,15 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   Widget _buildListMode(BuildContext context) {
     final gigs = _allGigs;
-    final query = _searchQuery.trim().toLowerCase();
-    final filtered = query.isEmpty
-        ? gigs
-        : gigs
-              .where(
-                (g) =>
-                    g.title.toLowerCase().contains(query) ||
-                    g.hostName.toLowerCase().contains(query),
-              )
-              .toList();
+    final queryWords = _searchWords(_searchQuery);
+    final searching = queryWords.isNotEmpty;
+    final filtered = searching
+        ? _filteredGigs(
+            applyRadius: false,
+          ).where((g) => gigMatchesSearch(g, queryWords)).toList()
+        : gigs;
+    final searchIgnoresRadius =
+        searching && _radiusKm != null && _myLocation != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4460,7 +4767,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                   decoration: const InputDecoration(
                     border: InputBorder.none,
                     isCollapsed: true,
-                    hintText: 'Search gigs near you',
+                    hintText: 'Search gigs, city, state or ZIP',
                     hintStyle: TextStyle(color: kSub, fontSize: 12.5),
                   ),
                 ),
@@ -4468,6 +4775,13 @@ class _GigMapSectionState extends State<GigMapSection> {
             ],
           ),
         ),
+        if (searchIgnoresRadius) ...[
+          const SizedBox(height: 6),
+          const Text(
+            'Search shows matches at any distance.',
+            style: TextStyle(fontSize: 11.5, color: kSub),
+          ),
+        ],
         const SizedBox(height: 12),
         if (_gigsStillLoading)
           Column(
@@ -4478,12 +4792,12 @@ class _GigMapSectionState extends State<GigMapSection> {
               ],
             ],
           )
-        else if (gigs.isEmpty)
+        else if (!searching && gigs.isEmpty)
           _emptyListCard('No gigs nearby right now')
         else if (filtered.isEmpty)
           _emptyListCard("No gigs match '${_searchQuery.trim()}'")
         else ...[
-          if (_nearestFallbackM != null) _buildNearestFallbackBanner(showButton: false),
+          _buildFallbackBanners(showButton: false),
           Column(
             children: [
               for (final entry
@@ -4751,13 +5065,13 @@ class _GigMapSectionState extends State<GigMapSection> {
           ),
         ),
 
-        // Nothing within the worker's distance → nearest gigs note
-        if (_nearestFallbackM != null)
+        // No gigs for their skills / nothing within their distance notes
+        if (_noSkillMatches || _nearestFallbackM != null)
           Positioned(
             top: topPad + 60,
             left: 12,
             right: 12,
-            child: _buildNearestFallbackBanner(),
+            child: _buildFallbackBanners(overMap: true),
           ),
 
         // Legend (bottom-left)
