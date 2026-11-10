@@ -333,7 +333,13 @@ service cloud.firestore {
       // before sign-in — "does this email have an account?" (Google/Apple)
       // and referral-code validation — go through the checkAccountExists /
       // lookupReferralCode callables (functions/src/publicLookups.ts).
-      allow read: if isAuth();
+      //
+      // TEMPORARY (2026-11-10): public again, because app 3.0.0 (still on
+      // users' phones) does those two lookups by reading users directly
+      // before sign-in, so `isAuth()` broke its Google/Apple sign-in and
+      // referral codes. Switch back to `allow read: if isAuth();` once most
+      // users are on 3.0.1+.
+      allow read: if true;
       // ratingWorker/ratingHost are server-only in both directions — a client
       // can neither seed them at registration nor edit them later. No app
       // version has ever written them, so this needs no rollout phasing.
