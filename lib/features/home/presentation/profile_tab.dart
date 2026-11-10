@@ -19,6 +19,7 @@ import 'package:giggre_app/features/gig_host/presentation/my_documents_screen.da
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import 'package:giggre_app/screens/referrals/my_referral_screen.dart';
 import '../../../core/providers/current_user_provider.dart';
+import '../../promos/promo_code_screen.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/profile_tab_theme.dart';
 import '../../../core/utils/currency_formatter.dart';
@@ -1133,6 +1134,19 @@ class _ProfileTabState extends State<ProfileTab> {
                         context,
                         MaterialPageRoute(
                           builder: (_) => const VideoTutorialsScreen(),
+                        ),
+                      ),
+                    ),
+                    _ActionDivider(tokens: tokens),
+                    _ActionRow(
+                      icon: Icons.local_offer_outlined,
+                      iconColor: kGold,
+                      label: 'Promo Code',
+                      tokens: tokens,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const PromoCodeScreen(),
                         ),
                       ),
                     ),

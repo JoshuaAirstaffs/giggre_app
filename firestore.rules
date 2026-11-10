@@ -289,6 +289,34 @@ service cloud.firestore {
     // client. Every change goes through postLedgerEntry() in
     // functions/src/wallet.ts (Admin SDK bypasses these rules).
     // The legacy users/{uid}.balance field is no longer used by the app.
+    // ─── Promo codes ───────────────────────────────────────────
+    // Managed by admins through callables (adminSavePromoCode…) and redeemed
+    // through redeemPromoCode (functions/src/promos.ts) — clients never write
+    // these. Codes and redemptions are admin-read only, so codes can't be
+    // listed or guessed from the app; a user reads only their own vouchers.
+    match /promo_codes/{code} {
+      allow read: if isAdmin();
+      allow write: if false;
+      match /redemptions/{uid} {
+        allow read: if isAdmin() || isUser(uid);
+        allow write: if false;
+      }
+    }
+    // Codes delivered to a user ("For you": private group sends, restricted
+    // per-user codes) and the read-only summary of listed public codes.
+    match /promo_offers/{offerId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+    match /promo_public/{code} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+    match /promo_vouchers/{voucherId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+
     match /wallets/{uid} {
       allow read: if isUser(uid) || isAdmin();
       allow write: if false;
