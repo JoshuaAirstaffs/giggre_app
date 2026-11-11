@@ -3,187 +3,29 @@ import 'package:provider/provider.dart';
 import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
-import '../../../../core/widgets/earnings_breakdown_dialog.dart';
-import '../../../../core/widgets/unverified_limit_progress.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
 
+const _kOnlineGreen = Color(0xFF2BB673);
+
 // ─────────────────────────────────────────────────────────────────────────────
-//  Three separate cards matching the dashboard redesign mockup:
-//  AvailabilityCard (rendered by the caller so it can overlap the header),
-//  EarningsSummaryCard, and WorkPreferencesCard (Quick Gigs + Auto Accept).
-//  Replaces the old _AvailabilityHeroCard / EarningsCard / TogglesCard.
+//  Worker dashboard cards:
+//  AvailabilityCard — Online (main switch) with Quick Gigs + Auto Accept under
+//    it, all in one place (rendered by the caller so it can overlap the
+//    header).
+//  EarningsHeaderLine — earnings as one line in the header.
 // ─────────────────────────────────────────────────────────────────────────────
 class AvailabilityCard extends StatelessWidget {
   final bool isOnline;
-  final ValueChanged<bool> onChanged;
-
-  const AvailabilityCard({
-    super.key,
-    required this.isOnline,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    return TutorialAnchor(
-      id: 'workerHome.activeMode',
-      child: Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Theme.of(context).dividerColor),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: isOnline ? const Color(0xFF2BB673) : kSub,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        isOnline
-                            ? "You're online · available for gigs"
-                            : "You're offline",
-                        style: TextStyle(
-                          color: onSurface,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  isOnline
-                      ? 'Hosts nearby can see and offer you gigs'
-                      : "You're hidden from hosts",
-                  style: const TextStyle(color: kSub, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Transform.scale(
-            scale: 0.75,
-            child: Switch(
-              value: isOnline,
-              onChanged: onChanged,
-              activeThumbColor: const Color(0xFF2BB673),
-            ),
-          ),
-        ],
-      ),
-      ),
-    );
-  }
-}
-
-class EarningsSummaryCard extends StatelessWidget {
-  final Map<String, double> totalByCurrency;
-  final Map<String, double> weeklyByCurrency;
-  final int completedGigs;
-
-  const EarningsSummaryCard({
-    super.key,
-    required this.totalByCurrency,
-    required this.weeklyByCurrency,
-    required this.completedGigs,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    final defaultCurrencyCode = context.watch<CurrentUserProvider>().currencyCode;
-    // Lead with whatever's in the worker's own current currency (matches the
-    // Profile tab's "Total earned" tile), falling back to the
-    // alphabetically-first one if they haven't earned in it yet.
-    final sortedCodes = totalByCurrency.keys.toList()..sort();
-    final primaryCode = totalByCurrency.containsKey(defaultCurrencyCode)
-        ? defaultCurrencyCode
-        : (sortedCodes.isNotEmpty ? sortedCodes.first : defaultCurrencyCode);
-    final primaryTotal = totalByCurrency[primaryCode] ?? 0;
-    final weeklyAmount = weeklyByCurrency[primaryCode] ?? 0;
-    final subtitle =
-        '$completedGigs gigs completed · '
-        '${CurrencyFormatter.format(weeklyAmount, primaryCode)} this week';
-    final hasOtherCurrencies = totalByCurrency.length > 1;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Theme.of(context).dividerColor),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Earned so far',
-            style: TextStyle(
-              color: kSub,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 6),
-          GestureDetector(
-            onTap: hasOtherCurrencies
-                ? () => showEarningsBreakdownDialog(context, totalByCurrency)
-                : null,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  CurrencyFormatter.format(primaryTotal, primaryCode),
-                  style: TextStyle(
-                    color: onSurface,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (hasOtherCurrencies) ...[
-                  const SizedBox(width: 5),
-                  Icon(Icons.info_outline_rounded, size: 16, color: kSub),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(subtitle, style: const TextStyle(color: kSub, fontSize: 12)),
-          // Unverified earning limit — shows only for unverified users while
-          // the admin limit is on; otherwise takes no space.
-          const UnverifiedLimitProgressCard(embedded: true),
-        ],
-      ),
-    );
-  }
-}
-
-class WorkPreferencesCard extends StatelessWidget {
+  final ValueChanged<bool> onOnlineChanged;
   final bool seekingQuickGigs;
   final ValueChanged<bool> onQuickGigsChanged;
   final bool autoAccept;
   final ValueChanged<bool> onAutoAcceptChanged;
 
-  const WorkPreferencesCard({
+  const AvailabilityCard({
     super.key,
+    required this.isOnline,
+    required this.onOnlineChanged,
     required this.seekingQuickGigs,
     required this.onQuickGigsChanged,
     required this.autoAccept,
@@ -192,50 +34,141 @@ class WorkPreferencesCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     final dividerColor = Theme.of(context).dividerColor;
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
+    return Material(
+      color: Theme.of(context).cardColor,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: dividerColor),
+        side: BorderSide(color: dividerColor),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
+          // ── Online: the main switch ─────────────────────────────
           TutorialAnchor(
-            id: 'workerHome.quickGigsToggle',
-            child: _ToggleRow(
-              label: 'Quick Gigs',
-              description: 'Get instant offers while online',
-              value: seekingQuickGigs,
-              activeColor: const Color(0xFF2BB673),
-              onChanged: onQuickGigsChanged,
+            id: 'workerHome.activeMode',
+            child: Semantics(
+              toggled: isOnline,
+              label: isOnline
+                  ? 'Online, hosts nearby can offer you gigs'
+                  : 'Offline, hidden from hosts',
+              child: InkWell(
+                onTap: () => onOnlineChanged(!isOnline),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: isOnline ? _kOnlineGreen : kSub,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isOnline ? 'Online' : 'Offline',
+                              style: TextStyle(
+                                color: onSurface,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              isOnline
+                                  ? 'Hosts nearby can offer you gigs'
+                                  : "You're hidden from hosts",
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: kSub, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      _SmallSwitch(
+                        value: isOnline,
+                        activeColor: _kOnlineGreen,
+                        onChanged: onOnlineChanged,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
           Divider(height: 1, color: dividerColor),
-          _ToggleRow(
-            label: 'Auto Accept',
-            description: 'Auto-book gigs matching your skills',
-            value: autoAccept,
-            activeColor: kGold,
-            onChanged: onAutoAcceptChanged,
+
+          // ── Options under Online ────────────────────────────────
+          // Greyed out while offline: neither does anything then (Quick Gig
+          // matching needs the worker online too).
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: TutorialAnchor(
+                    id: 'workerHome.quickGigsToggle',
+                    child: _OptionTile(
+                      label: 'Quick Gigs',
+                      description: 'Instant offers',
+                      value: seekingQuickGigs,
+                      enabled: isOnline,
+                      activeColor: _kOnlineGreen,
+                      onChanged: onQuickGigsChanged,
+                    ),
+                  ),
+                ),
+                VerticalDivider(width: 1, color: dividerColor),
+                Expanded(
+                  child: _OptionTile(
+                    label: 'Auto Accept',
+                    description: 'Auto-book matches',
+                    value: autoAccept,
+                    enabled: isOnline,
+                    activeColor: kGold,
+                    onChanged: onAutoAcceptChanged,
+                  ),
+                ),
+              ],
+            ),
           ),
+          if (!isOnline)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(14, 0, 14, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Go online to use these',
+                  style: TextStyle(color: kSub, fontSize: 11),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-class _ToggleRow extends StatelessWidget {
+class _OptionTile extends StatelessWidget {
   final String label;
   final String description;
   final bool value;
+  final bool enabled;
   final Color activeColor;
   final ValueChanged<bool> onChanged;
 
-  const _ToggleRow({
+  const _OptionTile({
     required this.label,
     required this.description,
     required this.value,
+    required this.enabled,
     required this.activeColor,
     required this.onChanged,
   });
@@ -243,40 +176,147 @@ class _ToggleRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Row(
-        children: [
-          Expanded(
+    return Semantics(
+      toggled: value,
+      enabled: enabled,
+      label: '$label, $description',
+      child: InkWell(
+        onTap: enabled ? () => onChanged(!value) : null,
+        child: Opacity(
+          opacity: enabled ? 1 : 0.45,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 6, 4, 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: onSurface,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: onSurface,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    _SmallSwitch(
+                      value: value,
+                      activeColor: activeColor,
+                      onChanged: enabled ? onChanged : null,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
                 Text(
                   description,
-                  style: const TextStyle(color: kSub, fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: kSub, fontSize: 11),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          Transform.scale(
-            scale: 0.75,
-            child: Switch(
-              value: value,
-              onChanged: onChanged,
-              activeThumbColor: activeColor,
-            ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SmallSwitch extends StatelessWidget {
+  final bool value;
+  final Color activeColor;
+  final ValueChanged<bool>? onChanged;
+
+  const _SmallSwitch({
+    required this.value,
+    required this.activeColor,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 30,
+      child: FittedBox(
+        child: Switch(
+          value: value,
+          onChanged: onChanged,
+          activeThumbColor: activeColor,
+        ),
+      ),
+    );
+  }
+}
+
+/// The worker's earnings as one line in the dashboard header:
+/// "₱12,450 earned · ₱1,200 this week".
+class EarningsHeaderLine extends StatelessWidget {
+  final Map<String, double> totalByCurrency;
+  final Map<String, double> weeklyByCurrency;
+
+  const EarningsHeaderLine({
+    super.key,
+    required this.totalByCurrency,
+    required this.weeklyByCurrency,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final defaultCurrencyCode = context
+        .watch<CurrentUserProvider>()
+        .currencyCode;
+    // Each currency shown on its own, never converted (a converted total
+    // would drift with exchange rates and not match the wallet). The
+    // worker's current currency leads, then the rest alphabetically; only
+    // currencies with money in them, so a PH-only worker never sees "+ $0".
+    // Nothing earned at all: "₱0" in their current currency.
+    List<String> amounts(Map<String, double> byCode) {
+      final codes =
+          byCode.entries.where((e) => e.value > 0).map((e) => e.key).toList()
+            ..sort((a, b) {
+              if (a == defaultCurrencyCode) return -1;
+              if (b == defaultCurrencyCode) return 1;
+              return a.compareTo(b);
+            });
+      if (codes.isEmpty) {
+        return [CurrencyFormatter.format(0, defaultCurrencyCode)];
+      }
+      return [for (final c in codes) CurrencyFormatter.format(byCode[c]!, c)];
+    }
+
+    final totals = amounts(totalByCurrency);
+    final weekly = amounts(weeklyByCurrency).join(' + ');
+
+    return Semantics(
+      label:
+          '${totals.join(' and ')} earned, '
+          '${weekly.replaceAll(' + ', ' and ')} this week',
+      child: ExcludeSemantics(
+        // Two currencies can run long on small phones: wraps to a second
+        // line rather than cutting off an amount.
+        child: Text.rich(
+          TextSpan(
+            children: [
+              for (var i = 0; i < totals.length; i++) ...[
+                if (i > 0) const TextSpan(text: ' + '),
+                TextSpan(
+                  text: totals[i],
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+              TextSpan(text: ' earned · $weekly this week'),
+            ],
           ),
-        ],
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
       ),
     );
   }

@@ -272,6 +272,7 @@ class _HostShellState extends State<HostShell>
           MaterialPageRoute(builder: (_) => const WorkerShell()),
         ),
         animationGeneration: _homeVisitGen,
+        isTabActive: _tabIndex == 0,
       ),
       HostGigsScreen(uid: uid, isTabRoot: true),
       HomeChat(showBackButton: false, visitGeneration: _chatVisitGen),
