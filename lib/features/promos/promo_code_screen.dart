@@ -7,7 +7,6 @@ import 'package:intl/intl.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../main.dart' show flavor;
-import '../tutorial_videos/tutorial_region.dart';
 
 /// Profile → Settings → Promo Code. Redeems a code made in giggre-admin →
 /// Promotions (functions/src/promos.ts → redeemPromoCode) and lists the
@@ -25,12 +24,6 @@ class _PromoCodeScreenState extends State<PromoCodeScreen> {
   String? _error;
 
   static final _region = flavor == 'prod' ? 'us-central1' : 'asia-east2';
-
-  @override
-  void initState() {
-    super.initState();
-    TutorialRegion.ensure(context); // ₱ or $ wording for listed promos
-  }
 
   @override
   void dispose() {
@@ -191,7 +184,6 @@ class _PromoCodeScreenState extends State<PromoCodeScreen> {
           ),
           const SizedBox(height: 28),
           if (uid != null) _OffersList(uid: uid, busy: _busy, onRedeem: _redeemCode),
-          _PublicPromosList(busy: _busy, onRedeem: _redeemCode),
           if (uid != null) _VoucherList(uid: uid),
         ],
       ),
@@ -287,7 +279,7 @@ class _VoucherList extends StatelessWidget {
   }
 }
 
-// ── "For you" (promo_offers) and "Available promos" (promo_public) ──────────
+// ── "For you" (promo_offers) ─────────────────────────────────────────────────
 
 Widget _promoTile(
   BuildContext context, {
@@ -387,64 +379,6 @@ class _OffersList extends StatelessWidget {
           ],
         );
       },
-    );
-  }
-}
-
-/// Public codes the admin chose to list (promo_public), for this region.
-class _PublicPromosList extends StatelessWidget {
-  final bool busy;
-  final Future<void> Function(String) onRedeem;
-  const _PublicPromosList({required this.busy, required this.onRedeem});
-
-  @override
-  Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    return ValueListenableBuilder<bool?>(
-      valueListenable: TutorialRegion.isPhilippines,
-      builder: (context, ph, _) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance.collection('promo_public').snapshots(),
-        builder: (context, snap) {
-          final now = DateTime.now();
-          final docs = [...?snap.data?.docs].where((d) {
-            final x = d.data();
-            final start = x['startsAt'];
-            final end = x['endsAt'];
-            if (start is Timestamp && start.toDate().isAfter(now)) return false;
-            if (end is Timestamp && end.toDate().isBefore(now)) return false;
-            final region = x['region'] as String? ?? 'any';
-            if (ph == true && region == 'US') return false;
-            if (ph == false && region == 'PH') return false;
-            return true;
-          }).toList();
-          if (docs.isEmpty) return const SizedBox.shrink();
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Available promos', style: TextStyle(color: onSurface, fontSize: 15, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 10),
-              for (final d in docs)
-                _promoTile(
-                  context,
-                  code: (d.data()['code'] as String?) ?? d.id,
-                  title: (d.data()['name'] as String?) ?? 'Promo',
-                  subtitle: [
-                    ((ph == true ? d.data()['rewardTextPHP'] : ph == false ? d.data()['rewardTextUSD'] : null) ??
-                            d.data()['rewardText'] ??
-                            '')
-                        .toString(),
-                    ?_until(d.data()['endsAt']),
-                  ].where((t) => t.isNotEmpty).join(' · '),
-                  icon: Icons.local_offer_rounded,
-                  color: kBlue,
-                  busy: busy,
-                  onRedeem: onRedeem,
-                ),
-              const SizedBox(height: 18),
-            ],
-          );
-        },
-      ),
     );
   }
 }
