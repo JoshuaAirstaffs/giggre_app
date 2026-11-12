@@ -58,6 +58,9 @@ class GigMarkerData {
   final String? assignedWorkerId;
   final String experienceLevel;
   final List<String> requiredSkills;
+  // The host typed the skill under "Other" — not in the skills library, so
+  // no worker has it; shown to everyone like a gig with no skill.
+  final bool customSkill;
   final String hostId;
   final bool hasApplied;
   final DateTime? scheduledDate;
@@ -85,6 +88,7 @@ class GigMarkerData {
     this.assignedWorkerId,
     this.experienceLevel = '',
     this.requiredSkills = const [],
+    this.customSkill = false,
     required this.hostId,
     this.hasApplied = false,
     this.scheduledDate,
@@ -252,6 +256,7 @@ GigMarkerData? gigMarkerFromDoc(
     assignedWorkerId: data['assignedWorkerId'] as String?,
     experienceLevel: data['experienceLevel'] as String? ?? '',
     requiredSkills: List<String>.from(data['requiredSkills'] ?? []),
+    customSkill: data['customSkill'] == true,
     hostId: data['hostId'] as String? ?? '',
     hasApplied: hasApplied,
     scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
@@ -810,7 +815,8 @@ void showFullGigDetailSheet(
       : gig.status == 'open';
 
   List<String> missingSkills() {
-    if (gig.gigType != 'open' || gig.requiredSkills.isEmpty) return [];
+    // A skill typed under "Other" isn't in anyone's profile — anyone can apply.
+    if (gig.gigType != 'open' || gig.requiredSkills.isEmpty || gig.customSkill) return [];
     return gig.requiredSkills
         .where(
           (s) => !workerSkills.any(
@@ -3108,6 +3114,7 @@ class _GigMapSectionState extends State<GigMapSection> {
             .where(
               (g) =>
                   g.requiredSkills.isEmpty ||
+                  g.customSkill ||
                   g.requiredSkills.any(
                     (s) =>
                         widget.workerSkills.any((ws) => _matchesSkill(ws, s)),

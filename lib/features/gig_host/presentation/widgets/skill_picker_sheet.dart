@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/services/content_filter_service.dart';
 
 /// A searchable, filterable skill picker shown as a modal bottom sheet.
 ///
@@ -12,6 +13,149 @@ import '../../../../core/theme/app_colors.dart';
 /// );
 /// if (picked != null) setState(() => _selectedSkill = picked);
 /// ```
+/// "Other" — the host types a skill that isn't in the list. Returns the
+/// trimmed skill name, or null if cancelled. Shared by the Open gig picker
+/// and the Offered gig dropdown.
+Future<String?> promptOtherSkill(
+  BuildContext context, {
+  String initial = '',
+  Color accentColor = Colors.blue,
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (_) => _OtherSkillDialog(initial: initial, accentColor: accentColor),
+  );
+}
+
+class _OtherSkillDialog extends StatefulWidget {
+  final String initial;
+  final Color accentColor;
+  const _OtherSkillDialog({required this.initial, required this.accentColor});
+
+  @override
+  State<_OtherSkillDialog> createState() => _OtherSkillDialogState();
+}
+
+class _OtherSkillDialogState extends State<_OtherSkillDialog> {
+  late final TextEditingController _ctrl = TextEditingController(text: widget.initial);
+  String? _error;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final v = _ctrl.text.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (v.length < 2) {
+      setState(() => _error = 'Enter the skill (at least 2 characters).');
+      return;
+    }
+    if (ContentFilterService.instance.check(v)) {
+      setState(() => _error = 'Please use a different word.');
+      return;
+    }
+    Navigator.pop(context, v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return AlertDialog(
+      backgroundColor: Theme.of(context).cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text('Other skill', style: TextStyle(color: onSurface, fontSize: 17, fontWeight: FontWeight.bold)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Not in the list? Type the skill this gig needs.',
+            style: TextStyle(color: kSub, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            maxLength: 40,
+            textCapitalization: TextCapitalization.words,
+            onSubmitted: (_) => _submit(),
+            style: TextStyle(color: onSurface, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'e.g. Aircon cleaning',
+              errorText: _error,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: widget.accentColor, width: 1.5),
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: kSub))),
+        TextButton(
+          onPressed: _submit,
+          child: Text('Use this skill', style: TextStyle(color: widget.accentColor, fontWeight: FontWeight.bold)),
+        ),
+      ],
+    );
+  }
+}
+
+/// The "Other — not listed" row at the end of the skill list.
+class _OtherSkillTile extends StatelessWidget {
+  final Color accentColor;
+  final String query;
+  final VoidCallback onTap;
+  const _OtherSkillTile({required this.accentColor, required this.query, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: accentColor.withValues(alpha: 0.45)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.edit_rounded, color: accentColor, size: 16),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    query.trim().isEmpty ? 'Other' : 'Other: "${query.trim()}"',
+                    style: TextStyle(color: onSurface, fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                  const Text('Skill not listed? Type your own', style: TextStyle(color: kSub, fontSize: 11)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: accentColor),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class SkillPickerSheet extends StatefulWidget {
   final List<Map<String, dynamic>> skills;
   final String? selectedSkill;
@@ -55,6 +199,16 @@ class _SkillPickerSheetState extends State<SkillPickerSheet> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickOther() async {
+    final typed = await promptOtherSkill(context, initial: _query.trim(), accentColor: widget.accentColor);
+    if (typed == null || !mounted) return;
+    // Same as a listed skill if it matches one (any capitalisation).
+    final match = widget.skills
+        .map((s) => s['name'] as String? ?? '')
+        .firstWhere((n) => n.toLowerCase() == typed.toLowerCase(), orElse: () => typed);
+    Navigator.pop(context, match);
   }
 
   @override
@@ -249,13 +403,30 @@ class _SkillPickerSheetState extends State<SkillPickerSheet> {
                               fontSize: 13,
                               fontWeight: FontWeight.w600),
                         ),
+                        const SizedBox(height: 16),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: _OtherSkillTile(
+                            accentColor: widget.accentColor,
+                            query: _query,
+                            onTap: _pickOther,
+                          ),
+                        ),
                       ],
                     ),
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-                    itemCount: filtered.length,
+                    itemCount: filtered.length + 1,
                     itemBuilder: (_, i) {
+                      // Last row: "Other — skill not listed".
+                      if (i == filtered.length) {
+                        return _OtherSkillTile(
+                          accentColor: widget.accentColor,
+                          query: _query,
+                          onTap: _pickOther,
+                        );
+                      }
                       final skill = filtered[i];
                       final name = skill['name'] as String? ?? '';
                       final cat = skill['category'] as String? ?? '';

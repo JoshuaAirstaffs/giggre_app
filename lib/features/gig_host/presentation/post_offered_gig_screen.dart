@@ -35,6 +35,7 @@ import '../models/offered_gig_model.dart';
 import '../models/worker_slot_model.dart';
 import 'widgets/template_name_dialog.dart';
 import 'widgets/task_type_picker.dart';
+import 'widgets/skill_picker_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Experience level options
@@ -445,7 +446,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       _showSnack('Please select at least one gig worker.');
       return;
     }
-    if (_workerSkillsXP.isEmpty && _selectedWorkers.length > 1) {
+    if (_workerSkillsXP.isEmpty && _selectedWorkers.length > 1 && !_isCustomSkill) {
       _showSnack(
         'The selected workers have no skill in common. Pick workers who share at least one skill, or offer them separately.',
         isError: true,
@@ -578,6 +579,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
             ...gig.toMap(),
             if (_taskTypeId != null) 'taskTypeId': _taskTypeId,
             if (place != null && place.parts.isNotEmpty) 'place': place.parts,
+            // Picked "Other" (not one of the workers' skills) — admins can spot these.
+            if (_isCustomSkill) 'customSkill': true,
           });
 
       if (!isSingle) {
@@ -1248,6 +1251,29 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   }
 
   // ── Skill Picker ──────────────────────────────────────────────────────────
+  static const _kOtherSkill = '__other__';
+
+  // A skill typed under "Other" (not one of the selected workers' skills).
+  bool get _isCustomSkill {
+    final s = _selectedSkill;
+    if (s == null || s.isEmpty) return false;
+    return !_workerSkillsXP.keys.any((k) => k.toLowerCase() == s.toLowerCase());
+  }
+
+  Future<void> _pickOtherSkill() async {
+    final typed = await promptOtherSkill(
+      context,
+      initial: _isCustomSkill ? (_selectedSkill ?? '') : '',
+      accentColor: _kPurple,
+    );
+    if (typed == null || !mounted) return;
+    final match = _workerSkillsXP.keys.firstWhere(
+      (k) => k.toLowerCase() == typed.toLowerCase(),
+      orElse: () => typed,
+    );
+    setState(() => _selectedSkill = match);
+  }
+
   Widget _buildSkillDropdown() {
     final cardColor = Theme.of(context).cardColor;
     final borderColor = Theme.of(context).dividerColor;
@@ -1255,8 +1281,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
     final workerSkills = _workerSkillsXP.keys.toList()..sort();
     final noWorker = _selectedWorkers.isEmpty;
-    final enabled =
-        !noWorker && !_loadingWorkerSkills && workerSkills.isNotEmpty;
+    // "Other" lets the host type a skill even when the workers have none in common.
+    final enabled = !noWorker && !_loadingWorkerSkills;
 
     String hintText;
     if (noWorker) {
@@ -1301,19 +1327,49 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
               : const Icon(Icons.keyboard_arrow_down_rounded, color: kSub),
           style: TextStyle(color: onSurface, fontSize: 14),
           items: enabled
-              ? workerSkills
-                    .map(
-                      (skill) => DropdownMenuItem(
-                        value: skill,
-                        child: Text(
-                          skill,
-                          style: TextStyle(color: onSurface, fontSize: 14),
-                        ),
+              ? [
+                  ...workerSkills.map(
+                    (skill) => DropdownMenuItem(
+                      value: skill,
+                      child: Text(
+                        skill,
+                        style: TextStyle(color: onSurface, fontSize: 14),
                       ),
-                    )
-                    .toList()
+                    ),
+                  ),
+                  // The typed "Other" skill, so the dropdown can show it.
+                  if (_isCustomSkill)
+                    DropdownMenuItem(
+                      value: _selectedSkill,
+                      child: Text(
+                        'Other: $_selectedSkill',
+                        style: TextStyle(color: onSurface, fontSize: 14),
+                      ),
+                    ),
+                  DropdownMenuItem(
+                    value: _kOtherSkill,
+                    child: Row(
+                      children: [
+                        const Icon(Icons.edit_rounded, size: 16, color: _kPurple),
+                        const SizedBox(width: 8),
+                        Text(
+                          _isCustomSkill ? 'Change other skill…' : 'Other (not listed)…',
+                          style: const TextStyle(color: _kPurple, fontSize: 14, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ]
               : null,
-          onChanged: enabled ? (v) => setState(() => _selectedSkill = v) : null,
+          onChanged: enabled
+              ? (v) {
+                  if (v == _kOtherSkill) {
+                    _pickOtherSkill();
+                  } else {
+                    setState(() => _selectedSkill = v);
+                  }
+                }
+              : null,
         ),
       ),
     );

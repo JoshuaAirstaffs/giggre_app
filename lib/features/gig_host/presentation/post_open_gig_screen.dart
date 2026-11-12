@@ -476,6 +476,8 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         ...gig.toMap(),
         if (_taskTypeId != null) 'taskTypeId': _taskTypeId,
         if (place != null && place.parts.isNotEmpty) 'place': place.parts,
+        // Picked "Other" (not in the skills library) — admins can spot these.
+        if (_isCustomSkill) 'customSkill': true,
       });
 
       if (!mounted) return;
@@ -979,6 +981,13 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     } catch (_) {}
   }
 
+  // A skill typed under "Other" (not in the skills library).
+  bool get _isCustomSkill {
+    final s = _selectedSkill;
+    if (s == null || s.isEmpty) return false;
+    return !_skills.any((k) => (k['name'] as String? ?? '').toLowerCase() == s.toLowerCase());
+  }
+
   // ── Skill Picker ──────────────────────────────────────────────────────────
   Widget _buildSkillDropdown() {
     final cardColor = Theme.of(context).cardColor;
@@ -1015,7 +1024,11 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
               child: Text(
                 _skills.isEmpty
                     ? 'Loading skills...'
-                    : _selectedSkill ?? 'Select a skill...',
+                    : _selectedSkill == null
+                        ? 'Select a skill...'
+                        : _isCustomSkill
+                            ? 'Other: $_selectedSkill'
+                            : _selectedSkill!,
                 style: TextStyle(
                   color: _selectedSkill != null ? onSurface : kSub,
                   fontSize: 14,
