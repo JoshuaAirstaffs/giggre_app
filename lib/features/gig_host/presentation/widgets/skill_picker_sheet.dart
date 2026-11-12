@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
-<<<<<<< Updated upstream
 import '../../../../core/services/content_filter_service.dart';
-=======
 import '../../../../core/widgets/skill_icon.dart';
->>>>>>> Stashed changes
 
 /// A searchable, filterable skill picker shown as a modal bottom sheet.
 ///
