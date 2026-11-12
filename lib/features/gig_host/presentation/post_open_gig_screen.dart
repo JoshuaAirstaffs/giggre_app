@@ -30,6 +30,7 @@ import '../../tutorial/flows/open_gig_flow.dart';
 import '../../tutorial/widgets/tutorial_anchor.dart';
 import '../models/gig_template_model.dart';
 import '../models/open_gig_model.dart';
+import '../edit_gig.dart';
 import 'widgets/template_name_dialog.dart';
 import 'widgets/task_type_picker.dart';
 import 'widgets/skill_picker_sheet.dart';
@@ -49,7 +50,18 @@ const _kLevels = [
 class PostOpenGigScreen extends StatefulWidget {
   final String hostName;
   final GigTemplateModel? template;
-  const PostOpenGigScreen({super.key, required this.hostName, this.template});
+  // Edit mode: the existing gig's id and its current doc data. Only opened
+  // while canEditGig('open', data) holds (see gig_detail_sheet.dart); pops
+  // with `true` once saved.
+  final String? editGigId;
+  final Map<String, dynamic>? editData;
+  const PostOpenGigScreen({
+    super.key,
+    required this.hostName,
+    this.template,
+    this.editGigId,
+    this.editData,
+  });
 
   @override
   State<PostOpenGigScreen> createState() => _PostOpenGigScreenState();
@@ -84,6 +96,10 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   // Schedule
   DateTime? _scheduledDate;
   TimeOfDay? _scheduledTime;
+  // "Flexible" — no fixed schedule, a worker can take this whenever
+  // they're available. When true, _scheduledDate/_scheduledTime are
+  // ignored entirely (see _submit) rather than required.
+  bool _anytime = false;
 
   // Location
   Position? _gpsPosition;
@@ -129,17 +145,61 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
 
   bool _tutorialAvailable = false;
 
+  bool get _isEditing => widget.editGigId != null && widget.editData != null;
+
+  // Seeds the form from the gig being edited. The saved location becomes a
+  // map pin so it's kept unless the host picks a new spot.
+  void _seedFromGig(Map<String, dynamic> d) {
+    _titleCtrl.text = d['title'] as String? ?? '';
+    _descCtrl.text = d['description'] as String? ?? '';
+    _payType = d['payType'] as String? ?? 'flat';
+    final amount = _payType == 'hourly'
+        ? (d['hourlyRate'] as num?) ?? (d['ratePerSlot'] as num?)
+        : (d['ratePerSlot'] as num?) ?? (d['budget'] as num?);
+    if (amount != null && amount > 0) _budgetCtrl.text = _fmtNum(amount);
+    final hours = d['workDurationHours'] as num?;
+    if (hours != null) _workDurationCtrl.text = _fmtNum(hours);
+    _workerSlots = ((d['workerSlots'] as num?)?.toInt() ?? 1).clamp(1, 50);
+    final skills = d['requiredSkills'] as List?;
+    if (skills != null && skills.isNotEmpty) {
+      _selectedSkill = skills.first.toString();
+    }
+    _experienceLevel = d['experienceLevel'] as String? ?? 'entry';
+    _taskTypeId = d['taskTypeId'] as String?;
+    final scheduled = (d['scheduledDate'] as Timestamp?)?.toDate();
+    if (scheduled != null) {
+      _scheduledDate = DateTime(scheduled.year, scheduled.month, scheduled.day);
+      _scheduledTime = TimeOfDay.fromDateTime(scheduled);
+    } else {
+      _anytime = true;
+    }
+    final geo = d['location'] as GeoPoint?;
+    if (geo != null) {
+      _mapPosition = LatLng(geo.latitude, geo.longitude);
+      _address = d['address'] as String? ?? '';
+      _useMapLocation = true;
+      _mapCurrency = d['currencyCode'] as String?;
+    }
+  }
+
+  static String _fmtNum(num n) =>
+      n == n.roundToDouble() ? n.toStringAsFixed(0) : n.toString();
+
   @override
   void initState() {
     super.initState();
     _fetchGpsLocation();
     _fetchSkills();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final controller = context.read<TutorialController>();
-      controller.startIfNeeded(openGigFlow);
-      final available = await controller.isAvailable(openGigFlow);
-      if (mounted) setState(() => _tutorialAvailable = available);
-    });
+    if (_isEditing) {
+      _seedFromGig(widget.editData!);
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final controller = context.read<TutorialController>();
+        controller.startIfNeeded(openGigFlow);
+        final available = await controller.isAvailable(openGigFlow);
+        if (mounted) setState(() => _tutorialAvailable = available);
+      });
+    }
     // Recompute the "Total: ..." hint under the worker-slots stepper live.
     _budgetCtrl.addListener(() {
       if (mounted && _workerSlots > 1) setState(() {});
@@ -371,15 +431,15 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       return;
     }
 
-    if (_scheduledDate == null) {
+    if (!_anytime && _scheduledDate == null) {
       _showSnack(
-        'Schedule is required. Please pick a date and time.',
+        'Schedule is required. Please pick a date and time, or choose Flexible.',
         isError: true,
       );
       return;
     }
 
-    if (_scheduledDate != null) {
+    if (!_anytime && _scheduledDate != null) {
       final t = _scheduledTime ?? const TimeOfDay(hour: 8, minute: 0);
       final scheduledCheck = DateTime(
         _scheduledDate!.year,
@@ -435,7 +495,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
           : fallbackCurrency;
 
       DateTime? scheduledAt;
-      if (_scheduledDate != null) {
+      if (!_anytime && _scheduledDate != null) {
         final t = _scheduledTime ?? const TimeOfDay(hour: 8, minute: 0);
         scheduledAt = DateTime(
           _scheduledDate!.year,
@@ -472,6 +532,45 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         ratePerSlot: budget,
       );
 
+      if (_isEditing) {
+        await saveGigEdit(
+          gigType: 'open',
+          gigId: widget.editGigId!,
+          fields: {
+            ...commonGigEditFields(
+              title: gig.title,
+              description: gig.description,
+              budget: budget,
+              currencyCode: currency,
+              payType: _payType,
+              hourlyRate: isHourly ? rate : null,
+              workDurationHours: workDurationHours,
+              location: geoPoint,
+              address: _address,
+              place: place?.parts,
+              scheduledDate: scheduledAt,
+              experienceLevel: _experienceLevel,
+            ),
+            'requiredSkills': [_selectedSkill!],
+            'workerSlots': _workerSlots,
+          },
+        );
+        if (!mounted) return;
+        setState(() => _posting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Gig updated.',
+              style: TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Colors.green[700],
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        Navigator.pop(context, true);
+        return;
+      }
+
       await FirebaseFirestore.instance.collection('open_gigs').add({
         ...gig.toMap(),
         if (_taskTypeId != null) 'taskTypeId': _taskTypeId,
@@ -483,10 +582,18 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
       if (!mounted) return;
       setState(() => _posting = false);
       _showSuccessSheet();
+    } on GigNoLongerEditable catch (e) {
+      if (!mounted) return;
+      setState(() => _posting = false);
+      _showSnack(e.message, isError: true);
     } catch (e) {
       if (!mounted) return;
       setState(() => _posting = false);
-      _showSnack('Failed to post gig. Please try again.');
+      _showSnack(
+        _isEditing
+            ? 'Failed to save changes. Please try again.'
+            : 'Failed to post gig. Please try again.',
+      );
     }
   }
 
@@ -664,7 +771,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
             ),
             const SizedBox(width: 10),
             Text(
-              'Post Open Gig',
+              _isEditing ? 'Edit Open Gig' : 'Post Open Gig',
               style: TextStyle(
                 color: onSurface,
                 fontWeight: FontWeight.bold,
@@ -737,12 +844,14 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // ── Task type (GSIN) — hidden until the admin sets up task types ──
-                TaskTypeField(
-                  value: _taskTypeId,
-                  skill: _selectedSkill,
-                  onChanged: (v) => setState(() => _taskTypeId = v),
-                ),
+                // ── Task type (GSIN) — hidden until the admin sets up task types.
+                // Not editable: the gig's GSIN codes are derived from it once.
+                if (!_isEditing)
+                  TaskTypeField(
+                    value: _taskTypeId,
+                    skill: _selectedSkill,
+                    onChanged: (v) => setState(() => _taskTypeId = v),
+                  ),
 
                 // ── Experience Level ──────────────────────────────
                 _SectionLabel('Experience Level'),
@@ -857,6 +966,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
 
                 // ── Schedule ──────────────────────────────────────
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       'Schedule',
@@ -866,6 +976,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    _buildAnytimeToggle(),
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -901,12 +1012,16 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                                 strokeWidth: 2.5,
                               ),
                             )
-                          : const Icon(
-                              Icons.workspace_premium_outlined,
+                          : Icon(
+                              _isEditing
+                                  ? Icons.check_rounded
+                                  : Icons.workspace_premium_outlined,
                               size: 18,
                             ),
                       label: Text(
-                        _posting ? 'Posting...' : 'Post Open Gig',
+                        _isEditing
+                            ? (_posting ? 'Saving...' : 'Save Changes')
+                            : (_posting ? 'Posting...' : 'Post Open Gig'),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -926,28 +1041,29 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                 ),
                 const SizedBox(height: 12),
                 // ── Save as Template ──────────────────────────────
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: OutlinedButton.icon(
-                    onPressed: _posting ? null : _saveAsTemplate,
-                    icon: const Icon(Icons.bookmark_add_outlined, size: 18),
-                    label: const Text(
-                      'Save as Template',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                if (!_isEditing)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed: _posting ? null : _saveAsTemplate,
+                      icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                      label: const Text(
+                        'Save as Template',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: kBlue,
-                      side: BorderSide(color: kBlue.withValues(alpha: 0.6)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: kBlue,
+                        side: BorderSide(color: kBlue.withValues(alpha: 0.6)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
+                        ),
                       ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 28),
               ],
             ),
@@ -1148,8 +1264,74 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     );
   }
 
+  // ── "Flexible" toggle ──────────────────────────────────────────────────────
+  Widget _buildAnytimeToggle() {
+    final borderColor = Theme.of(context).dividerColor;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    Widget chip(String label, bool selected, VoidCallback onTap) {
+      return GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected
+                ? kBlue.withValues(alpha: 0.15)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: selected ? kBlue : borderColor),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? kBlue : onSurface.withValues(alpha: 0.6),
+              fontSize: 11,
+              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        chip(
+          'Specific time',
+          !_anytime,
+          () => setState(() => _anytime = false),
+        ),
+        const SizedBox(width: 6),
+        chip('Flexible', _anytime, () => setState(() => _anytime = true)),
+      ],
+    );
+  }
+
   // ── Schedule Row ──────────────────────────────────────────────────────────────
   Widget _buildScheduleRow() {
+    if (_anytime) {
+      final onSurface = Theme.of(context).colorScheme.onSurface;
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: kBlue.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: kBlue.withValues(alpha: 0.6)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.event_available_rounded, color: kBlue, size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'No fixed schedule — a worker can take this gig whenever they\'re available.',
+                style: TextStyle(color: onSurface, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final cardColor = Theme.of(context).cardColor;
     final borderColor = Theme.of(context).dividerColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;

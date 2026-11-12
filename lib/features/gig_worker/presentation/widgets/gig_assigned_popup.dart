@@ -240,16 +240,15 @@ class GigAssignedDialog extends StatelessWidget {
             ],
 
             // ── Schedule ───────────────────────────────────────────────
-            if (gig.scheduledDate != null)
-              _InfoRow(
-                icon: Icons.calendar_today_rounded,
-                label: 'SCHEDULE',
-                value: DateFormat(
-                  'EEE, MMM d · h:mm a',
-                ).format(gig.scheduledDate!),
-                accent: green,
-                isDark: isDark,
-              ),
+            _InfoRow(
+              icon: Icons.calendar_today_rounded,
+              label: 'SCHEDULE',
+              value: gig.scheduledDate != null
+                  ? DateFormat('EEE, MMM d · h:mm a').format(gig.scheduledDate!)
+                  : 'Flexible',
+              accent: green,
+              isDark: isDark,
+            ),
             const SizedBox(height: 18),
 
             // ── Info box ───────────────────────────────────────────────

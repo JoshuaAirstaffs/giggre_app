@@ -1,3 +1,4 @@
+import '../../../core/widgets/unverified_limit_progress.dart';
 import 'dart:async';
 import 'package:giggre_app/core/services/unverified_limit.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +27,7 @@ import 'widgets/offered_gig_offer_card.dart';
 import 'widgets/gig_assigned_popup.dart'; // exports GigAssignedDialog
 import 'widgets/pending_cancellation_card.dart';
 import '../../../widgets/active_gig_bar.dart';
+import '../../../widgets/content_carousel.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main screen
@@ -45,6 +47,9 @@ class GigWorkerScreen extends StatefulWidget {
   // Bumped by WorkerShell each time this tab is switched to, so its entrance
   // animations can replay instead of only ever playing once.
   final int animationGeneration;
+  // False while another tab of the worker shell is showing (the dashboard
+  // stays mounted underneath): the carousel's videos stop.
+  final bool isTabActive;
 
   const GigWorkerScreen({
     super.key,
@@ -52,6 +57,7 @@ class GigWorkerScreen extends StatefulWidget {
     this.isTabRoot = false,
     this.onSwitchToHost,
     this.animationGeneration = 0,
+    this.isTabActive = true,
   });
 
   @override
@@ -85,7 +91,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   // Earnings grouped by currency code
   Map<String, double> _earningsByCode = {};
   Map<String, double> _weeklyByCode = {};
-  int _completedGigs = 0;
 
   // Active gigs (when working)
   GigMarkerData? _activeQuickGig;
@@ -317,8 +322,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             _weeklyByCode = rawWeekly.map(
               (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0),
             );
-            _completedGigs =
-                (earningsData['completedGigs'] as num?)?.toInt() ?? 0;
           });
 
           if (isFirstLoad) {
@@ -922,9 +925,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _acceptOfferedGig(GigMarkerData gig) async {
-    if (!await guardUnverifiedLimit(context,
-        amount: gig.budget, currencyCode: gig.currencyCode,
-        action: LimitAction.accept)) {
+    if (!await guardUnverifiedLimit(
+      context,
+      amount: gig.budget,
+      currencyCode: gig.currencyCode,
+      action: LimitAction.accept,
+    )) {
       return;
     }
     if (!mounted) return;
@@ -1166,6 +1172,26 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     if (uid == null) return;
     await FirebaseFirestore.instance.collection('users').doc(uid).update({
       field: value,
+    });
+  }
+
+  // Online is the main switch: going offline also turns Quick Gigs and Auto
+  // Accept off (they can't work while offline), saved in one write. Going
+  // online leaves them off for the worker to choose.
+  Future<void> _setOnline(bool value) async {
+    setState(() {
+      _availableForGigs = value;
+      if (!value) {
+        _seekingQuickGigs = false;
+        _autoAccept = false;
+      }
+    });
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    await FirebaseFirestore.instance.collection('users').doc(uid).update({
+      'availableForGigs': value,
+      if (!value) 'seekingQuickGigs': false,
+      if (!value) 'autoAccept': false,
     });
   }
 
@@ -1823,6 +1849,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 onTutorial: () => context
                                     .read<TutorialController>()
                                     .restart(gigWorkerHomeFlow),
+                                subtitle: EarningsHeaderLine(
+                                  totalByCurrency: _earningsByCode,
+                                  weeklyByCurrency: _weeklyByCode,
+                                ),
                               ),
                               Transform.translate(
                                 offset: const Offset(0, -24),
@@ -1835,11 +1865,17 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                       'availability-${widget.animationGeneration}',
                                     ),
                                     type: EntranceAnimationType.fadeInSlideUp,
+                                    // Online + Quick Gigs + Auto Accept in
+                                    // one card.
                                     child: AvailabilityCard(
                                       isOnline: _availableForGigs,
-                                      onChanged: (v) {
-                                        setState(() => _availableForGigs = v);
-                                        _setToggle('availableForGigs', v);
+                                      onOnlineChanged: _setOnline,
+                                      seekingQuickGigs: _seekingQuickGigs,
+                                      onQuickGigsChanged: _toggleQuickGigs,
+                                      autoAccept: _autoAccept,
+                                      onAutoAcceptChanged: (v) {
+                                        setState(() => _autoAccept = v);
+                                        _setToggle('autoAccept', v);
                                       },
                                     ),
                                   ),
@@ -1878,38 +1914,24 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 },
                               ),
 
-                              // ── Earnings ───────────────────────────────────
-                              EntranceAnimation(
-                                key: ValueKey(
-                                  'earnings-${widget.animationGeneration}',
-                                ),
-                                type: EntranceAnimationType.fadeInSlideUp,
-                                child: EarningsSummaryCard(
-                                  totalByCurrency: _earningsByCode,
-                                  weeklyByCurrency: _weeklyByCode,
-                                  completedGigs: _completedGigs,
-                                ),
+                              // ── Unverified earning limit ────────────────
+                              // Shows only for unverified users while the
+                              // admin limit is on; otherwise takes no space.
+                              const UnverifiedLimitProgressCard(
+                                bottomSpacing: 10,
                               ),
-                              const SizedBox(height: 16),
 
-                              // ── Work preferences ──────────────────────────
-                              EntranceAnimation(
-                                key: ValueKey(
-                                  'work-prefs-${widget.animationGeneration}',
-                                ),
-                                type: EntranceAnimationType.fadeInSlideUp,
-                                delay: const Duration(milliseconds: 80),
-                                child: WorkPreferencesCard(
-                                  seekingQuickGigs: _seekingQuickGigs,
-                                  onQuickGigsChanged: _toggleQuickGigs,
-                                  autoAccept: _autoAccept,
-                                  onAutoAcceptChanged: (v) {
-                                    setState(() => _autoAccept = v);
-                                    _setToggle('autoAccept', v);
-                                  },
-                                ),
+                              // ── Carousel (giggre-admin → Content
+                              // Management → Carousel → Gig Worker). Takes no
+                              // space when it has no slides or is hidden.
+                              ContentCarousel(
+                                section: ContentCarousel.workerSection,
+                                height: ContentCarousel.bannerHeight,
+                                soundOnFirstPlay: false,
+                                active: widget.isTabActive,
+                                showLoading: false,
+                                padding: const EdgeInsets.only(bottom: 16),
                               ),
-                              const SizedBox(height: 20),
 
                               // ── Gig Map ───────────────────────────────────
                               EntranceAnimation(

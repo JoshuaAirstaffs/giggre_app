@@ -193,6 +193,7 @@ class _WorkerShellState extends State<WorkerShell> {
           MaterialPageRoute(builder: (_) => const HostShell()),
         ),
         animationGeneration: _homeVisitGen,
+        isTabActive: _index == 0,
       ),
       SavedScreen(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
       HomeChat(showBackButton: false, visitGeneration: _chatVisitGen),

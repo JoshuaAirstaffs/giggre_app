@@ -1,3 +1,4 @@
+import '../../../widgets/content_carousel.dart';
 import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:cached_network_image/cached_network_image.dart';
@@ -39,12 +40,16 @@ class GigHostScreen extends StatefulWidget {
   // Bumped by HostShell each time this tab is switched to, so its entrance
   // animations can replay instead of only ever playing once.
   final int animationGeneration;
+  // False while another tab of the host shell is showing (the dashboard
+  // stays mounted underneath): the carousel's videos stop.
+  final bool isTabActive;
 
   const GigHostScreen({
     super.key,
     this.isTabRoot = false,
     this.onSwitchToWorker,
     this.animationGeneration = 0,
+    this.isTabActive = true,
   });
 
   @override
@@ -121,6 +126,18 @@ class _GigHostScreenState extends State<GigHostScreen> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
+                // ── Carousel (giggre-admin → Content Management →
+                // Carousel → Gig Host). Takes no space when it has no
+                // slides or is hidden.
+                ContentCarousel(
+                  section: ContentCarousel.hostSection,
+                  height: ContentCarousel.bannerHeight,
+                  soundOnFirstPlay: false,
+                  active: widget.isTabActive,
+                  showLoading: false,
+                  padding: const EdgeInsets.only(bottom: 16),
+                ),
+
                 // ── Workers Near You ───────────────────────────
                 EntranceAnimation(
                   type: EntranceAnimationType.fadeInSlideUp,

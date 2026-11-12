@@ -24,6 +24,7 @@ import '../../models/worker_slot_model.dart';
 import '../../services/quick_gig_matching_service.dart';
 import '../post_offered_gig_screen.dart';
 import '../post_open_gig_screen.dart';
+import '../../edit_gig.dart';
 import '../post_quick_gig_screen.dart';
 import 'host_payment_code_sheet.dart';
 import 'payment_selection_sheet.dart';
@@ -407,6 +408,31 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     } finally {
       controller.dispose();
     }
+  }
+
+  // Open/Offered gigs only, and only while nobody is committed yet (see
+  // canEditGig). Reuses the post screens in edit mode; saving re-checks the
+  // same condition in a transaction, and this sheet's live listener shows
+  // the new details.
+  void _editGig() {
+    final data = _data;
+    if (data == null || !canEditGig(widget.gigType, data)) return;
+    final hostName = data['hostName'] as String? ?? '';
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => widget.gigType == 'open'
+            ? PostOpenGigScreen(
+                hostName: hostName,
+                editGigId: widget.gigId,
+                editData: Map<String, dynamic>.from(data),
+              )
+            : PostOfferedGigScreen(
+                hostName: hostName,
+                editGigId: widget.gigId,
+                editData: Map<String, dynamic>.from(data),
+              ),
+      ),
+    );
   }
 
   // Reuses everything about a completed/cancelled/no_worker gig except its
@@ -1881,9 +1907,10 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       Expanded(
                         child: Text(
                           [
-                            if (address.isNotEmpty) dedupedAddress(address),
-                            if (scheduledDate != null)
-                              _fmtScheduledShort(scheduledDate),
+                            dedupedAddress(address),
+                            scheduledDate != null
+                                ? _fmtScheduledShort(scheduledDate)
+                                : 'Flexible',
                           ].join(' · '),
                           style: TextStyle(
                             color: activeGigTextMuted(isDark),
@@ -2207,7 +2234,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                   isDark: isDark,
                   value: scheduledDate != null
                       ? _fmtScheduleGrid(scheduledDate)
-                      : '—',
+                      : 'Flexible',
                 ),
               ),
             ],
@@ -2762,7 +2789,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                       Text(
                         scheduledDate != null
                             ? _fmtScheduleWeekday(scheduledDate)
-                            : '—',
+                            : 'Flexible',
                         style: TextStyle(
                           color: activeGigTextPrimary(isDark),
                           fontSize: 14,
@@ -2888,6 +2915,34 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               surface: 'completed_gig',
             ),
             const SizedBox(height: 16),
+          ],
+
+          // ── Edit gig (open/offered, nobody committed yet) ───────
+          if (canEditGig(widget.gigType, _data)) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: _editGig,
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: Text(
+                  widget.gigType == 'offered' ? 'Edit offer' : 'Edit gig',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: activeGigTextPrimary(isDark),
+                  backgroundColor: activeGigCardBg(isDark),
+                  side: BorderSide(color: activeGigCardBorder(isDark)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
           ],
 
           // ── Cancel gig ──────────────────────────────────────────

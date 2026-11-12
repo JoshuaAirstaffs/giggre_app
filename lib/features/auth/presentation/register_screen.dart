@@ -675,6 +675,10 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         'skills'          : [],
         'openGigsUnlocked': false,
         'signInMethod'    : widget.user != null ? 'google' : widget.pendingProvider,
+        // New workers start online (visible to hosts). Quick Gigs and Auto
+        // Accept stay off until the worker turns them on.
+        'availableForGigs': true,
+        'slot'            : 'AVAILABLE',
         'isVerified'      : 'unverified',
         'referredBy'      : referrerId,
         'referrals'       : {
@@ -1346,6 +1350,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'openGigsUnlocked': false,
         'signInMethod'    : 'email',
         'slot'            : 'AVAILABLE',
+        // New workers start online (visible to hosts). Quick Gigs and Auto
+        // Accept stay off until the worker turns them on.
+        'availableForGigs': true,
         'acceptanceRate'  : 1.0,
         'isVerified'      : 'unverified',
         'referredBy'      : referrerId,

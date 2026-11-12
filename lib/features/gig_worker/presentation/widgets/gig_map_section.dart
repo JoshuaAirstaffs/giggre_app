@@ -1114,7 +1114,7 @@ void showFullGigDetailSheet(
                       ? DateFormat(
                           'EEE, MMM d · h:mm a',
                         ).format(gig.scheduledDate!)
-                      : '—',
+                      : 'Flexible',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurface,
                     fontSize: 13,
@@ -3143,8 +3143,11 @@ class _GigMapSectionState extends State<GigMapSection> {
     if (scheduleDate != null) {
       gigs = gigs.where((g) {
         final d = g.scheduledDate;
-        return d != null &&
-            d.year == scheduleDate.year &&
+        // A "Flexible" gig (no scheduledDate — see post_open_gig_screen.dart's
+        // Anytime toggle) is available every day, so it always matches a
+        // date filter instead of being excluded.
+        if (d == null) return true;
+        return d.year == scheduleDate.year &&
             d.month == scheduleDate.month &&
             d.day == scheduleDate.day;
       }).toList();
@@ -4392,7 +4395,6 @@ class _GigMapSectionState extends State<GigMapSection> {
     if (widget.fullScreen) return _buildFullScreenLayout(context);
 
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final total = _allGigs.length;
     final offeredCount = _visibleOfferedGigs.length;
 
     return Column(
@@ -4433,22 +4435,6 @@ class _GigMapSectionState extends State<GigMapSection> {
                   ),
                 ),
               ),
-            Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0A830).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '$total ${total == 1 ? 'Gig' : 'Gigs'}',
-                style: const TextStyle(
-                  color: Color(0xFFB06E00),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
             _buildViewModeToggle(),
             const SizedBox(width: 8),
             _buildFilterButton(context, onSurface: onSurface),
@@ -5261,10 +5247,10 @@ class _GigListCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheduleText = gig.scheduledDate != null
         ? DateFormat('EEE, h:mm a').format(gig.scheduledDate!)
-        : null;
+        : 'Flexible';
     final metaParts = [
       if (gig.address.isNotEmpty) _summarizeAddress(gig.address),
-      ?scheduleText,
+      scheduleText,
       ?distanceLabel,
     ];
 

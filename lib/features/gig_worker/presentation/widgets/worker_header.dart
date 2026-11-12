@@ -16,6 +16,8 @@ class WorkerHeader extends StatelessWidget {
   final VoidCallback? onNotifications;
   final VoidCallback? onSwitchToHost;
   final VoidCallback? onTutorial;
+  // Optional line under the title (the worker's earnings)
+  final Widget? subtitle;
 
   const WorkerHeader({
     super.key,
@@ -29,6 +31,7 @@ class WorkerHeader extends StatelessWidget {
     this.onNotifications,
     this.onSwitchToHost,
     this.onTutorial,
+    this.subtitle,
   });
 
   @override
@@ -153,6 +156,7 @@ class WorkerHeader extends StatelessWidget {
                       ),
                   ],
                 ),
+                if (subtitle != null) ...[const SizedBox(height: 6), subtitle!],
               ],
             ),
           ),
