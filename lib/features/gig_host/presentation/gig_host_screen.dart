@@ -20,11 +20,14 @@ import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/map_style.dart';
 import '../../../core/widgets/entrance_animation.dart';
+import '../../../core/widgets/mode_switch.dart';
+import '../../../core/widgets/header_home_button.dart';
 import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
 import '../models/gig_template_model.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/utils/distance_units.dart';
 import '../../../core/utils/host_active_gig.dart';
 import 'widgets/notifications_sheet.dart';
 import 'widgets/gig_detail_sheet.dart';
@@ -37,6 +40,9 @@ class GigHostScreen extends StatefulWidget {
   // header's back arrow since there's no dashboard-level route to pop to.
   final bool isTabRoot;
   final VoidCallback? onSwitchToWorker;
+  // Header house button → the Home screen (Home isn't in the bottom nav, so
+  // Dashboard · My gigs · Post Gig · Chat · Profile stays even).
+  final VoidCallback? onGoHome;
 
   // Bumped by HostShell each time this tab is switched to, so its entrance
   // animations can replay instead of only ever playing once.
@@ -49,6 +55,7 @@ class GigHostScreen extends StatefulWidget {
     super.key,
     this.isTabRoot = false,
     this.onSwitchToWorker,
+    this.onGoHome,
     this.animationGeneration = 0,
     this.isTabActive = true,
   });
@@ -59,7 +66,7 @@ class GigHostScreen extends StatefulWidget {
 
 class _GigHostScreenState extends State<GigHostScreen> {
   String _userName = '';
-  final GlobalKey _workerMapKey = GlobalKey();
+  final GlobalKey<_WorkerMapSectionState> _workerMapKey = GlobalKey<_WorkerMapSectionState>();
 
   @override
   void initState() {
@@ -78,6 +85,18 @@ class _GigHostScreenState extends State<GigHostScreen> {
     setState(() {
       _userName = doc.data()?['name'] ?? '';
     });
+  }
+
+  // Dashboard "View": the list of workers in range (or the nearest ones) —
+  // same list the map's clusters open. Falls back to scrolling to the map if
+  // it isn't built yet.
+  void _showWorkersList() {
+    final map = _workerMapKey.currentState;
+    if (map != null) {
+      map.showWorkersInRangeList();
+    } else {
+      _scrollToWorkerMap();
+    }
   }
 
   void _scrollToWorkerMap() {
@@ -117,8 +136,9 @@ class _GigHostScreenState extends State<GigHostScreen> {
               uid: uid,
               showBackButton: !widget.isTabRoot,
               onTemplates: _showTemplates,
-              onViewWorkers: _scrollToWorkerMap,
+              onViewWorkers: _showWorkersList,
               onSwitchToWorker: widget.onSwitchToWorker,
+              onGoHome: widget.onGoHome,
             ),
           ),
 
@@ -212,6 +232,7 @@ class _HostHeader extends StatelessWidget {
   final VoidCallback onTemplates;
   final VoidCallback onViewWorkers;
   final VoidCallback? onSwitchToWorker;
+  final VoidCallback? onGoHome;
 
   const _HostHeader({
     required this.uid,
@@ -219,6 +240,7 @@ class _HostHeader extends StatelessWidget {
     required this.onTemplates,
     required this.onViewWorkers,
     this.onSwitchToWorker,
+    this.onGoHome,
   });
 
   @override
@@ -252,6 +274,11 @@ class _HostHeader extends StatelessWidget {
                     // ── Action row ──────────────────────────────
                     Row(
                       children: [
+                        // Home (house) — leaves for the Home screen
+                        if (onGoHome != null) ...[
+                          HeaderHomeButton(onTap: onGoHome!),
+                          const SizedBox(width: 10),
+                        ],
                         // Left: back (when pushed) + "Gig Host / Dashboard" label
                         GestureDetector(
                           onTap: showBackButton
@@ -367,26 +394,16 @@ class _HostHeader extends StatelessWidget {
                                 fixedSize: const Size(38, 38),
                               ),
                             ),
-                            if (onSwitchToWorker != null) ...[
-                              const SizedBox(width: 4),
-                              IconButton(
-                                tooltip: 'Switch to Worker Mode',
-                                icon: const Icon(Icons.sync_alt, size: 19),
-                                onPressed: onSwitchToWorker,
-                                style: IconButton.styleFrom(
-                                  foregroundColor: Colors.white,
-                                  backgroundColor: Colors.white.withValues(
-                                    alpha: 0.18,
-                                  ),
-                                  shape: const CircleBorder(),
-                                  fixedSize: const Size(38, 38),
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                       ],
                     ),
+                    // ── Worker ⇄ Host switch (both modes visible) ──
+                    if (onSwitchToWorker != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(0, 14, 12, 0),
+                        child: ModeSwitch(isHost: true, onSwitch: onSwitchToWorker!),
+                      ),
                   ],
                 ),
               ),
@@ -444,6 +461,12 @@ const _kAvatarBlue = Color(0xFF2B6FB5);
 //  reuses the same users/isOnline stream shape as _WorkerMapSection, just
 //  filtered client-side by a different flag.
 // ─────────────────────────────────────────────────────────────────────────────
+// Host dashboard "workers online" range: 10 of the region's unit (10 mi in
+// the US, 10 km elsewhere — DistanceUnits). When nobody is that close, the
+// card and the map fall back to the nearest online workers instead.
+double _workerRangeMeters() => DistanceUnits.toKm(10) * 1000;
+const int _kNearestWorkersCount = 10;
+
 class _WorkersOnlineCard extends StatefulWidget {
   final String uid;
   final VoidCallback onViewWorkers;
@@ -454,11 +477,10 @@ class _WorkersOnlineCard extends StatefulWidget {
 }
 
 class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
-  // Matches the "near you" copy to an actual distance now — same radius
-  // constant shape as _WorkerMapSection's _kMaxWorkerDistanceMeters.
-  static const double _kMaxDistanceMeters = 10000;
-
   StreamSubscription? _onlineSub;
+  // Nobody within range → distance to the nearest online worker (null when
+  // someone is in range, or the host's location isn't known yet).
+  double? _nearestM;
   LatLng? _myLocation;
   // Locations of all online + seeking-quick-gigs workers, unfiltered by
   // distance — recomputed into _onlineWorkers whenever either this or
@@ -466,10 +488,16 @@ class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
   List<GeoPoint> _seekingLocations = [];
   int _onlineWorkers = 0;
 
+  void _onRegionChanged() {
+    if (mounted) setState(_recomputeOnlineCount);
+  }
+
   @override
   void initState() {
     super.initState();
     if (widget.uid.isEmpty) return;
+    DistanceUnits.region.addListener(_onRegionChanged);
+    DistanceUnits.ensure(context);
     _fetchMyLocation();
     _onlineSub = FirebaseFirestore.instance
         .collection('users')
@@ -477,8 +505,10 @@ class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
         .snapshots()
         .listen(
           (snap) {
+            // Same workers the View list / map show: online, available for
+            // gigs, not the host themself.
             _seekingLocations = snap.docs
-                .where((d) => d.data()['seekingQuickGigs'] == true)
+                .where((d) => d.id != widget.uid && d.data()['availableForGigs'] == true)
                 .map((d) => d.data()['location'] as GeoPoint?)
                 .whereType<GeoPoint>()
                 .toList();
@@ -495,17 +525,21 @@ class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
   // resolved yet, same as _WorkerMapSection's _recomputeVisibleWorkers.
   void _recomputeOnlineCount() {
     final loc = _myLocation;
-    _onlineWorkers = loc == null
-        ? _seekingLocations.length
-        : _seekingLocations.where((geo) {
-            final distance = Geolocator.distanceBetween(
-              loc.latitude,
-              loc.longitude,
-              geo.latitude,
-              geo.longitude,
-            );
-            return distance <= _kMaxDistanceMeters;
-          }).length;
+    _nearestM = null;
+    if (loc == null) {
+      _onlineWorkers = _seekingLocations.length;
+      return;
+    }
+    final distances = _seekingLocations
+        .map((geo) => Geolocator.distanceBetween(loc.latitude, loc.longitude, geo.latitude, geo.longitude))
+        .toList()
+      ..sort();
+    final range = _workerRangeMeters();
+    _onlineWorkers = distances.where((d) => d <= range).length;
+    if (_onlineWorkers == 0 && distances.isNotEmpty) {
+      // Nobody in range — the map below shows the nearest ones instead.
+      _nearestM = distances.first;
+    }
   }
 
   Future<void> _fetchMyLocation() async {
@@ -534,6 +568,7 @@ class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
 
   @override
   void dispose() {
+    DistanceUnits.region.removeListener(_onRegionChanged);
     _onlineSub?.cancel();
     super.dispose();
   }
@@ -565,7 +600,11 @@ class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '$_onlineWorkers ${_onlineWorkers == 1 ? 'worker' : 'workers'} online near you',
+                  _nearestM != null
+                      ? 'No workers within ${DistanceUnits.formatKmRounded(DistanceUnits.toKm(10))} · nearest ${DistanceUnits.format(_nearestM!)}'
+                      : _myLocation == null
+                          ? '$_onlineWorkers ${_onlineWorkers == 1 ? 'worker' : 'workers'} online near you'
+                          : '$_onlineWorkers ${_onlineWorkers == 1 ? 'worker' : 'workers'} online within ${DistanceUnits.formatKmRounded(DistanceUnits.toKm(10))}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -575,8 +614,10 @@ class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
                   ),
                 ),
                 const SizedBox(height: 2),
-                const Text(
-                  'Ready to receive quick gig offers',
+                Text(
+                  _nearestM != null
+                      ? 'Tap View to see the nearest online workers'
+                      : 'Available for gigs · tap View to see them',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: kSub, fontSize: 10.5),
@@ -1370,7 +1411,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   bool _mapInteractive = false;
   // All online + available workers with a location, unfiltered by distance.
   List<_WorkerData> _allWorkers = [];
-  // Cached result of filtering _allWorkers to within 20km of _myLocation —
+  // Cached result of filtering _allWorkers to within range of _myLocation —
   // recomputed only when either input changes (see _recomputeVisibleWorkers),
   // NOT on every read. _buildClusters()'s nested loop indexes into this list
   // many times per build; if this were a getter re-filtering from scratch on
@@ -1397,24 +1438,73 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   // subscriptions that already live in this State.
   final ValueNotifier<int> _fullScreenTick = ValueNotifier(0);
 
-  static const double _kMaxWorkerDistanceMeters = 20000;
+  // Set when nobody is within range and _workers holds the nearest online
+  // workers instead (distance to the closest one).
+  double? _nearestFallbackM;
 
-  // Falls back to the unfiltered list while the host's own location hasn't
-  // resolved yet, so the map isn't empty just because location
-  // permission/fix is still pending.
+  // Workers within range of the host (10 mi US / 10 km elsewhere — see
+  // _workerRangeMeters). If nobody is that close, the nearest
+  // _kNearestWorkersCount online workers instead. Falls back to the
+  // unfiltered list while the host's own location hasn't resolved yet, so
+  // the map isn't empty just because location permission/fix is pending.
   void _recomputeVisibleWorkers() {
     final loc = _myLocation;
-    _workers = loc == null
-        ? _allWorkers
-        : _allWorkers.where((w) {
-            final distance = Geolocator.distanceBetween(
-              loc.latitude,
-              loc.longitude,
-              w.position.latitude,
-              w.position.longitude,
-            );
-            return distance <= _kMaxWorkerDistanceMeters;
-          }).toList();
+    final wasFallback = _nearestFallbackM != null;
+    _nearestFallbackM = null;
+    if (loc == null) {
+      _workers = _allWorkers;
+      return;
+    }
+    double dist(_WorkerData w) => Geolocator.distanceBetween(
+      loc.latitude,
+      loc.longitude,
+      w.position.latitude,
+      w.position.longitude,
+    );
+    final range = _workerRangeMeters();
+    final inRange = _allWorkers.where((w) => dist(w) <= range).toList();
+    if (inRange.isNotEmpty || _allWorkers.isEmpty) {
+      _workers = inRange;
+      return;
+    }
+    final byDistance = [..._allWorkers]..sort((a, b) => dist(a).compareTo(dist(b)));
+    _workers = byDistance.take(_kNearestWorkersCount).toList();
+    _nearestFallbackM = dist(_workers.first);
+    // First time falling back: pan out so the nearest workers are on screen.
+    if (!wasFallback) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showNearestWorkersOnMap();
+      });
+    }
+  }
+
+  void _onRegionChanged() {
+    if (!mounted) return;
+    setState(_recomputeVisibleWorkers);
+    _fullScreenTick.value++;
+  }
+
+  // Fit the host and the nearest worker on the map.
+  void _showNearestWorkersOnMap() {
+    final me = _myLocation;
+    if (me == null || _workers.isEmpty) return;
+    final w = _workers.first.position;
+    final south = me.latitude < w.latitude ? me.latitude : w.latitude;
+    final north = me.latitude < w.latitude ? w.latitude : me.latitude;
+    final west = me.longitude < w.longitude ? me.longitude : w.longitude;
+    final east = me.longitude < w.longitude ? w.longitude : me.longitude;
+    if (_useGoogleMaps) {
+      final bounds = LatLngBounds(southwest: LatLng(south, west), northeast: LatLng(north, east));
+      _googleMapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
+      _fullScreenGoogleMapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
+    } else if (_osmMapReady) {
+      _osmController.fitCamera(
+        fm.CameraFit.bounds(
+          bounds: fm.LatLngBounds(ll.LatLng(south, west), ll.LatLng(north, east)),
+          padding: const EdgeInsets.all(60),
+        ),
+      );
+    }
   }
 
   late final CurrentUserProvider _userProvider;
@@ -1433,6 +1523,8 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     // has a value already on a second+ visit within the same app process.
     // Listening picks up the first-visit case too, once it arrives.
     _userProvider.addListener(_onProviderLocationChanged);
+    DistanceUnits.region.addListener(_onRegionChanged);
+    DistanceUnits.ensure(context);
     _initMap();
     _startWorkersSub();
     _loadBlueCircleIcon();
@@ -1608,6 +1700,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   @override
   void dispose() {
     _userProvider.removeListener(_onProviderLocationChanged);
+    DistanceUnits.region.removeListener(_onRegionChanged);
     _workerSub?.cancel();
     _googleMapController?.dispose();
     _fullScreenGoogleMapController?.dispose();
@@ -2118,7 +2211,36 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     );
   }
 
-  void _showWorkerList(BuildContext context, List<_WorkerData> workers) {
+  /// Dashboard "View": workers in range, or the nearest ones, nearest first.
+  void showWorkersInRangeList() {
+    final me = _myLocation;
+    final list = [..._workers];
+    double? dist(_WorkerData w) => me == null
+        ? null
+        : Geolocator.distanceBetween(me.latitude, me.longitude, w.position.latitude, w.position.longitude);
+    if (me != null) list.sort((a, b) => dist(a)!.compareTo(dist(b)!));
+    final range = DistanceUnits.formatKmRounded(DistanceUnits.toKm(10));
+    final fallback = _nearestFallbackM != null;
+    _showWorkerList(
+      context,
+      list,
+      title: list.isEmpty
+          ? 'No workers online'
+          : fallback
+              ? 'Nearest ${list.length} online ${list.length == 1 ? 'worker' : 'workers'}'
+              : '${list.length} ${list.length == 1 ? 'worker' : 'workers'} within $range',
+      note: fallback ? 'No workers online within $range — these are the closest.' : null,
+      distanceOf: me == null ? null : (w) => DistanceUnits.format(dist(w)!),
+    );
+  }
+
+  void _showWorkerList(
+    BuildContext context,
+    List<_WorkerData> workers, {
+    String? title,
+    String? note,
+    String Function(_WorkerData)? distanceOf,
+  }) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -2168,7 +2290,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '${workers.length} Workers in this area',
+                          title ?? '${workers.length} Workers in this area',
                           style: TextStyle(
                             color: onSurface,
                             fontSize: 15,
@@ -2184,6 +2306,26 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                   ],
                 ),
               ),
+              if (note != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.near_me_rounded, color: kAmber, size: 16),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(note, style: const TextStyle(color: kSub, fontSize: 12))),
+                    ],
+                  ),
+                ),
+              if (workers.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(24, 24, 24, 12),
+                  child: Text(
+                    'No one is online for gigs right now. Post a gig and workers will see it when they come online.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: kSub, fontSize: 12.5),
+                  ),
+                ),
               const SizedBox(height: 12),
               Divider(
                 color: isDark
@@ -2211,6 +2353,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                     final w = workers[i];
                     return _ClusterWorkerTile(
                       w: w,
+                      distanceLabel: distanceOf?.call(w),
                       onOffer: () {
                         Navigator.pop(ctx);
                         Navigator.of(context).push(
@@ -2499,7 +2642,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    '${_workers.length} Online',
+                    _nearestFallbackM != null ? 'Nearest ${_workers.length}' : '${_workers.length} Online',
                     style: const TextStyle(
                       color: Color(0xFF22C55E),
                       fontSize: 11,
@@ -2512,6 +2655,36 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
           ],
         ),
         const SizedBox(height: 12),
+
+        // Nobody within range → note + the nearest online workers on the map
+        if (_nearestFallbackM != null) ...[
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: kAmber.withValues(alpha: 0.6)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.near_me_rounded, color: kAmber, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'No workers online within ${DistanceUnits.formatKmRounded(DistanceUnits.toKm(10))}. '
+                    'Showing the nearest — ${DistanceUnits.format(_nearestFallbackM!)} away.',
+                    style: TextStyle(color: onSurface, fontSize: 12, height: 1.3),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _showNearestWorkersOnMap,
+                  child: const Text('Show', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
 
         // Map
         _buildMapStack(isFullScreen: false),
@@ -2572,7 +2745,8 @@ class _StatCell extends StatelessWidget {
 class _ClusterWorkerTile extends StatefulWidget {
   final _WorkerData w;
   final VoidCallback onOffer;
-  const _ClusterWorkerTile({required this.w, required this.onOffer});
+  final String? distanceLabel; // shown when opened from the dashboard list
+  const _ClusterWorkerTile({required this.w, required this.onOffer, this.distanceLabel});
 
   @override
   State<_ClusterWorkerTile> createState() => _ClusterWorkerTileState();
@@ -2614,12 +2788,93 @@ class _ClusterWorkerTileState extends State<_ClusterWorkerTile> {
     });
   }
 
+  // Tap a worker → "Offer a gig to …?". Offers go to favorite workers, so a
+  // non-favorite is added to Favorites first (asked in the same dialog).
+  Future<void> _confirmOffer() async {
+    final w = widget.w;
+    final fav = _isFavorite;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: Theme.of(dCtx).cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        contentPadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 28,
+              backgroundColor: kBlue.withValues(alpha: 0.12),
+              backgroundImage: w.photoUrl.isNotEmpty ? CachedNetworkImageProvider(w.photoUrl) : null,
+              child: w.photoUrl.isEmpty ? const Icon(Icons.person, color: kBlue, size: 26) : null,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Offer a gig to ${w.name}?',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: onSurface, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              fav
+                  ? 'You\'ll set up the gig next, with ${w.name} already selected.'
+                  : '${w.name} isn\'t in your Favorites yet — offers go to favorite workers, so we\'ll add them first.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: kSub, fontSize: 13, height: 1.4),
+            ),
+          ],
+        ),
+        actionsAlignment: MainAxisAlignment.spaceBetween,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('Cancel', style: TextStyle(color: kSub)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kBlue,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Text(fav ? 'Offer a gig' : 'Add & offer a gig', style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    if (!fav) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'favoriteWorkerIds': FieldValue.arrayUnion([w.id]),
+        }, SetOptions(merge: true));
+        if (mounted) setState(() => _isFavorite = true);
+      } catch (e) {
+        debugPrint('[_ClusterWorkerTile] add favorite failed: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Couldn\'t add to Favorites. Please try again.')),
+          );
+        }
+        return;
+      }
+    }
+    widget.onOffer();
+  }
+
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final w = widget.w;
 
-    return Padding(
+    return InkWell(
+      onTap: _confirmOffer,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
       child: Row(
         children: [
@@ -2691,7 +2946,9 @@ class _ClusterWorkerTileState extends State<_ClusterWorkerTile> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                Row(
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  runSpacing: 2,
                   children: [
                     const Icon(
                       Icons.star_rounded,
@@ -2718,61 +2975,37 @@ class _ClusterWorkerTileState extends State<_ClusterWorkerTile> {
                       _loading ? '—' : '$_completedGigs done',
                       style: const TextStyle(color: kSub, fontSize: 12),
                     ),
+                    if (widget.distanceLabel != null) ...[
+                      const SizedBox(width: 10),
+                      const Icon(Icons.near_me_rounded, color: kSub, size: 12),
+                      const SizedBox(width: 3),
+                      Text(widget.distanceLabel!, style: const TextStyle(color: kSub, fontSize: 12)),
+                    ],
                   ],
                 ),
               ],
             ),
           ),
           const SizedBox(width: 8),
-          // Offer button or lock indicator
-          if (_loading)
-            const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2, color: kBlue),
-            )
-          else if (_isFavorite)
-            TextButton(
-              onPressed: widget.onOffer,
-              style: TextButton.styleFrom(
-                backgroundColor: kBlue.withValues(alpha: 0.1),
-                foregroundColor: kBlue,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text(
-                'Offer',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-            )
-          else
-            Tooltip(
-              message: 'Add to favorites to offer',
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: kSub.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.lock_outline_rounded,
-                  color: kSub,
-                  size: 14,
-                ),
-              ),
+          // Offer — asks first (and adds to Favorites if needed)
+          TextButton(
+            onPressed: _confirmOffer,
+            style: TextButton.styleFrom(
+              backgroundColor: kBlue.withValues(alpha: 0.1),
+              foregroundColor: kBlue,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
+            child: Text(
+              _loading || _isFavorite ? 'Offer' : '+ Offer',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+          ),
         ],
       ),
+    ),
     );
   }
 }

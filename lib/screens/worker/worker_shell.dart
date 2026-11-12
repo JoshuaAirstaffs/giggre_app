@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../core/services/sign_out_service.dart';
+import '../../core/utils/go_home.dart';
 import '../../features/gig_worker/presentation/gig_worker_screen.dart';
 import '../../features/home/presentation/profile_tab.dart';
 import '../../features/tutorial/widgets/tutorial_anchor.dart';
@@ -192,6 +193,7 @@ class _WorkerShellState extends State<WorkerShell> {
           context,
           MaterialPageRoute(builder: (_) => const HostShell()),
         ),
+        onGoHome: () => goToHome(context),
         animationGeneration: _homeVisitGen,
         isTabActive: _index == 0,
       ),
@@ -228,14 +230,16 @@ class _WorkerShellState extends State<WorkerShell> {
 class _NavItem {
   final IconData icon;
   final String label;
-  const _NavItem(this.icon, this.label);
+  // Which tab it opens. (Home is the house button in the dashboard header.)
+  final int? tab;
+  const _NavItem(this.icon, this.label, this.tab);
 }
 
 const _kNavItems = [
-  _NavItem(Icons.home_outlined, 'Home'),
-  _NavItem(Icons.bookmark_outline_rounded, 'Saved'),
-  _NavItem(Icons.chat_bubble_outline_rounded, 'Chat'),
-  _NavItem(Icons.person_outline_rounded, 'Profile'),
+  _NavItem(Icons.space_dashboard_outlined, 'Dashboard', 0),
+  _NavItem(Icons.bookmark_outline_rounded, 'Saved', 1),
+  _NavItem(Icons.chat_bubble_outline_rounded, 'Chat', 2),
+  _NavItem(Icons.person_outline_rounded, 'Profile', 3),
 ];
 
 class _WorkerBottomNavBar extends StatelessWidget {
@@ -265,9 +269,9 @@ class _WorkerBottomNavBar extends StatelessWidget {
           child: Row(
             children: List.generate(_kNavItems.length, (i) {
               final item = _kNavItems[i];
-              final active = i == currentIndex;
+              final active = item.tab == currentIndex;
               final color = active ? _kNavActive : _kNavInactive;
-              final showDot = i == 2 && hasUnreadChat;
+              final showDot = item.tab == 2 && hasUnreadChat;
 
               final tab = Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -305,10 +309,10 @@ class _WorkerBottomNavBar extends StatelessWidget {
 
               return Expanded(
                 child: InkWell(
-                  onTap: () => onTap(i),
+                  onTap: () => onTap(item.tab!),
                   // The worker dashboard tutorial points here for
                   // "Manage your skills" (Profile → My Toolchest).
-                  child: i == 3
+                  child: item.tab == 3
                       ? TutorialAnchor(id: 'workerHome.profileTab', child: tab)
                       : tab,
                 ),

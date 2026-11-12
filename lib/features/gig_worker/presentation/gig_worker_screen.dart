@@ -43,6 +43,8 @@ class GigWorkerScreen extends StatefulWidget {
   // header's back arrow since there's no dashboard-level route to pop to.
   final bool isTabRoot;
   final VoidCallback? onSwitchToHost;
+  // Header house button → the Home screen.
+  final VoidCallback? onGoHome;
 
   // Bumped by WorkerShell each time this tab is switched to, so its entrance
   // animations can replay instead of only ever playing once.
@@ -56,6 +58,7 @@ class GigWorkerScreen extends StatefulWidget {
     this.restoreActiveGigOnEntry = false,
     this.isTabRoot = false,
     this.onSwitchToHost,
+    this.onGoHome,
     this.animationGeneration = 0,
     this.isTabActive = true,
   });
@@ -1846,6 +1849,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 onNotifications: () =>
                                     WorkerNotificationsSheet.show(context),
                                 onSwitchToHost: widget.onSwitchToHost,
+                                onGoHome: widget.onGoHome,
                                 onTutorial: () => context
                                     .read<TutorialController>()
                                     .restart(gigWorkerHomeFlow),

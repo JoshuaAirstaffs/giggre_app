@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/providers/current_user_provider.dart';
 import '../../core/services/sign_out_service.dart';
+import '../../core/utils/go_home.dart';
 import '../../features/gig_host/presentation/gig_host_screen.dart';
 import '../../features/gig_host/presentation/host_gigs_screen.dart';
 import '../../features/gig_host/presentation/post_quick_gig_screen.dart';
@@ -271,6 +272,7 @@ class _HostShellState extends State<HostShell>
           context,
           MaterialPageRoute(builder: (_) => const WorkerShell()),
         ),
+        onGoHome: () => goToHome(context),
         animationGeneration: _homeVisitGen,
         isTabActive: _tabIndex == 0,
       ),
@@ -357,9 +359,11 @@ class _HostBottomNavBar extends StatelessWidget {
     required bool active,
     bool showDot = false,
     required VoidCallback onTap,
+    int flex = 1,
   }) {
     final color = active ? _kNavActive : _kNavInactive;
     return Expanded(
+      flex: flex,
       child: InkWell(
         onTap: onTap,
         child: Column(
@@ -414,9 +418,12 @@ class _HostBottomNavBar extends StatelessWidget {
           height: _kFlatBarHeight,
           child: Row(
             children: [
+              // Dashboard · My gigs · [Post Gig] · Chat · Profile — two each
+              // side of the raised button, all equal width. Home is the
+              // house button in the dashboard header.
               _item(
-                icon: Icons.home_outlined,
-                label: 'Home',
+                icon: Icons.space_dashboard_outlined,
+                label: 'Dashboard',
                 active: currentIndex == 0,
                 onTap: () => onTap(0),
               ),
