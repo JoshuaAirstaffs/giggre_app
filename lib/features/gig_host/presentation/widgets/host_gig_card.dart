@@ -14,6 +14,7 @@ import '../post_open_gig_screen.dart';
 import '../post_quick_gig_screen.dart';
 import 'gig_detail_sheet.dart';
 import 'quick_gig_search_sheet.dart';
+import '../../../../core/widgets/skill_icon.dart';
 
 // Gigs that can no longer go anywhere on their own — reposting is the only
 // way forward, so HostGigCard/GigDetailSheet both offer "Post Again" here.
@@ -657,6 +658,13 @@ class _HostGigCardState extends State<HostGigCard> {
     final workerSlots = (data['workerSlots'] as num?)?.toInt() ?? 1;
     final filledSlotCount = (data['filledSlotCount'] as num?)?.toInt() ?? 0;
     final isMultiWorker = workerSlots > 1;
+    // First skill on the gig, shown with its sub-category icon before
+    // line 2 (Open: requiredSkills, Offered: skillRequired).
+    final firstSkill = switch (gigType) {
+      'open' => (data['requiredSkills'] as List?)?.firstOrNull?.toString(),
+      'offered' => data['skillRequired'] as String?,
+      _ => null,
+    };
     final line2 = [
       if (category.isNotEmpty) category,
       pay,
@@ -732,8 +740,23 @@ class _HostGigCardState extends State<HostGigCard> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    line2,
+                  Text.rich(
+                    TextSpan(
+                      children: [
+                        if (firstSkill != null && firstSkill.isNotEmpty)
+                          WidgetSpan(
+                            alignment: PlaceholderAlignment.middle,
+                            child: SkillIcon(
+                              firstSkill,
+                              size: 12,
+                              color: bodyColor,
+                              fallback: null,
+                              gap: 4,
+                            ),
+                          ),
+                        TextSpan(text: line2),
+                      ],
+                    ),
                     style: TextStyle(fontSize: 11, color: bodyColor),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

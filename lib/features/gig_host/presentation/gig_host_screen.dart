@@ -30,6 +30,7 @@ import 'widgets/notifications_sheet.dart';
 import 'widgets/gig_detail_sheet.dart';
 import 'widgets/host_gig_card.dart';
 import 'host_gigs_screen.dart';
+import '../../../core/widgets/skill_icon.dart';
 
 class GigHostScreen extends StatefulWidget {
   // True when hosted as the Home tab root inside HostShell — suppresses the
@@ -3088,9 +3089,16 @@ class _TemplatesSheet extends StatelessWidget {
                 ),
                 if (t.skillRequired.isNotEmpty) ...[
                   const SizedBox(width: 6),
+                  SkillIcon(
+                    t.skillRequired,
+                    size: 12,
+                    color: kSub,
+                    fallback: null,
+                    gap: 4,
+                  ),
                   Flexible(
                     child: Text(
-                      '• ${t.skillRequired}',
+                      t.skillRequired,
                       style: const TextStyle(color: kSub, fontSize: 11),
                       overflow: TextOverflow.ellipsis,
                     ),

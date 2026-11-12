@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+<<<<<<< Updated upstream
 import '../../../../core/services/content_filter_service.dart';
+=======
+import '../../../../core/widgets/skill_icon.dart';
+>>>>>>> Stashed changes
 
 /// A searchable, filterable skill picker shown as a modal bottom sheet.
 ///
@@ -462,8 +466,13 @@ class _SkillPickerSheetState extends State<SkillPickerSheet> {
                                       .withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: Icon(Icons.construction_rounded,
-                                    color: widget.accentColor, size: 16),
+                                child: Center(
+                                  child: SkillIcon(
+                                    name,
+                                    color: widget.accentColor,
+                                    size: 16,
+                                  ),
+                                ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(

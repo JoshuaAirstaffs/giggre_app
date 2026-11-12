@@ -8,6 +8,7 @@ import '../../core/theme/app_colors.dart';
 import 'active_gig_theme.dart';
 import 'profile_stats.dart';
 import 'user_profile_sheet.dart' show ProfileAvatar;
+import '../../core/widgets/skill_icon.dart';
 
 /// Role accent for a profile: blue for a worker, gold for a host, matching
 /// the two Active Gig screens.
@@ -436,13 +437,26 @@ class _ProfileHeaderState extends State<ProfileHeader> {
       borderRadius: BorderRadius.circular(20),
       border: Border.all(color: _p.chipBorder),
     ),
-    child: Text(
-      label,
-      style: TextStyle(
-        color: _p.fg.withValues(alpha: 0.95),
-        fontSize: 11.5,
-        fontWeight: FontWeight.w600,
-      ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!emphasised)
+          SkillIcon(
+            label,
+            size: 13,
+            color: _p.fg.withValues(alpha: 0.95),
+            fallback: null,
+            gap: 5,
+          ),
+        Text(
+          label,
+          style: TextStyle(
+            color: _p.fg.withValues(alpha: 0.95),
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     ),
   );
 

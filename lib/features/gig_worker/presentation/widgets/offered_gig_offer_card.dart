@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
+import '../../../../core/widgets/skill_icon.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Offered Gig Offer Card — shown when a host directly offers a gig to the
@@ -60,7 +61,12 @@ class OfferedGigOfferCard extends StatelessWidget {
           '${gig.openSlots} of ${gig.workerSlots} spots open',
         ),
       if (skillRequired.isNotEmpty)
-        _InfoChip(Icons.build_outlined, 'SKILL', skillRequired),
+        _InfoChip(
+          Icons.build_outlined,
+          'SKILL',
+          skillRequired,
+          skill: skillRequired,
+        ),
       if (gig.address.isNotEmpty)
         _InfoChip(
           Icons.location_on_outlined,
@@ -296,7 +302,15 @@ class _InfoChip {
   // hide real information the worker needs (which street, which building) —
   // every other chip's value is short by nature (a price, a date, a skill).
   final bool allowWrap;
-  const _InfoChip(this.icon, this.label, this.value, {this.allowWrap = false});
+  // Skill name whose sub-category icon replaces [icon] (when it has one).
+  final String? skill;
+  const _InfoChip(
+    this.icon,
+    this.label,
+    this.value, {
+    this.allowWrap = false,
+    this.skill,
+  });
 }
 
 class _ChipGrid extends StatelessWidget {
@@ -334,7 +348,15 @@ class _ChipGrid extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (chip.icon != null) ...[
+          if (chip.skill != null)
+            SkillIcon(
+              chip.skill!,
+              size: 14,
+              color: purple,
+              fallback: chip.icon,
+              gap: 6,
+            )
+          else if (chip.icon != null) ...[
             Icon(chip.icon, size: 14, color: purple),
             const SizedBox(width: 6),
           ],
