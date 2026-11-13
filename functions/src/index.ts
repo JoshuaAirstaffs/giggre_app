@@ -1558,5 +1558,6 @@ export {
 // GSIN Library: GSINS / GSKU codes for gigs (admin-only identifiers).
 export {
   onQuickGigAssignGsku, onOpenGigAssignGsku, onOfferedGigAssignGsku,
+  onOpenGigSkillChanged, onOfferedGigSkillChanged,
   adminCreateGsinTaskType, adminAssignGigTaskType, adminBackfillGigCodes,
 } from "./gsin";

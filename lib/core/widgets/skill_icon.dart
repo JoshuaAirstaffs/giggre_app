@@ -20,7 +20,7 @@ class SkillIcon extends StatelessWidget {
     super.key,
     this.size = 18,
     this.color,
-    this.fallback = Icons.construction_rounded,
+    this.fallback = Icons.handshake_outlined,
     this.gap = 0,
   });
 

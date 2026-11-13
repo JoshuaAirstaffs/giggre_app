@@ -1,5 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { firestoreTriggerRegion } from "./region";
@@ -182,6 +182,59 @@ function makeGskuTrigger(collection: GigCollection) {
 export const onQuickGigAssignGsku = makeGskuTrigger("quick_gigs");
 export const onOpenGigAssignGsku = makeGskuTrigger("open_gigs");
 export const onOfferedGigAssignGsku = makeGskuTrigger("offered_gigs");
+
+// ── Host changed the gig's skill (Edit gig, app or website) ────────────────
+// The task type comes from the skill, so it follows the new skill:
+//   • the current task type is still linked to the new skill → keep it
+//   • the new skill links to exactly one task type → switch to it (new GSKU;
+//     the old one goes to previousGsku)
+//   • none / several → clear the codes (old GSKU kept in previousGsku); with
+//     several, gsinCandidates lets an admin pick in All Gigs
+// Only skill changes trigger this, and it never writes a skill field, so its
+// own update can't re-trigger it.
+
+export async function followSkillChange(
+  collection: GigCollection,
+  gigId: string,
+  before: FirebaseFirestore.DocumentData,
+  after: FirebaseFirestore.DocumentData,
+): Promise<string> {
+  const newSkill = skillOf(after).toLowerCase();
+  if (!newSkill || newSkill === skillOf(before).toLowerCase()) return "skill_unchanged";
+  const linked = [...((await skillTaskMap()).get(newSkill) ?? [])].sort();
+  const current = str(after.taskTypeId);
+  if (current && linked.includes(current)) return "kept";
+  if (linked.length === 1) {
+    const r = await assignGigCodes(collection, gigId, { taskTypeId: linked[0], force: true });
+    return r.status;
+  }
+  const gigRef = db().collection(collection).doc(gigId);
+  await gigRef.update({
+    taskTypeId: FV.delete(), gsins: FV.delete(), gsku: FV.delete(), gskuAssignedAt: FV.delete(),
+    gsinCandidates: linked.length > 1 ? linked : FV.delete(),
+    ...(str(after.gsku) ? { previousGsku: FV.arrayUnion(str(after.gsku)) } : {}),
+  });
+  return linked.length > 1 ? "needs_pick" : "no_task_type";
+}
+
+function makeSkillChangeTrigger(collection: GigCollection) {
+  return onDocumentUpdated({ ...OPTS, document: `${collection}/{gigId}` }, async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+    if (skillOf(before).toLowerCase() === skillOf(after).toLowerCase()) return;
+    try {
+      const r = await followSkillChange(collection, event.params.gigId, before, after);
+      logger.info("[gsin] skill changed", { collection, gigId: event.params.gigId, from: skillOf(before), to: skillOf(after), result: r });
+    } catch (err) {
+      logger.warn("[gsin] skill change re-assign failed", { collection, gigId: event.params.gigId, error: String(err) });
+    }
+  });
+}
+
+// Quick Gigs can't be edited, so only Open and Offered.
+export const onOpenGigSkillChanged = makeSkillChangeTrigger("open_gigs");
+export const onOfferedGigSkillChanged = makeSkillChangeTrigger("offered_gigs");
 
 // ── Admin callables ────────────────────────────────────────────────────────
 

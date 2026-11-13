@@ -1657,7 +1657,6 @@ class _GigMapSectionState extends State<GigMapSection> {
   // map centers on that gig instead of the worker's own location the next
   // time it mounts. Consumed once in onMapCreated, then cleared.
   LatLng? _pendingCameraTarget;
-  bool _mapInteractive = false;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();
   bool _osmMapReady = false;
@@ -2297,7 +2296,6 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   void initState() {
     super.initState();
-    _mapInteractive = widget.fullScreen;
     _userProvider = context.read<CurrentUserProvider>();
     _myLocation =
         (_userProvider.lastLat != null && _userProvider.lastLng != null)
@@ -3783,11 +3781,6 @@ class _GigMapSectionState extends State<GigMapSection> {
                       : g.gigType == 'offered'
                       ? const Color(0xFF8B5CF6)
                       : kAmber;
-                  final typeIcon = g.gigType == 'open'
-                      ? Icons.workspace_premium_outlined
-                      : g.gigType == 'offered'
-                      ? Icons.send_rounded
-                      : Icons.flash_on_rounded;
                   final typeLabel = g.gigType == 'open'
                       ? 'Open'
                       : g.gigType == 'offered'
@@ -3821,16 +3814,19 @@ class _GigMapSectionState extends State<GigMapSection> {
                         color: typeColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      // Skill icon when it has one, else the gig type's icon.
+                      // Skill icon when it has one, else the handshake.
                       child: Center(
                         child: g.requiredSkills.isNotEmpty
                             ? SkillIcon(
                                 g.requiredSkills.first,
                                 color: typeColor,
                                 size: 20,
-                                fallback: typeIcon,
                               )
-                            : Icon(typeIcon, color: typeColor, size: 20),
+                            : Icon(
+                                Icons.handshake_outlined,
+                                color: typeColor,
+                                size: 20,
+                              ),
                       ),
                     ),
                     title: Text(
@@ -4584,10 +4580,12 @@ class _GigMapSectionState extends State<GigMapSection> {
             child: _buildMapBlock(context),
           ),
         ]
+        // No EntranceAnimation here: it waits until 20% of its child is on
+        // screen, and an infinite-scrolled list can be too tall to ever reach
+        // that, which left the whole list invisible.
         else
-          EntranceAnimation(
+          KeyedSubtree(
             key: const ValueKey('list-mode'),
-            type: EntranceAnimationType.fadeInSlideUp,
             child: _buildListMode(context),
           ),
       ],
@@ -4608,13 +4606,11 @@ class _GigMapSectionState extends State<GigMapSection> {
             child: _useGoogleMaps
                 ? GoogleMap(
                     style: _workerMapStyle(context),
-                    gestureRecognizers: _mapInteractive
-                        ? <Factory<OneSequenceGestureRecognizer>>{
-                            Factory<OneSequenceGestureRecognizer>(
-                              () => EagerGestureRecognizer(),
-                            ),
-                          }
-                        : const <Factory<OneSequenceGestureRecognizer>>{},
+                    gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                      Factory<OneSequenceGestureRecognizer>(
+                        () => EagerGestureRecognizer(),
+                      ),
+                    },
                     onMapCreated: (controller) {
                       _googleMapController = controller;
                       final pending = _pendingCameraTarget;
@@ -4677,81 +4673,6 @@ class _GigMapSectionState extends State<GigMapSection> {
             ),
           ),
         ),
-        // Tap-to-interact overlay — blocks map from stealing scroll gestures
-        if (!_mapInteractive)
-          Positioned.fill(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => _mapInteractive = true),
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.touch_app_rounded,
-                          color: Colors.white,
-                          size: 13,
-                        ),
-                        SizedBox(width: 5),
-                        Text(
-                          'Tap to interact with map',
-                          style: TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        // Lock-map button shown while map is interactive
-        if (_mapInteractive)
-          Positioned(
-            top: 8,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: GestureDetector(
-                onTap: () => setState(() => _mapInteractive = false),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.lock_open_rounded,
-                        color: Colors.white,
-                        size: 13,
-                      ),
-                      SizedBox(width: 5),
-                      Text(
-                        'Tap to lock map',
-                        style: TextStyle(color: Colors.white, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
         // "Tap a pin for details" hint — moved onto the map as a bottom-center
         // overlay chip (bottom-left/right are already the expand/recenter buttons).
         Positioned(
@@ -4976,8 +4897,8 @@ class _GigMapSectionState extends State<GigMapSection> {
   /// Infinite scroll for the gig list. All gigs are already in memory; the
   /// list renders [_kListPageSize] at a time. When the 8th card of the latest
   /// batch scrolls into view, the next batch is added, so it's laid out before
-  /// the user reaches the end. Only the first batch gets the staggered entrance
-  /// animation, later batches appear as if they were always there.
+  /// the user reaches the end. No entrance animation, so cards look like they
+  /// were always there.
   static const int _kLoadAheadFromEnd = 3;
 
   Widget _listItemWrapper({
@@ -4985,27 +4906,19 @@ class _GigMapSectionState extends State<GigMapSection> {
     required bool hasMore,
     required Widget child,
   }) {
-    Widget item = index < _kListPageSize
-        ? EntranceAnimation(
-            type: EntranceAnimationType.fadeInSlideUp,
-            delay: Duration(milliseconds: index * 40),
-            child: child,
-          )
-        : child;
-
     if (hasMore && index == _visibleListCount - _kLoadAheadFromEnd) {
       final threshold = _visibleListCount;
-      item = VisibilityDetector(
+      return VisibilityDetector(
         key: ValueKey('gig-list-load-more-$threshold'),
         onVisibilityChanged: (info) {
           if (!mounted || info.visibleFraction <= 0) return;
           if (_visibleListCount != threshold) return;
           setState(() => _visibleListCount += _kListPageSize);
         },
-        child: item,
+        child: child,
       );
     }
-    return item;
+    return child;
   }
 
   String _fmtDistance(double meters) => DistanceUnits.format(meters);
@@ -5290,6 +5203,7 @@ class _GigMapSectionState extends State<GigMapSection> {
 //  List-mode loading placeholder — shown while the gig streams' first
 //  snapshot is still in flight, so it doesn't flash "No gigs nearby" first.
 // ─────────────────────────────────────────────────────────────────────────────
+
 class _GigListCardSkeleton extends StatefulWidget {
   const _GigListCardSkeleton();
 
@@ -5337,26 +5251,41 @@ class _GigListCardSkeletonState extends State<_GigListCardSkeleton>
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Theme.of(context).dividerColor),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _bar(width: 140, height: 12),
-                _bar(width: 40, height: 10),
-              ],
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: kSub.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _bar(width: 90, height: 10),
-                _bar(width: 56, height: 14),
-              ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _bar(width: 140, height: 12),
+                      _bar(width: 40, height: 10),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _bar(width: 90, height: 10),
+                      _bar(width: 56, height: 14),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  _bar(width: 180, height: 9),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            _bar(width: 180, height: 9),
           ],
         ),
       ),
@@ -5410,12 +5339,15 @@ class _GigListCard extends StatelessWidget {
       ?distanceLabel,
     ];
 
-    // The gig's first required skill: named (with its icon) in row 2, and
-    // shown as a large faded watermark in the bottom-right corner. Skills
-    // without a sub-category icon get the name only.
-    final watermarkSkill = gig.requiredSkills.isNotEmpty
+    // The gig's first required skill: its sub-category icon fills the tile
+    // on the left, its name leads row 2.
+    final skill = gig.requiredSkills.isNotEmpty
         ? gig.requiredSkills.first
         : null;
+    // Skills without a sub-category icon get a neutral handshake, the same
+    // for every gig type (the type is already the colored label in row 1).
+    const fallbackIcon = Icons.handshake_outlined;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return GestureDetector(
       onTap: onTap,
@@ -5427,221 +5359,214 @@ class _GigListCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Theme.of(context).dividerColor),
         ),
-        child: Stack(
-          children: [
-            if (watermarkSkill != null)
-              // Bleeds off the bottom-right corner so it reads as texture,
-              // not an object sitting on the pay. One Opacity over the whole
-              // icon keeps the fade even.
-              Positioned(
-                right: -14,
-                bottom: -38,
-                child: IgnorePointer(
-                  child: Opacity(
-                    // Fainter on light cards so it doesn't fight the pay.
-                    opacity: Theme.of(context).brightness == Brightness.dark
-                        ? 0.12
-                        : 0.08,
-                    child: SkillIcon(
-                      watermarkSkill,
-                      size: 110,
-                      color: accentColor,
-                      fallback: null,
-                    ),
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Skill icon tile
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: isDark ? 0.18 : 0.10),
+                  borderRadius: BorderRadius.circular(12),
                 ),
+                child: skill != null
+                    ? SkillIcon(
+                        skill,
+                        size: 24,
+                        color: accentColor,
+                        fallback: fallbackIcon,
+                      )
+                    : Icon(fallbackIcon, size: 22, color: accentColor),
               ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Row 1: title ── type badge
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          gig.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      if (gig.isMultiWorker) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(
-                              0xFF2E9E6B,
-                            ).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Row 1: title ── type badge
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
                           child: Text(
-                            '${gig.openSlots} of ${gig.workerSlots} spots',
-                            style: const TextStyle(
-                              color: Color(0xFF2E9E6B),
-                              fontSize: 9,
+                            gig.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontSize: 13.5,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
                         const SizedBox(width: 6),
-                      ],
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
+                        if (gig.isMultiWorker) ...[
                           Container(
-                            width: 6,
-                            height: 6,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
-                              color: accentColor,
-                              shape: BoxShape.circle,
+                              color: const Color(
+                                0xFF2E9E6B,
+                              ).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '${gig.openSlots} of ${gig.workerSlots} spots',
+                              style: const TextStyle(
+                                color: Color(0xFF2E9E6B),
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            typeLabel,
-                            style: TextStyle(
-                              color: accentColor,
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                          const SizedBox(width: 6),
                         ],
-                      ),
-                      if (gig.gigType == 'open' && gig.hasApplied) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(
-                              0xFF2E9E6B,
-                            ).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Text(
-                            'Applied',
-                            style: TextStyle(
-                              color: Color(0xFF2E9E6B),
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  // Row 2: host name ── pay
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        // Skill (icon + name) then host, so the faded watermark has a
-                        // readable label. One Text.rich so the line ellipsizes as one.
-                        child: Text.rich(
-                          TextSpan(
-                            children: [
-                              if (watermarkSkill != null) ...[
-                                WidgetSpan(
-                                  alignment: PlaceholderAlignment.middle,
-                                  child: SkillIcon(
-                                    watermarkSkill,
-                                    size: 12,
-                                    color: kSub,
-                                    fallback: null,
-                                    gap: 4,
-                                  ),
-                                ),
-                                TextSpan(
-                                  text: watermarkSkill,
-                                  style: const TextStyle(fontWeight: FontWeight.w600),
-                                ),
-                                if (gig.hostName.isNotEmpty) const TextSpan(text: ' · '),
-                              ],
-                              if (gig.hostName.isNotEmpty)
-                                TextSpan(text: gig.hostName)
-                              else if (watermarkSkill == null)
-                                const TextSpan(text: '—'),
-                            ],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: kSub, fontSize: 11),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      RichText(
-                        text: TextSpan(
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            TextSpan(
-                              text: CurrencyFormatter.format(
-                                gig.payType == 'hourly' &&
-                                        gig.hourlyRate != null
-                                    ? gig.hourlyRate!
-                                    : gig.budget,
-                                gig.currencyCode,
-                              ),
-                              style: const TextStyle(
-                                color: Color(0xFF2B6FB5),
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: accentColor,
+                                shape: BoxShape.circle,
                               ),
                             ),
-                            TextSpan(
-                              text: gig.payType == 'hourly' ? '/hr' : '/day',
-                              style: const TextStyle(
-                                color: kSub,
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w500,
+                            const SizedBox(width: 4),
+                            Text(
+                              typeLabel,
+                              style: TextStyle(
+                                color: accentColor,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  // Row 3: location · schedule · distance ── chevron
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.location_on_outlined,
-                        size: 13,
-                        color: kSub,
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          metaParts.isNotEmpty ? metaParts.join(' · ') : '—',
-                          style: const TextStyle(color: kSub, fontSize: 10.5),
+                        if (gig.gigType == 'open' && gig.hasApplied) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(
+                                0xFF2E9E6B,
+                              ).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              'Applied',
+                              style: TextStyle(
+                                color: Color(0xFF2E9E6B),
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    // Row 2: host name ── pay
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          // Skill name then host. One Text.rich so the line
+                          // ellipsizes as one.
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                if (skill != null) ...[
+                                  TextSpan(
+                                    text: skill,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (gig.hostName.isNotEmpty)
+                                    const TextSpan(text: ' · '),
+                                ],
+                                if (gig.hostName.isNotEmpty)
+                                  TextSpan(text: gig.hostName)
+                                else if (skill == null)
+                                  const TextSpan(text: '—'),
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: kSub, fontSize: 11),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      const Icon(
-                        Icons.chevron_right_rounded,
-                        size: 18,
-                        color: kSub,
-                      ),
-                    ],
-                  ),
-                ],
+                        const SizedBox(width: 6),
+                        RichText(
+                          text: TextSpan(
+                            children: [
+                              TextSpan(
+                                text: CurrencyFormatter.format(
+                                  gig.payType == 'hourly' &&
+                                          gig.hourlyRate != null
+                                      ? gig.hourlyRate!
+                                      : gig.budget,
+                                  gig.currencyCode,
+                                ),
+                                style: const TextStyle(
+                                  color: Color(0xFF2B6FB5),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              TextSpan(
+                                text: gig.payType == 'hourly' ? '/hr' : '/day',
+                                style: const TextStyle(
+                                  color: kSub,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    // Row 3: location · schedule · distance ── chevron
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.location_on_outlined,
+                          size: 13,
+                          color: kSub,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            metaParts.isNotEmpty ? metaParts.join(' · ') : '—',
+                            style: const TextStyle(color: kSub, fontSize: 10.5),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          size: 18,
+                          color: kSub,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
