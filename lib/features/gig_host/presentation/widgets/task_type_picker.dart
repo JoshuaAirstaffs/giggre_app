@@ -76,11 +76,25 @@ Future<List<GsinTaskTypeOption>> loadGsinTaskTypes() async {
 /// With [skill] (Open / Offered gigs), task types linked to that skill are
 /// listed first as "Suggested", and when exactly one matches it's picked
 /// automatically (the host can still change it).
+///
+/// With [enabled] false (editing a posted gig) it's locked: no picker, no
+/// auto-pick, not required. Hosts can't set it (firestore.rules), but the
+/// server re-derives it when the skill changes (gsin.ts followSkillChange).
+/// So when [skill] differs from [originalSkill] it previews that result.
 class TaskTypeField extends StatefulWidget {
   final String? value;
   final ValueChanged<String?> onChanged;
   final String? skill;
-  const TaskTypeField({super.key, required this.value, required this.onChanged, this.skill});
+  final bool enabled;
+  final String? originalSkill;
+  const TaskTypeField({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.skill,
+    this.enabled = true,
+    this.originalSkill,
+  });
 
   @override
   State<TaskTypeField> createState() => _TaskTypeFieldState();
@@ -111,6 +125,7 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
   }
 
   void _autoPick() {
+    if (!widget.enabled) return;
     final opts = _options;
     if (opts == null) return;
     // Only replace an empty choice or one we auto-picked — never the host's own pick.
@@ -130,6 +145,23 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
       if (o.id == widget.value) return o;
     }
     return null;
+  }
+
+  static String _norm(String? s) => (s ?? '').trim().toLowerCase();
+
+  bool get _skillChanged =>
+      !widget.enabled &&
+      _norm(widget.skill).isNotEmpty &&
+      _norm(widget.skill) != _norm(widget.originalSkill);
+
+  /// Locked + skill changed: what the server will set (mirrors
+  /// followSkillChange). Null → it'll be cleared for an admin to assign.
+  GsinTaskTypeOption? get _previewAfterSkillChange {
+    final opts = _options ?? const [];
+    final current = _selected;
+    if (current != null && current.fitsSkill(widget.skill)) return current;
+    final matches = opts.where((o) => o.fitsSkill(widget.skill)).toList();
+    return matches.length == 1 ? matches.first : null;
   }
 
   Future<void> _open(FormFieldState<String> field) async {
@@ -160,9 +192,13 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
       padding: const EdgeInsets.only(bottom: 20),
       child: FormField<String>(
         initialValue: widget.value,
-        validator: (_) => widget.value == null ? 'Pick the type of task' : null,
+        validator: (_) =>
+            widget.enabled && widget.value == null ? 'Pick the type of task' : null,
         builder: (field) {
-          final sel = _selected;
+          final locked = !widget.enabled;
+          final skillChanged = _skillChanged;
+          final sel = skillChanged ? _previewAfterSkillChange : _selected;
+          final willChange = skillChanged && sel?.id != widget.value;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -173,11 +209,13 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
               const SizedBox(height: 10),
               InkWell(
                 borderRadius: BorderRadius.circular(12),
-                onTap: () => _open(field),
+                onTap: locked ? null : () => _open(field),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
+                    color: locked
+                        ? textColor.withValues(alpha: 0.04)
+                        : Theme.of(context).cardColor,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: field.hasError ? Colors.redAccent : borderColor,
@@ -188,23 +226,42 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
                     children: [
                       Expanded(
                         child: sel == null
-                            ? Text('Choose what kind of task this is',
+                            ? Text(
+                                locked
+                                    ? (skillChanged ? 'Assigned by Giggre' : 'Not set')
+                                    : 'Choose what kind of task this is',
                                 style: TextStyle(color: textColor.withValues(alpha: 0.35), fontSize: 14))
                             : Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(sel.name, style: TextStyle(color: textColor, fontSize: 14)),
+                                  Text(sel.name,
+                                      style: TextStyle(
+                                          color: locked ? textColor.withValues(alpha: 0.7) : textColor,
+                                          fontSize: 14)),
                                   const SizedBox(height: 2),
                                   Text(sel.group,
                                       style: TextStyle(color: textColor.withValues(alpha: 0.5), fontSize: 11)),
                                 ],
                               ),
                       ),
-                      Icon(Icons.expand_more, color: textColor.withValues(alpha: 0.5)),
+                      Icon(
+                        locked ? Icons.lock_outline_rounded : Icons.expand_more,
+                        size: locked ? 18 : 24,
+                        color: textColor.withValues(alpha: locked ? 0.4 : 0.5),
+                      ),
                     ],
                   ),
                 ),
               ),
+              if (locked)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6, left: 12),
+                  child: Text(
+                      willChange
+                          ? 'Updates to match the new skill when you save.'
+                          : 'Set from the skill. It updates when the skill changes.',
+                      style: TextStyle(color: textColor.withValues(alpha: 0.5), fontSize: 11)),
+                ),
               if (field.hasError)
                 Padding(
                   padding: const EdgeInsets.only(top: 6, left: 12),

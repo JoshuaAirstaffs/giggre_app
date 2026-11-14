@@ -1044,13 +1044,15 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 const SizedBox(height: 20),
 
                 // ── Task type (GSIN) — hidden until the admin sets up task types.
-                // Not editable: the gig's GSIN codes are derived from it once.
-                if (!_isEditing)
-                  TaskTypeField(
-                    value: _taskTypeId,
-                    skill: _selectedSkill,
-                    onChanged: (v) => setState(() => _taskTypeId = v),
-                  ),
+                // Locked when editing and never part of the edit save; the
+                // server re-derives it if the skill changes (gsin.ts).
+                TaskTypeField(
+                  value: _taskTypeId,
+                  skill: _selectedSkill,
+                  enabled: !_isEditing,
+                  originalSkill: widget.editData?['skillRequired'] as String?,
+                  onChanged: (v) => setState(() => _taskTypeId = v),
+                ),
 
                 // ── Experience Level ──────────────────────────────
                 _SectionLabel('Experience Level'),

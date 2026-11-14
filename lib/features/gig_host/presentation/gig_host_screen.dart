@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/widgets/keep_alive.dart';
 import '../../../core/models/rating_summary.dart';
 import '../../../core/services/rating_service.dart';
 import 'package:http/http.dart' as http;
@@ -140,13 +141,17 @@ class _GigHostScreenState extends State<GigHostScreen> {
                 // ── Carousel (giggre-admin → Content Management →
                 // Carousel → Gig Host). Takes no space when it has no
                 // slides or is hidden.
-                ContentCarousel(
-                  section: ContentCarousel.hostSection,
-                  height: ContentCarousel.bannerHeight,
-                  soundOnFirstPlay: false,
-                  active: widget.isTabActive,
-                  showLoading: false,
-                  padding: const EdgeInsets.only(bottom: 16),
+                KeepAliveWrapper(
+                  // Lazy list: keep it mounted so scrolling back up doesn't
+                  // re-fetch the slides and restart the video.
+                  child: ContentCarousel(
+                    section: ContentCarousel.hostSection,
+                    height: ContentCarousel.bannerHeight,
+                    soundOnFirstPlay: false,
+                    active: widget.isTabActive,
+                    showLoading: false,
+                    padding: const EdgeInsets.only(bottom: 16),
+                  ),
                 ),
 
                 // ── Workers Near You ───────────────────────────
@@ -1403,7 +1408,6 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
   bool _osmMapReady = false;
   double _zoom = 12.0;
   LatLng? _myLocation;
-  bool _mapInteractive = false;
   // All online + available workers with a location, unfiltered by distance.
   List<_WorkerData> _allWorkers = [];
   // Cached result of filtering _allWorkers to within range of _myLocation —
@@ -2508,7 +2512,6 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     final borderColor = Theme.of(context).dividerColor;
     final height = isFullScreen ? MediaQuery.of(context).size.height : 280.0;
     final radius = isFullScreen ? 0.0 : 16.0;
-    final interactive = isFullScreen || _mapInteractive;
 
     return Stack(
       children: [
@@ -2525,13 +2528,11 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                     style: Theme.of(context).brightness == Brightness.dark
                         ? kDarkMapStyle
                         : null,
-                    gestureRecognizers: interactive
-                        ? <Factory<OneSequenceGestureRecognizer>>{
-                            Factory<OneSequenceGestureRecognizer>(
-                              () => EagerGestureRecognizer(),
-                            ),
-                          }
-                        : const <Factory<OneSequenceGestureRecognizer>>{},
+                    gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                      Factory<OneSequenceGestureRecognizer>(
+                        () => EagerGestureRecognizer(),
+                      ),
+                    },
                     onMapCreated: (controller) {
                       if (isFullScreen) {
                         _fullScreenGoogleMapController = controller;
@@ -2563,82 +2564,6 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                 : _buildOsmMap(),
           ),
         ),
-        // Tap-to-interact overlay — inline map only; full screen is always
-        // interactive since that's the entire point of switching to it.
-        if (!isFullScreen && !_mapInteractive)
-          Positioned.fill(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(radius),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => _mapInteractive = true),
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.touch_app_rounded,
-                          color: Colors.white,
-                          size: 13,
-                        ),
-                        SizedBox(width: 5),
-                        Text(
-                          'Tap to interact with map',
-                          style: TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        // Lock-map button shown while the inline map is interactive
-        if (!isFullScreen && _mapInteractive)
-          Positioned(
-            top: 8,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: GestureDetector(
-                onTap: () => setState(() => _mapInteractive = false),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.lock_open_rounded,
-                        color: Colors.white,
-                        size: 13,
-                      ),
-                      SizedBox(width: 5),
-                      Text(
-                        'Tap to lock map',
-                        style: TextStyle(color: Colors.white, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
         // Recenter button
         Positioned(
           bottom: 12,

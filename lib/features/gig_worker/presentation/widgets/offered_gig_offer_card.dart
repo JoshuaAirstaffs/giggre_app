@@ -63,7 +63,7 @@ class OfferedGigOfferCard extends StatelessWidget {
         ),
       if (skillRequired.isNotEmpty)
         _InfoChip(
-          Icons.build_outlined,
+          Icons.handshake_outlined,
           'SKILL',
           skillRequired,
           skill: skillRequired,

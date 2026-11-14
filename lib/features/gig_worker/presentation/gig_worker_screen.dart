@@ -1,6 +1,8 @@
+import '../../../core/widgets/keep_alive.dart';
 import '../../../core/widgets/unverified_limit_progress.dart';
 import 'dart:async';
 import 'package:giggre_app/core/services/unverified_limit.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -145,11 +147,33 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   // True while WorkingUI is pushed as a route so the body doesn't render a duplicate.
   bool _workingUIRouteActive = false;
 
+  // Dashboard scroll + the "back to top" button, shown once the worker has
+  // scrolled about a screen down (e.g. deep into the infinite gig list).
+  final _scrollController = ScrollController();
+  final _showScrollToTop = ValueNotifier<bool>(false);
+  static const double _kScrollToTopThreshold = 800;
+
+  void _onDashboardScroll() {
+    if (!_scrollController.hasClients) return;
+    final show = _scrollController.offset > _kScrollToTopThreshold;
+    if (show != _showScrollToTop.value) _showScrollToTop.value = show;
+  }
+
+  void _scrollToTop() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     _awaitingActiveGigRestore = widget.restoreActiveGigOnEntry;
     WidgetsBinding.instance.addObserver(this);
+    _scrollController.addListener(_onDashboardScroll);
     _listenToProfile();
     _setOnlineStatus(true);
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -176,6 +200,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _multiWorkerOfferedGigSub?.cancel();
     _bookmarksSub?.cancel();
     _suspensionTimer?.cancel();
+    _scrollController.dispose();
+    _showScrollToTop.dispose();
     _setOnlineStatus(false);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -1836,6 +1862,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 return Stack(
                   children: [
                     CustomScrollView(
+                      controller: _scrollController,
                       slivers: [
                         // Header + Availability card share one sliver so the
                         // card's Transform.translate can visually overlap the
@@ -1934,18 +1961,26 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                               // ── Carousel (giggre-admin → Content
                               // Management → Carousel → Gig Worker). Takes no
                               // space when it has no slides or is hidden.
-                              ContentCarousel(
-                                section: ContentCarousel.workerSection,
-                                height: ContentCarousel.bannerHeight,
-                                soundOnFirstPlay: false,
-                                active: widget.isTabActive,
-                                showLoading: false,
-                                padding: const EdgeInsets.only(bottom: 16),
+                              KeepAliveWrapper(
+                                // Lazy list: keep it mounted so scrolling back up doesn't
+                                // re-fetch the slides and restart the video.
+                                child: ContentCarousel(
+                                  section: ContentCarousel.workerSection,
+                                  height: ContentCarousel.bannerHeight,
+                                  soundOnFirstPlay: false,
+                                  active: widget.isTabActive,
+                                  showLoading: false,
+                                  padding: const EdgeInsets.only(bottom: 16),
+                                ),
                               ),
 
                               // ── Gig Map ───────────────────────────────────
+                              // Tiny threshold: in list mode this section can
+                              // be many screens tall, so the default 20% may
+                              // never be on screen and it would stay invisible.
                               EntranceAnimation(
                                 delay: const Duration(milliseconds: 160),
+                                visibleFraction: 0.01,
                                 child: GigMapSection(
                                   uid: uid,
                                   workerName: _name,
@@ -2004,10 +2039,71 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                         bottom: 0,
                         child: ActiveGigBar(gig: activeGigForBar),
                       ),
+                    // Back to top. Hidden behind the dispatch/offer cards,
+                    // lifted above the active gig bar.
+                    if (_dispatchedGig == null && _pendingOfferedGig == null)
+                      Positioned(
+                        right: 16,
+                        bottom: showActiveGigBar ? 96 : 16,
+                        child: _ScrollToTopButton(
+                          visible: _showScrollToTop,
+                          onPressed: _scrollToTop,
+                        ),
+                      ),
                   ],
                 );
               },
             ),
+    );
+  }
+}
+
+class _ScrollToTopButton extends StatelessWidget {
+  const _ScrollToTopButton({required this.visible, required this.onPressed});
+
+  final ValueListenable<bool> visible;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: visible,
+      builder: (context, show, child) => IgnorePointer(
+        ignoring: !show,
+        child: AnimatedScale(
+          scale: show ? 1 : 0.6,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutBack,
+          child: AnimatedOpacity(
+            opacity: show ? 1 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: child,
+          ),
+        ),
+      ),
+      child: Semantics(
+        button: true,
+        label: 'Back to top',
+        child: Material(
+          color: kBlue,
+          shape: const CircleBorder(),
+          elevation: 4,
+          shadowColor: Colors.black38,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onPressed,
+            child: const SizedBox(
+              width: 46,
+              height: 46,
+              child: Icon(
+                Icons.keyboard_arrow_up_rounded,
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

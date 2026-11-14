@@ -750,7 +750,6 @@ class _HostGigCardState extends State<HostGigCard> {
                               firstSkill,
                               size: 12,
                               color: bodyColor,
-                              fallback: null,
                               gap: 4,
                             ),
                           ),
