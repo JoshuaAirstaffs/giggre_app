@@ -25,6 +25,7 @@ import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/distance_units.dart';
+import '../../../gig_host/presentation/widgets/gig_images_picker.dart';
 import '../../../../helpers/snackbar_helper.dart';
 import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/worker_active_gig.dart';
@@ -65,6 +66,8 @@ class GigMarkerData {
   // The host typed the skill under "Other" — not in the skills library, so
   // no worker has it; shown to everyone like a gig with no skill.
   final bool customSkill;
+  // Photos the host attached when posting (download URLs, up to 5).
+  final List<String> images;
   final String hostId;
   final bool hasApplied;
   final DateTime? scheduledDate;
@@ -93,6 +96,7 @@ class GigMarkerData {
     this.experienceLevel = '',
     this.requiredSkills = const [],
     this.customSkill = false,
+    this.images = const [],
     required this.hostId,
     this.hasApplied = false,
     this.scheduledDate,
@@ -261,6 +265,7 @@ GigMarkerData? gigMarkerFromDoc(
     experienceLevel: data['experienceLevel'] as String? ?? '',
     requiredSkills: List<String>.from(data['requiredSkills'] ?? []),
     customSkill: data['customSkill'] == true,
+    images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
     hostId: data['hostId'] as String? ?? '',
     hasApplied: hasApplied,
     scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
@@ -1199,6 +1204,20 @@ void showFullGigDetailSheet(
                     ? gig.experienceLevel
                     : '—',
               ),
+              if (gig.images.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const Text(
+                  'PHOTOS',
+                  style: TextStyle(
+                    color: kSub,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                GigImagesStrip(urls: gig.images, height: 110),
+              ],
               if (gig.description.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 const Text(
@@ -1565,7 +1584,8 @@ enum _PinDisplayMode { default_, salary, distance }
 
 enum _PayTypeFilter { all, hourly, flat }
 
-enum _GigViewMode { map, list }
+// map = map only, list = list only, both = the map with the list under it.
+enum _GigViewMode { map, list, both }
 
 const String _kGigsViewModePrefKey = 'gigs_view_mode';
 
@@ -1774,7 +1794,8 @@ class _GigMapSectionState extends State<GigMapSection> {
   _PayTypeFilter _payTypeFilter = _PayTypeFilter.all;
 
   // ── Map/List view toggle (compact section only) ────────────────────────
-  _GigViewMode _viewMode = _GigViewMode.map;
+  // Default: map and list together, until the worker picks Map or List.
+  _GigViewMode _viewMode = _GigViewMode.both;
   final _searchController = TextEditingController();
   String _searchQuery = '';
   static const int _kListPageSize = 10;
@@ -1962,10 +1983,20 @@ class _GigMapSectionState extends State<GigMapSection> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString(_kGigsViewModePrefKey);
-      if (saved == _GigViewMode.list.name && mounted) {
-        setState(() => _viewMode = _GigViewMode.list);
+      final mode = _GigViewMode.values.where((m) => m.name == saved).firstOrNull;
+      if (mode != null && mode != _viewMode && mounted) {
+        setState(() => _viewMode = mode);
       }
     } catch (_) {}
+  }
+
+  bool get _showsMap => _viewMode != _GigViewMode.list;
+  bool get _showsList => _viewMode != _GigViewMode.map;
+
+  // Something wants the map on screen (focus a gig, show the nearest):
+  // switch to it only from list-only, so "Both" keeps its list.
+  void _ensureMapVisible() {
+    if (!_showsMap) _setViewMode(_GigViewMode.map);
   }
 
   void _setViewMode(_GigViewMode mode) {
@@ -2333,7 +2364,7 @@ class _GigMapSectionState extends State<GigMapSection> {
   void _handleExternalFocusRequest() {
     final target = widget.externalFocusRequest?.value;
     if (target == null) return;
-    _setViewMode(_GigViewMode.map);
+    _ensureMapVisible();
     if (_useGoogleMaps) {
       final controller = _googleMapController;
       if (controller != null) {
@@ -2371,7 +2402,7 @@ class _GigMapSectionState extends State<GigMapSection> {
     final north = me.latitude < g.latitude ? g.latitude : me.latitude;
     final west = me.longitude < g.longitude ? me.longitude : g.longitude;
     final east = me.longitude < g.longitude ? g.longitude : me.longitude;
-    _setViewMode(_GigViewMode.map);
+    _ensureMapVisible();
     if (_useGoogleMaps) {
       _googleMapController?.animateCamera(
         CameraUpdate.newLatLngBounds(
@@ -2574,7 +2605,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         // while this await was pending, tearing down the GoogleMap widget —
         // animating its controller afterwards throws, which the catch below
         // would otherwise misreport as a location failure.
-        if (_viewMode == _GigViewMode.map) {
+        if (_showsMap) {
           if (_useGoogleMaps) {
             _googleMapController?.animateCamera(
               CameraUpdate.newLatLngZoom(quickLoc, 14.0),
@@ -2604,7 +2635,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       );
       _resolveMyCountry(loc);
       // Same view-mode race as the last-known-position branch above.
-      if (_viewMode == _GigViewMode.map) {
+      if (_showsMap) {
         if (_useGoogleMaps) {
           _googleMapController?.animateCamera(
             CameraUpdate.newLatLngZoom(loc, 14.0),
@@ -4338,7 +4369,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                     // Pin Display only affects how map markers are drawn —
                     // meaningless in list view, so it's hidden entirely
                     // there rather than shown as a dead control.
-                    if (_viewMode == _GigViewMode.map) ...[
+                    if (_showsMap) ...[
                       sectionTitle('Pin Display'),
                       Padding(
                         padding: const EdgeInsets.only(bottom: 10),
@@ -4450,7 +4481,7 @@ class _GigMapSectionState extends State<GigMapSection> {
     return TutorialAnchor(
       id: 'workerHome.gigViewToggle',
       child: Container(
-        width: 110,
+        width: 138,
         height: 30,
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
@@ -4460,6 +4491,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         ),
         child: Row(
           children: [
+            Expanded(child: _buildViewModeSegment(_GigViewMode.both, 'Both')),
             Expanded(child: _buildViewModeSegment(_GigViewMode.map, 'Map')),
             Expanded(child: _buildViewModeSegment(_GigViewMode.list, 'List')),
           ],
@@ -4541,6 +4573,8 @@ class _GigMapSectionState extends State<GigMapSection> {
             Expanded(
               child: Text(
                 'Gigs Near You',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: onSurface,
                   fontSize: 17,
@@ -4577,14 +4611,16 @@ class _GigMapSectionState extends State<GigMapSection> {
           ],
         ),
         const SizedBox(height: 12),
-        if (_viewMode == _GigViewMode.map) ...[
+        if (_showsMap) ...[
           _buildFallbackBanners(),
           EntranceAnimation(
             key: const ValueKey('map-block'),
             child: _buildMapBlock(context),
           ),
-        ]
-        else
+        ],
+        // "Both": the list follows right under the map.
+        if (_viewMode == _GigViewMode.both) const SizedBox(height: 16),
+        if (_showsList)
           EntranceAnimation(
             key: const ValueKey('list-mode'),
             type: EntranceAnimationType.fadeInSlideUp,
@@ -4926,7 +4962,8 @@ class _GigMapSectionState extends State<GigMapSection> {
         else if (filtered.isEmpty)
           _emptyListCard("No gigs match '${_searchQuery.trim()}'")
         else ...[
-          _buildFallbackBanners(showButton: false),
+          // In "Both" the note already sits above the map.
+          if (_viewMode != _GigViewMode.both) _buildFallbackBanners(showButton: false),
           Column(
             children: [
               for (final entry

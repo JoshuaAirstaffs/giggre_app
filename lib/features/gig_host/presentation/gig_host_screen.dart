@@ -87,18 +87,8 @@ class _GigHostScreenState extends State<GigHostScreen> {
     });
   }
 
-  // Dashboard "View": the list of workers in range (or the nearest ones) —
-  // same list the map's clusters open. Falls back to scrolling to the map if
-  // it isn't built yet.
-  void _showWorkersList() {
-    final map = _workerMapKey.currentState;
-    if (map != null) {
-      map.showWorkersInRangeList();
-    } else {
-      _scrollToWorkerMap();
-    }
-  }
-
+  // Dashboard "View": scrolls to the "Workers Near You" map (the Online
+  // Workers list sits right under it).
   void _scrollToWorkerMap() {
     final ctx = _workerMapKey.currentContext;
     if (ctx != null) {
@@ -136,7 +126,7 @@ class _GigHostScreenState extends State<GigHostScreen> {
               uid: uid,
               showBackButton: !widget.isTabRoot,
               onTemplates: _showTemplates,
-              onViewWorkers: _showWorkersList,
+              onViewWorkers: _scrollToWorkerMap,
               onSwitchToWorker: widget.onSwitchToWorker,
               onGoHome: widget.onGoHome,
             ),
@@ -280,12 +270,12 @@ class _HostHeader extends StatelessWidget {
                           const SizedBox(width: 10),
                         ],
                         // Left: back (when pushed) + "Gig Host / Dashboard" label
-                        GestureDetector(
+                        Expanded(
+                          child: GestureDetector(
                           onTap: showBackButton
                               ? () => Navigator.pop(context)
                               : null,
                           child: Row(
-                            mainAxisSize: MainAxisSize.min,
                             children: [
                               if (showBackButton) ...[
                                 Container(
@@ -303,19 +293,24 @@ class _HostHeader extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 10),
                               ],
-                              const Text(
-                                'Gig Host Dashboard',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.3,
+                              const Flexible(
+                                child: Text(
+                                  'Dashboard',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.3,
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        const Spacer(),
+                        ),
+                        const SizedBox(width: 6),
                         // Right: action icons (white)
                         Row(
                           mainAxisSize: MainAxisSize.min,
@@ -394,16 +389,16 @@ class _HostHeader extends StatelessWidget {
                                 fixedSize: const Size(38, 38),
                               ),
                             ),
+                            // Worker ⇄ Host mini toggle (current mode named)
+                            if (onSwitchToWorker != null) ...[
+                              const SizedBox(width: 6),
+                              ModeSwitch(isHost: true, onSwitch: onSwitchToWorker!),
+                              const SizedBox(width: 8),
+                            ],
                           ],
                         ),
                       ],
                     ),
-                    // ── Worker ⇄ Host switch (both modes visible) ──
-                    if (onSwitchToWorker != null)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(0, 14, 12, 0),
-                        child: ModeSwitch(isHost: true, onSwitch: onSwitchToWorker!),
-                      ),
                   ],
                 ),
               ),
@@ -616,8 +611,8 @@ class _WorkersOnlineCardState extends State<_WorkersOnlineCard> {
                 const SizedBox(height: 2),
                 Text(
                   _nearestM != null
-                      ? 'Tap View to see the nearest online workers'
-                      : 'Available for gigs · tap View to see them',
+                      ? 'Tap View to see the nearest on the map'
+                      : 'Available for gigs · tap View to see the map',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: kSub, fontSize: 10.5),
@@ -2211,6 +2206,113 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     );
   }
 
+  // Workers shown (in range, or the nearest ones), nearest first, with a
+  // distance label when the host's location is known.
+  ({List<_WorkerData> list, String Function(_WorkerData)? distanceOf}) _sortedWorkers() {
+    final me = _myLocation;
+    final list = [..._workers];
+    if (me == null) return (list: list, distanceOf: null);
+    double dist(_WorkerData w) =>
+        Geolocator.distanceBetween(me.latitude, me.longitude, w.position.latitude, w.position.longitude);
+    list.sort((a, b) => dist(a).compareTo(dist(b)));
+    return (list: list, distanceOf: (w) => DistanceUnits.format(dist(w)));
+  }
+
+  void _offerTo(_WorkerData w) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PostOfferedGigScreen(
+          hostName: widget.hostName,
+          preselectedWorkerId: w.id,
+          preselectedWorkerName: w.name,
+        ),
+      ),
+    );
+  }
+
+  static const int _kInlineWorkers = 5;
+
+  // "Online Workers" — under the map, above Your Gigs: the nearest few,
+  // tap one to offer a gig; See all opens the full list.
+  Widget _buildOnlineWorkersList(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final sorted = _sortedWorkers();
+    final shown = sorted.list.take(_kInlineWorkers).toList();
+    final range = DistanceUnits.formatKmRounded(DistanceUnits.toKm(10));
+    final subtitle = sorted.list.isEmpty
+        ? 'No one is online for gigs right now'
+        : _nearestFallbackM != null
+            ? 'None within $range — showing the nearest'
+            : _myLocation == null
+                ? 'Available for gigs'
+                : 'Within $range of you · nearest first';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Online Workers',
+                    style: TextStyle(color: onSurface, fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: const TextStyle(color: kSub, fontSize: 11.5)),
+                ],
+              ),
+            ),
+            if (sorted.list.length > _kInlineWorkers)
+              TextButton(
+                onPressed: showWorkersInRangeList,
+                child: Text(
+                  'See all (${sorted.list.length})',
+                  style: const TextStyle(color: kGold, fontWeight: FontWeight.w700, fontSize: 13),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: shown.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20, horizontal: 12),
+                  child: Text(
+                    'Post a gig and workers will see it when they come online.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: kSub, fontSize: 12.5),
+                  ),
+                )
+              : Column(
+                  children: [
+                    for (var i = 0; i < shown.length; i++) ...[
+                      if (i > 0)
+                        Divider(
+                          height: 1,
+                          color: isDark ? kBorder.withValues(alpha: 0.4) : Colors.grey.withValues(alpha: 0.12),
+                        ),
+                      _ClusterWorkerTile(
+                        key: ValueKey('online-${shown[i].id}'),
+                        w: shown[i],
+                        distanceLabel: sorted.distanceOf?.call(shown[i]),
+                        onOffer: () => _offerTo(shown[i]),
+                      ),
+                    ],
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
   /// Dashboard "View": workers in range, or the nearest ones, nearest first.
   void showWorkersInRangeList() {
     final me = _myLocation;
@@ -2695,6 +2797,10 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
             style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 11),
           ),
         ),
+        const SizedBox(height: 24),
+
+        // Online workers list — between the map and Your Gigs
+        _buildOnlineWorkersList(context),
       ],
     );
   }
@@ -2746,7 +2852,7 @@ class _ClusterWorkerTile extends StatefulWidget {
   final _WorkerData w;
   final VoidCallback onOffer;
   final String? distanceLabel; // shown when opened from the dashboard list
-  const _ClusterWorkerTile({required this.w, required this.onOffer, this.distanceLabel});
+  const _ClusterWorkerTile({super.key, required this.w, required this.onOffer, this.distanceLabel});
 
   @override
   State<_ClusterWorkerTile> createState() => _ClusterWorkerTileState();

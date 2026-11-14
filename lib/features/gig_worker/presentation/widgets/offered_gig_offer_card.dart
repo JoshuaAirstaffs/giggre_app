@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
+import '../../../gig_host/presentation/widgets/gig_images_picker.dart';
 import '../../../../core/widgets/skill_icon.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,6 +231,12 @@ class OfferedGigOfferCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+          ],
+
+          // ── Photos from the host ───────────────────────────────────
+          if (gig.images.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            GigImagesStrip(urls: gig.images, height: 72),
           ],
 
           const SizedBox(height: 14),

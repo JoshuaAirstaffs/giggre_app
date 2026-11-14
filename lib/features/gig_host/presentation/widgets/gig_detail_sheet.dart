@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'gig_images_picker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -2262,6 +2263,14 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
               label: 'LOCATION',
               isDark: isDark,
               value: dedupedAddress(address),
+            ),
+          ],
+          // Photos the host attached when posting
+          if (((_data?['images'] as List?) ?? const []).isNotEmpty) ...[
+            const SizedBox(height: 14),
+            GigImagesStrip(
+              urls: ((_data?['images'] as List?) ?? const []).whereType<String>().toList(),
+              height: 96,
             ),
           ],
           const SizedBox(height: 16),

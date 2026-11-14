@@ -33,6 +33,7 @@ import '../models/open_gig_model.dart';
 import '../edit_gig.dart';
 import 'widgets/template_name_dialog.dart';
 import 'widgets/task_type_picker.dart';
+import 'widgets/gig_images_picker.dart';
 import 'widgets/skill_picker_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,6 +141,8 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
     setState(() => _mapCurrency = CurrencyFormatter.countryToCurrency(country));
   }
 
+  // Gig photos (optional, up to 5) — uploaded when the gig is posted.
+  final _imagesCtrl = GigImagesController();
   bool _posting = false;
   final _errorPlayer = AudioPlayer();
 
@@ -231,6 +234,7 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
 
   @override
   void dispose() {
+    _imagesCtrl.dispose();
     _titleCtrl.dispose();
     _descCtrl.dispose();
     _budgetCtrl.dispose();
@@ -571,9 +575,22 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         return;
       }
 
+      // Photos first, so a gig is never posted with some of them missing.
+      final List<String> images;
+      try {
+        images = await _imagesCtrl.uploadAll();
+      } catch (e) {
+        debugPrint('[PostGig] photo upload failed: $e');
+        if (!mounted) return;
+        setState(() => _posting = false);
+        _showSnack('Couldn\'t upload the photos. Check your connection and try again.', isError: true);
+        return;
+      }
+
       await FirebaseFirestore.instance.collection('open_gigs').add({
         ...gig.toMap(),
         if (_taskTypeId != null) 'taskTypeId': _taskTypeId,
+        if (images.isNotEmpty) 'images': images,
         if (place != null && place.parts.isNotEmpty) 'place': place.parts,
         // Picked "Other" (not in the skills library) — admins can spot these.
         if (_isCustomSkill) 'customSkill': true,
@@ -826,6 +843,19 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
+
+                // ── Photos (optional) ─────────────────────────────
+                if (!_isEditing) ...[
+                  _SectionLabel('Photos (optional)'),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Up to 5 — the place, the item or the task. Workers see them in the gig details.',
+                    style: TextStyle(color: kSub.withValues(alpha: 0.8), fontSize: 12),
+                  ),
+                  const SizedBox(height: 10),
+                  GigImagesPicker(controller: _imagesCtrl, accentColor: kBlue),
+                  const SizedBox(height: 20),
+                ],
 
                 // ── Required Skills ───────────────────────────────
                 _SectionLabel('Required Skills'),

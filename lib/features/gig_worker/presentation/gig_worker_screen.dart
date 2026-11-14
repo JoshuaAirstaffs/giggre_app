@@ -388,6 +388,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               workDurationHours: (data['workDurationHours'] as num?)
                   ?.toDouble(),
               description: (data['description'] as String?) ?? '',
+              images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -426,6 +427,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               workDurationHours: (data['workDurationHours'] as num?)
                   ?.toDouble(),
               description: (data['description'] as String?) ?? '',
+              images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -463,6 +465,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               workDurationHours: (data['workDurationHours'] as num?)
                   ?.toDouble(),
               description: (data['description'] as String?) ?? '',
+              images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -584,6 +587,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 workDurationHours: (data['workDurationHours'] as num?)
                     ?.toDouble(),
                 description: (data['description'] as String?) ?? '',
+                images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
                 status: 'offered',
                 hostName: data['hostName'] as String? ?? '',
                 address: data['address'] as String? ?? '',
@@ -721,6 +725,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   workDurationHours: (data['workDurationHours'] as num?)
                       ?.toDouble(),
                   description: (data['description'] as String?) ?? '',
+                  images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
                   status: 'navigating',
                   hostName: data['hostName'] as String? ?? '',
                   address: data['address'] as String? ?? '',
@@ -1054,6 +1059,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
             workDurationHours: (data['workDurationHours'] as num?)?.toDouble(),
             description: (data['description'] as String?) ?? '',
+            images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
             status: 'in_progress',
             hostName: data['hostName'] as String? ?? '',
             address: data['address'] as String? ?? '',

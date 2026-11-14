@@ -94,7 +94,7 @@ class WorkerHeader extends StatelessWidget {
                     ],
                     const Expanded(
                       child: Text(
-                        'Gig Worker Dashboard',
+                        'Dashboard',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -145,13 +145,13 @@ class WorkerHeader extends StatelessWidget {
                         ),
                       ),
                     ],
+                    // Worker ⇄ Host mini toggle (current mode named)
+                    if (onSwitchToHost != null) ...[
+                      const SizedBox(width: 8),
+                      ModeSwitch(isHost: false, onSwitch: onSwitchToHost!),
+                    ],
                   ],
                 ),
-                // ── Worker ⇄ Host switch (both modes visible) ──
-                if (onSwitchToHost != null) ...[
-                  const SizedBox(height: 14),
-                  ModeSwitch(isHost: false, onSwitch: onSwitchToHost!),
-                ],
                 if (subtitle != null) ...[const SizedBox(height: 6), subtitle!],
               ],
             ),
