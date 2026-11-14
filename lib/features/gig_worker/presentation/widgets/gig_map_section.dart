@@ -1584,6 +1584,8 @@ enum _PinDisplayMode { default_, salary, distance }
 
 enum _PayTypeFilter { all, hourly, flat }
 
+enum _GigSort { newest, oldest }
+
 // map = map only, list = list only, both = the map with the list under it.
 enum _GigViewMode { map, list, both }
 
@@ -1791,6 +1793,31 @@ class _GigMapSectionState extends State<GigMapSection> {
   // A real data filter, unlike _pinDisplayMode — applies to both map and
   // list view.
   _PayTypeFilter _payTypeFilter = _PayTypeFilter.all;
+  // Pay range on the gig's shown rate (hourly rate for hourly gigs, else the
+  // budget), in the worker's currency. null = no bound on that side.
+  double? _payMin;
+  double? _payMax;
+  // List order; a preference, not a filter (doesn't light the filter badge).
+  _GigSort _sort = _GigSort.newest;
+
+  String get _payCurrency => _userProvider.currencyCode;
+
+  // Pay range slider stops per currency; the last stop means "no maximum".
+  List<double> get _payStops => _payCurrency == 'PHP'
+      ? const [0, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 10000]
+      : const [0, 10, 15, 20, 25, 30, 40, 50, 75, 100, 200, 500];
+
+  int _payStopIndex(double? amount, {required bool isMax}) {
+    final stops = _payStops;
+    if (amount == null) return isMax ? stops.length - 1 : 0;
+    var best = 0;
+    for (var i = 0; i < stops.length; i++) {
+      if ((stops[i] - amount).abs() < (stops[best] - amount).abs()) best = i;
+    }
+    return best;
+  }
+
+  bool get _hasPayRange => _payMin != null || _payMax != null;
 
   // ── Map/List view toggle (compact section only) ────────────────────────
   // Default: map and list together, until the worker picks Map or List.
@@ -1826,6 +1853,10 @@ class _GigMapSectionState extends State<GigMapSection> {
         : DateFormat('yyyy-MM-dd').format(_scheduleDateFilter!),
     'payType': _payTypeFilter.name,
     'pinDisplay': _pinDisplayMode.name,
+    'payMin': _payMin,
+    'payMax': _payMax,
+    'payCurrency': _payCurrency,
+    'sort': _sort.name,
   };
 
   void _applyDefaultFilters() {
@@ -1902,6 +1933,11 @@ class _GigMapSectionState extends State<GigMapSection> {
       j['pinDisplay'],
       _pinDisplayMode,
     );
+    // A pay range only makes sense in the currency it was set in.
+    final sameCurrency = j['payCurrency'] == _payCurrency;
+    _payMin = sameCurrency ? (j['payMin'] as num?)?.toDouble() : null;
+    _payMax = sameCurrency ? (j['payMax'] as num?)?.toDouble() : null;
+    _sort = byName(_GigSort.values, j['sort'], _sort);
   }
 
   // Uids whose account copy was already read this session.
@@ -3302,6 +3338,20 @@ class _GigMapSectionState extends State<GigMapSection> {
         gigs = gigs.where((g) => g.payType != 'hourly').toList();
     }
 
+    // Gigs in another currency can't be compared, so a range hides them.
+    if (_hasPayRange) {
+      final min = _payMin, max = _payMax, ccy = _payCurrency;
+      gigs = gigs.where((g) {
+        if (g.currencyCode != ccy) return false;
+        final pay = g.payType == 'hourly' && g.hourlyRate != null
+            ? g.hourlyRate!
+            : g.budget;
+        return (min == null || pay >= min) && (max == null || pay <= max);
+      }).toList();
+    }
+
+    gigs = _sorted(gigs);
+
     // Distance last, so that when nothing is inside the worker's radius we
     // can fall back to the nearest gigs that match every other filter.
     if (!applyRadius) return gigs;
@@ -3319,7 +3369,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       final byDistance = [...gigs]..sort((a, b) => dist(a).compareTo(dist(b)));
       final nearest = byDistance.take(_kNearestFallbackCount).toList();
       _nearestFallbackM = dist(nearest.first);
-      return nearest;
+      return _sorted(nearest);
     }
 
     return gigs;
@@ -3327,11 +3377,24 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   static const int _kNearestFallbackCount = 10;
 
+  // Newest / oldest posted first; gigs without a createdAt go last.
+  List<GigMarkerData> _sorted(List<GigMarkerData> gigs) {
+    final newestFirst = _sort == _GigSort.newest;
+    return [...gigs]..sort((a, b) {
+      final ca = a.createdAt, cb = b.createdAt;
+      if (ca == null && cb == null) return 0;
+      if (ca == null) return 1;
+      if (cb == null) return -1;
+      return newestFirst ? cb.compareTo(ca) : ca.compareTo(cb);
+    });
+  }
+
   bool get _hasActiveFilter =>
       _skillFilter != _SkillFilter.all ||
       _radiusKm != null ||
       _scheduleDateFilter != null ||
-      _payTypeFilter != _PayTypeFilter.all;
+      _payTypeFilter != _PayTypeFilter.all ||
+      _hasPayRange;
 
   static double _gridSize(double zoom) {
     if (zoom < 10) return 0.15;
@@ -3971,7 +4034,29 @@ class _GigMapSectionState extends State<GigMapSection> {
   // ─────────────────────────────────────────────────────────────────────────
   //  Filter sheet — skill + radius
   // ─────────────────────────────────────────────────────────────────────────
-  static const List<double?> _radiusOptions = [null, 1, 5, 10, 50, 100];
+  // Distance slider stops, in the shown unit (km, or mi in the US); the last
+  // stop (null) is "Any". Also the steps the skills default radius snaps to.
+  static const List<double?> _radiusOptions = [
+    1, 2, 5, 10, 15, 25, 50, 75, 100, null,
+  ];
+
+  // Slider position for a radius in km: the closest stop (saved filters from
+  // the old chips, or a region switch, may sit between stops).
+  int _radiusStopIndex(double? radiusKm) {
+    if (radiusKm == null) return _radiusOptions.length - 1;
+    var best = 0;
+    var bestDiff = double.infinity;
+    for (var i = 0; i < _radiusOptions.length; i++) {
+      final r = _radiusOptions[i];
+      if (r == null) continue;
+      final diff = (DistanceUnits.toKm(r) - radiusKm).abs();
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = i;
+      }
+    }
+    return best;
+  }
 
   void _showFilterSheet(BuildContext context) {
     final skills = _allSkillNames;
@@ -3980,6 +4065,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (ctx) {
         final cardColor = Theme.of(ctx).cardColor;
         final onSurface = Theme.of(ctx).colorScheme.onSurface;
@@ -3987,14 +4073,30 @@ class _GigMapSectionState extends State<GigMapSection> {
 
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
+            // Hierarchy: sheet title → group (Gigs, Where & when, Pay,
+            // Order & display) → field label → the chosen value in amber.
+            final matchCount = _allGigs.length;
+
+            Widget groupTitle(String text) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            );
+
             Widget sectionTitle(String text) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
                 text,
                 style: TextStyle(
-                  color: onSurface,
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
+                  color: onSurface.withValues(alpha: 0.65),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             );
@@ -4036,423 +4138,773 @@ class _GigMapSectionState extends State<GigMapSection> {
               );
             }
 
-            return Container(
-              margin: const EdgeInsets.all(16),
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: SingleChildScrollView(
+            // Drawer: attached to the bottom, drag the handle to expand or
+            // pull down to dismiss.
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.75,
+              minChildSize: 0.4,
+              maxChildSize: 0.92,
+              builder: (_, scrollController) => Container(
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(24),
+                  ),
+                ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Icon(Icons.tune_rounded, color: kAmber, size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Filter Gigs',
-                          style: TextStyle(
-                            color: onSurface,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+                    // Drag handle
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10, bottom: 6),
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: kSub.withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(2),
                         ),
-                        const Spacer(),
-                        TextButton(
-                          onPressed: () {
-                            setSheetState(() {
-                              _skillFilter = _SkillFilter.all;
-                              _specificSkill = null;
-                              _radiusKm = null;
-                              _radiusTouched = true;
-                              _scheduleDateFilter = null;
-                              _pinDisplayMode = _PinDisplayMode.default_;
-                              _payTypeFilter = _PayTypeFilter.all;
-                            });
-                            setState(() {
-                              _skillFilter = _SkillFilter.all;
-                              _specificSkill = null;
-                              _radiusKm = null;
-                              _radiusTouched = true;
-                              _scheduleDateFilter = null;
-                              _pinDisplayMode = _PinDisplayMode.default_;
-                              _payTypeFilter = _PayTypeFilter.all;
-                            });
-                          },
-                          child: const Text(
-                            'Reset',
-                            style: TextStyle(color: kSub, fontSize: 12),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    sectionTitle('Show gigs'),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        choiceChip(
-                          label: 'All Gigs',
-                          selected: _skillFilter == _SkillFilter.all,
-                          onTap: () {
-                            setSheetState(
-                              () => _skillFilter = _SkillFilter.all,
-                            );
-                            setState(() => _skillFilter = _SkillFilter.all);
-                          },
-                        ),
-                        choiceChip(
-                          label: 'Matches My Skills',
-                          selected: _skillFilter == _SkillFilter.mySkills,
-                          onTap: () {
-                            setSheetState(
-                              () => _skillFilter = _SkillFilter.mySkills,
-                            );
-                            setState(
-                              () => _skillFilter = _SkillFilter.mySkills,
-                            );
-                          },
-                        ),
-                        choiceChip(
-                          label: 'Specific Skill',
-                          selected: _skillFilter == _SkillFilter.specific,
-                          onTap: skills.isEmpty
-                              ? () {}
-                              : () {
-                                  setSheetState(() {
-                                    _skillFilter = _SkillFilter.specific;
-                                    _specificSkill ??= skills.first;
-                                  });
-                                  setState(() {
-                                    _skillFilter = _SkillFilter.specific;
-                                    _specificSkill ??= skills.first;
-                                  });
-                                },
-                        ),
-                      ],
-                    ),
-                    if (_skillFilter == _SkillFilter.specific) ...[
-                      const SizedBox(height: 12),
-                      if (skills.isEmpty)
-                        const Text(
-                          'Loading skills…',
-                          style: TextStyle(color: kSub, fontSize: 12),
-                        )
-                      else
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.black.withValues(alpha: 0.04),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Theme.of(ctx).dividerColor,
-                            ),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: skills.contains(_specificSkill)
-                                  ? _specificSkill
-                                  : skills.first,
-                              isExpanded: true,
-                              icon: const Icon(
-                                Icons.keyboard_arrow_down_rounded,
-                                color: kSub,
-                              ),
-                              style: TextStyle(
-                                color: onSurface,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              dropdownColor: cardColor,
-                              borderRadius: BorderRadius.circular(12),
-                              items: skills
-                                  .map(
-                                    (s) => DropdownMenuItem(
-                                      value: s,
-                                      child: Text(s),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (s) {
-                                if (s == null) return;
-                                setSheetState(() => _specificSkill = s);
-                                setState(() => _specificSkill = s);
-                              },
-                            ),
-                          ),
-                        ),
-                    ],
-                    const SizedBox(height: 18),
-                    sectionTitle('Distance'),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _radiusOptions.map((r) {
-                        final label = r == null
-                            ? 'Any'
-                            : '${r.toStringAsFixed(0)} ${DistanceUnits.unit}';
-                        final km = r == null ? null : DistanceUnits.toKm(r);
-                        return choiceChip(
-                          label: label,
-                          selected: km == null
-                              ? _radiusKm == null
-                              : _radiusKm != null && (_radiusKm! - km).abs() < 0.001,
-                          onTap: () {
-                            _radiusTouched = true;
-                            setSheetState(() => _radiusKm = km);
-                            setState(() => _radiusKm = km);
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    if (_radiusKm != null && _myLocation != null) ...[
-                      const SizedBox(height: 8),
-                      const Text(
-                        'If nothing is within this distance, the nearest gigs are shown instead.',
-                        style: TextStyle(color: kSub, fontSize: 11),
                       ),
-                    ],
-                    if (_radiusKm != null && _myLocation == null) ...[
-                      const SizedBox(height: 10),
-                      const Text(
-                        'Your location isn\'t available yet — distance filter will apply once located.',
-                        style: TextStyle(color: kSub, fontSize: 11),
-                      ),
-                    ],
-                    const SizedBox(height: 18),
-                    sectionTitle('Schedule'),
-                    Row(
-                      children: [
-                        GestureDetector(
-                          onTap: () async {
-                            final now = DateTime.now();
-                            final picked = await showDatePicker(
-                              context: ctx,
-                              initialDate: _scheduleDateFilter ?? now,
-                              firstDate: now.subtract(
-                                const Duration(days: 365),
-                              ),
-                              lastDate: now.add(const Duration(days: 365)),
-                              builder: (dctx, child) => Theme(
-                                data: Theme.of(dctx).copyWith(
-                                  colorScheme: Theme.of(dctx).colorScheme
-                                      .copyWith(
-                                        primary: kAmber,
-                                        onPrimary: Colors.white,
-                                      ),
-                                ),
-                                child: child!,
-                              ),
-                            );
-                            if (picked == null) return;
-                            setSheetState(() => _scheduleDateFilter = picked);
-                            setState(() => _scheduleDateFilter = picked);
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _scheduleDateFilter != null
-                                  ? kAmber.withValues(alpha: 0.15)
-                                  : (isDark
-                                        ? Colors.white.withValues(alpha: 0.05)
-                                        : Colors.black.withValues(alpha: 0.04)),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: _scheduleDateFilter != null
-                                    ? kAmber
-                                    : Theme.of(ctx).dividerColor,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
                               children: [
-                                Icon(
-                                  Icons.event_rounded,
-                                  size: 14,
-                                  color: _scheduleDateFilter != null
-                                      ? kAmber
-                                      : onSurface,
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Filter Gigs',
+                                        style: TextStyle(
+                                          color: onSurface,
+                                          fontSize: 19,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _hasActiveFilter
+                                            ? '${matchCount == 1 ? '1 gig matches' : '$matchCount gigs match'} your filters'
+                                            : 'Showing all gigs',
+                                        style: const TextStyle(
+                                          color: kSub,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  _scheduleDateFilter != null
-                                      ? DateFormat(
-                                          'EEE, MMM d',
-                                        ).format(_scheduleDateFilter!)
-                                      : 'Any date',
-                                  style: TextStyle(
-                                    color: _scheduleDateFilter != null
-                                        ? kAmber
-                                        : onSurface,
-                                    fontSize: 12,
-                                    fontWeight: _scheduleDateFilter != null
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
+                                TextButton(
+                                  onPressed:
+                                      !_hasActiveFilter &&
+                                          _sort == _GigSort.newest
+                                      ? null
+                                      : () {
+                                          setSheetState(() {
+                                            _skillFilter = _SkillFilter.all;
+                                            _specificSkill = null;
+                                            _radiusKm = null;
+                                            _radiusTouched = true;
+                                            _scheduleDateFilter = null;
+                                            _pinDisplayMode =
+                                                _PinDisplayMode.default_;
+                                            _payTypeFilter = _PayTypeFilter.all;
+                                            _payMin = null;
+                                            _payMax = null;
+                                            _sort = _GigSort.newest;
+                                          });
+                                          setState(() {
+                                            _skillFilter = _SkillFilter.all;
+                                            _specificSkill = null;
+                                            _radiusKm = null;
+                                            _radiusTouched = true;
+                                            _scheduleDateFilter = null;
+                                            _pinDisplayMode =
+                                                _PinDisplayMode.default_;
+                                            _payTypeFilter = _PayTypeFilter.all;
+                                            _payMin = null;
+                                            _payMax = null;
+                                            _sort = _GigSort.newest;
+                                          });
+                                        },
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: kAmber,
+                                    disabledForegroundColor: kSub.withValues(
+                                      alpha: 0.5,
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Reset',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                 ),
                               ],
                             ),
-                          ),
+                            const SizedBox(height: 20),
+                            groupTitle('Gigs'),
+                            sectionTitle('Skills'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                choiceChip(
+                                  label: 'All Gigs',
+                                  selected: _skillFilter == _SkillFilter.all,
+                                  onTap: () {
+                                    setSheetState(
+                                      () => _skillFilter = _SkillFilter.all,
+                                    );
+                                    setState(
+                                      () => _skillFilter = _SkillFilter.all,
+                                    );
+                                  },
+                                ),
+                                choiceChip(
+                                  label: 'Matches My Skills',
+                                  selected:
+                                      _skillFilter == _SkillFilter.mySkills,
+                                  onTap: () {
+                                    setSheetState(
+                                      () =>
+                                          _skillFilter = _SkillFilter.mySkills,
+                                    );
+                                    setState(
+                                      () =>
+                                          _skillFilter = _SkillFilter.mySkills,
+                                    );
+                                  },
+                                ),
+                                choiceChip(
+                                  label: 'Specific Skill',
+                                  selected:
+                                      _skillFilter == _SkillFilter.specific,
+                                  onTap: skills.isEmpty
+                                      ? () {}
+                                      : () {
+                                          setSheetState(() {
+                                            _skillFilter =
+                                                _SkillFilter.specific;
+                                            _specificSkill ??= skills.first;
+                                          });
+                                          setState(() {
+                                            _skillFilter =
+                                                _SkillFilter.specific;
+                                            _specificSkill ??= skills.first;
+                                          });
+                                        },
+                                ),
+                              ],
+                            ),
+                            if (_skillFilter == _SkillFilter.specific) ...[
+                              const SizedBox(height: 12),
+                              if (skills.isEmpty)
+                                const Text(
+                                  'Loading skills…',
+                                  style: TextStyle(color: kSub, fontSize: 12),
+                                )
+                              else
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.05)
+                                        : Colors.black.withValues(alpha: 0.04),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Theme.of(ctx).dividerColor,
+                                    ),
+                                  ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: skills.contains(_specificSkill)
+                                          ? _specificSkill
+                                          : skills.first,
+                                      isExpanded: true,
+                                      icon: const Icon(
+                                        Icons.keyboard_arrow_down_rounded,
+                                        color: kSub,
+                                      ),
+                                      style: TextStyle(
+                                        color: onSurface,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      dropdownColor: cardColor,
+                                      borderRadius: BorderRadius.circular(12),
+                                      items: skills
+                                          .map(
+                                            (s) => DropdownMenuItem(
+                                              value: s,
+                                              child: Text(s),
+                                            ),
+                                          )
+                                          .toList(),
+                                      onChanged: (s) {
+                                        if (s == null) return;
+                                        setSheetState(() => _specificSkill = s);
+                                        setState(() => _specificSkill = s);
+                                      },
+                                    ),
+                                  ),
+                                ),
+                            ],
+                            const SizedBox(height: 22),
+                            Divider(
+                              height: 1,
+                              color: Theme.of(ctx).dividerColor,
+                            ),
+                            const SizedBox(height: 18),
+                            groupTitle('Where & when'),
+                            sectionTitle('Distance'),
+                            Builder(
+                              builder: (_) {
+                                final stop = _radiusStopIndex(_radiusKm);
+                                final r = _radiusOptions[stop];
+                                final first = _radiusOptions.first!;
+                                String fmt(double v) =>
+                                    '${v.toStringAsFixed(0)} ${DistanceUnits.unit}';
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      r == null
+                                          ? 'Any distance'
+                                          : 'Within ${fmt(r)}',
+                                      style: const TextStyle(
+                                        color: kAmber,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    SliderTheme(
+                                      data: SliderTheme.of(ctx).copyWith(
+                                        activeTrackColor: kAmber,
+                                        inactiveTrackColor: kAmber.withValues(
+                                          alpha: 0.2,
+                                        ),
+                                        thumbColor: kAmber,
+                                        overlayColor: kAmber.withValues(
+                                          alpha: 0.15,
+                                        ),
+                                        activeTickMarkColor: Colors.white
+                                            .withValues(alpha: 0.7),
+                                        inactiveTickMarkColor: kAmber
+                                            .withValues(alpha: 0.5),
+                                        trackHeight: 4,
+                                        showValueIndicator:
+                                            ShowValueIndicator.never,
+                                      ),
+                                      child: Slider(
+                                        value: stop.toDouble(),
+                                        min: 0,
+                                        max: (_radiusOptions.length - 1)
+                                            .toDouble(),
+                                        divisions: _radiusOptions.length - 1,
+                                        semanticFormatterCallback: (v) {
+                                          final o = _radiusOptions[v.round()];
+                                          return o == null
+                                              ? 'Any distance'
+                                              : 'Within ${fmt(o)}';
+                                        },
+                                        // Live in the sheet while dragging; the
+                                        // list and map refilter once on release.
+                                        onChanged: (v) {
+                                          final o = _radiusOptions[v.round()];
+                                          _radiusTouched = true;
+                                          setSheetState(
+                                            () => _radiusKm = o == null
+                                                ? null
+                                                : DistanceUnits.toKm(o),
+                                          );
+                                        },
+                                        onChangeEnd: (_) => setState(() {}),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            fmt(first),
+                                            style: const TextStyle(
+                                              color: kSub,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                          const Text(
+                                            'Any',
+                                            style: TextStyle(
+                                              color: kSub,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                            if (_radiusKm != null && _myLocation != null) ...[
+                              const SizedBox(height: 8),
+                              const Text(
+                                'If nothing is within this distance, the nearest gigs are shown instead.',
+                                style: TextStyle(color: kSub, fontSize: 11),
+                              ),
+                            ],
+                            if (_radiusKm != null && _myLocation == null) ...[
+                              const SizedBox(height: 10),
+                              const Text(
+                                'Your location isn\'t available yet — distance filter will apply once located.',
+                                style: TextStyle(color: kSub, fontSize: 11),
+                              ),
+                            ],
+                            const SizedBox(height: 18),
+                            sectionTitle('Schedule'),
+                            Row(
+                              children: [
+                                GestureDetector(
+                                  onTap: () async {
+                                    final now = DateTime.now();
+                                    final picked = await showDatePicker(
+                                      context: ctx,
+                                      initialDate: _scheduleDateFilter ?? now,
+                                      firstDate: now.subtract(
+                                        const Duration(days: 365),
+                                      ),
+                                      lastDate: now.add(
+                                        const Duration(days: 365),
+                                      ),
+                                      builder: (dctx, child) => Theme(
+                                        data: Theme.of(dctx).copyWith(
+                                          colorScheme: Theme.of(dctx)
+                                              .colorScheme
+                                              .copyWith(
+                                                primary: kAmber,
+                                                onPrimary: Colors.white,
+                                              ),
+                                        ),
+                                        child: child!,
+                                      ),
+                                    );
+                                    if (picked == null) return;
+                                    setSheetState(
+                                      () => _scheduleDateFilter = picked,
+                                    );
+                                    setState(
+                                      () => _scheduleDateFilter = picked,
+                                    );
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _scheduleDateFilter != null
+                                          ? kAmber.withValues(alpha: 0.15)
+                                          : (isDark
+                                                ? Colors.white.withValues(
+                                                    alpha: 0.05,
+                                                  )
+                                                : Colors.black.withValues(
+                                                    alpha: 0.04,
+                                                  )),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: _scheduleDateFilter != null
+                                            ? kAmber
+                                            : Theme.of(ctx).dividerColor,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.event_rounded,
+                                          size: 14,
+                                          color: _scheduleDateFilter != null
+                                              ? kAmber
+                                              : onSurface,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          _scheduleDateFilter != null
+                                              ? DateFormat(
+                                                  'EEE, MMM d',
+                                                ).format(_scheduleDateFilter!)
+                                              : 'Any date',
+                                          style: TextStyle(
+                                            color: _scheduleDateFilter != null
+                                                ? kAmber
+                                                : onSurface,
+                                            fontSize: 12,
+                                            fontWeight:
+                                                _scheduleDateFilter != null
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                if (_scheduleDateFilter != null) ...[
+                                  const SizedBox(width: 8),
+                                  GestureDetector(
+                                    onTap: () {
+                                      setSheetState(
+                                        () => _scheduleDateFilter = null,
+                                      );
+                                      setState(
+                                        () => _scheduleDateFilter = null,
+                                      );
+                                    },
+                                    child: Icon(
+                                      Icons.close_rounded,
+                                      size: 18,
+                                      color: kSub,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 22),
+                            Divider(
+                              height: 1,
+                              color: Theme.of(ctx).dividerColor,
+                            ),
+                            const SizedBox(height: 18),
+                            groupTitle('Pay'),
+                            sectionTitle('Pay type'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                choiceChip(
+                                  label: 'All',
+                                  selected:
+                                      _payTypeFilter == _PayTypeFilter.all,
+                                  onTap: () {
+                                    setSheetState(
+                                      () => _payTypeFilter = _PayTypeFilter.all,
+                                    );
+                                    setState(
+                                      () => _payTypeFilter = _PayTypeFilter.all,
+                                    );
+                                  },
+                                ),
+                                choiceChip(
+                                  label: 'Hourly',
+                                  selected:
+                                      _payTypeFilter == _PayTypeFilter.hourly,
+                                  onTap: () {
+                                    setSheetState(
+                                      () => _payTypeFilter =
+                                          _PayTypeFilter.hourly,
+                                    );
+                                    setState(
+                                      () => _payTypeFilter =
+                                          _PayTypeFilter.hourly,
+                                    );
+                                  },
+                                ),
+                                choiceChip(
+                                  label: 'Day',
+                                  selected:
+                                      _payTypeFilter == _PayTypeFilter.flat,
+                                  onTap: () {
+                                    setSheetState(
+                                      () =>
+                                          _payTypeFilter = _PayTypeFilter.flat,
+                                    );
+                                    setState(
+                                      () =>
+                                          _payTypeFilter = _PayTypeFilter.flat,
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            sectionTitle('Pay range'),
+                            Builder(
+                              builder: (_) {
+                                final stops = _payStops;
+                                final last = stops.length - 1;
+                                final lo = _payStopIndex(_payMin, isMax: false);
+                                final hi = _payStopIndex(_payMax, isMax: true);
+                                String money(double v) =>
+                                    CurrencyFormatter.format(v, _payCurrency);
+                                final label = lo == 0 && hi == last
+                                    ? 'Any pay'
+                                    : hi == last
+                                    ? '${money(stops[lo])} and up'
+                                    : lo == 0
+                                    ? 'Up to ${money(stops[hi])}'
+                                    : '${money(stops[lo])} – ${money(stops[hi])}';
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      label,
+                                      style: const TextStyle(
+                                        color: kAmber,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    SliderTheme(
+                                      data: SliderTheme.of(ctx).copyWith(
+                                        activeTrackColor: kAmber,
+                                        inactiveTrackColor: kAmber.withValues(
+                                          alpha: 0.2,
+                                        ),
+                                        thumbColor: kAmber,
+                                        overlayColor: kAmber.withValues(
+                                          alpha: 0.15,
+                                        ),
+                                        activeTickMarkColor: Colors.white
+                                            .withValues(alpha: 0.7),
+                                        inactiveTickMarkColor: kAmber
+                                            .withValues(alpha: 0.5),
+                                        trackHeight: 4,
+                                        showValueIndicator:
+                                            ShowValueIndicator.never,
+                                      ),
+                                      child: RangeSlider(
+                                        values: RangeValues(
+                                          lo.toDouble(),
+                                          hi.toDouble(),
+                                        ),
+                                        min: 0,
+                                        max: last.toDouble(),
+                                        divisions: last,
+                                        semanticFormatterCallback: (v) {
+                                          final i = v.round();
+                                          return i == last
+                                              ? 'No maximum'
+                                              : money(stops[i]);
+                                        },
+                                        // Live in the sheet while dragging; the
+                                        // list and map refilter once on release.
+                                        onChanged: (v) {
+                                          final a = v.start.round();
+                                          final b = v.end.round();
+                                          setSheetState(() {
+                                            _payMin = a == 0 ? null : stops[a];
+                                            _payMax = b == last
+                                                ? null
+                                                : stops[b];
+                                          });
+                                        },
+                                        onChangeEnd: (_) => setState(() {}),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            money(stops.first),
+                                            style: const TextStyle(
+                                              color: kSub,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                          Text(
+                                            '${money(stops[last])}+',
+                                            style: const TextStyle(
+                                              color: kSub,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (_hasPayRange) ...[
+                                      const SizedBox(height: 6),
+                                      const Text(
+                                        'Compares the hourly rate for hourly gigs and the day rate for day gigs.',
+                                        style: TextStyle(
+                                          color: kSub,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 22),
+                            Divider(
+                              height: 1,
+                              color: Theme.of(ctx).dividerColor,
+                            ),
+                            const SizedBox(height: 18),
+                            groupTitle('Order & display'),
+                            sectionTitle('Sort by'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final (sort, label) in const [
+                                  (_GigSort.newest, 'Newest first'),
+                                  (_GigSort.oldest, 'Oldest first'),
+                                ])
+                                  choiceChip(
+                                    label: label,
+                                    selected: _sort == sort,
+                                    onTap: () {
+                                      setSheetState(() => _sort = sort);
+                                      setState(() => _sort = sort);
+                                    },
+                                  ),
+                              ],
+                            ),
+                            if (_showsMap)
+                              const SizedBox(height: 18),
+                            // Pin Display only affects how map markers are drawn —
+                            // meaningless in list view, so it's hidden entirely
+                            // there rather than shown as a dead control.
+                            if (_showsMap) ...[
+                              sectionTitle('Pin display'),
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Text(
+                                  'Choose what shows on each map pin — the gig type icon, its pay rate, or how far it is from you.',
+                                  style: TextStyle(
+                                    color: kSub.withValues(alpha: 0.8),
+                                    fontSize: 11.5,
+                                  ),
+                                ),
+                              ),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  choiceChip(
+                                    label: 'Default',
+                                    selected:
+                                        _pinDisplayMode ==
+                                        _PinDisplayMode.default_,
+                                    onTap: () {
+                                      setSheetState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.default_,
+                                      );
+                                      setState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.default_,
+                                      );
+                                    },
+                                  ),
+                                  choiceChip(
+                                    label: 'Salary',
+                                    selected:
+                                        _pinDisplayMode ==
+                                        _PinDisplayMode.salary,
+                                    onTap: () {
+                                      setSheetState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.salary,
+                                      );
+                                      setState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.salary,
+                                      );
+                                    },
+                                  ),
+                                  choiceChip(
+                                    label: 'Distance',
+                                    selected:
+                                        _pinDisplayMode ==
+                                        _PinDisplayMode.distance,
+                                    onTap: () {
+                                      setSheetState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.distance,
+                                      );
+                                      setState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.distance,
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                              if (_pinDisplayMode == _PinDisplayMode.distance &&
+                                  _myLocation == null) ...[
+                                const SizedBox(height: 10),
+                                const Text(
+                                  'Your location isn\'t available yet — pins will show the default style until located.',
+                                  style: TextStyle(color: kSub, fontSize: 11),
+                                ),
+                              ],
+                              const SizedBox(height: 20),
+                            ],
+                          ],
                         ),
-                        if (_scheduleDateFilter != null) ...[
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () {
-                              setSheetState(() => _scheduleDateFilter = null);
-                              setState(() => _scheduleDateFilter = null);
-                            },
-                            child: Icon(
-                              Icons.close_rounded,
-                              size: 18,
-                              color: kSub,
+                      ),
+                    ),
+                    // Apply stays pinned under the scrolling filters.
+                    Container(
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        12,
+                        20,
+                        12 + MediaQuery.of(ctx).padding.bottom,
+                      ),
+                      decoration: BoxDecoration(
+                        color: cardColor,
+                        border: Border(
+                          top: BorderSide(color: Theme.of(ctx).dividerColor),
+                        ),
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 46,
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: kAmber,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    sectionTitle('Pay Type'),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        choiceChip(
-                          label: 'All',
-                          selected: _payTypeFilter == _PayTypeFilter.all,
-                          onTap: () {
-                            setSheetState(
-                              () => _payTypeFilter = _PayTypeFilter.all,
-                            );
-                            setState(() => _payTypeFilter = _PayTypeFilter.all);
-                          },
-                        ),
-                        choiceChip(
-                          label: 'Hourly',
-                          selected: _payTypeFilter == _PayTypeFilter.hourly,
-                          onTap: () {
-                            setSheetState(
-                              () => _payTypeFilter = _PayTypeFilter.hourly,
-                            );
-                            setState(
-                              () => _payTypeFilter = _PayTypeFilter.hourly,
-                            );
-                          },
-                        ),
-                        choiceChip(
-                          label: 'Day',
-                          selected: _payTypeFilter == _PayTypeFilter.flat,
-                          onTap: () {
-                            setSheetState(
-                              () => _payTypeFilter = _PayTypeFilter.flat,
-                            );
-                            setState(
-                              () => _payTypeFilter = _PayTypeFilter.flat,
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    // Pin Display only affects how map markers are drawn —
-                    // meaningless in list view, so it's hidden entirely
-                    // there rather than shown as a dead control.
-                    if (_showsMap) ...[
-                      sectionTitle('Pin Display'),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Text(
-                          'Choose what shows on each map pin — the gig type icon, its pay rate, or how far it is from you.',
-                          style: TextStyle(
-                            color: kSub.withValues(alpha: 0.8),
-                            fontSize: 11.5,
-                          ),
-                        ),
-                      ),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          choiceChip(
-                            label: 'Default',
-                            selected:
-                                _pinDisplayMode == _PinDisplayMode.default_,
-                            onTap: () {
-                              setSheetState(
-                                () =>
-                                    _pinDisplayMode = _PinDisplayMode.default_,
-                              );
-                              setState(
-                                () =>
-                                    _pinDisplayMode = _PinDisplayMode.default_,
-                              );
-                            },
-                          ),
-                          choiceChip(
-                            label: 'Salary',
-                            selected: _pinDisplayMode == _PinDisplayMode.salary,
-                            onTap: () {
-                              setSheetState(
-                                () => _pinDisplayMode = _PinDisplayMode.salary,
-                              );
-                              setState(
-                                () => _pinDisplayMode = _PinDisplayMode.salary,
-                              );
-                            },
-                          ),
-                          choiceChip(
-                            label: 'Distance',
-                            selected:
-                                _pinDisplayMode == _PinDisplayMode.distance,
-                            onTap: () {
-                              setSheetState(
-                                () =>
-                                    _pinDisplayMode = _PinDisplayMode.distance,
-                              );
-                              setState(
-                                () =>
-                                    _pinDisplayMode = _PinDisplayMode.distance,
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                      if (_pinDisplayMode == _PinDisplayMode.distance &&
-                          _myLocation == null) ...[
-                        const SizedBox(height: 10),
-                        const Text(
-                          'Your location isn\'t available yet — pins will show the default style until located.',
-                          style: TextStyle(color: kSub, fontSize: 11),
-                        ),
-                      ],
-                      const SizedBox(height: 20),
-                    ],
-                    SizedBox(
-                      width: double.infinity,
-                      height: 46,
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: kAmber,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        child: const Text(
-                          'Apply',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
+                          child: Text(
+                            matchCount == 0
+                                ? 'No gigs match'
+                                : matchCount == 1
+                                ? 'Show 1 gig'
+                                : 'Show $matchCount gigs',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ),
@@ -4824,6 +5276,23 @@ class _GigMapSectionState extends State<GigMapSection> {
     final searchIgnoresRadius =
         searching && _radiusKm != null && _myLocation != null;
 
+    // After the results: an end marker, then every other gig (outside the
+    // filters), so the list never just stops. Not while searching — a
+    // search result is exactly what was asked for.
+    final shownIds = {for (final g in filtered) g.id};
+    final others = searching
+        ? const <GigMarkerData>[]
+        : _sorted(
+            _unfilteredGigs.where((g) => !shownIds.contains(g.id)).toList(),
+          );
+    // Each entry is a gig, or null for the marker between the two parts.
+    final items = <GigMarkerData?>[
+      ...filtered,
+      if (others.isNotEmpty) null,
+      ...others,
+    ];
+    final hasMore = _visibleListCount < items.length;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -4878,56 +5347,108 @@ class _GigMapSectionState extends State<GigMapSection> {
               ],
             ],
           )
-        else if (!searching && gigs.isEmpty)
-          _emptyListCard('No gigs nearby right now')
-        else if (filtered.isEmpty)
-          _emptyListCard("No gigs match '${_searchQuery.trim()}'")
+        else if (items.isEmpty)
+          _emptyListCard(
+            searching
+                ? "No gigs match '${_searchQuery.trim()}'"
+                : 'No gigs nearby right now',
+          )
         else ...[
           // In "Both" the note already sits above the map.
-          if (_viewMode != _GigViewMode.both) _buildFallbackBanners(showButton: false),
+          if (filtered.isNotEmpty && _viewMode != _GigViewMode.both)
+            _buildFallbackBanners(showButton: false),
           Column(
             children: [
               for (final entry
-                  in filtered
-                      .take(_visibleListCount)
-                      .toList()
-                      .asMap()
-                      .entries) ...[
-                _listItemWrapper(
-                  index: entry.key,
-                  hasMore: _visibleListCount < filtered.length,
-                  child: _GigListCard(
-                    gig: entry.value,
-                    accentColor: cardAccentForType(entry.value.gigType),
-                    typeLabel: gigTypeLabel(entry.value.gigType),
-                    distanceLabel: _myLocation != null
-                        ? formatGigDistance(
-                            Geolocator.distanceBetween(
-                              _myLocation!.latitude,
-                              _myLocation!.longitude,
-                              entry.value.position.latitude,
-                              entry.value.position.longitude,
+                  in items.take(_visibleListCount).toList().asMap().entries)
+                if (entry.value == null)
+                  _listItemWrapper(
+                    index: entry.key,
+                    hasMore: hasMore,
+                    child: _endOfResultsMarker(matchCount: filtered.length),
+                  )
+                else ...[
+                  _listItemWrapper(
+                    index: entry.key,
+                    hasMore: hasMore,
+                    child: _GigListCard(
+                      gig: entry.value!,
+                      accentColor: cardAccentForType(entry.value!.gigType),
+                      typeLabel: gigTypeLabel(entry.value!.gigType),
+                      distanceLabel: _myLocation != null
+                          ? formatGigDistance(
+                              Geolocator.distanceBetween(
+                                _myLocation!.latitude,
+                                _myLocation!.longitude,
+                                entry.value!.position.latitude,
+                                entry.value!.position.longitude,
+                              ),
+                            )
+                          : null,
+                      isBookmarked: widget.bookmarkedGigIds.contains(
+                        entry.value!.id,
+                      ),
+                      onToggleBookmark: widget.onToggleBookmark == null
+                          ? null
+                          : () => widget.onToggleBookmark!(
+                              entry.value!.id,
+                              entry.value!.gigType,
                             ),
-                          )
-                        : null,
-                    isBookmarked: widget.bookmarkedGigIds.contains(
-                      entry.value.id,
+                      onTap: () => _showGigSheet(context, entry.value!),
                     ),
-                    onToggleBookmark: widget.onToggleBookmark == null
-                        ? null
-                        : () => widget.onToggleBookmark!(
-                            entry.value.id,
-                            entry.value.gigType,
-                          ),
-                    onTap: () => _showGigSheet(context, entry.value),
                   ),
-                ),
-                const SizedBox(height: 10),
-              ],
+                  const SizedBox(height: 10),
+                ],
             ],
           ),
+          // Nothing outside the filters: just say it's the end.
+          if (!hasMore && others.isEmpty && filtered.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+              child: Center(
+                child: Text(
+                  searching
+                      ? "That's every gig matching your search"
+                      : "You've seen every gig",
+                  style: const TextStyle(color: kSub, fontSize: 12),
+                ),
+              ),
+            ),
         ],
       ],
+    );
+  }
+
+  // Between the results and the rest of the gigs.
+  Widget _endOfResultsMarker({required int matchCount}) {
+    final divider = Expanded(
+      child: Divider(color: Theme.of(context).dividerColor, height: 1),
+    );
+    return Padding(
+      padding: EdgeInsets.only(top: matchCount == 0 ? 0 : 8, bottom: 16),
+      child: Row(
+        children: [
+          divider,
+          Flexible(
+            flex: 0,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Text(
+                matchCount == 0
+                    ? 'No matches · showing other gigs'
+                    : 'End of results · showing other gigs',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: kSub,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          divider,
+        ],
+      ),
     );
   }
 
