@@ -192,8 +192,10 @@ class _AuthGateState extends State<AuthGate> {
   Future<bool> _handleIncompleteProfile(User user, String? phone) async {
     if (phone != null && phone.isNotEmpty) return false;
 
+    // Google and Apple both use the deferred-credential sign-up that can be
+    // interrupted before the profile write — resume it, don't sign out.
     final isGoogleUser = user.providerData.any(
-      (p) => p.providerId == 'google.com',
+      (p) => p.providerId == 'google.com' || p.providerId == 'apple.com',
     );
     if (isGoogleUser) {
       if (mounted) {
@@ -215,13 +217,31 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   // Core restore logic — called both from initState and from the stream path.
+  // Reads users/{uid} for the restore. Since users/{uid} is readable only by
+  // signed-in users (firestore.rules), a cold start (e.g. after swiping the
+  // app away) could send this read before Firestore had the restored sign-in
+  // attached — it was refused and the app fell back to the Welcome screen as
+  // if logged out. So: make sure the ID token is ready first, and retry a
+  // refused/unavailable read a few times before giving up.
+  Future<DocumentSnapshot<Map<String, dynamic>>> _readProfile(User user) async {
+    const delays = [Duration(milliseconds: 600), Duration(milliseconds: 1500), Duration(seconds: 3)];
+    for (var attempt = 0; ; attempt++) {
+      try {
+        await user.getIdToken();
+        return await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      } on FirebaseException catch (e) {
+        final retryable = e.code == 'permission-denied' || e.code == 'unavailable' || e.code == 'unauthenticated';
+        if (!retryable || attempt >= delays.length) rethrow;
+        debugPrint('[AuthGate] profile read ${e.code}, retrying (${attempt + 1})');
+        await Future.delayed(delays[attempt]);
+      }
+    }
+  }
+
   Future<void> _doRestore(User user) async {
     if (mounted) setState(() => _restoreError = false);
     try {
-      var doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      var doc = await _readProfile(user);
 
       // A signup flow for this exact user may be mid-flight: it creates the
       // Auth account (firing this restore via authStateChanges()) before its
@@ -325,12 +345,16 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        if (_restoreError && snapshot.hasData) {
-          return _RestoreErrorScreen(onRetry: () => _doRestore(snapshot.data!));
+        // Still signed in on this device (currentUser is restored natively on
+        // a cold start, even while the stream's first event is null).
+        final signedInUser = snapshot.data ?? FirebaseAuth.instance.currentUser;
+
+        if (_restoreError && signedInUser != null) {
+          return _RestoreErrorScreen(onRetry: () => _doRestore(signedInUser));
         }
 
         // No Firebase user — signed out. Reset all gate state and go to login.
-        if (!snapshot.hasData && !provider.isLoggedIn) {
+        if (signedInUser == null && !provider.isLoggedIn) {
           if (_pendingDeletion ||
               _restoredForUid != null ||
               _restoreError ||
@@ -387,10 +411,11 @@ class _AuthGateState extends State<AuthGate> {
           return const MainNavigation();
         }
 
-        if (snapshot.hasData) {
-          // Stream has a user but provider is empty (rare race).
+        if (signedInUser != null) {
+          // Signed in but the provider is empty (rare race) — restore, never
+          // show the Welcome screen to a signed-in user.
           WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _restoreSession(snapshot.data!),
+            (_) => _restoreSession(signedInUser),
           );
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
