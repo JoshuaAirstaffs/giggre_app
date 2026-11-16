@@ -67,11 +67,17 @@ Future<void> performSignOut(BuildContext context) async {
   // Read before the first await — the widget may be gone by the time the
   // chain finishes.
   final currentUser = context.read<CurrentUserProvider>();
+  // Also grabbed up front: signing out makes AuthGate swap the home route's
+  // screen, which disposes callers that live there (HomeScreen, opening
+  // Profile as a pushed route). Their context is then unmounted, so a
+  // `context.mounted` check skipped this navigation and left the pushed
+  // screen on top. The navigator itself outlives them.
+  final navigator = Navigator.of(context);
 
   await signOutAndCleanup(currentUser, revokeGoogle: true);
 
-  if (!context.mounted) return;
-  Navigator.of(context).pushAndRemoveUntil(
+  if (!navigator.mounted) return;
+  navigator.pushAndRemoveUntil(
     MaterialPageRoute(builder: (_) => const WelcomeScreen()),
     (route) => false,
   );
