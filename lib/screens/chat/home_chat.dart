@@ -432,6 +432,8 @@ class _HomeChatState extends State<HomeChat>
 
 // ── Gig Chats Tab ─────────────────────────────────────────────────────────────
 
+enum _ChatFilter { all, groups, missed }
+
 class _GigChatsTab extends StatefulWidget {
   const _GigChatsTab({required this.resetSearch});
 
@@ -445,10 +447,11 @@ class _GigChatsTab extends StatefulWidget {
 class _GigChatsTabState extends State<_GigChatsTab> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _groupStream;
-  // "Missed calls" filter — rooms where the peer's last call to me went
-  // unanswered and hasn't been followed up by another call since (see
-  // missedCallFor in call_log.dart).
-  bool _missedOnly = false;
+  // All / Groups / Missed calls. "Missed calls" = rooms where the peer's last
+  // call to me went unanswered and hasn't been followed up by another call
+  // since (see missedCallFor in call_log.dart).
+  _ChatFilter _filter = _ChatFilter.all;
+  bool get _missedOnly => _filter == _ChatFilter.missed;
   final _search = TextEditingController();
   String _query = '';
   Timer? _searchDebounce;
@@ -605,7 +608,12 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                 if (bTime == null) return -1;
                 return bTime.compareTo(aTime);
               });
-        final byTab = _missedOnly ? missedDocs : docs;
+        final byTab = switch (_filter) {
+          _ChatFilter.all => docs,
+          _ChatFilter.groups =>
+            const <QueryDocumentSnapshot<Map<String, dynamic>>>[],
+          _ChatFilter.missed => missedDocs,
+        };
         final q = _query.trim().toLowerCase();
         final shown = q.isEmpty
             ? byTab
@@ -614,7 +622,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                     (d) => _peerName(d.data(), myUid).toLowerCase().contains(q),
                   )
                   .toList();
-        // Groups are listed under All only, and searched by group name.
+        // Groups are listed under All and Groups, and searched by group name.
         final shownGroups = _missedOnly
             ? const <QueryDocumentSnapshot<Map<String, dynamic>>>[]
             : q.isEmpty
@@ -650,21 +658,69 @@ class _GigChatsTabState extends State<_GigChatsTab> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Row(
+              // Left-aligned (a bare Wrap would be centered by the Column)
+              // and compact: smaller text, padding and tap area.
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Theme(
+                  data: Theme.of(context).copyWith(
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    // Explicit label colors: a size-only labelStyle drops the
+                    // theme's text color and left the labels faint in light
+                    // mode. Selected = white on blue, unselected = onSurface.
+                    chipTheme: Theme.of(context).chipTheme.copyWith(
+                      selectedColor: kBlue,
+                      labelStyle: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: WidgetStateColor.resolveWith(
+                          (states) => states.contains(WidgetState.selected)
+                              ? Colors.white
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    ),
+                  ),
+                  child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
                 children: [
                   ChoiceChip(
                     showCheckmark: false,
                     label: const Text('All'),
-                    selected: !_missedOnly,
-                    onSelected: (_) => setState(() => _missedOnly = false),
+                    selected: _filter == _ChatFilter.all,
+                    onSelected: (_) =>
+                        setState(() => _filter = _ChatFilter.all),
                   ),
-                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    showCheckmark: false,
+                    avatar: Icon(
+                      Icons.groups_rounded,
+                      size: 14,
+                      color: _filter == _ChatFilter.groups
+                          ? Colors.white
+                          : Theme.of(context).colorScheme.onSurface,
+                    ),
+                    label: Text(
+                      groups.isEmpty ? 'Groups' : 'Groups (${groups.length})',
+                    ),
+                    selected: _filter == _ChatFilter.groups,
+                    onSelected: (_) =>
+                        setState(() => _filter = _ChatFilter.groups),
+                  ),
                   ChoiceChip(
                     showCheckmark: false,
                     avatar: Icon(
                       Icons.call_missed_rounded,
-                      size: 16,
-                      color: missedDocs.isEmpty ? null : Colors.red,
+                      size: 14,
+                      color: _missedOnly
+                          ? Colors.white
+                          : missedDocs.isEmpty
+                          ? Theme.of(context).colorScheme.onSurface
+                          : Colors.red,
                     ),
                     label: Text(
                       missedDocs.isEmpty
@@ -672,9 +728,12 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                           : 'Missed calls (${missedDocs.length})',
                     ),
                     selected: _missedOnly,
-                    onSelected: (_) => setState(() => _missedOnly = true),
+                    onSelected: (_) =>
+                        setState(() => _filter = _ChatFilter.missed),
                   ),
                 ],
+                  ),
+                ),
               ),
             ),
             Expanded(
@@ -710,19 +769,31 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(
-                            Icons.call_missed_rounded,
+                          Icon(
+                            _missedOnly
+                                ? Icons.call_missed_rounded
+                                : Icons.groups_rounded,
                             size: 48,
                             color: Colors.grey,
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'No missed calls',
+                            _missedOnly ? 'No missed calls' : 'No groups yet',
                             style: TextStyle(
                               color: Colors.grey.shade400,
                               fontSize: 14,
                             ),
                           ),
+                          if (!_missedOnly) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Tap New to start a group',
+                              style: TextStyle(
+                                color: Colors.grey.shade400,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     )
