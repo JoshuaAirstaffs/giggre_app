@@ -1,5 +1,8 @@
+import '../../../core/widgets/keep_alive.dart';
+import '../../../core/widgets/unverified_limit_progress.dart';
 import 'dart:async';
 import 'package:giggre_app/core/services/unverified_limit.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -26,6 +29,7 @@ import 'widgets/offered_gig_offer_card.dart';
 import 'widgets/gig_assigned_popup.dart'; // exports GigAssignedDialog
 import 'widgets/pending_cancellation_card.dart';
 import '../../../widgets/active_gig_bar.dart';
+import '../../../widgets/content_carousel.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main screen
@@ -41,17 +45,24 @@ class GigWorkerScreen extends StatefulWidget {
   // header's back arrow since there's no dashboard-level route to pop to.
   final bool isTabRoot;
   final VoidCallback? onSwitchToHost;
+  // Header house button → the Home screen.
+  final VoidCallback? onGoHome;
 
   // Bumped by WorkerShell each time this tab is switched to, so its entrance
   // animations can replay instead of only ever playing once.
   final int animationGeneration;
+  // False while another tab of the worker shell is showing (the dashboard
+  // stays mounted underneath): the carousel's videos stop.
+  final bool isTabActive;
 
   const GigWorkerScreen({
     super.key,
     this.restoreActiveGigOnEntry = false,
     this.isTabRoot = false,
     this.onSwitchToHost,
+    this.onGoHome,
     this.animationGeneration = 0,
+    this.isTabActive = true,
   });
 
   @override
@@ -85,7 +96,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   // Earnings grouped by currency code
   Map<String, double> _earningsByCode = {};
   Map<String, double> _weeklyByCode = {};
-  int _completedGigs = 0;
 
   // Active gigs (when working)
   GigMarkerData? _activeQuickGig;
@@ -137,11 +147,33 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   // True while WorkingUI is pushed as a route so the body doesn't render a duplicate.
   bool _workingUIRouteActive = false;
 
+  // Dashboard scroll + the "back to top" button, shown once the worker has
+  // scrolled about a screen down (e.g. deep into the infinite gig list).
+  final _scrollController = ScrollController();
+  final _showScrollToTop = ValueNotifier<bool>(false);
+  static const double _kScrollToTopThreshold = 800;
+
+  void _onDashboardScroll() {
+    if (!_scrollController.hasClients) return;
+    final show = _scrollController.offset > _kScrollToTopThreshold;
+    if (show != _showScrollToTop.value) _showScrollToTop.value = show;
+  }
+
+  void _scrollToTop() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     _awaitingActiveGigRestore = widget.restoreActiveGigOnEntry;
     WidgetsBinding.instance.addObserver(this);
+    _scrollController.addListener(_onDashboardScroll);
     _listenToProfile();
     _setOnlineStatus(true);
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -168,6 +200,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _multiWorkerOfferedGigSub?.cancel();
     _bookmarksSub?.cancel();
     _suspensionTimer?.cancel();
+    _scrollController.dispose();
+    _showScrollToTop.dispose();
     _setOnlineStatus(false);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -317,8 +351,6 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             _weeklyByCode = rawWeekly.map(
               (k, v) => MapEntry(k, (v as num?)?.toDouble() ?? 0),
             );
-            _completedGigs =
-                (earningsData['completedGigs'] as num?)?.toInt() ?? 0;
           });
 
           if (isFirstLoad) {
@@ -382,6 +414,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               workDurationHours: (data['workDurationHours'] as num?)
                   ?.toDouble(),
               description: (data['description'] as String?) ?? '',
+              images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -420,6 +453,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               workDurationHours: (data['workDurationHours'] as num?)
                   ?.toDouble(),
               description: (data['description'] as String?) ?? '',
+              images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -457,6 +491,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               workDurationHours: (data['workDurationHours'] as num?)
                   ?.toDouble(),
               description: (data['description'] as String?) ?? '',
+              images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
               status: data['status'] as String? ?? 'navigating',
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
@@ -578,6 +613,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 workDurationHours: (data['workDurationHours'] as num?)
                     ?.toDouble(),
                 description: (data['description'] as String?) ?? '',
+                images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
                 status: 'offered',
                 hostName: data['hostName'] as String? ?? '',
                 address: data['address'] as String? ?? '',
@@ -715,6 +751,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   workDurationHours: (data['workDurationHours'] as num?)
                       ?.toDouble(),
                   description: (data['description'] as String?) ?? '',
+                  images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
                   status: 'navigating',
                   hostName: data['hostName'] as String? ?? '',
                   address: data['address'] as String? ?? '',
@@ -922,9 +959,12 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   }
 
   Future<void> _acceptOfferedGig(GigMarkerData gig) async {
-    if (!await guardUnverifiedLimit(context,
-        amount: gig.budget, currencyCode: gig.currencyCode,
-        action: LimitAction.accept)) {
+    if (!await guardUnverifiedLimit(
+      context,
+      amount: gig.budget,
+      currencyCode: gig.currencyCode,
+      action: LimitAction.accept,
+    )) {
       return;
     }
     if (!mounted) return;
@@ -1045,6 +1085,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             hourlyRate: (data['hourlyRate'] as num?)?.toDouble(),
             workDurationHours: (data['workDurationHours'] as num?)?.toDouble(),
             description: (data['description'] as String?) ?? '',
+            images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
             status: 'in_progress',
             hostName: data['hostName'] as String? ?? '',
             address: data['address'] as String? ?? '',
@@ -1166,6 +1207,26 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     if (uid == null) return;
     await FirebaseFirestore.instance.collection('users').doc(uid).update({
       field: value,
+    });
+  }
+
+  // Online is the main switch: going offline also turns Quick Gigs and Auto
+  // Accept off (they can't work while offline), saved in one write. Going
+  // online leaves them off for the worker to choose.
+  Future<void> _setOnline(bool value) async {
+    setState(() {
+      _availableForGigs = value;
+      if (!value) {
+        _seekingQuickGigs = false;
+        _autoAccept = false;
+      }
+    });
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    await FirebaseFirestore.instance.collection('users').doc(uid).update({
+      'availableForGigs': value,
+      if (!value) 'seekingQuickGigs': false,
+      if (!value) 'autoAccept': false,
     });
   }
 
@@ -1801,6 +1862,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 return Stack(
                   children: [
                     CustomScrollView(
+                      controller: _scrollController,
                       slivers: [
                         // Header + Availability card share one sliver so the
                         // card's Transform.translate can visually overlap the
@@ -1820,9 +1882,14 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 onNotifications: () =>
                                     WorkerNotificationsSheet.show(context),
                                 onSwitchToHost: widget.onSwitchToHost,
+                                onGoHome: widget.onGoHome,
                                 onTutorial: () => context
                                     .read<TutorialController>()
                                     .restart(gigWorkerHomeFlow),
+                                subtitle: EarningsHeaderLine(
+                                  totalByCurrency: _earningsByCode,
+                                  weeklyByCurrency: _weeklyByCode,
+                                ),
                               ),
                               Transform.translate(
                                 offset: const Offset(0, -24),
@@ -1835,11 +1902,17 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                       'availability-${widget.animationGeneration}',
                                     ),
                                     type: EntranceAnimationType.fadeInSlideUp,
+                                    // Online + Quick Gigs + Auto Accept in
+                                    // one card.
                                     child: AvailabilityCard(
                                       isOnline: _availableForGigs,
-                                      onChanged: (v) {
-                                        setState(() => _availableForGigs = v);
-                                        _setToggle('availableForGigs', v);
+                                      onOnlineChanged: _setOnline,
+                                      seekingQuickGigs: _seekingQuickGigs,
+                                      onQuickGigsChanged: _toggleQuickGigs,
+                                      autoAccept: _autoAccept,
+                                      onAutoAcceptChanged: (v) {
+                                        setState(() => _autoAccept = v);
+                                        _setToggle('autoAccept', v);
                                       },
                                     ),
                                   ),
@@ -1878,42 +1951,36 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                                 },
                               ),
 
-                              // ── Earnings ───────────────────────────────────
-                              EntranceAnimation(
-                                key: ValueKey(
-                                  'earnings-${widget.animationGeneration}',
-                                ),
-                                type: EntranceAnimationType.fadeInSlideUp,
-                                child: EarningsSummaryCard(
-                                  totalByCurrency: _earningsByCode,
-                                  weeklyByCurrency: _weeklyByCode,
-                                  completedGigs: _completedGigs,
-                                ),
+                              // ── Unverified earning limit ────────────────
+                              // Shows only for unverified users while the
+                              // admin limit is on; otherwise takes no space.
+                              const UnverifiedLimitProgressCard(
+                                bottomSpacing: 10,
                               ),
-                              const SizedBox(height: 16),
 
-                              // ── Work preferences ──────────────────────────
-                              EntranceAnimation(
-                                key: ValueKey(
-                                  'work-prefs-${widget.animationGeneration}',
-                                ),
-                                type: EntranceAnimationType.fadeInSlideUp,
-                                delay: const Duration(milliseconds: 80),
-                                child: WorkPreferencesCard(
-                                  seekingQuickGigs: _seekingQuickGigs,
-                                  onQuickGigsChanged: _toggleQuickGigs,
-                                  autoAccept: _autoAccept,
-                                  onAutoAcceptChanged: (v) {
-                                    setState(() => _autoAccept = v);
-                                    _setToggle('autoAccept', v);
-                                  },
+                              // ── Carousel (giggre-admin → Content
+                              // Management → Carousel → Gig Worker). Takes no
+                              // space when it has no slides or is hidden.
+                              KeepAliveWrapper(
+                                // Lazy list: keep it mounted so scrolling back up doesn't
+                                // re-fetch the slides and restart the video.
+                                child: ContentCarousel(
+                                  section: ContentCarousel.workerSection,
+                                  height: ContentCarousel.bannerHeight,
+                                  soundOnFirstPlay: false,
+                                  active: widget.isTabActive,
+                                  showLoading: false,
+                                  padding: const EdgeInsets.only(bottom: 16),
                                 ),
                               ),
-                              const SizedBox(height: 20),
 
                               // ── Gig Map ───────────────────────────────────
+                              // Tiny threshold: in list mode this section can
+                              // be many screens tall, so the default 20% may
+                              // never be on screen and it would stay invisible.
                               EntranceAnimation(
                                 delay: const Duration(milliseconds: 160),
+                                visibleFraction: 0.01,
                                 child: GigMapSection(
                                   uid: uid,
                                   workerName: _name,
@@ -1972,10 +2039,71 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                         bottom: 0,
                         child: ActiveGigBar(gig: activeGigForBar),
                       ),
+                    // Back to top. Hidden behind the dispatch/offer cards,
+                    // lifted above the active gig bar.
+                    if (_dispatchedGig == null && _pendingOfferedGig == null)
+                      Positioned(
+                        right: 16,
+                        bottom: showActiveGigBar ? 96 : 16,
+                        child: _ScrollToTopButton(
+                          visible: _showScrollToTop,
+                          onPressed: _scrollToTop,
+                        ),
+                      ),
                   ],
                 );
               },
             ),
+    );
+  }
+}
+
+class _ScrollToTopButton extends StatelessWidget {
+  const _ScrollToTopButton({required this.visible, required this.onPressed});
+
+  final ValueListenable<bool> visible;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: visible,
+      builder: (context, show, child) => IgnorePointer(
+        ignoring: !show,
+        child: AnimatedScale(
+          scale: show ? 1 : 0.6,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutBack,
+          child: AnimatedOpacity(
+            opacity: show ? 1 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: child,
+          ),
+        ),
+      ),
+      child: Semantics(
+        button: true,
+        label: 'Back to top',
+        child: Material(
+          color: kBlue,
+          shape: const CircleBorder(),
+          elevation: 4,
+          shadowColor: Colors.black38,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onPressed,
+            child: const SizedBox(
+              width: 46,
+              height: 46,
+              child: Icon(
+                Icons.keyboard_arrow_up_rounded,
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -1561,3 +1561,14 @@ export { refreshFxRates, adminRefreshFxRates } from "./fx";
 export { adminUnverifiedUsage } from "./unverifiedLimits";
 // Pre-sign-in lookups (users/{uid} is no longer publicly readable).
 export { checkAccountExists, lookupReferralCode } from "./publicLookups";
+export {
+  adminSavePromoCode, adminSetPromoActive, adminDeletePromoCode, redeemPromoCode,
+  adminSendPromoToGroup, adminFindPromoUser, adminCreateRestrictedCodes,
+  onQuickGigPromoCashback, onOpenGigPromoCashback, onOfferedGigPromoCashback,
+} from "./promos";
+// GSIN Library: GSINS / GSKU codes for gigs (admin-only identifiers).
+export {
+  onQuickGigAssignGsku, onOpenGigAssignGsku, onOfferedGigAssignGsku,
+  onOpenGigSkillChanged, onOfferedGigSkillChanged,
+  adminCreateGsinTaskType, adminAssignGigTaskType, adminBackfillGigCodes,
+} from "./gsin";

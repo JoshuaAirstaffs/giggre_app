@@ -28,7 +28,7 @@ const gigWorkerHomeFlow = TutorialFlow(
       id: 'gigWorkerHome.findOpenGigs',
       anchorId: 'workerHome.gigViewToggle',
       title: 'Find Open Gigs',
-      body: 'Switch between Map and List to browse Open Gigs nearby. You '
+      body: 'Choose Both, Map or List to browse Open Gigs nearby. You '
           'can only apply to ones matching the skills a host requires.',
     ),
     TutorialStep(

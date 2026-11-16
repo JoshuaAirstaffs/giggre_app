@@ -1,3 +1,4 @@
+import '../../core/utils/distance_units.dart';
 import '../../core/utils/currency_formatter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -157,10 +158,7 @@ String dedupedAddress(String address) {
   return deduped.join(', ');
 }
 
-String fmtDist(double meters) {
-  if (meters < 1000) return '${meters.round()} m';
-  return '${(meters / 1000).toStringAsFixed(1)} km';
-}
+String fmtDist(double meters) => DistanceUnits.format(meters);
 
 String fmtWorkDuration(int seconds) {
   final h = seconds ~/ 3600;

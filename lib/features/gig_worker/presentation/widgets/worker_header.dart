@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../../core/models/rating_summary.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
+import '../../../../core/widgets/mode_switch.dart';
+import '../../../../core/widgets/header_home_button.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Worker Header — blue gradient band
@@ -15,7 +17,11 @@ class WorkerHeader extends StatelessWidget {
   final bool showBackButton;
   final VoidCallback? onNotifications;
   final VoidCallback? onSwitchToHost;
+  // House button top-left → the Home screen.
+  final VoidCallback? onGoHome;
   final VoidCallback? onTutorial;
+  // Optional line under the title (the worker's earnings)
+  final Widget? subtitle;
 
   const WorkerHeader({
     super.key,
@@ -28,7 +34,9 @@ class WorkerHeader extends StatelessWidget {
     this.showBackButton = true,
     this.onNotifications,
     this.onSwitchToHost,
+    this.onGoHome,
     this.onTutorial,
+    this.subtitle,
   });
 
   @override
@@ -61,6 +69,10 @@ class WorkerHeader extends StatelessWidget {
                 // ── Title row ────────────────────────────────────────────
                 Row(
                   children: [
+                    if (onGoHome != null) ...[
+                      HeaderHomeButton(onTap: onGoHome!),
+                      const SizedBox(width: 10),
+                    ],
                     if (showBack) ...[
                       GestureDetector(
                         onTap: () => Navigator.pop(context),
@@ -82,7 +94,7 @@ class WorkerHeader extends StatelessWidget {
                     ],
                     const Expanded(
                       child: Text(
-                        'Gig Worker Dashboard',
+                        'Dashboard',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -132,27 +144,15 @@ class WorkerHeader extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if (onSwitchToHost != null) const SizedBox(width: 8),
                     ],
-                    if (onSwitchToHost != null)
-                      GestureDetector(
-                        onTap: onSwitchToHost,
-                        child: Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.18),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.sync_alt,
-                            color: Colors.white,
-                            size: 19,
-                          ),
-                        ),
-                      ),
+                    // Worker ⇄ Host mini toggle (current mode named)
+                    if (onSwitchToHost != null) ...[
+                      const SizedBox(width: 8),
+                      ModeSwitch(isHost: false, onSwitch: onSwitchToHost!),
+                    ],
                   ],
                 ),
+                if (subtitle != null) ...[const SizedBox(height: 6), subtitle!],
               ],
             ),
           ),

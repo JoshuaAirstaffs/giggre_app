@@ -32,7 +32,8 @@ export type LedgerType =
   | "refund"
   | "fee"
   | "adjustment"
-  | "points_conversion";
+  | "points_conversion"
+  | "promo"; // promo code credit / gig cashback (promos.ts)
 
 export interface LedgerEntryInput {
   uid: string;

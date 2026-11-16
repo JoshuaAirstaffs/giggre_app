@@ -316,8 +316,9 @@ class _VerificationScreenState extends State<VerificationScreen> {
     final hasWorkerDoc = categories.any((c) => c.startsWith('worker_'));
     final hasHostDoc = categories.any((c) => c.startsWith('host_'));
 
-    // Then check based on user's role
-    final canSubmit = hasHostDoc && hasWorkerDoc;
+    // Documents for either role are enough — a host-only or worker-only
+    // user shouldn't have to upload for a role they don't use.
+    final canSubmit = hasHostDoc || hasWorkerDoc;
 
     setState(() {
       _canSubmitVerification = canSubmit;
@@ -631,7 +632,7 @@ void _showErrorModal(
           ),
           const SizedBox(height: 8),
           Text(
-            'Upload at least 1 document for each role (Gig Worker & Gig Host) in My Documents to continue.',
+            'Upload at least 1 document (as a Gig Worker or a Gig Host) in My Documents to continue.',
             style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
             textAlign: TextAlign.center,
           ),

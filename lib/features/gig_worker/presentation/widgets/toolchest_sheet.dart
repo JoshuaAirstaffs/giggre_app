@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/theme/app_colors.dart';
 import 'skill_request_form.dart';
+import '../../../../core/widgets/skill_icon.dart';
 
 class ToolchestSheet extends StatefulWidget {
   final String uid;
@@ -840,8 +841,9 @@ class _ApplySkillCard extends StatelessWidget {
               color: kAmber.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.construction_rounded,
-                color: kAmber, size: 18),
+            child: Center(
+              child: SkillIcon(skillName, color: kAmber, size: 18),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1009,6 +1011,13 @@ class _SkillRequestCard extends StatelessWidget {
         children: [
           Row(
             children: [
+              SkillIcon(
+                skillName,
+                size: 16,
+                color: kAmber,
+                fallback: null,
+                gap: 6,
+              ),
               Expanded(
                 child: Text(skillName,
                     style: TextStyle(
@@ -1142,8 +1151,9 @@ class _SkillChip extends StatelessWidget {
               color: kAmber.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.construction_rounded,
-                color: kAmber, size: 18),
+            child: Center(
+              child: SkillIcon(label, color: kAmber, size: 18),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(

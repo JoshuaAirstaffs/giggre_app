@@ -43,6 +43,18 @@ service cloud.firestore {
       return request.resource.data.keys().hasAny(['gigPointsReward']);
     }
 
+    // GSIN Library codes on a gig (functions/src/gsin.ts writes them with the
+    // Admin SDK). Clients may pick a taskTypeId when creating a gig (Quick
+    // Gig picker) but never set or change the codes, nor the task type later.
+    function setsGigCodes() {
+      return request.resource.data.keys().hasAny(['gsins', 'gsku', 'gskuAssignedAt', 'previousGsku', 'gsinCandidates']);
+    }
+
+    function changesGigCodes() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['gsins', 'gsku', 'gskuAssignedAt', 'previousGsku', 'gsinCandidates', 'taskTypeId']);
+    }
+
     function changesGigPointsReward() {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasAny(['gigPointsReward']);
@@ -277,6 +289,34 @@ service cloud.firestore {
     // client. Every change goes through postLedgerEntry() in
     // functions/src/wallet.ts (Admin SDK bypasses these rules).
     // The legacy users/{uid}.balance field is no longer used by the app.
+    // ─── Promo codes ───────────────────────────────────────────
+    // Managed by admins through callables (adminSavePromoCode…) and redeemed
+    // through redeemPromoCode (functions/src/promos.ts) — clients never write
+    // these. Codes and redemptions are admin-read only, so codes can't be
+    // listed or guessed from the app; a user reads only their own vouchers.
+    match /promo_codes/{code} {
+      allow read: if isAdmin();
+      allow write: if false;
+      match /redemptions/{uid} {
+        allow read: if isAdmin() || isUser(uid);
+        allow write: if false;
+      }
+    }
+    // Codes delivered to a user ("For you": private group sends, restricted
+    // per-user codes) and the read-only summary of listed public codes.
+    match /promo_offers/{offerId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+    match /promo_public/{code} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+    match /promo_vouchers/{voucherId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+
     match /wallets/{uid} {
       allow read: if isUser(uid) || isAdmin();
       allow write: if false;
@@ -293,7 +333,13 @@ service cloud.firestore {
       // before sign-in — "does this email have an account?" (Google/Apple)
       // and referral-code validation — go through the checkAccountExists /
       // lookupReferralCode callables (functions/src/publicLookups.ts).
-      allow read: if isAuth();
+      //
+      // TEMPORARY (2026-11-10): public again, because app 3.0.0 (still on
+      // users' phones) does those two lookups by reading users directly
+      // before sign-in, so `isAuth()` broke its Google/Apple sign-in and
+      // referral codes. Switch back to `allow read: if isAuth();` once most
+      // users are on 3.0.1+.
+      allow read: if true;
       // ratingWorker/ratingHost are server-only in both directions — a client
       // can neither seed them at registration nor edit them later. No app
       // version has ever written them, so this needs no rollout phasing.
@@ -383,6 +429,41 @@ service cloud.firestore {
     }
 
     // ─── Skills ────────────────────────────────────────────────
+    // ─── GSIN Library (functions/src/gsin.ts) ───────────────────
+    // Category → sub-category → task type, each id = its prefix so codes
+    // never collide or change meaning. Read by signed-in users (Quick Gig
+    // task picker); admins edit names / links. Counters (gsinsSeq, gskuSeq)
+    // and task-type creation (which assigns the GSINS) are server-only.
+    match /gsin_categories/{catId} {
+      allow read: if isAuth();
+      allow create: if isAdmin() && catId.matches('^[A-Z]{3}$') &&
+        request.resource.data.prefix == catId &&
+        request.resource.data.name is string && request.resource.data.name.size() > 1 &&
+        request.resource.data.get('gsinsSeq', 0) == 0;
+      allow update: if isAdmin() &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['prefix', 'gsinsSeq']);
+      allow delete: if isAdmin() && resource.data.get('gsinsSeq', 0) == 0;
+    }
+
+    match /gsin_subcategories/{subId} {
+      allow read: if isAuth();
+      allow create: if isAdmin() && subId.matches('^[A-Z]{2}$') &&
+        request.resource.data.prefix == subId &&
+        request.resource.data.name is string && request.resource.data.name.size() > 1 &&
+        exists(/databases/$(database)/documents/gsin_categories/$(request.resource.data.categoryId));
+      allow update: if isAdmin() &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['prefix', 'categoryId']);
+      allow delete: if isAdmin();
+    }
+
+    match /gsin_task_types/{taskId} {
+      allow read: if isAuth();
+      allow create: if false;
+      allow update: if isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'skillIds', 'updatedAt', 'updatedBy']);
+      allow delete: if isAdmin() && resource.data.get('gskuSeq', 0) == 0;
+    }
+
     match /skills/{skillId} {
       allow read: if isAuth();
       allow write: if isAdmin();
@@ -701,8 +782,8 @@ service cloud.firestore {
     match /quick_gigs/{gigId} {
       allow read: if isAuth();
       allow create: if isAuth() && request.resource.data.hostId == request.auth.uid &&
-        (!setsGigPointsReward() || canWriteGigPointsReward());
-      allow update: if (!changesGigPointsReward() || canWriteGigPointsReward()) && isAuth() &&
+        (!setsGigPointsReward() || canWriteGigPointsReward()) && !setsGigCodes();
+      allow update: if (!changesGigPointsReward() || canWriteGigPointsReward()) && !changesGigCodes() && isAuth() &&
         !writesHostApprovalAsNonHost() && (
         resource.data.hostId == request.auth.uid ||
         resource.data.workerId == request.auth.uid ||
@@ -742,8 +823,8 @@ service cloud.firestore {
     allow read: if isAuth();
     allow create: if isAuth() &&
       request.resource.data.hostId == request.auth.uid &&
-      (!setsGigPointsReward() || canWriteGigPointsReward());
-    allow update: if (!changesGigPointsReward() || canWriteGigPointsReward()) && isAuth() &&
+      (!setsGigPointsReward() || canWriteGigPointsReward()) && !setsGigCodes();
+    allow update: if (!changesGigPointsReward() || canWriteGigPointsReward()) && !changesGigCodes() && isAuth() &&
         !writesHostApprovalAsNonHost() && (
       resource.data.hostId == request.auth.uid ||
       resource.data.workerId == request.auth.uid ||
@@ -790,8 +871,8 @@ service cloud.firestore {
       allow read: if isAuth();
       allow create: if isAuth() &&
         request.resource.data.hostId == request.auth.uid &&
-        (!setsGigPointsReward() || canWriteGigPointsReward());
-      allow update: if (!changesGigPointsReward() || canWriteGigPointsReward()) && isAuth() &&
+        (!setsGigPointsReward() || canWriteGigPointsReward()) && !setsGigCodes();
+      allow update: if (!changesGigPointsReward() || canWriteGigPointsReward()) && !changesGigCodes() && isAuth() &&
         !writesHostApprovalAsNonHost() && (
         resource.data.hostId == request.auth.uid ||
         resource.data.workerId == request.auth.uid ||

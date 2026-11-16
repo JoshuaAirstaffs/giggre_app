@@ -11,12 +11,14 @@ rules_version = '2';
 //
 // Paths in use (2026-11-05):
 //   profile_images/{uid}.jpg                    avatar_service, profile tabs
+//   users/{uid}/profile/avatar                  giggre-website v2 profile photo
 //   users/{uid}/documents/{category}/{file}     My Documents (verification IDs)
 //   skill_requests/{uid}/{file}                 skill request proofs
 //   wallet_proofs/{uid}/{clientRequestId}.jpg   Gig Wallet top-up proof
 //   chat_attachments/{roomId}/{file}            chat.dart attachments
 //   group_attachments/{groupId}/{file}          group chat photos
 //   group_photos/{groupId}/{file}               group avatar (admins)
+//   gig_images/{uid}/{file}                     gig photos (Post a gig, up to 5)
 //   app_content/**                              giggre-admin CMS (carousel,
 //                                               tutorial videos, thumbnails)
 service firebase.storage {
@@ -59,10 +61,28 @@ service firebase.storage {
       allow delete: if (signedIn() && fileName == request.auth.uid + '.jpg') || isAdmin();
     }
 
+    // ── Website (giggre-website v2) profile photos ──────────────────────────
+    //   users/{uid}/profile/avatar   EditProfileDialog (host + worker)
+    match /users/{uid}/profile/{path=**} {
+      allow read: if signedIn();
+      allow create, update: if isOwner(uid) && maxMB(10);
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+
     // ── Verification / My Documents (IDs — owner + admins only) ─────────────
     match /users/{uid}/documents/{path=**} {
       allow read: if isOwner(uid) || isAdmin();
       allow create, update: if isOwner(uid) && maxMB(15);
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+
+    // ── Gig photos (Post a gig: Quick / Open / Offered, app + website) ──────
+    // Uploaded by the host before the gig doc exists; the gig keeps their
+    // download URLs in `images`. Images only, 8 MB each.
+    match /gig_images/{uid}/{file} {
+      allow read: if signedIn();
+      allow create, update: if isOwner(uid) && maxMB(8) &&
+        request.resource.contentType.matches('image/.*');
       allow delete: if isOwner(uid) || isAdmin();
     }
 

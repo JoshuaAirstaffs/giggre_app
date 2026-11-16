@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:giggre_app/core/services/unverified_limit.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -23,12 +24,19 @@ import '../../../../core/theme/map_style.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/distance_units.dart';
+import '../../../gig_host/presentation/widgets/gig_images_picker.dart';
+import '../../../../helpers/snackbar_helper.dart';
 import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/worker_active_gig.dart';
 import '../../../gig_shared/user_profile_screen.dart';
 import '../../../reports/models/report_content_type.dart';
 import '../../../reports/report_service.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
+import '../../../../core/widgets/skill_icon.dart';
+import '../../../../core/services/skill_icon_service.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Data models
@@ -55,6 +63,11 @@ class GigMarkerData {
   final String? assignedWorkerId;
   final String experienceLevel;
   final List<String> requiredSkills;
+  // The host typed the skill under "Other" — not in the skills library, so
+  // no worker has it; shown to everyone like a gig with no skill.
+  final bool customSkill;
+  // Photos the host attached when posting (download URLs, up to 5).
+  final List<String> images;
   final String hostId;
   final bool hasApplied;
   final DateTime? scheduledDate;
@@ -82,6 +95,8 @@ class GigMarkerData {
     this.assignedWorkerId,
     this.experienceLevel = '',
     this.requiredSkills = const [],
+    this.customSkill = false,
+    this.images = const [],
     required this.hostId,
     this.hasApplied = false,
     this.scheduledDate,
@@ -89,7 +104,12 @@ class GigMarkerData {
     this.applicantCount = 0,
     this.workerSlots = 1,
     this.filledSlotCount = 0,
+    this.place = const {},
   });
+
+  // Country, region, state/province, city, ZIP saved when the gig was
+  // posted (empty on older gigs). Used by the list search.
+  final Map<String, String> place;
 
   bool get isMultiWorker => workerSlots > 1;
   int get openSlots => (workerSlots - filledSlotCount).clamp(0, workerSlots);
@@ -166,10 +186,7 @@ String _fmtHours(double hours) {
   return '$trimmed hr${hours == 1 ? '' : 's'}';
 }
 
-String formatGigDistance(double meters) {
-  if (meters < 1000) return '${meters.round()} m';
-  return '${(meters / 1000).toStringAsFixed(1)} km';
-}
+String formatGigDistance(double meters) => DistanceUnits.format(meters);
 
 // One doc read, shown on the gig sheet's host row (avatar + rating).
 // Gracefully returns nulls (hidden/fallback) on any failure.
@@ -247,6 +264,8 @@ GigMarkerData? gigMarkerFromDoc(
     assignedWorkerId: data['assignedWorkerId'] as String?,
     experienceLevel: data['experienceLevel'] as String? ?? '',
     requiredSkills: List<String>.from(data['requiredSkills'] ?? []),
+    customSkill: data['customSkill'] == true,
+    images: (data['images'] as List?)?.whereType<String>().toList() ?? const [],
     hostId: data['hostId'] as String? ?? '',
     hasApplied: hasApplied,
     scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
@@ -255,7 +274,30 @@ GigMarkerData? gigMarkerFromDoc(
     applicantCount: type == 'open' ? applicants.length : 0,
     workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
     filledSlotCount: (data['filledSlotCount'] as num?)?.toInt() ?? 0,
+    place: {
+      for (final MapEntry(:key, :value)
+          in ((data['place'] as Map?) ?? const {}).entries)
+        if (key is String && value is String) key: value,
+    },
   );
+}
+
+// Lowercase words of [text]; punctuation (commas, dashes) splits words.
+List<String> _searchWords(String text) => text
+    .toLowerCase()
+    .split(RegExp(r'[^\p{L}\p{N}]+', unicode: true))
+    .where((w) => w.isNotEmpty)
+    .toList();
+
+// True when every word typed starts a word somewhere in the gig's title,
+// host name, address or place (country, region, province, city, ZIP), in
+// any order: "makati 1226", "1226 makati" and "metro manila ph" all match.
+bool gigMatchesSearch(GigMarkerData g, List<String> queryWords) {
+  if (queryWords.isEmpty) return true;
+  final words = _searchWords(
+    [g.title, g.hostName, g.address, ...g.place.values].join(' '),
+  );
+  return queryWords.every((q) => words.any((w) => w.startsWith(q)));
 }
 
 const _kSharedMarkerSheetRouteName = 'gig_marker_sheet';
@@ -432,7 +474,7 @@ Future<void> applyToOpenGig(
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'It\'s about ${distKm.round()} km from your current location. Make sure you\'re able to travel there before you take it.',
+                  'It\'s about ${DistanceUnits.formatKmRounded(distKm)} from your current location. Make sure you\'re able to travel there before you take it.',
                   style: TextStyle(
                     fontSize: 13,
                     color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
@@ -782,7 +824,8 @@ void showFullGigDetailSheet(
       : gig.status == 'open';
 
   List<String> missingSkills() {
-    if (gig.gigType != 'open' || gig.requiredSkills.isEmpty) return [];
+    // A skill typed under "Other" isn't in anyone's profile — anyone can apply.
+    if (gig.gigType != 'open' || gig.requiredSkills.isEmpty || gig.customSkill) return [];
     return gig.requiredSkills
         .where(
           (s) => !workerSkills.any(
@@ -1080,7 +1123,7 @@ void showFullGigDetailSheet(
                       ? DateFormat(
                           'EEE, MMM d · h:mm a',
                         ).format(gig.scheduledDate!)
-                      : '—',
+                      : 'Flexible',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurface,
                     fontSize: 13,
@@ -1161,6 +1204,20 @@ void showFullGigDetailSheet(
                     ? gig.experienceLevel
                     : '—',
               ),
+              if (gig.images.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const Text(
+                  'PHOTOS',
+                  style: TextStyle(
+                    color: kSub,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                GigImagesStrip(urls: gig.images, height: 110),
+              ],
               if (gig.description.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 const Text(
@@ -1208,13 +1265,25 @@ void showFullGigDetailSheet(
                       ),
                       child: Center(
                         widthFactor: 1,
-                        child: Text(
-                          s,
-                          style: TextStyle(
-                            color: has ? const Color(0xFF2E9E6B) : kSub,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SkillIcon(
+                              s,
+                              size: 13,
+                              color: has ? const Color(0xFF2E9E6B) : kSub,
+                              fallback: null,
+                              gap: 5,
+                            ),
+                            Text(
+                              s,
+                              style: TextStyle(
+                                color: has ? const Color(0xFF2E9E6B) : kSub,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -1515,7 +1584,10 @@ enum _PinDisplayMode { default_, salary, distance }
 
 enum _PayTypeFilter { all, hourly, flat }
 
-enum _GigViewMode { map, list }
+enum _GigSort { newest, oldest }
+
+// map = map only, list = list only, both = the map with the list under it.
+enum _GigViewMode { map, list, both }
 
 const String _kGigsViewModePrefKey = 'gigs_view_mode';
 
@@ -1607,7 +1679,6 @@ class _GigMapSectionState extends State<GigMapSection> {
   // map centers on that gig instead of the worker's own location the next
   // time it mounts. Consumed once in onMapCreated, then cleared.
   LatLng? _pendingCameraTarget;
-  bool _mapInteractive = false;
   bool _useGoogleMaps = true;
   final _osmController = fm.MapController();
   bool _osmMapReady = false;
@@ -1690,10 +1761,26 @@ class _GigMapSectionState extends State<GigMapSection> {
   bool _isResolvingCountries = false;
 
   // ── Filters ──────────────────────────────────────────────────────────────
-  // Defaults: match the worker's own skills, within 10km.
+  // Defaults (see _applyDefaultFilters): a worker with no skills yet sees
+  // every gig at any distance; once they have skills, gigs matching them
+  // within the smallest distance that reaches the nearest gig needing one
+  // of their skills (No limit when there's none). A filter they saved
+  // themselves always wins.
   _SkillFilter _skillFilter = _SkillFilter.mySkills;
   String? _specificSkill;
-  double? _radiusKm = 10; // null = no radius limit
+  // null = no radius limit. Always km internally; chips show the region's
+  // unit (miles for US — see DistanceUnits). Default is 10 of the shown unit.
+  double? _radiusKm = 10;
+  bool _radiusTouched = false;
+  // Set by _allGigs when nothing is inside the radius and it fell back to
+  // the nearest gigs beyond it (null = not falling back).
+  double? _nearestFallbackM;
+  // Set by _allGigs when "My skills" matched nothing and it fell back to
+  // every gig (so a worker with skills never lands on an empty screen).
+  bool _noSkillMatches = false;
+  // True until saved filters load or the worker changes one; while true the
+  // defaults follow their skills (which can arrive after this screen opens).
+  bool _usingDefaultFilters = true;
   List<String> _allSkillNames = [];
   // Date-only (time ignored) — null = no schedule filter. A gig with no
   // scheduledDate at all never matches once this is set (treated as stale
@@ -1706,22 +1793,245 @@ class _GigMapSectionState extends State<GigMapSection> {
   // A real data filter, unlike _pinDisplayMode — applies to both map and
   // list view.
   _PayTypeFilter _payTypeFilter = _PayTypeFilter.all;
+  // Pay range on the gig's shown rate (hourly rate for hourly gigs, else the
+  // budget), in the worker's currency. null = no bound on that side.
+  double? _payMin;
+  double? _payMax;
+  // List order; a preference, not a filter (doesn't light the filter badge).
+  _GigSort _sort = _GigSort.newest;
+
+  String get _payCurrency => _userProvider.currencyCode;
+
+  // Pay range slider stops per currency; the last stop means "no maximum".
+  List<double> get _payStops => _payCurrency == 'PHP'
+      ? const [0, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 10000]
+      : const [0, 10, 15, 20, 25, 30, 40, 50, 75, 100, 200, 500];
+
+  int _payStopIndex(double? amount, {required bool isMax}) {
+    final stops = _payStops;
+    if (amount == null) return isMax ? stops.length - 1 : 0;
+    var best = 0;
+    for (var i = 0; i < stops.length; i++) {
+      if ((stops[i] - amount).abs() < (stops[best] - amount).abs()) best = i;
+    }
+    return best;
+  }
+
+  bool get _hasPayRange => _payMin != null || _payMax != null;
 
   // ── Map/List view toggle (compact section only) ────────────────────────
-  _GigViewMode _viewMode = _GigViewMode.map;
+  // Default: map and list together, until the worker picks Map or List.
+  _GigViewMode _viewMode = _GigViewMode.both;
   final _searchController = TextEditingController();
   String _searchQuery = '';
   static const int _kListPageSize = 10;
   int _visibleListCount = _kListPageSize;
 
+  // ── Saved filters ───────────────────────────────────────────────────────
+  // The worker's filter choices (skills, distance, date, pay type, pin
+  // display) are saved on their account (users/{uid}.gigFilters) when the
+  // filter sheet closes, so the app and the website share them. A copy on
+  // this phone shows them instantly while the account copy loads; the
+  // account copy wins. Same keys as the website's Browse page.
+  //
+  // PAUSED (2026-11-09): filters aren't saved to the account or phone for
+  // now, so every app start uses the dynamic defaults (_applyDefaultFilters).
+  // A choice still holds for the rest of the session (_savedFiltersCache).
+  // Existing users/{uid}.gigFilters data is left in place; flip this back to
+  // true to resume saving and loading it.
+  static const bool _kPersistFilters = false;
+  static final Map<String, Map<String, dynamic>> _savedFiltersCache = {};
+  String get _filtersPrefKey => 'gig_filters_${widget.uid}';
+
+  Map<String, dynamic> _filtersToJson() => {
+    'skill': _skillFilter.name,
+    'specificSkill': _specificSkill,
+    'radiusKm': _radiusKm,
+    'radiusSet': true, // distinguishes "No limit" (null) from not saved
+    'scheduleDate': _scheduleDateFilter == null
+        ? null
+        : DateFormat('yyyy-MM-dd').format(_scheduleDateFilter!),
+    'payType': _payTypeFilter.name,
+    'pinDisplay': _pinDisplayMode.name,
+    'payMin': _payMin,
+    'payMax': _payMax,
+    'payCurrency': _payCurrency,
+    'sort': _sort.name,
+  };
+
+  void _applyDefaultFilters() {
+    final hasSkills = widget.workerSkills.isNotEmpty;
+    _skillFilter = hasSkills ? _SkillFilter.mySkills : _SkillFilter.all;
+    _specificSkill = null;
+    _radiusKm = hasSkills ? _nearestSkillGigRadius() : null;
+  }
+
+  // Smallest distance option (1, 5, 10, 50, 100 km, or miles for US) that
+  // reaches the nearest open gig needing one of the worker's skills — a gig
+  // 4km away gives 5km. Null (No limit) when there's no such gig, it's further than
+  // 100km, or the worker's location isn't known yet.
+  double? _nearestSkillGigRadius() {
+    final me = _myLocation;
+    if (me == null) return null;
+    double? nearestKm;
+    for (final g in _unfilteredGigs) {
+      final needsMySkill = g.requiredSkills.any(
+        (s) => widget.workerSkills.any((ws) => _matchesSkill(ws, s)),
+      );
+      if (!needsMySkill) continue;
+      final km =
+          Geolocator.distanceBetween(
+            me.latitude,
+            me.longitude,
+            g.position.latitude,
+            g.position.longitude,
+          ) /
+          1000;
+      if (nearestKm == null || km < nearestKm) nearestKm = km;
+    }
+    if (nearestKm == null) return null;
+    // Options are in the shown unit (miles for US); _radiusKm is km.
+    for (final r in _radiusOptions) {
+      if (r == null) continue;
+      final km = DistanceUnits.toKm(r);
+      if (nearestKm <= km) return km;
+    }
+    return null;
+  }
+
+  void _applyFilters(Map<String, dynamic> j) {
+    _usingDefaultFilters = false;
+    // A saved distance is the worker's choice; region changes keep it.
+    if (j['radiusSet'] == true) _radiusTouched = true;
+    T byName<T extends Enum>(List<T> values, Object? name, T fallback) =>
+        values.firstWhere((v) => v.name == name, orElse: () => fallback);
+    _skillFilter = byName(_SkillFilter.values, j['skill'], _skillFilter);
+    _specificSkill = j['specificSkill'] as String?;
+    if (_skillFilter == _SkillFilter.specific && _specificSkill == null) {
+      _skillFilter = widget.workerSkills.isNotEmpty
+          ? _SkillFilter.mySkills
+          : _SkillFilter.all;
+    }
+    if (j['radiusSet'] == true) {
+      _radiusKm = (j['radiusKm'] as num?)?.toDouble();
+    }
+    // A date that has already passed would hide every gig, so it's dropped.
+    final date = DateTime.tryParse(j['scheduleDate'] as String? ?? '');
+    final now = DateTime.now();
+    _scheduleDateFilter =
+        date != null &&
+            !DateTime(
+              date.year,
+              date.month,
+              date.day,
+            ).isBefore(DateTime(now.year, now.month, now.day))
+        ? date
+        : null;
+    _payTypeFilter = byName(_PayTypeFilter.values, j['payType'], _payTypeFilter);
+    _pinDisplayMode = byName(
+      _PinDisplayMode.values,
+      j['pinDisplay'],
+      _pinDisplayMode,
+    );
+    // A pay range only makes sense in the currency it was set in.
+    final sameCurrency = j['payCurrency'] == _payCurrency;
+    _payMin = sameCurrency ? (j['payMin'] as num?)?.toDouble() : null;
+    _payMax = sameCurrency ? (j['payMax'] as num?)?.toDouble() : null;
+    _sort = byName(_GigSort.values, j['sort'], _sort);
+  }
+
+  // Uids whose account copy was already read this session.
+  static final Set<String> _accountFiltersLoaded = {};
+
+  Future<void> _loadSavedFilters() async {
+    final uid = widget.uid;
+    if (uid.isEmpty) return;
+    final cached = _savedFiltersCache[uid];
+    if (cached != null) {
+      _applyFilters(cached);
+    } else if (_kPersistFilters) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final raw = prefs.getString(_filtersPrefKey);
+        if (raw != null && mounted) {
+          final j = jsonDecode(raw) as Map<String, dynamic>;
+          _savedFiltersCache[uid] = j;
+          setState(() => _applyFilters(j));
+        }
+      } catch (e) {
+        debugPrint('[GigMap] saved filters (phone): $e');
+      }
+    }
+    if (!_kPersistFilters || _accountFiltersLoaded.contains(uid)) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      _accountFiltersLoaded.add(uid);
+      final remote = snap.data()?['gigFilters'];
+      if (remote is! Map || !mounted) return;
+      final j = Map<String, dynamic>.from(remote);
+      _savedFiltersCache[uid] = j;
+      setState(() => _applyFilters(j));
+      _storeFiltersOnPhone(j);
+    } catch (e) {
+      debugPrint('[GigMap] saved filters (account): $e');
+    }
+  }
+
+  void _storeFiltersOnPhone(Map<String, dynamic> j) {
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setString(_filtersPrefKey, jsonEncode(j)))
+        .catchError((_) => false);
+  }
+
+  // Filters as they were when the sheet opened; closing it unchanged saves
+  // nothing, so untouched defaults keep following the worker's skills.
+  String? _filtersAtSheetOpen;
+
+  void _saveFilters() {
+    final uid = widget.uid;
+    if (uid.isEmpty) return;
+    final j = _filtersToJson();
+    final opened = _filtersAtSheetOpen;
+    _filtersAtSheetOpen = null;
+    if (opened != null && opened == jsonEncode(j)) return;
+    _usingDefaultFilters = false;
+    final before = _savedFiltersCache[uid];
+    _savedFiltersCache[uid] = j;
+    // Only write when something changed: every write to the user doc also
+    // wakes its Cloud Function triggers.
+    if (!_kPersistFilters) return;
+    if (before != null && jsonEncode(before) == jsonEncode(j)) return;
+    _storeFiltersOnPhone(j);
+    // Tells the worker their choice sticks for next time.
+    if (mounted) SnackbarHelper.showSuccess(context, 'Filters saved');
+    FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .update({'gigFilters': j})
+        .catchError((Object e) => debugPrint('[GigMap] save filters: $e'));
+  }
+
   Future<void> _loadSavedViewMode() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString(_kGigsViewModePrefKey);
-      if (saved == _GigViewMode.list.name && mounted) {
-        setState(() => _viewMode = _GigViewMode.list);
+      final mode = _GigViewMode.values.where((m) => m.name == saved).firstOrNull;
+      if (mode != null && mode != _viewMode && mounted) {
+        setState(() => _viewMode = mode);
       }
     } catch (_) {}
+  }
+
+  bool get _showsMap => _viewMode != _GigViewMode.list;
+  bool get _showsList => _viewMode != _GigViewMode.map;
+
+  // Something wants the map on screen (focus a gig, show the nearest):
+  // switch to it only from list-only, so "Both" keeps its list.
+  void _ensureMapVisible() {
+    if (!_showsMap) _setViewMode(_GigViewMode.map);
   }
 
   void _setViewMode(_GigViewMode mode) {
@@ -1838,6 +2148,97 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   BitmapDescriptor _gigIcon(String type) =>
       _icons[type] ?? BitmapDescriptor.defaultMarkerWithHue(_hueForType(type));
+
+  // ── Skill-icon pins (default pin display) ────────────────────────────────
+  // A gig whose first required skill has a GSIN sub-category icon (see
+  // SkillIconService) gets a slightly larger circle with that icon in white;
+  // anything else keeps the plain dot. Bitmaps are cached per type + icon.
+  final Set<String> _skillPinRequested = {};
+
+  String? _skillIconUrlFor(GigMarkerData g) => g.requiredSkills.isEmpty
+      ? null
+      : SkillIconService.instance.urlForSkill(g.requiredSkills.first);
+
+  void _onSkillIconsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  BitmapDescriptor _resolveGigPin(GigMarkerData g) {
+    final url = _skillIconUrlFor(g);
+    if (url == null) return _gigIcon(g.gigType);
+    final key = 'skill_${g.gigType}_$url';
+    final cached = _icons[key];
+    if (cached != null) return cached;
+    // Plain dot until the icon bitmap is ready (or if it fails to load).
+    if (_skillPinRequested.add(key)) {
+      _makeSkillPinIcon(_colorForType(g.gigType), url).then((icon) {
+        if (icon == null) return;
+        _icons[key] = icon;
+        if (mounted) setState(() {});
+      });
+    }
+    return _gigIcon(g.gigType);
+  }
+
+  Future<BitmapDescriptor?> _makeSkillPinIcon(Color color, String url) async {
+    try {
+      final info = await vg.loadPicture(SvgNetworkLoader(url), null);
+      const px = 28.0;
+      const r = 12.5;
+      const c = px / 2;
+      const iconSize = 15.0;
+      final scale = _markerPixelRatio;
+
+      final rec = ui.PictureRecorder();
+      final can = Canvas(rec)..scale(scale);
+      can.drawCircle(const Offset(c, c), r, Paint()..color = color);
+      can.drawCircle(
+        const Offset(c, c),
+        r,
+        Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
+
+      final size = info.size;
+      if (size.width > 0 && size.height > 0) {
+        final longest = size.width > size.height ? size.width : size.height;
+        final fit = iconSize / longest;
+        can.save();
+        can.translate(c - size.width * fit / 2, c - size.height * fit / 2);
+        can.scale(fit);
+        // Tint the whole icon white in one layer.
+        can.saveLayer(
+          Offset.zero & size,
+          Paint()
+            ..colorFilter = const ColorFilter.mode(
+              Colors.white,
+              BlendMode.srcIn,
+            ),
+        );
+        can.drawPicture(info.picture);
+        can.restore();
+        can.restore();
+      }
+      info.picture.dispose();
+
+      final img = await rec.endRecording().toImage(
+        (px * scale).ceil(),
+        (px * scale).ceil(),
+      );
+      final data = await img.toByteData(format: ui.ImageByteFormat.png);
+      if (data == null) return null;
+      return BitmapDescriptor.bytes(
+        data.buffer.asUint8List(),
+        width: px,
+        height: px,
+      );
+    } catch (e) {
+      debugPrint('[GigMap] skill pin ($url): $e');
+      return null;
+    }
+  }
 
   BitmapDescriptor _resolveClusterIcon(int count) {
     final key = 'cluster_$count';
@@ -1962,7 +2363,6 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   void initState() {
     super.initState();
-    _mapInteractive = widget.fullScreen;
     _userProvider = context.read<CurrentUserProvider>();
     _myLocation =
         (_userProvider.lastLat != null && _userProvider.lastLng != null)
@@ -1974,8 +2374,15 @@ class _GigMapSectionState extends State<GigMapSection> {
     // has a value already on a second+ visit within the same app process.
     // Listening picks up the first-visit case too, once it arrives.
     _userProvider.addListener(_onProviderLocationChanged);
+    DistanceUnits.region.addListener(_onRegionChanged);
+    DistanceUnits.ensure(context);
+    if (DistanceUnits.miles) _radiusKm = DistanceUnits.toKm(10);
     _loadBaseIcons();
+    SkillIconService.instance.icons.addListener(_onSkillIconsChanged);
+    SkillIconService.instance.ensureLoaded();
     _fetchAllSkills();
+    _applyDefaultFilters();
+    _loadSavedFilters();
     if (!widget.fullScreen) _loadSavedViewMode();
     final db = FirebaseFirestore.instance;
     _startOpenSub(db);
@@ -1991,7 +2398,7 @@ class _GigMapSectionState extends State<GigMapSection> {
   void _handleExternalFocusRequest() {
     final target = widget.externalFocusRequest?.value;
     if (target == null) return;
-    _setViewMode(_GigViewMode.map);
+    _ensureMapVisible();
     if (_useGoogleMaps) {
       final controller = _googleMapController;
       if (controller != null) {
@@ -2005,6 +2412,144 @@ class _GigMapSectionState extends State<GigMapSection> {
       _pendingCameraTarget = target;
     }
     widget.externalFocusRequest!.value = null;
+  }
+
+  // Region known → miles or km. Keep the default "10" in the shown unit
+  // until the worker picks a distance themselves.
+  void _onRegionChanged() {
+    if (!mounted) return;
+    setState(() {
+      if (!_radiusTouched && !_usingDefaultFilters) {
+        _radiusKm = DistanceUnits.toKm(10);
+      }
+    });
+  }
+
+  // Nothing inside the worker's distance → nearest gigs instead: pan the
+  // map to show the worker and the nearest one.
+  void _showNearestOnMap() {
+    final me = _myLocation;
+    final gigs = _allGigs;
+    if (me == null || gigs.isEmpty) return;
+    final g = gigs.first.position; // nearest-first while falling back
+    final south = me.latitude < g.latitude ? me.latitude : g.latitude;
+    final north = me.latitude < g.latitude ? g.latitude : me.latitude;
+    final west = me.longitude < g.longitude ? me.longitude : g.longitude;
+    final east = me.longitude < g.longitude ? g.longitude : me.longitude;
+    _ensureMapVisible();
+    if (_useGoogleMaps) {
+      _googleMapController?.animateCamera(
+        CameraUpdate.newLatLngBounds(
+          LatLngBounds(southwest: LatLng(south, west), northeast: LatLng(north, east)),
+          60,
+        ),
+      );
+    } else if (_osmMapReady) {
+      _osmController.fitCamera(
+        fm.CameraFit.bounds(
+          bounds: fm.LatLngBounds(ll.LatLng(south, west), ll.LatLng(north, east)),
+          padding: const EdgeInsets.all(60),
+        ),
+      );
+    }
+  }
+
+  // The fallback notes above the map/list: "no gigs need your skills" and
+  // "nothing within your distance". Empty when neither applies.
+  // [overMap]: drawn on top of the full-screen map, where plain text would be
+  // unreadable, so the skills note keeps its card there.
+  Widget _buildFallbackBanners({bool showButton = true, bool overMap = false}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_noSkillMatches)
+          overMap ? _buildNoSkillMatchesBanner() : _buildNoSkillMatchesNote(),
+        if (_nearestFallbackM != null)
+          _buildNearestFallbackBanner(showButton: showButton),
+      ],
+    );
+  }
+
+  static const _noSkillMatchesText =
+      'No gigs for your skills yet. Add more in your Toolchest.';
+
+  Widget _buildNoSkillMatchesNote() {
+    return const Padding(
+      padding: EdgeInsets.only(bottom: 10),
+      child: Text(
+        _noSkillMatchesText,
+        textAlign: TextAlign.center,
+        style: TextStyle(color: kSub, fontSize: 12, height: 1.35),
+      ),
+    );
+  }
+
+  Widget _buildNoSkillMatchesBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kAmber.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.work_outline_rounded, color: kAmber, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _noSkillMatchesText,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 12,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNearestFallbackBanner({bool showButton = true}) {
+    final nearest = _nearestFallbackM;
+    final radius = _radiusKm;
+    if (nearest == null || radius == null) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kAmber.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.near_me_rounded, color: kAmber, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'No gigs within ${DistanceUnits.formatKmRounded(radius)}. '
+              'Showing the nearest — ${DistanceUnits.format(nearest)} away.',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 12,
+                height: 1.3,
+              ),
+            ),
+          ),
+          if (showButton)
+            TextButton(
+              onPressed: _showNearestOnMap,
+              child: const Text('Show', style: TextStyle(fontWeight: FontWeight.w700)),
+            )
+          else
+            const SizedBox(width: 6),
+        ],
+      ),
+    );
   }
 
   void _onProviderLocationChanged() {
@@ -2094,7 +2639,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         // while this await was pending, tearing down the GoogleMap widget —
         // animating its controller afterwards throws, which the catch below
         // would otherwise misreport as a location failure.
-        if (_viewMode == _GigViewMode.map) {
+        if (_showsMap) {
           if (_useGoogleMaps) {
             _googleMapController?.animateCamera(
               CameraUpdate.newLatLngZoom(quickLoc, 14.0),
@@ -2124,7 +2669,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       );
       _resolveMyCountry(loc);
       // Same view-mode race as the last-known-position branch above.
-      if (_viewMode == _GigViewMode.map) {
+      if (_showsMap) {
         if (_useGoogleMaps) {
           _googleMapController?.animateCamera(
             CameraUpdate.newLatLngZoom(loc, 14.0),
@@ -2225,6 +2770,13 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   void didUpdateWidget(GigMapSection old) {
     super.didUpdateWidget(old);
+    // Skills load after this screen opens, and a worker can add their
+    // first skill later: keep untouched defaults in step with them.
+    if (_usingDefaultFilters &&
+        _filtersAtSheetOpen == null &&
+        old.workerSkills.isEmpty != widget.workerSkills.isEmpty) {
+      _applyDefaultFilters();
+    }
   }
 
   void _startOpenSub(FirebaseFirestore db) {
@@ -2439,7 +2991,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'It\'s about ${distKm.round()} km from your current location. Make sure you\'re able to travel there before you take it.',
+                    'It\'s about ${DistanceUnits.formatKmRounded(distKm)} from your current location. Make sure you\'re able to travel there before you take it.',
                     style: TextStyle(
                       fontSize: 13,
                       color: isDark
@@ -2698,6 +3250,8 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   void dispose() {
     _userProvider.removeListener(_onProviderLocationChanged);
+    DistanceUnits.region.removeListener(_onRegionChanged);
+    SkillIconService.instance.icons.removeListener(_onSkillIconsChanged);
     widget.externalFocusRequest?.removeListener(_handleExternalFocusRequest);
     _googleMapController?.dispose();
     _osmController.dispose();
@@ -2719,8 +3273,14 @@ class _GigMapSectionState extends State<GigMapSection> {
   bool _matchesSkill(String skill, String other) =>
       skill.toLowerCase().trim() == other.toLowerCase().trim();
 
-  List<GigMarkerData> get _allGigs {
-    var gigs = _unfilteredGigs;
+  List<GigMarkerData> get _allGigs => _filteredGigs();
+
+  // [applyRadius] false: a typed search looks past the distance limit, so
+  // searching another city or ZIP finds its gigs.
+  List<GigMarkerData> _filteredGigs({bool applyRadius = true}) {
+    final unfiltered = _unfilteredGigs;
+    var gigs = unfiltered;
+    _noSkillMatches = false;
 
     switch (_skillFilter) {
       case _SkillFilter.all:
@@ -2730,12 +3290,18 @@ class _GigMapSectionState extends State<GigMapSection> {
             .where(
               (g) =>
                   g.requiredSkills.isEmpty ||
+                  g.customSkill ||
                   g.requiredSkills.any(
                     (s) =>
                         widget.workerSkills.any((ws) => _matchesSkill(ws, s)),
                   ),
             )
             .toList();
+        // No gig needs their skills → show every gig, with a note.
+        if (gigs.isEmpty && unfiltered.isNotEmpty) {
+          gigs = unfiltered;
+          _noSkillMatches = true;
+        }
       case _SkillFilter.specific:
         final skill = _specificSkill;
         if (skill != null) {
@@ -2749,25 +3315,15 @@ class _GigMapSectionState extends State<GigMapSection> {
 
     final myLoc = _myLocation;
 
-    final radiusKm = _radiusKm;
-    if (radiusKm != null && myLoc != null) {
-      gigs = gigs.where((g) {
-        final distM = Geolocator.distanceBetween(
-          myLoc.latitude,
-          myLoc.longitude,
-          g.position.latitude,
-          g.position.longitude,
-        );
-        return distM <= radiusKm * 1000;
-      }).toList();
-    }
-
     final scheduleDate = _scheduleDateFilter;
     if (scheduleDate != null) {
       gigs = gigs.where((g) {
         final d = g.scheduledDate;
-        return d != null &&
-            d.year == scheduleDate.year &&
+        // A "Flexible" gig (no scheduledDate — see post_open_gig_screen.dart's
+        // Anytime toggle) is available every day, so it always matches a
+        // date filter instead of being excluded.
+        if (d == null) return true;
+        return d.year == scheduleDate.year &&
             d.month == scheduleDate.month &&
             d.day == scheduleDate.day;
       }).toList();
@@ -2782,14 +3338,63 @@ class _GigMapSectionState extends State<GigMapSection> {
         gigs = gigs.where((g) => g.payType != 'hourly').toList();
     }
 
+    // Gigs in another currency can't be compared, so a range hides them.
+    if (_hasPayRange) {
+      final min = _payMin, max = _payMax, ccy = _payCurrency;
+      gigs = gigs.where((g) {
+        if (g.currencyCode != ccy) return false;
+        final pay = g.payType == 'hourly' && g.hourlyRate != null
+            ? g.hourlyRate!
+            : g.budget;
+        return (min == null || pay >= min) && (max == null || pay <= max);
+      }).toList();
+    }
+
+    gigs = _sorted(gigs);
+
+    // Distance last, so that when nothing is inside the worker's radius we
+    // can fall back to the nearest gigs that match every other filter.
+    if (!applyRadius) return gigs;
+    _nearestFallbackM = null;
+    final radiusKm = _radiusKm;
+    if (radiusKm != null && myLoc != null) {
+      double dist(GigMarkerData g) => Geolocator.distanceBetween(
+        myLoc.latitude,
+        myLoc.longitude,
+        g.position.latitude,
+        g.position.longitude,
+      );
+      final inside = gigs.where((g) => dist(g) <= radiusKm * 1000).toList();
+      if (inside.isNotEmpty || gigs.isEmpty) return inside;
+      final byDistance = [...gigs]..sort((a, b) => dist(a).compareTo(dist(b)));
+      final nearest = byDistance.take(_kNearestFallbackCount).toList();
+      _nearestFallbackM = dist(nearest.first);
+      return _sorted(nearest);
+    }
+
     return gigs;
+  }
+
+  static const int _kNearestFallbackCount = 10;
+
+  // Newest / oldest posted first; gigs without a createdAt go last.
+  List<GigMarkerData> _sorted(List<GigMarkerData> gigs) {
+    final newestFirst = _sort == _GigSort.newest;
+    return [...gigs]..sort((a, b) {
+      final ca = a.createdAt, cb = b.createdAt;
+      if (ca == null && cb == null) return 0;
+      if (ca == null) return 1;
+      if (cb == null) return -1;
+      return newestFirst ? cb.compareTo(ca) : ca.compareTo(cb);
+    });
   }
 
   bool get _hasActiveFilter =>
       _skillFilter != _SkillFilter.all ||
       _radiusKm != null ||
       _scheduleDateFilter != null ||
-      _payTypeFilter != _PayTypeFilter.all;
+      _payTypeFilter != _PayTypeFilter.all ||
+      _hasPayRange;
 
   static double _gridSize(double zoom) {
     if (zoom < 10) return 0.15;
@@ -2851,7 +3456,7 @@ class _GigMapSectionState extends State<GigMapSection> {
           position: cluster.center,
           icon: pillLabel != null
               ? _resolvePillIcon(singleGig.gigType, pillLabel)
-              : _gigIcon(singleGig.gigType),
+              : _resolveGigPin(singleGig),
           // The pill has a pointer tail below it — anchor to the tail's
           // tip (bottom-center of the bitmap) instead of the default
           // center, so it actually points at the gig's coordinate.
@@ -3012,10 +3617,20 @@ class _GigMapSectionState extends State<GigMapSection> {
                       BoxShadow(color: Colors.black26, blurRadius: 4),
                     ],
                   ),
-                  child: Icon(
-                    _iconForType(gig.gigType),
-                    color: Colors.white,
-                    size: 16,
+                  // Skill icon when it has one, else the gig type's icon.
+                  child: Center(
+                    child: gig.requiredSkills.isNotEmpty
+                        ? SkillIcon(
+                            gig.requiredSkills.first,
+                            color: Colors.white,
+                            size: 16,
+                            fallback: _iconForType(gig.gigType),
+                          )
+                        : Icon(
+                            _iconForType(gig.gigType),
+                            color: Colors.white,
+                            size: 16,
+                          ),
                   ),
                 ),
               ),
@@ -3137,7 +3752,8 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   // Same fullscreen map the "expand" button opens.
   void _openFullScreenMap(BuildContext context) {
-    Navigator.push(
+    // Filters changed on the full-screen map carry back here.
+    Navigator.push<void>(
       context,
       MaterialPageRoute(
         fullscreenDialog: true,
@@ -3157,7 +3773,11 @@ class _GigMapSectionState extends State<GigMapSection> {
           ),
         ),
       ),
-    );
+    ).then((_) {
+      if (!mounted) return;
+      final saved = _savedFiltersCache[widget.uid];
+      if (saved != null) setState(() => _applyFilters(saved));
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -3255,11 +3875,6 @@ class _GigMapSectionState extends State<GigMapSection> {
                       : g.gigType == 'offered'
                       ? const Color(0xFF8B5CF6)
                       : kAmber;
-                  final typeIcon = g.gigType == 'open'
-                      ? Icons.workspace_premium_outlined
-                      : g.gigType == 'offered'
-                      ? Icons.send_rounded
-                      : Icons.flash_on_rounded;
                   final typeLabel = g.gigType == 'open'
                       ? 'Open'
                       : g.gigType == 'offered'
@@ -3293,7 +3908,20 @@ class _GigMapSectionState extends State<GigMapSection> {
                         color: typeColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Icon(typeIcon, color: typeColor, size: 20),
+                      // Skill icon when it has one, else the handshake.
+                      child: Center(
+                        child: g.requiredSkills.isNotEmpty
+                            ? SkillIcon(
+                                g.requiredSkills.first,
+                                color: typeColor,
+                                size: 20,
+                              )
+                            : Icon(
+                                Icons.handshake_outlined,
+                                color: typeColor,
+                                size: 20,
+                              ),
+                      ),
                     ),
                     title: Text(
                       g.title,
@@ -3406,14 +4034,38 @@ class _GigMapSectionState extends State<GigMapSection> {
   // ─────────────────────────────────────────────────────────────────────────
   //  Filter sheet — skill + radius
   // ─────────────────────────────────────────────────────────────────────────
-  static const List<double?> _radiusOptions = [null, 1, 5, 10, 50, 100];
+  // Distance slider stops, in the shown unit (km, or mi in the US); the last
+  // stop (null) is "Any". Also the steps the skills default radius snaps to.
+  static const List<double?> _radiusOptions = [
+    1, 2, 5, 10, 15, 25, 50, 75, 100, null,
+  ];
+
+  // Slider position for a radius in km: the closest stop (saved filters from
+  // the old chips, or a region switch, may sit between stops).
+  int _radiusStopIndex(double? radiusKm) {
+    if (radiusKm == null) return _radiusOptions.length - 1;
+    var best = 0;
+    var bestDiff = double.infinity;
+    for (var i = 0; i < _radiusOptions.length; i++) {
+      final r = _radiusOptions[i];
+      if (r == null) continue;
+      final diff = (DistanceUnits.toKm(r) - radiusKm).abs();
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = i;
+      }
+    }
+    return best;
+  }
 
   void _showFilterSheet(BuildContext context) {
     final skills = _allSkillNames;
-    showModalBottomSheet(
+    _filtersAtSheetOpen = jsonEncode(_filtersToJson());
+    showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (ctx) {
         final cardColor = Theme.of(ctx).cardColor;
         final onSurface = Theme.of(ctx).colorScheme.onSurface;
@@ -3421,14 +4073,30 @@ class _GigMapSectionState extends State<GigMapSection> {
 
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
+            // Hierarchy: sheet title → group (Gigs, Where & when, Pay,
+            // Order & display) → field label → the chosen value in amber.
+            final matchCount = _allGigs.length;
+
+            Widget groupTitle(String text) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            );
+
             Widget sectionTitle(String text) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
                 text,
                 style: TextStyle(
-                  color: onSurface,
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
+                  color: onSurface.withValues(alpha: 0.65),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             );
@@ -3470,410 +4138,773 @@ class _GigMapSectionState extends State<GigMapSection> {
               );
             }
 
-            return Container(
-              margin: const EdgeInsets.all(16),
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: SingleChildScrollView(
+            // Drawer: attached to the bottom, drag the handle to expand or
+            // pull down to dismiss.
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.75,
+              minChildSize: 0.4,
+              maxChildSize: 0.92,
+              builder: (_, scrollController) => Container(
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(24),
+                  ),
+                ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Icon(Icons.tune_rounded, color: kAmber, size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Filter Gigs',
-                          style: TextStyle(
-                            color: onSurface,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+                    // Drag handle
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10, bottom: 6),
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: kSub.withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(2),
                         ),
-                        const Spacer(),
-                        TextButton(
-                          onPressed: () {
-                            setSheetState(() {
-                              _skillFilter = _SkillFilter.all;
-                              _specificSkill = null;
-                              _radiusKm = null;
-                              _scheduleDateFilter = null;
-                              _pinDisplayMode = _PinDisplayMode.default_;
-                              _payTypeFilter = _PayTypeFilter.all;
-                            });
-                            setState(() {
-                              _skillFilter = _SkillFilter.all;
-                              _specificSkill = null;
-                              _radiusKm = null;
-                              _scheduleDateFilter = null;
-                              _pinDisplayMode = _PinDisplayMode.default_;
-                              _payTypeFilter = _PayTypeFilter.all;
-                            });
-                          },
-                          child: const Text(
-                            'Reset',
-                            style: TextStyle(color: kSub, fontSize: 12),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    sectionTitle('Show gigs'),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        choiceChip(
-                          label: 'All Gigs',
-                          selected: _skillFilter == _SkillFilter.all,
-                          onTap: () {
-                            setSheetState(
-                              () => _skillFilter = _SkillFilter.all,
-                            );
-                            setState(() => _skillFilter = _SkillFilter.all);
-                          },
-                        ),
-                        choiceChip(
-                          label: 'Matches My Skills',
-                          selected: _skillFilter == _SkillFilter.mySkills,
-                          onTap: () {
-                            setSheetState(
-                              () => _skillFilter = _SkillFilter.mySkills,
-                            );
-                            setState(
-                              () => _skillFilter = _SkillFilter.mySkills,
-                            );
-                          },
-                        ),
-                        choiceChip(
-                          label: 'Specific Skill',
-                          selected: _skillFilter == _SkillFilter.specific,
-                          onTap: skills.isEmpty
-                              ? () {}
-                              : () {
-                                  setSheetState(() {
-                                    _skillFilter = _SkillFilter.specific;
-                                    _specificSkill ??= skills.first;
-                                  });
-                                  setState(() {
-                                    _skillFilter = _SkillFilter.specific;
-                                    _specificSkill ??= skills.first;
-                                  });
-                                },
-                        ),
-                      ],
-                    ),
-                    if (_skillFilter == _SkillFilter.specific) ...[
-                      const SizedBox(height: 12),
-                      if (skills.isEmpty)
-                        const Text(
-                          'Loading skills…',
-                          style: TextStyle(color: kSub, fontSize: 12),
-                        )
-                      else
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.black.withValues(alpha: 0.04),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Theme.of(ctx).dividerColor,
-                            ),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: skills.contains(_specificSkill)
-                                  ? _specificSkill
-                                  : skills.first,
-                              isExpanded: true,
-                              icon: const Icon(
-                                Icons.keyboard_arrow_down_rounded,
-                                color: kSub,
-                              ),
-                              style: TextStyle(
-                                color: onSurface,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              dropdownColor: cardColor,
-                              borderRadius: BorderRadius.circular(12),
-                              items: skills
-                                  .map(
-                                    (s) => DropdownMenuItem(
-                                      value: s,
-                                      child: Text(s),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (s) {
-                                if (s == null) return;
-                                setSheetState(() => _specificSkill = s);
-                                setState(() => _specificSkill = s);
-                              },
-                            ),
-                          ),
-                        ),
-                    ],
-                    const SizedBox(height: 18),
-                    sectionTitle('Distance'),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _radiusOptions.map((r) {
-                        final label = r == null
-                            ? 'Any'
-                            : '${r.toStringAsFixed(0)} km';
-                        return choiceChip(
-                          label: label,
-                          selected: _radiusKm == r,
-                          onTap: () {
-                            setSheetState(() => _radiusKm = r);
-                            setState(() => _radiusKm = r);
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    if (_radiusKm != null && _myLocation == null) ...[
-                      const SizedBox(height: 10),
-                      const Text(
-                        'Your location isn\'t available yet — distance filter will apply once located.',
-                        style: TextStyle(color: kSub, fontSize: 11),
                       ),
-                    ],
-                    const SizedBox(height: 18),
-                    sectionTitle('Schedule'),
-                    Row(
-                      children: [
-                        GestureDetector(
-                          onTap: () async {
-                            final now = DateTime.now();
-                            final picked = await showDatePicker(
-                              context: ctx,
-                              initialDate: _scheduleDateFilter ?? now,
-                              firstDate: now.subtract(
-                                const Duration(days: 365),
-                              ),
-                              lastDate: now.add(const Duration(days: 365)),
-                              builder: (dctx, child) => Theme(
-                                data: Theme.of(dctx).copyWith(
-                                  colorScheme: Theme.of(dctx).colorScheme
-                                      .copyWith(
-                                        primary: kAmber,
-                                        onPrimary: Colors.white,
-                                      ),
-                                ),
-                                child: child!,
-                              ),
-                            );
-                            if (picked == null) return;
-                            setSheetState(() => _scheduleDateFilter = picked);
-                            setState(() => _scheduleDateFilter = picked);
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _scheduleDateFilter != null
-                                  ? kAmber.withValues(alpha: 0.15)
-                                  : (isDark
-                                        ? Colors.white.withValues(alpha: 0.05)
-                                        : Colors.black.withValues(alpha: 0.04)),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: _scheduleDateFilter != null
-                                    ? kAmber
-                                    : Theme.of(ctx).dividerColor,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
                               children: [
-                                Icon(
-                                  Icons.event_rounded,
-                                  size: 14,
-                                  color: _scheduleDateFilter != null
-                                      ? kAmber
-                                      : onSurface,
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Filter Gigs',
+                                        style: TextStyle(
+                                          color: onSurface,
+                                          fontSize: 19,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _hasActiveFilter
+                                            ? '${matchCount == 1 ? '1 gig matches' : '$matchCount gigs match'} your filters'
+                                            : 'Showing all gigs',
+                                        style: const TextStyle(
+                                          color: kSub,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  _scheduleDateFilter != null
-                                      ? DateFormat(
-                                          'EEE, MMM d',
-                                        ).format(_scheduleDateFilter!)
-                                      : 'Any date',
-                                  style: TextStyle(
-                                    color: _scheduleDateFilter != null
-                                        ? kAmber
-                                        : onSurface,
-                                    fontSize: 12,
-                                    fontWeight: _scheduleDateFilter != null
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
+                                TextButton(
+                                  onPressed:
+                                      !_hasActiveFilter &&
+                                          _sort == _GigSort.newest
+                                      ? null
+                                      : () {
+                                          setSheetState(() {
+                                            _skillFilter = _SkillFilter.all;
+                                            _specificSkill = null;
+                                            _radiusKm = null;
+                                            _radiusTouched = true;
+                                            _scheduleDateFilter = null;
+                                            _pinDisplayMode =
+                                                _PinDisplayMode.default_;
+                                            _payTypeFilter = _PayTypeFilter.all;
+                                            _payMin = null;
+                                            _payMax = null;
+                                            _sort = _GigSort.newest;
+                                          });
+                                          setState(() {
+                                            _skillFilter = _SkillFilter.all;
+                                            _specificSkill = null;
+                                            _radiusKm = null;
+                                            _radiusTouched = true;
+                                            _scheduleDateFilter = null;
+                                            _pinDisplayMode =
+                                                _PinDisplayMode.default_;
+                                            _payTypeFilter = _PayTypeFilter.all;
+                                            _payMin = null;
+                                            _payMax = null;
+                                            _sort = _GigSort.newest;
+                                          });
+                                        },
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: kAmber,
+                                    disabledForegroundColor: kSub.withValues(
+                                      alpha: 0.5,
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Reset',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                 ),
                               ],
                             ),
-                          ),
+                            const SizedBox(height: 20),
+                            groupTitle('Gigs'),
+                            sectionTitle('Skills'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                choiceChip(
+                                  label: 'All Gigs',
+                                  selected: _skillFilter == _SkillFilter.all,
+                                  onTap: () {
+                                    setSheetState(
+                                      () => _skillFilter = _SkillFilter.all,
+                                    );
+                                    setState(
+                                      () => _skillFilter = _SkillFilter.all,
+                                    );
+                                  },
+                                ),
+                                choiceChip(
+                                  label: 'Matches My Skills',
+                                  selected:
+                                      _skillFilter == _SkillFilter.mySkills,
+                                  onTap: () {
+                                    setSheetState(
+                                      () =>
+                                          _skillFilter = _SkillFilter.mySkills,
+                                    );
+                                    setState(
+                                      () =>
+                                          _skillFilter = _SkillFilter.mySkills,
+                                    );
+                                  },
+                                ),
+                                choiceChip(
+                                  label: 'Specific Skill',
+                                  selected:
+                                      _skillFilter == _SkillFilter.specific,
+                                  onTap: skills.isEmpty
+                                      ? () {}
+                                      : () {
+                                          setSheetState(() {
+                                            _skillFilter =
+                                                _SkillFilter.specific;
+                                            _specificSkill ??= skills.first;
+                                          });
+                                          setState(() {
+                                            _skillFilter =
+                                                _SkillFilter.specific;
+                                            _specificSkill ??= skills.first;
+                                          });
+                                        },
+                                ),
+                              ],
+                            ),
+                            if (_skillFilter == _SkillFilter.specific) ...[
+                              const SizedBox(height: 12),
+                              if (skills.isEmpty)
+                                const Text(
+                                  'Loading skills…',
+                                  style: TextStyle(color: kSub, fontSize: 12),
+                                )
+                              else
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.05)
+                                        : Colors.black.withValues(alpha: 0.04),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Theme.of(ctx).dividerColor,
+                                    ),
+                                  ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: skills.contains(_specificSkill)
+                                          ? _specificSkill
+                                          : skills.first,
+                                      isExpanded: true,
+                                      icon: const Icon(
+                                        Icons.keyboard_arrow_down_rounded,
+                                        color: kSub,
+                                      ),
+                                      style: TextStyle(
+                                        color: onSurface,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      dropdownColor: cardColor,
+                                      borderRadius: BorderRadius.circular(12),
+                                      items: skills
+                                          .map(
+                                            (s) => DropdownMenuItem(
+                                              value: s,
+                                              child: Text(s),
+                                            ),
+                                          )
+                                          .toList(),
+                                      onChanged: (s) {
+                                        if (s == null) return;
+                                        setSheetState(() => _specificSkill = s);
+                                        setState(() => _specificSkill = s);
+                                      },
+                                    ),
+                                  ),
+                                ),
+                            ],
+                            const SizedBox(height: 22),
+                            Divider(
+                              height: 1,
+                              color: Theme.of(ctx).dividerColor,
+                            ),
+                            const SizedBox(height: 18),
+                            groupTitle('Where & when'),
+                            sectionTitle('Distance'),
+                            Builder(
+                              builder: (_) {
+                                final stop = _radiusStopIndex(_radiusKm);
+                                final r = _radiusOptions[stop];
+                                final first = _radiusOptions.first!;
+                                String fmt(double v) =>
+                                    '${v.toStringAsFixed(0)} ${DistanceUnits.unit}';
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      r == null
+                                          ? 'Any distance'
+                                          : 'Within ${fmt(r)}',
+                                      style: const TextStyle(
+                                        color: kAmber,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    SliderTheme(
+                                      data: SliderTheme.of(ctx).copyWith(
+                                        activeTrackColor: kAmber,
+                                        inactiveTrackColor: kAmber.withValues(
+                                          alpha: 0.2,
+                                        ),
+                                        thumbColor: kAmber,
+                                        overlayColor: kAmber.withValues(
+                                          alpha: 0.15,
+                                        ),
+                                        activeTickMarkColor: Colors.white
+                                            .withValues(alpha: 0.7),
+                                        inactiveTickMarkColor: kAmber
+                                            .withValues(alpha: 0.5),
+                                        trackHeight: 4,
+                                        showValueIndicator:
+                                            ShowValueIndicator.never,
+                                      ),
+                                      child: Slider(
+                                        value: stop.toDouble(),
+                                        min: 0,
+                                        max: (_radiusOptions.length - 1)
+                                            .toDouble(),
+                                        divisions: _radiusOptions.length - 1,
+                                        semanticFormatterCallback: (v) {
+                                          final o = _radiusOptions[v.round()];
+                                          return o == null
+                                              ? 'Any distance'
+                                              : 'Within ${fmt(o)}';
+                                        },
+                                        // Live in the sheet while dragging; the
+                                        // list and map refilter once on release.
+                                        onChanged: (v) {
+                                          final o = _radiusOptions[v.round()];
+                                          _radiusTouched = true;
+                                          setSheetState(
+                                            () => _radiusKm = o == null
+                                                ? null
+                                                : DistanceUnits.toKm(o),
+                                          );
+                                        },
+                                        onChangeEnd: (_) => setState(() {}),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            fmt(first),
+                                            style: const TextStyle(
+                                              color: kSub,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                          const Text(
+                                            'Any',
+                                            style: TextStyle(
+                                              color: kSub,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                            if (_radiusKm != null && _myLocation != null) ...[
+                              const SizedBox(height: 8),
+                              const Text(
+                                'If nothing is within this distance, the nearest gigs are shown instead.',
+                                style: TextStyle(color: kSub, fontSize: 11),
+                              ),
+                            ],
+                            if (_radiusKm != null && _myLocation == null) ...[
+                              const SizedBox(height: 10),
+                              const Text(
+                                'Your location isn\'t available yet — distance filter will apply once located.',
+                                style: TextStyle(color: kSub, fontSize: 11),
+                              ),
+                            ],
+                            const SizedBox(height: 18),
+                            sectionTitle('Schedule'),
+                            Row(
+                              children: [
+                                GestureDetector(
+                                  onTap: () async {
+                                    final now = DateTime.now();
+                                    final picked = await showDatePicker(
+                                      context: ctx,
+                                      initialDate: _scheduleDateFilter ?? now,
+                                      firstDate: now.subtract(
+                                        const Duration(days: 365),
+                                      ),
+                                      lastDate: now.add(
+                                        const Duration(days: 365),
+                                      ),
+                                      builder: (dctx, child) => Theme(
+                                        data: Theme.of(dctx).copyWith(
+                                          colorScheme: Theme.of(dctx)
+                                              .colorScheme
+                                              .copyWith(
+                                                primary: kAmber,
+                                                onPrimary: Colors.white,
+                                              ),
+                                        ),
+                                        child: child!,
+                                      ),
+                                    );
+                                    if (picked == null) return;
+                                    setSheetState(
+                                      () => _scheduleDateFilter = picked,
+                                    );
+                                    setState(
+                                      () => _scheduleDateFilter = picked,
+                                    );
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _scheduleDateFilter != null
+                                          ? kAmber.withValues(alpha: 0.15)
+                                          : (isDark
+                                                ? Colors.white.withValues(
+                                                    alpha: 0.05,
+                                                  )
+                                                : Colors.black.withValues(
+                                                    alpha: 0.04,
+                                                  )),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: _scheduleDateFilter != null
+                                            ? kAmber
+                                            : Theme.of(ctx).dividerColor,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.event_rounded,
+                                          size: 14,
+                                          color: _scheduleDateFilter != null
+                                              ? kAmber
+                                              : onSurface,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          _scheduleDateFilter != null
+                                              ? DateFormat(
+                                                  'EEE, MMM d',
+                                                ).format(_scheduleDateFilter!)
+                                              : 'Any date',
+                                          style: TextStyle(
+                                            color: _scheduleDateFilter != null
+                                                ? kAmber
+                                                : onSurface,
+                                            fontSize: 12,
+                                            fontWeight:
+                                                _scheduleDateFilter != null
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                if (_scheduleDateFilter != null) ...[
+                                  const SizedBox(width: 8),
+                                  GestureDetector(
+                                    onTap: () {
+                                      setSheetState(
+                                        () => _scheduleDateFilter = null,
+                                      );
+                                      setState(
+                                        () => _scheduleDateFilter = null,
+                                      );
+                                    },
+                                    child: Icon(
+                                      Icons.close_rounded,
+                                      size: 18,
+                                      color: kSub,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 22),
+                            Divider(
+                              height: 1,
+                              color: Theme.of(ctx).dividerColor,
+                            ),
+                            const SizedBox(height: 18),
+                            groupTitle('Pay'),
+                            sectionTitle('Pay type'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                choiceChip(
+                                  label: 'All',
+                                  selected:
+                                      _payTypeFilter == _PayTypeFilter.all,
+                                  onTap: () {
+                                    setSheetState(
+                                      () => _payTypeFilter = _PayTypeFilter.all,
+                                    );
+                                    setState(
+                                      () => _payTypeFilter = _PayTypeFilter.all,
+                                    );
+                                  },
+                                ),
+                                choiceChip(
+                                  label: 'Hourly',
+                                  selected:
+                                      _payTypeFilter == _PayTypeFilter.hourly,
+                                  onTap: () {
+                                    setSheetState(
+                                      () => _payTypeFilter =
+                                          _PayTypeFilter.hourly,
+                                    );
+                                    setState(
+                                      () => _payTypeFilter =
+                                          _PayTypeFilter.hourly,
+                                    );
+                                  },
+                                ),
+                                choiceChip(
+                                  label: 'Day',
+                                  selected:
+                                      _payTypeFilter == _PayTypeFilter.flat,
+                                  onTap: () {
+                                    setSheetState(
+                                      () =>
+                                          _payTypeFilter = _PayTypeFilter.flat,
+                                    );
+                                    setState(
+                                      () =>
+                                          _payTypeFilter = _PayTypeFilter.flat,
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            sectionTitle('Pay range'),
+                            Builder(
+                              builder: (_) {
+                                final stops = _payStops;
+                                final last = stops.length - 1;
+                                final lo = _payStopIndex(_payMin, isMax: false);
+                                final hi = _payStopIndex(_payMax, isMax: true);
+                                String money(double v) =>
+                                    CurrencyFormatter.format(v, _payCurrency);
+                                final label = lo == 0 && hi == last
+                                    ? 'Any pay'
+                                    : hi == last
+                                    ? '${money(stops[lo])} and up'
+                                    : lo == 0
+                                    ? 'Up to ${money(stops[hi])}'
+                                    : '${money(stops[lo])} – ${money(stops[hi])}';
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      label,
+                                      style: const TextStyle(
+                                        color: kAmber,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    SliderTheme(
+                                      data: SliderTheme.of(ctx).copyWith(
+                                        activeTrackColor: kAmber,
+                                        inactiveTrackColor: kAmber.withValues(
+                                          alpha: 0.2,
+                                        ),
+                                        thumbColor: kAmber,
+                                        overlayColor: kAmber.withValues(
+                                          alpha: 0.15,
+                                        ),
+                                        activeTickMarkColor: Colors.white
+                                            .withValues(alpha: 0.7),
+                                        inactiveTickMarkColor: kAmber
+                                            .withValues(alpha: 0.5),
+                                        trackHeight: 4,
+                                        showValueIndicator:
+                                            ShowValueIndicator.never,
+                                      ),
+                                      child: RangeSlider(
+                                        values: RangeValues(
+                                          lo.toDouble(),
+                                          hi.toDouble(),
+                                        ),
+                                        min: 0,
+                                        max: last.toDouble(),
+                                        divisions: last,
+                                        semanticFormatterCallback: (v) {
+                                          final i = v.round();
+                                          return i == last
+                                              ? 'No maximum'
+                                              : money(stops[i]);
+                                        },
+                                        // Live in the sheet while dragging; the
+                                        // list and map refilter once on release.
+                                        onChanged: (v) {
+                                          final a = v.start.round();
+                                          final b = v.end.round();
+                                          setSheetState(() {
+                                            _payMin = a == 0 ? null : stops[a];
+                                            _payMax = b == last
+                                                ? null
+                                                : stops[b];
+                                          });
+                                        },
+                                        onChangeEnd: (_) => setState(() {}),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            money(stops.first),
+                                            style: const TextStyle(
+                                              color: kSub,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                          Text(
+                                            '${money(stops[last])}+',
+                                            style: const TextStyle(
+                                              color: kSub,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (_hasPayRange) ...[
+                                      const SizedBox(height: 6),
+                                      const Text(
+                                        'Compares the hourly rate for hourly gigs and the day rate for day gigs.',
+                                        style: TextStyle(
+                                          color: kSub,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 22),
+                            Divider(
+                              height: 1,
+                              color: Theme.of(ctx).dividerColor,
+                            ),
+                            const SizedBox(height: 18),
+                            groupTitle('Order & display'),
+                            sectionTitle('Sort by'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final (sort, label) in const [
+                                  (_GigSort.newest, 'Newest first'),
+                                  (_GigSort.oldest, 'Oldest first'),
+                                ])
+                                  choiceChip(
+                                    label: label,
+                                    selected: _sort == sort,
+                                    onTap: () {
+                                      setSheetState(() => _sort = sort);
+                                      setState(() => _sort = sort);
+                                    },
+                                  ),
+                              ],
+                            ),
+                            if (_showsMap)
+                              const SizedBox(height: 18),
+                            // Pin Display only affects how map markers are drawn —
+                            // meaningless in list view, so it's hidden entirely
+                            // there rather than shown as a dead control.
+                            if (_showsMap) ...[
+                              sectionTitle('Pin display'),
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Text(
+                                  'Choose what shows on each map pin — the gig type icon, its pay rate, or how far it is from you.',
+                                  style: TextStyle(
+                                    color: kSub.withValues(alpha: 0.8),
+                                    fontSize: 11.5,
+                                  ),
+                                ),
+                              ),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  choiceChip(
+                                    label: 'Default',
+                                    selected:
+                                        _pinDisplayMode ==
+                                        _PinDisplayMode.default_,
+                                    onTap: () {
+                                      setSheetState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.default_,
+                                      );
+                                      setState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.default_,
+                                      );
+                                    },
+                                  ),
+                                  choiceChip(
+                                    label: 'Salary',
+                                    selected:
+                                        _pinDisplayMode ==
+                                        _PinDisplayMode.salary,
+                                    onTap: () {
+                                      setSheetState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.salary,
+                                      );
+                                      setState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.salary,
+                                      );
+                                    },
+                                  ),
+                                  choiceChip(
+                                    label: 'Distance',
+                                    selected:
+                                        _pinDisplayMode ==
+                                        _PinDisplayMode.distance,
+                                    onTap: () {
+                                      setSheetState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.distance,
+                                      );
+                                      setState(
+                                        () => _pinDisplayMode =
+                                            _PinDisplayMode.distance,
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                              if (_pinDisplayMode == _PinDisplayMode.distance &&
+                                  _myLocation == null) ...[
+                                const SizedBox(height: 10),
+                                const Text(
+                                  'Your location isn\'t available yet — pins will show the default style until located.',
+                                  style: TextStyle(color: kSub, fontSize: 11),
+                                ),
+                              ],
+                              const SizedBox(height: 20),
+                            ],
+                          ],
                         ),
-                        if (_scheduleDateFilter != null) ...[
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () {
-                              setSheetState(() => _scheduleDateFilter = null);
-                              setState(() => _scheduleDateFilter = null);
-                            },
-                            child: Icon(
-                              Icons.close_rounded,
-                              size: 18,
-                              color: kSub,
+                      ),
+                    ),
+                    // Apply stays pinned under the scrolling filters.
+                    Container(
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        12,
+                        20,
+                        12 + MediaQuery.of(ctx).padding.bottom,
+                      ),
+                      decoration: BoxDecoration(
+                        color: cardColor,
+                        border: Border(
+                          top: BorderSide(color: Theme.of(ctx).dividerColor),
+                        ),
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 46,
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: kAmber,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    sectionTitle('Pay Type'),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        choiceChip(
-                          label: 'All',
-                          selected: _payTypeFilter == _PayTypeFilter.all,
-                          onTap: () {
-                            setSheetState(
-                              () => _payTypeFilter = _PayTypeFilter.all,
-                            );
-                            setState(() => _payTypeFilter = _PayTypeFilter.all);
-                          },
-                        ),
-                        choiceChip(
-                          label: 'Hourly',
-                          selected: _payTypeFilter == _PayTypeFilter.hourly,
-                          onTap: () {
-                            setSheetState(
-                              () => _payTypeFilter = _PayTypeFilter.hourly,
-                            );
-                            setState(
-                              () => _payTypeFilter = _PayTypeFilter.hourly,
-                            );
-                          },
-                        ),
-                        choiceChip(
-                          label: 'Day',
-                          selected: _payTypeFilter == _PayTypeFilter.flat,
-                          onTap: () {
-                            setSheetState(
-                              () => _payTypeFilter = _PayTypeFilter.flat,
-                            );
-                            setState(
-                              () => _payTypeFilter = _PayTypeFilter.flat,
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    // Pin Display only affects how map markers are drawn —
-                    // meaningless in list view, so it's hidden entirely
-                    // there rather than shown as a dead control.
-                    if (_viewMode == _GigViewMode.map) ...[
-                      sectionTitle('Pin Display'),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Text(
-                          'Choose what shows on each map pin — the gig type icon, its pay rate, or how far it is from you.',
-                          style: TextStyle(
-                            color: kSub.withValues(alpha: 0.8),
-                            fontSize: 11.5,
-                          ),
-                        ),
-                      ),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          choiceChip(
-                            label: 'Default',
-                            selected:
-                                _pinDisplayMode == _PinDisplayMode.default_,
-                            onTap: () {
-                              setSheetState(
-                                () =>
-                                    _pinDisplayMode = _PinDisplayMode.default_,
-                              );
-                              setState(
-                                () =>
-                                    _pinDisplayMode = _PinDisplayMode.default_,
-                              );
-                            },
-                          ),
-                          choiceChip(
-                            label: 'Salary',
-                            selected: _pinDisplayMode == _PinDisplayMode.salary,
-                            onTap: () {
-                              setSheetState(
-                                () => _pinDisplayMode = _PinDisplayMode.salary,
-                              );
-                              setState(
-                                () => _pinDisplayMode = _PinDisplayMode.salary,
-                              );
-                            },
-                          ),
-                          choiceChip(
-                            label: 'Distance',
-                            selected:
-                                _pinDisplayMode == _PinDisplayMode.distance,
-                            onTap: () {
-                              setSheetState(
-                                () =>
-                                    _pinDisplayMode = _PinDisplayMode.distance,
-                              );
-                              setState(
-                                () =>
-                                    _pinDisplayMode = _PinDisplayMode.distance,
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                      if (_pinDisplayMode == _PinDisplayMode.distance &&
-                          _myLocation == null) ...[
-                        const SizedBox(height: 10),
-                        const Text(
-                          'Your location isn\'t available yet — pins will show the default style until located.',
-                          style: TextStyle(color: kSub, fontSize: 11),
-                        ),
-                      ],
-                      const SizedBox(height: 20),
-                    ],
-                    SizedBox(
-                      width: double.infinity,
-                      height: 46,
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: kAmber,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        child: const Text(
-                          'Done',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
+                          child: Text(
+                            matchCount == 0
+                                ? 'No gigs match'
+                                : matchCount == 1
+                                ? 'Show 1 gig'
+                                : 'Show $matchCount gigs',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ),
@@ -3885,7 +4916,7 @@ class _GigMapSectionState extends State<GigMapSection> {
           },
         );
       },
-    );
+    ).whenComplete(_saveFilters);
   }
 
   static const Color _kSegActiveBg = Color(0xFF1F4D80);
@@ -3898,7 +4929,7 @@ class _GigMapSectionState extends State<GigMapSection> {
     return TutorialAnchor(
       id: 'workerHome.gigViewToggle',
       child: Container(
-        width: 110,
+        width: 138,
         height: 30,
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
@@ -3908,6 +4939,7 @@ class _GigMapSectionState extends State<GigMapSection> {
         ),
         child: Row(
           children: [
+            Expanded(child: _buildViewModeSegment(_GigViewMode.both, 'Both')),
             Expanded(child: _buildViewModeSegment(_GigViewMode.map, 'Map')),
             Expanded(child: _buildViewModeSegment(_GigViewMode.list, 'List')),
           ],
@@ -3968,10 +5000,17 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   Widget build(BuildContext context) {
     _context = context;
+    // Untouched defaults follow the live gigs, location and skills (see
+    // _nearestSkillGigRadius); every change to those rebuilds this. Not
+    // while the filter sheet is open: each chip tap rebuilds this screen,
+    // and re-applying defaults then would undo the worker's pick (e.g. "All
+    // Gigs" snapping back to "Matches My Skills") before the sheet closes.
+    if (_usingDefaultFilters && _filtersAtSheetOpen == null) {
+      _applyDefaultFilters();
+    }
     if (widget.fullScreen) return _buildFullScreenLayout(context);
 
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final total = _allGigs.length;
     final offeredCount = _visibleOfferedGigs.length;
 
     return Column(
@@ -3982,6 +5021,8 @@ class _GigMapSectionState extends State<GigMapSection> {
             Expanded(
               child: Text(
                 'Gigs Near You',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: onSurface,
                   fontSize: 17,
@@ -4012,37 +5053,27 @@ class _GigMapSectionState extends State<GigMapSection> {
                   ),
                 ),
               ),
-            Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0A830).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '$total ${total == 1 ? 'Gig' : 'Gigs'}',
-                style: const TextStyle(
-                  color: Color(0xFFB06E00),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
             _buildViewModeToggle(),
             const SizedBox(width: 8),
             _buildFilterButton(context, onSurface: onSurface),
           ],
         ),
         const SizedBox(height: 12),
-        if (_viewMode == _GigViewMode.map)
+        if (_showsMap) ...[
+          _buildFallbackBanners(),
           EntranceAnimation(
             key: const ValueKey('map-block'),
             child: _buildMapBlock(context),
-          )
-        else
-          EntranceAnimation(
+          ),
+        ],
+        // No EntranceAnimation here: it waits until 20% of its child is on
+        // screen, and an infinite-scrolled list can be too tall to ever reach
+        // that, which left the whole list invisible.
+        // "Both": the list follows right under the map.
+        if (_viewMode == _GigViewMode.both) const SizedBox(height: 16),
+        if (_showsList)
+          KeyedSubtree(
             key: const ValueKey('list-mode'),
-            type: EntranceAnimationType.fadeInSlideUp,
             child: _buildListMode(context),
           ),
       ],
@@ -4063,13 +5094,11 @@ class _GigMapSectionState extends State<GigMapSection> {
             child: _useGoogleMaps
                 ? GoogleMap(
                     style: _workerMapStyle(context),
-                    gestureRecognizers: _mapInteractive
-                        ? <Factory<OneSequenceGestureRecognizer>>{
-                            Factory<OneSequenceGestureRecognizer>(
-                              () => EagerGestureRecognizer(),
-                            ),
-                          }
-                        : const <Factory<OneSequenceGestureRecognizer>>{},
+                    gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                      Factory<OneSequenceGestureRecognizer>(
+                        () => EagerGestureRecognizer(),
+                      ),
+                    },
                     onMapCreated: (controller) {
                       _googleMapController = controller;
                       final pending = _pendingCameraTarget;
@@ -4132,81 +5161,6 @@ class _GigMapSectionState extends State<GigMapSection> {
             ),
           ),
         ),
-        // Tap-to-interact overlay — blocks map from stealing scroll gestures
-        if (!_mapInteractive)
-          Positioned.fill(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => _mapInteractive = true),
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.touch_app_rounded,
-                          color: Colors.white,
-                          size: 13,
-                        ),
-                        SizedBox(width: 5),
-                        Text(
-                          'Tap to interact with map',
-                          style: TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        // Lock-map button shown while map is interactive
-        if (_mapInteractive)
-          Positioned(
-            top: 8,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: GestureDetector(
-                onTap: () => setState(() => _mapInteractive = false),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.lock_open_rounded,
-                        color: Colors.white,
-                        size: 13,
-                      ),
-                      SizedBox(width: 5),
-                      Text(
-                        'Tap to lock map',
-                        style: TextStyle(color: Colors.white, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
         // "Tap a pin for details" hint — moved onto the map as a bottom-center
         // overlay chip (bottom-left/right are already the expand/recenter buttons).
         Positioned(
@@ -4312,16 +5266,32 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   Widget _buildListMode(BuildContext context) {
     final gigs = _allGigs;
-    final query = _searchQuery.trim().toLowerCase();
-    final filtered = query.isEmpty
-        ? gigs
-        : gigs
-              .where(
-                (g) =>
-                    g.title.toLowerCase().contains(query) ||
-                    g.hostName.toLowerCase().contains(query),
-              )
-              .toList();
+    final queryWords = _searchWords(_searchQuery);
+    final searching = queryWords.isNotEmpty;
+    final filtered = searching
+        ? _filteredGigs(
+            applyRadius: false,
+          ).where((g) => gigMatchesSearch(g, queryWords)).toList()
+        : gigs;
+    final searchIgnoresRadius =
+        searching && _radiusKm != null && _myLocation != null;
+
+    // After the results: an end marker, then every other gig (outside the
+    // filters), so the list never just stops. Not while searching — a
+    // search result is exactly what was asked for.
+    final shownIds = {for (final g in filtered) g.id};
+    final others = searching
+        ? const <GigMarkerData>[]
+        : _sorted(
+            _unfilteredGigs.where((g) => !shownIds.contains(g.id)).toList(),
+          );
+    // Each entry is a gig, or null for the marker between the two parts.
+    final items = <GigMarkerData?>[
+      ...filtered,
+      if (others.isNotEmpty) null,
+      ...others,
+    ];
+    final hasMore = _visibleListCount < items.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4352,7 +5322,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                   decoration: const InputDecoration(
                     border: InputBorder.none,
                     isCollapsed: true,
-                    hintText: 'Search gigs near you',
+                    hintText: 'Search gigs, city, state or ZIP',
                     hintStyle: TextStyle(color: kSub, fontSize: 12.5),
                   ),
                 ),
@@ -4360,6 +5330,13 @@ class _GigMapSectionState extends State<GigMapSection> {
             ],
           ),
         ),
+        if (searchIgnoresRadius) ...[
+          const SizedBox(height: 6),
+          const Text(
+            'Search shows matches at any distance.',
+            style: TextStyle(fontSize: 11.5, color: kSub),
+          ),
+        ],
         const SizedBox(height: 12),
         if (_gigsStillLoading)
           Column(
@@ -4370,64 +5347,70 @@ class _GigMapSectionState extends State<GigMapSection> {
               ],
             ],
           )
-        else if (gigs.isEmpty)
-          _emptyListCard('No gigs nearby right now')
-        else if (filtered.isEmpty)
-          _emptyListCard("No gigs match '${_searchQuery.trim()}'")
+        else if (items.isEmpty)
+          _emptyListCard(
+            searching
+                ? "No gigs match '${_searchQuery.trim()}'"
+                : 'No gigs nearby right now',
+          )
         else ...[
+          // In "Both" the note already sits above the map.
+          if (filtered.isNotEmpty && _viewMode != _GigViewMode.both)
+            _buildFallbackBanners(showButton: false),
           Column(
             children: [
               for (final entry
-                  in filtered
-                      .take(_visibleListCount)
-                      .toList()
-                      .asMap()
-                      .entries) ...[
-                EntranceAnimation(
-                  type: EntranceAnimationType.fadeInSlideUp,
-                  delay: Duration(milliseconds: entry.key * 40),
-                  child: _GigListCard(
-                    gig: entry.value,
-                    accentColor: cardAccentForType(entry.value.gigType),
-                    typeLabel: gigTypeLabel(entry.value.gigType),
-                    distanceLabel: _myLocation != null
-                        ? formatGigDistance(
-                            Geolocator.distanceBetween(
-                              _myLocation!.latitude,
-                              _myLocation!.longitude,
-                              entry.value.position.latitude,
-                              entry.value.position.longitude,
+                  in items.take(_visibleListCount).toList().asMap().entries)
+                if (entry.value == null)
+                  _listItemWrapper(
+                    index: entry.key,
+                    hasMore: hasMore,
+                    child: _endOfResultsMarker(matchCount: filtered.length),
+                  )
+                else ...[
+                  _listItemWrapper(
+                    index: entry.key,
+                    hasMore: hasMore,
+                    child: _GigListCard(
+                      gig: entry.value!,
+                      accentColor: cardAccentForType(entry.value!.gigType),
+                      typeLabel: gigTypeLabel(entry.value!.gigType),
+                      distanceLabel: _myLocation != null
+                          ? formatGigDistance(
+                              Geolocator.distanceBetween(
+                                _myLocation!.latitude,
+                                _myLocation!.longitude,
+                                entry.value!.position.latitude,
+                                entry.value!.position.longitude,
+                              ),
+                            )
+                          : null,
+                      isBookmarked: widget.bookmarkedGigIds.contains(
+                        entry.value!.id,
+                      ),
+                      onToggleBookmark: widget.onToggleBookmark == null
+                          ? null
+                          : () => widget.onToggleBookmark!(
+                              entry.value!.id,
+                              entry.value!.gigType,
                             ),
-                          )
-                        : null,
-                    isBookmarked: widget.bookmarkedGigIds.contains(
-                      entry.value.id,
+                      onTap: () => _showGigSheet(context, entry.value!),
                     ),
-                    onToggleBookmark: widget.onToggleBookmark == null
-                        ? null
-                        : () => widget.onToggleBookmark!(
-                            entry.value.id,
-                            entry.value.gigType,
-                          ),
-                    onTap: () => _showGigSheet(context, entry.value),
                   ),
-                ),
-                const SizedBox(height: 10),
-              ],
+                  const SizedBox(height: 10),
+                ],
             ],
           ),
-          if (_visibleListCount < filtered.length)
-            Center(
-              child: TextButton(
-                onPressed: () =>
-                    setState(() => _visibleListCount += _kListPageSize),
-                child: const Text(
-                  'See more',
-                  style: TextStyle(
-                    color: Color(0xFF2B6FB5),
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                  ),
+          // Nothing outside the filters: just say it's the end.
+          if (!hasMore && others.isEmpty && filtered.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+              child: Center(
+                child: Text(
+                  searching
+                      ? "That's every gig matching your search"
+                      : "You've seen every gig",
+                  style: const TextStyle(color: kSub, fontSize: 12),
                 ),
               ),
             ),
@@ -4436,10 +5419,67 @@ class _GigMapSectionState extends State<GigMapSection> {
     );
   }
 
-  String _fmtDistance(double meters) {
-    if (meters < 1000) return '${meters.round()} m';
-    return '${(meters / 1000).toStringAsFixed(1)} km';
+  // Between the results and the rest of the gigs.
+  Widget _endOfResultsMarker({required int matchCount}) {
+    final divider = Expanded(
+      child: Divider(color: Theme.of(context).dividerColor, height: 1),
+    );
+    return Padding(
+      padding: EdgeInsets.only(top: matchCount == 0 ? 0 : 8, bottom: 16),
+      child: Row(
+        children: [
+          divider,
+          Flexible(
+            flex: 0,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Text(
+                matchCount == 0
+                    ? 'No matches · showing other gigs'
+                    : 'End of results · showing other gigs',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: kSub,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          divider,
+        ],
+      ),
+    );
   }
+
+  /// Infinite scroll for the gig list. All gigs are already in memory; the
+  /// list renders [_kListPageSize] at a time. When the 8th card of the latest
+  /// batch scrolls into view, the next batch is added, so it's laid out before
+  /// the user reaches the end. No entrance animation, so cards look like they
+  /// were always there.
+  static const int _kLoadAheadFromEnd = 3;
+
+  Widget _listItemWrapper({
+    required int index,
+    required bool hasMore,
+    required Widget child,
+  }) {
+    if (hasMore && index == _visibleListCount - _kLoadAheadFromEnd) {
+      final threshold = _visibleListCount;
+      return VisibilityDetector(
+        key: ValueKey('gig-list-load-more-$threshold'),
+        onVisibilityChanged: (info) {
+          if (!mounted || info.visibleFraction <= 0) return;
+          if (_visibleListCount != threshold) return;
+          setState(() => _visibleListCount += _kListPageSize);
+        },
+        child: child,
+      );
+    }
+    return child;
+  }
+
+  String _fmtDistance(double meters) => DistanceUnits.format(meters);
 
   // Same field the host's own profile screen reads
   // (gig_host_profile_screen.dart) — one doc read, shown on the gig sheet's
@@ -4645,6 +5685,15 @@ class _GigMapSectionState extends State<GigMapSection> {
           ),
         ),
 
+        // No gigs for their skills / nothing within their distance notes
+        if (_noSkillMatches || _nearestFallbackM != null)
+          Positioned(
+            top: topPad + 60,
+            left: 12,
+            right: 12,
+            child: _buildFallbackBanners(overMap: true),
+          ),
+
         // Legend (bottom-left)
         Positioned(
           bottom: bottomPad + 20,
@@ -4712,6 +5761,7 @@ class _GigMapSectionState extends State<GigMapSection> {
 //  List-mode loading placeholder — shown while the gig streams' first
 //  snapshot is still in flight, so it doesn't flash "No gigs nearby" first.
 // ─────────────────────────────────────────────────────────────────────────────
+
 class _GigListCardSkeleton extends StatefulWidget {
   const _GigListCardSkeleton();
 
@@ -4759,26 +5809,41 @@ class _GigListCardSkeletonState extends State<_GigListCardSkeleton>
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Theme.of(context).dividerColor),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _bar(width: 140, height: 12),
-                _bar(width: 40, height: 10),
-              ],
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: kSub.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _bar(width: 90, height: 10),
-                _bar(width: 56, height: 14),
-              ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _bar(width: 140, height: 12),
+                      _bar(width: 40, height: 10),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _bar(width: 90, height: 10),
+                      _bar(width: 56, height: 14),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  _bar(width: 180, height: 9),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            _bar(width: 180, height: 9),
           ],
         ),
       ),
@@ -4825,170 +5890,241 @@ class _GigListCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheduleText = gig.scheduledDate != null
         ? DateFormat('EEE, h:mm a').format(gig.scheduledDate!)
-        : null;
+        : 'Flexible';
     final metaParts = [
       if (gig.address.isNotEmpty) _summarizeAddress(gig.address),
-      ?scheduleText,
+      scheduleText,
       ?distanceLabel,
     ];
+
+    // The gig's first required skill: its sub-category icon fills the tile
+    // on the left, its name leads row 2.
+    final skill = gig.requiredSkills.isNotEmpty
+        ? gig.requiredSkills.first
+        : null;
+    // Skills without a sub-category icon get a neutral handshake, the same
+    // for every gig type (the type is already the colored label in row 1).
+    const fallbackIcon = Icons.handshake_outlined;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(12),
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: _listSurfaceColor(context),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Theme.of(context).dividerColor),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Row 1: title ── type badge
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    gig.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Skill icon tile
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: isDark ? 0.18 : 0.10),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(width: 6),
-                if (gig.isMultiWorker) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2E9E6B).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '${gig.openSlots} of ${gig.workerSlots} spots',
-                      style: const TextStyle(
-                        color: Color(0xFF2E9E6B),
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                Row(
-                  mainAxisSize: MainAxisSize.min,
+                child: skill != null
+                    ? SkillIcon(
+                        skill,
+                        size: 24,
+                        color: accentColor,
+                        fallback: fallbackIcon,
+                      )
+                    : Icon(fallbackIcon, size: 22, color: accentColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: accentColor,
-                        shape: BoxShape.circle,
-                      ),
+                    // Row 1: title ── type badge
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            gig.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        if (gig.isMultiWorker) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(
+                                0xFF2E9E6B,
+                              ).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '${gig.openSlots} of ${gig.workerSlots} spots',
+                              style: const TextStyle(
+                                color: Color(0xFF2E9E6B),
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: accentColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              typeLabel,
+                              style: TextStyle(
+                                color: accentColor,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (gig.gigType == 'open' && gig.hasApplied) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(
+                                0xFF2E9E6B,
+                              ).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              'Applied',
+                              style: TextStyle(
+                                color: Color(0xFF2E9E6B),
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      typeLabel,
-                      style: TextStyle(
-                        color: accentColor,
-                        fontSize: 9.5,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    const SizedBox(height: 4),
+                    // Row 2: host name ── pay
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          // Skill name then host. One Text.rich so the line
+                          // ellipsizes as one.
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                if (skill != null) ...[
+                                  TextSpan(
+                                    text: skill,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (gig.hostName.isNotEmpty)
+                                    const TextSpan(text: ' · '),
+                                ],
+                                if (gig.hostName.isNotEmpty)
+                                  TextSpan(text: gig.hostName)
+                                else if (skill == null)
+                                  const TextSpan(text: '—'),
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: kSub, fontSize: 11),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        RichText(
+                          text: TextSpan(
+                            children: [
+                              TextSpan(
+                                text: CurrencyFormatter.format(
+                                  gig.payType == 'hourly' &&
+                                          gig.hourlyRate != null
+                                      ? gig.hourlyRate!
+                                      : gig.budget,
+                                  gig.currencyCode,
+                                ),
+                                style: const TextStyle(
+                                  color: Color(0xFF2B6FB5),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              TextSpan(
+                                text: gig.payType == 'hourly' ? '/hr' : '/day',
+                                style: const TextStyle(
+                                  color: kSub,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    // Row 3: location · schedule · distance ── chevron
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.location_on_outlined,
+                          size: 13,
+                          color: kSub,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            metaParts.isNotEmpty ? metaParts.join(' · ') : '—',
+                            style: const TextStyle(color: kSub, fontSize: 10.5),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          size: 18,
+                          color: kSub,
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                if (gig.gigType == 'open' && gig.hasApplied) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2E9E6B).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Text(
-                      'Applied',
-                      style: TextStyle(
-                        color: Color(0xFF2E9E6B),
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 4),
-            // Row 2: host name ── pay
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    gig.hostName.isNotEmpty ? gig.hostName : '—',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: kSub, fontSize: 11),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                RichText(
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: CurrencyFormatter.format(
-                          gig.payType == 'hourly' && gig.hourlyRate != null
-                              ? gig.hourlyRate!
-                              : gig.budget,
-                          gig.currencyCode,
-                        ),
-                        style: const TextStyle(
-                          color: Color(0xFF2B6FB5),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      TextSpan(
-                        text: gig.payType == 'hourly' ? '/hr' : '/day',
-                        style: const TextStyle(
-                          color: kSub,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            // Row 3: location · schedule · distance ── chevron
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                const Icon(Icons.location_on_outlined, size: 13, color: kSub),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    metaParts.isNotEmpty ? metaParts.join(' · ') : '—',
-                    style: const TextStyle(color: kSub, fontSize: 10.5),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Icon(Icons.chevron_right_rounded, size: 18, color: kSub),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );

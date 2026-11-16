@@ -31,6 +31,8 @@ import '../models/gig_template_model.dart';
 import '../models/quick_gig_model.dart';
 import '../services/quick_gig_matching_service.dart';
 import 'widgets/template_name_dialog.dart';
+import 'widgets/task_type_picker.dart';
+import 'widgets/gig_images_picker.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Post Quick Gig Screen
@@ -76,6 +78,41 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   String? _locationError;
   bool _useMapLocation = false;
 
+  // GSIN task type (admin catalog) — gives the gig its GSINS/GSKU codes.
+  String? _taskTypeId;
+
+  // Currency of the gig's location, so the ₱/$ shown while filling the form
+  // matches what the gig is saved with. Looked up per source (GPS / map pin);
+  // until a lookup lands, the host's profile currency is shown.
+  String? _gpsCurrency;
+  String? _mapCurrency;
+  int _mapCurrencyLookup = 0;
+
+  String get _gigCurrency =>
+      (_useMapLocation ? _mapCurrency : _gpsCurrency) ??
+      context.read<CurrentUserProvider>().currencyCode;
+
+  // For build(): rebuilds when the profile currency (the fallback) changes.
+  String _watchGigCurrency() {
+    context.watch<CurrentUserProvider>();
+    return _gigCurrency;
+  }
+
+  Future<void> _lookupGpsCurrency(double lat, double lng) async {
+    final country = await countryCodeFromCoordinates(lat, lng);
+    if (!mounted || country == null) return;
+    setState(() => _gpsCurrency = CurrencyFormatter.countryToCurrency(country));
+  }
+
+  Future<void> _lookupMapCurrency(double lat, double lng) async {
+    final lookup = ++_mapCurrencyLookup;
+    final country = await countryCodeFromCoordinates(lat, lng);
+    if (!mounted || lookup != _mapCurrencyLookup || country == null) return;
+    setState(() => _mapCurrency = CurrencyFormatter.countryToCurrency(country));
+  }
+
+  // Gig photos (optional, up to 5) — uploaded when the gig is posted.
+  final _imagesCtrl = GigImagesController();
   bool _posting = false;
   final _errorPlayer = AudioPlayer();
 
@@ -115,6 +152,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 
   @override
   void dispose() {
+    _imagesCtrl.dispose();
     _titleCtrl.dispose();
     _descCtrl.dispose();
     _budgetCtrl.dispose();
@@ -166,6 +204,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         _gpsPosition = pos;
         _loadingLocation = false;
       });
+      _lookupGpsCurrency(pos.latitude, pos.longitude);
 
       // Geocoding is best-effort
       try {
@@ -277,7 +316,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         _address = result.address;
         _useMapLocation = true;
         _locationError = null;
+        _mapCurrency = null;
       });
+      _lookupMapCurrency(result.position.latitude, result.position.longitude);
     }
   }
 
@@ -287,7 +328,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     if (!await guardUnverifiedLimit(
       context,
       amount: (double.tryParse(_budgetCtrl.text.trim()) ?? 0) * _workerSlots,
-      currencyCode: context.read<CurrentUserProvider>().currencyCode,
+      currencyCode: _gigCurrency,
       action: LimitAction.post,
     )) {
       return;
@@ -335,7 +376,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     }
 
     // Fallback if gig-location geocoding fails during submit.
-    final fallbackCurrency = context.read<CurrentUserProvider>().currencyCode;
+    final fallbackCurrency = _gigCurrency;
 
     setState(() => _posting = true);
     try {
@@ -360,10 +401,13 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           ? GeoPoint(_mapPosition!.latitude, _mapPosition!.longitude)
           : GeoPoint(_gpsPosition!.latitude, _gpsPosition!.longitude);
 
-      final gigCountry = await countryCodeFromCoordinates(
+      // One lookup gives both the currency's country and the place parts
+      // workers can search by (country, region, city, ZIP).
+      final place = await placeFromCoordinates(
         geoPoint.latitude,
         geoPoint.longitude,
       );
+      final gigCountry = place?.countryCode;
       final currency = gigCountry != null
           ? CurrencyFormatter.countryToCurrency(gigCountry)
           : fallbackCurrency;
@@ -407,9 +451,26 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         ratePerSlot: budget,
       );
 
+      // Photos first, so a gig is never posted with some of them missing.
+      final List<String> images;
+      try {
+        images = await _imagesCtrl.uploadAll();
+      } catch (e) {
+        debugPrint('[PostGig] photo upload failed: $e');
+        if (!mounted) return;
+        setState(() => _posting = false);
+        _showSnack('Couldn\'t upload the photos. Check your connection and try again.', isError: true);
+        return;
+      }
+
       final docRef = await FirebaseFirestore.instance
           .collection('quick_gigs')
-          .add(gig.toMap());
+          .add({
+            ...gig.toMap(),
+            if (_taskTypeId != null) 'taskTypeId': _taskTypeId,
+            if (images.isNotEmpty) 'images': images,
+            if (place != null && place.parts.isNotEmpty) 'place': place.parts,
+          });
 
       // Start smart dispatch in background (do not await)
       QuickGigMatchingService.startAutoSearch(
@@ -515,7 +576,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       return;
     }
     // Capture before async gap.
-    final currency = context.read<CurrentUserProvider>().currencyCode;
+    final currency = _gigCurrency;
     final name = await showDialog<String>(
       context: context,
       builder: (_) => TemplateNameDialog(initialName: title),
@@ -625,6 +686,12 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 ),
                 const SizedBox(height: 20),
 
+                // ── Task type (GSIN) — hidden until the admin sets up task types ──
+                TaskTypeField(
+                  value: _taskTypeId,
+                  onChanged: (v) => setState(() => _taskTypeId = v),
+                ),
+
                 // ── Description ───────────────────────────────────
                 _SectionLabel('Description'),
                 const SizedBox(height: 10),
@@ -637,6 +704,19 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
+
+                // ── Photos (optional) ─────────────────────────────
+                ...[
+                  _SectionLabel('Photos (optional)'),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Up to 5 — the place, the item or the task. Workers see them in the gig details.',
+                    style: TextStyle(color: kSub.withValues(alpha: 0.8), fontSize: 12),
+                  ),
+                  const SizedBox(height: 10),
+                  GigImagesPicker(controller: _imagesCtrl, accentColor: kGold),
+                  const SizedBox(height: 20),
+                ],
 
                 // ── Pay type ─────────────────────────────────────────
                 _SectionLabel('Pay Type'),
@@ -679,7 +759,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                       return null;
                     },
                     prefix: Text(
-                      '${CurrencyFormatter.symbol(context.watch<CurrentUserProvider>().currencyCode)} ',
+                      '${CurrencyFormatter.symbol(_watchGigCurrency())} ',
                       style: const TextStyle(
                         color: kAmber,
                         fontSize: 15,
@@ -1203,7 +1283,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     final cardColor = Theme.of(context).cardColor;
     final borderColor = Theme.of(context).dividerColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    final currencyCode = context.read<CurrentUserProvider>().currencyCode;
+    final currencyCode = _gigCurrency;
     final rate = double.tryParse(_budgetCtrl.text.trim()) ?? 0;
 
     return Container(

@@ -79,6 +79,7 @@ IconData walletTxIcon(String type) => switch (type) {
   'fee' => Icons.percent_rounded,
   'adjustment' => Icons.tune_rounded,
   'points_conversion' => Icons.stars_rounded,
+  'promo' => Icons.redeem_rounded,
   _ => Icons.receipt_long_rounded,
 };
 
@@ -94,6 +95,7 @@ String walletTxTypeLabel(String type) => switch (type) {
   'fee' => 'Fee',
   'adjustment' => 'Adjustment',
   'points_conversion' => 'Gig Points',
+  'promo' => 'Promo',
   _ => 'Transaction',
 };
 
