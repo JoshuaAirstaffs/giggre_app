@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:http/http.dart' as http;
 import '../../../../core/models/rating_summary.dart';
 import '../../../../core/services/rating_service.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -1324,8 +1325,8 @@ void showFullGigDetailSheet(
                               width: 38,
                               height: 38,
                               fit: BoxFit.cover,
-                              placeholder: (_, _) => _hostInitialAvatar(gig),
-                              errorWidget: (_, _, _) => _hostInitialAvatar(gig),
+                              placeholder: (ctx, u) => _hostInitialAvatar(gig),
+                              errorWidget: (ctx, u, e) => _hostInitialAvatar(gig),
                             ),
                           )
                         else
@@ -1584,7 +1585,20 @@ enum _PinDisplayMode { default_, salary, distance }
 
 enum _PayTypeFilter { all, hourly, flat }
 
-enum _GigSort { newest, oldest }
+// List order (eBay-style "Sort"). Newest is the default.
+enum _GigSort {
+  newest('Newest'),
+  nearest('Nearest'),
+  offers('Offers for you'),
+  payHigh('Pay: highest'),
+  payLow('Pay: lowest'),
+  startingSoon('Starting soonest'),
+  fewestApplicants('Fewest applicants'),
+  oldest('Oldest');
+
+  const _GigSort(this.label);
+  final String label;
+}
 
 // map = map only, list = list only, both = the map with the list under it.
 enum _GigViewMode { map, list, both }
@@ -2164,6 +2178,26 @@ class _GigMapSectionState extends State<GigMapSection> {
   }
 
   BitmapDescriptor _resolveGigPin(GigMarkerData g) {
+    // A gig with photos shows its first photo as the pin (Default display
+    // only — Salary / Distance keep their pills). Skill icon / dot until the
+    // photo bitmap is ready, or if it can't be loaded.
+    if (g.images.isNotEmpty) {
+      final photo = g.images.first;
+      final pkey = 'photo_${g.gigType}_$photo';
+      final cachedPhoto = _icons[pkey];
+      if (cachedPhoto != null) return cachedPhoto;
+      if (_skillPinRequested.add(pkey)) {
+        _makePhotoPinIcon(_colorForType(g.gigType), photo).then((icon) {
+          if (icon == null) return;
+          _icons[pkey] = icon;
+          if (mounted) setState(() {});
+        });
+      }
+    }
+    return _resolveSkillPin(g);
+  }
+
+  BitmapDescriptor _resolveSkillPin(GigMarkerData g) {
     final url = _skillIconUrlFor(g);
     if (url == null) return _gigIcon(g.gigType);
     final key = 'skill_${g.gigType}_$url';
@@ -2178,6 +2212,57 @@ class _GigMapSectionState extends State<GigMapSection> {
       });
     }
     return _gigIcon(g.gigType);
+  }
+
+  /// Round photo pin: the gig's first photo, ringed in the gig type's color.
+  Future<BitmapDescriptor?> _makePhotoPinIcon(Color color, String url) async {
+    try {
+      final res = await http.get(Uri.parse(url));
+      if (res.statusCode != 200) return null;
+      const px = 36.0;
+      const c = px / 2;
+      const rOuter = 16.5;
+      const rPhoto = 13.5;
+      final scale = _markerPixelRatio;
+      final codec = await ui.instantiateImageCodec(
+        res.bodyBytes,
+        targetWidth: (rPhoto * 2 * scale).ceil(),
+      );
+      final photo = (await codec.getNextFrame()).image;
+
+      final rec = ui.PictureRecorder();
+      final can = Canvas(rec)..scale(scale);
+      can.drawCircle(
+        const Offset(c, c + 0.8),
+        rOuter,
+        Paint()
+          ..color = Colors.black26
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2),
+      );
+      can.drawCircle(const Offset(c, c), rOuter, Paint()..color = Colors.white);
+      can.drawCircle(const Offset(c, c), rOuter - 1.2, Paint()..color = color);
+      // Cover-fit the photo into the inner circle.
+      final iw = photo.width.toDouble(), ih = photo.height.toDouble();
+      final side = iw < ih ? iw : ih;
+      final src = Rect.fromLTWH((iw - side) / 2, (ih - side) / 2, side, side);
+      final dst = Rect.fromCircle(center: const Offset(c, c), radius: rPhoto);
+      can.save();
+      can.clipPath(Path()..addOval(dst));
+      can.drawImageRect(photo, src, dst, Paint()..filterQuality = FilterQuality.medium);
+      can.restore();
+      photo.dispose();
+
+      final img = await rec.endRecording().toImage(
+        (px * scale).ceil(),
+        (px * scale).ceil(),
+      );
+      final data = await img.toByteData(format: ui.ImageByteFormat.png);
+      if (data == null) return null;
+      return BitmapDescriptor.bytes(data.buffer.asUint8List(), width: px, height: px);
+    } catch (e) {
+      debugPrint('[GigMap] photo pin ($url): $e');
+      return null;
+    }
   }
 
   Future<BitmapDescriptor?> _makeSkillPinIcon(Color color, String url) async {
@@ -3377,16 +3462,158 @@ class _GigMapSectionState extends State<GigMapSection> {
 
   static const int _kNearestFallbackCount = 10;
 
-  // Newest / oldest posted first; gigs without a createdAt go last.
+  // Orders the list by [_sort]. Ties (and gigs missing the sorted value,
+  // which go last) fall back to newest posted first.
   List<GigMarkerData> _sorted(List<GigMarkerData> gigs) {
-    final newestFirst = _sort == _GigSort.newest;
-    return [...gigs]..sort((a, b) {
+    int newest(GigMarkerData a, GigMarkerData b) {
       final ca = a.createdAt, cb = b.createdAt;
       if (ca == null && cb == null) return 0;
       if (ca == null) return 1;
       if (cb == null) return -1;
-      return newestFirst ? cb.compareTo(ca) : ca.compareTo(cb);
+      return cb.compareTo(ca);
+    }
+
+    // Missing values (null) last, then [cmp], then newest.
+    int nullsLast<T extends Comparable<dynamic>>(T? x, T? y, {bool desc = false}) {
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return desc ? y.compareTo(x) : x.compareTo(y);
+    }
+
+    final me = _myLocation;
+    final ccy = _payCurrency;
+    double? dist(GigMarkerData g) => me == null
+        ? null
+        : Geolocator.distanceBetween(
+            me.latitude, me.longitude, g.position.latitude, g.position.longitude);
+    // Shown pay in the worker's currency; other currencies can't be ranked.
+    double? pay(GigMarkerData g) => g.currencyCode != ccy
+        ? null
+        : (g.payType == 'hourly' && g.hourlyRate != null ? g.hourlyRate! : g.budget);
+    final now = DateTime.now();
+    // Upcoming dates first (soonest), then flexible, then past dates.
+    DateTime? start(GigMarkerData g) {
+      final d = g.scheduledDate;
+      return d == null || d.isBefore(now.subtract(const Duration(hours: 1))) ? null : d;
+    }
+
+    final cache = <String, double?>{};
+    int cmp(GigMarkerData a, GigMarkerData b) {
+      switch (_sort) {
+        case _GigSort.newest:
+          return newest(a, b);
+        case _GigSort.oldest:
+          return -newest(a, b);
+        case _GigSort.nearest:
+          return nullsLast(
+            cache.putIfAbsent('d${a.id}', () => dist(a)),
+            cache.putIfAbsent('d${b.id}', () => dist(b)),
+          );
+        case _GigSort.offers:
+          // Gigs a host offered to this worker first.
+          final oa = a.gigType == 'offered' ? 0 : 1;
+          final ob = b.gigType == 'offered' ? 0 : 1;
+          return oa.compareTo(ob);
+        case _GigSort.payHigh:
+          return nullsLast(pay(a), pay(b), desc: true);
+        case _GigSort.payLow:
+          return nullsLast(pay(a), pay(b));
+        case _GigSort.startingSoon:
+          return nullsLast(start(a), start(b));
+        case _GigSort.fewestApplicants:
+          // Open gigs with the least competition; others after.
+          final fa = a.gigType == 'open' ? a.applicantCount : null;
+          final fb = b.gigType == 'open' ? b.applicantCount : null;
+          return nullsLast(fa, fb);
+      }
+    }
+
+    return [...gigs]..sort((a, b) {
+      final c = cmp(a, b);
+      return c != 0 ? c : newest(a, b);
     });
+  }
+
+  void _setSort(_GigSort sort) {
+    setState(() {
+      _sort = sort;
+      _visibleListCount = _kListPageSize;
+    });
+    _saveFilters();
+  }
+
+  // "Sort: Newest ▾" above the list.
+  Widget _buildSortButton(BuildContext context, {required int count}) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final noLocation = _myLocation == null;
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            count == 1 ? '1 gig' : '$count gigs',
+            style: const TextStyle(color: kSub, fontSize: 12),
+          ),
+        ),
+        PopupMenuButton<_GigSort>(
+          tooltip: 'Sort',
+          initialValue: _sort,
+          onSelected: _setSort,
+          position: PopupMenuPosition.under,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          itemBuilder: (_) => [
+            for (final s in _GigSort.values)
+              PopupMenuItem(
+                value: s,
+                enabled: !(s == _GigSort.nearest && noLocation),
+                height: 40,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        s == _GigSort.nearest && noLocation
+                            ? 'Nearest (turn on location)'
+                            : s.label,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: s == _sort ? FontWeight.w700 : FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                    if (s == _sort)
+                      const Icon(Icons.check_rounded, size: 18, color: kAmber),
+                  ],
+                ),
+              ),
+          ],
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: _listSurfaceColor(context),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.swap_vert_rounded, size: 16, color: kSub),
+                const SizedBox(width: 4),
+                Text(
+                  'Sort: ${_sort.label}',
+                  style: TextStyle(
+                    color: onSurface,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                const Icon(Icons.expand_more_rounded, size: 16, color: kSub),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   bool get _hasActiveFilter =>
@@ -3617,9 +3844,17 @@ class _GigMapSectionState extends State<GigMapSection> {
                       BoxShadow(color: Colors.black26, blurRadius: 4),
                     ],
                   ),
-                  // Skill icon when it has one, else the gig type's icon.
+                  // First photo when the gig has one, else its skill icon,
+                  // else the gig type's icon.
+                  clipBehavior: Clip.antiAlias,
                   child: Center(
-                    child: gig.requiredSkills.isNotEmpty
+                    child: gig.images.isNotEmpty
+                        ? GigThumb(
+                            url: gig.images.first,
+                            size: 32,
+                            fallback: Icon(_iconForType(gig.gigType), color: Colors.white, size: 16),
+                          )
+                        : gig.requiredSkills.isNotEmpty
                         ? SkillIcon(
                             gig.requiredSkills.first,
                             color: Colors.white,
@@ -3908,9 +4143,16 @@ class _GigMapSectionState extends State<GigMapSection> {
                         color: typeColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      // Skill icon when it has one, else the handshake.
+                      // Photo, else skill icon, else the handshake.
+                      clipBehavior: Clip.antiAlias,
                       child: Center(
-                        child: g.requiredSkills.isNotEmpty
+                        child: g.images.isNotEmpty
+                            ? GigThumb(
+                                url: g.images.first,
+                                size: 44,
+                                fallback: Icon(Icons.handshake_outlined, color: typeColor, size: 20),
+                              )
+                            : g.requiredSkills.isNotEmpty
                             ? SkillIcon(
                                 g.requiredSkills.first,
                                 color: typeColor,
@@ -4769,12 +5011,11 @@ class _GigMapSectionState extends State<GigMapSection> {
                               spacing: 8,
                               runSpacing: 8,
                               children: [
-                                for (final (sort, label) in const [
-                                  (_GigSort.newest, 'Newest first'),
-                                  (_GigSort.oldest, 'Oldest first'),
-                                ])
+                                for (final sort in _GigSort.values)
+                                  if (sort != _GigSort.nearest ||
+                                      _myLocation != null)
                                   choiceChip(
-                                    label: label,
+                                    label: sort.label,
                                     selected: _sort == sort,
                                     onTap: () {
                                       setSheetState(() => _sort = sort);
@@ -5337,7 +5578,9 @@ class _GigMapSectionState extends State<GigMapSection> {
             style: TextStyle(fontSize: 11.5, color: kSub),
           ),
         ],
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
+        _buildSortButton(context, count: filtered.length),
+        const SizedBox(height: 10),
         if (_gigsStillLoading)
           Column(
             children: [
@@ -5931,7 +6174,17 @@ class _GigListCard extends StatelessWidget {
                   color: accentColor.withValues(alpha: isDark ? 0.18 : 0.10),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: skill != null
+                clipBehavior: Clip.antiAlias,
+                // The gig's first photo when it has one.
+                child: gig.images.isNotEmpty
+                    ? GigThumb(
+                        url: gig.images.first,
+                        size: 44,
+                        fallback: skill != null
+                            ? SkillIcon(skill, size: 24, color: accentColor, fallback: fallbackIcon)
+                            : Icon(fallbackIcon, size: 22, color: accentColor),
+                      )
+                    : skill != null
                     ? SkillIcon(
                         skill,
                         size: 24,
@@ -6255,6 +6508,31 @@ class _InfoGridCell extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+
+/// Square gig photo thumbnail (cover-fit); [fallback] while loading or if
+/// the image can't be fetched. The parent clips it to its own shape.
+class GigThumb extends StatelessWidget {
+  final String url;
+  final double size;
+  final Widget fallback;
+  const GigThumb({super.key, required this.url, required this.size, required this.fallback});
+
+  @override
+  Widget build(BuildContext context) {
+    final px = (size * MediaQuery.devicePixelRatioOf(context)).ceil();
+    return CachedNetworkImage(
+      imageUrl: url,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      memCacheWidth: px,
+      fadeInDuration: const Duration(milliseconds: 150),
+      placeholder: (ctx, u) => Center(child: fallback),
+      errorWidget: (ctx, u, e) => Center(child: fallback),
     );
   }
 }

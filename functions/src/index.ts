@@ -1561,6 +1561,7 @@ export { refreshFxRates, adminRefreshFxRates } from "./fx";
 export { adminUnverifiedUsage } from "./unverifiedLimits";
 // Pre-sign-in lookups (users/{uid} is no longer publicly readable).
 export { checkAccountExists, lookupReferralCode } from "./publicLookups";
+export { onReferralJoined } from "./referralCounts";
 export {
   adminSavePromoCode, adminSetPromoActive, adminDeletePromoCode, redeemPromoCode,
   adminSendPromoToGroup, adminFindPromoUser, adminCreateRestrictedCodes,

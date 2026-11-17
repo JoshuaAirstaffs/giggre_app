@@ -6,6 +6,14 @@ import 'package:provider/provider.dart';
 import '../../features/auth/presentation/welcome_screen.dart';
 import '../providers/current_user_provider.dart';
 
+/// True while [signOutAndCleanup] runs. [clearUser] empties the provider
+/// before [FirebaseAuth.signOut] lands, so for that window (up to ~5s during
+/// the Google disconnect) AuthGate sees "Firebase user, empty provider" — the
+/// cold-start race it repairs by restoring the session. Restoring here would
+/// re-register this device's push token and call listener for the account
+/// being signed out, so AuthGate holds off while this is set.
+final ValueNotifier<bool> isSigningOut = ValueNotifier<bool>(false);
+
 /// The sign-out teardown chain, with no navigation and no [BuildContext] —
 /// shared by every logout entry point, including the ones that must not
 /// navigate (main.dart's pendingDeletion/restoreError screens, which AuthGate
@@ -32,24 +40,29 @@ Future<void> signOutAndCleanup(
   final providerUid = provider.uid;
   final uid = providerUid ?? FirebaseAuth.instance.currentUser?.uid;
 
-  await provider.clearUser();
+  isSigningOut.value = true;
+  try {
+    await provider.clearUser();
 
-  if (providerUid == null && uid != null) {
-    await CurrentUserProvider.unregisterPushForUid(uid);
+    if (providerUid == null && uid != null) {
+      await CurrentUserProvider.unregisterPushForUid(uid);
+    }
+
+    if (revokeGoogle) {
+      // disconnect() throws when the current session isn't a Google sign-in
+      // (e.g. email/password) — there's nothing to disconnect, so swallow it
+      // rather than letting it abort the sign-out below. Bounded as well as
+      // caught: on a bad connection it can stall indefinitely, which no catch
+      // would rescue.
+      try {
+        await GoogleSignIn().disconnect().timeout(const Duration(seconds: 5));
+      } catch (_) {}
+    }
+
+    await FirebaseAuth.instance.signOut();
+  } finally {
+    isSigningOut.value = false;
   }
-
-  if (revokeGoogle) {
-    // disconnect() throws when the current session isn't a Google sign-in
-    // (e.g. email/password) — there's nothing to disconnect, so swallow it
-    // rather than letting it abort the sign-out below. Bounded as well as
-    // caught: on a bad connection it can stall indefinitely, which no catch
-    // would rescue.
-    try {
-      await GoogleSignIn().disconnect().timeout(const Duration(seconds: 5));
-    } catch (_) {}
-  }
-
-  await FirebaseAuth.instance.signOut();
 }
 
 /// [signOutAndCleanup] plus the jump back to [WelcomeScreen], for the logout
