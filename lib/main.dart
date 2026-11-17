@@ -155,6 +155,9 @@ class _AuthGateState extends State<AuthGate> {
     super.initState();
     _authStream = FirebaseAuth.instance.authStateChanges();
     isCompletingRegistration.addListener(_onCompletingRegistrationChanged);
+    // Re-evaluate once a logout finishes (or fails and leaves the user
+    // signed in, which must then be restored).
+    isSigningOut.addListener(_onCompletingRegistrationChanged);
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null) {
       _doRestore(currentUser);
@@ -164,6 +167,7 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void dispose() {
     isCompletingRegistration.removeListener(_onCompletingRegistrationChanged);
+    isSigningOut.removeListener(_onCompletingRegistrationChanged);
     super.dispose();
   }
 
@@ -324,7 +328,9 @@ class _AuthGateState extends State<AuthGate> {
   // Called from the stream builder when Firebase has a user but the provider
   // is still empty (e.g. the stream fired before initState's restore finished).
   Future<void> _restoreSession(User user) async {
-    if (_restoringSession) return;
+    // Mid-logout the provider is already empty but Firebase still has the
+    // user — don't log them back in (see isSigningOut).
+    if (_restoringSession || isSigningOut.value) return;
     setState(() => _restoringSession = true);
     await _doRestore(user);
   }
@@ -413,10 +419,13 @@ class _AuthGateState extends State<AuthGate> {
 
         if (signedInUser != null) {
           // Signed in but the provider is empty (rare race) — restore, never
-          // show the Welcome screen to a signed-in user.
-          WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _restoreSession(signedInUser),
-          );
+          // show the Welcome screen to a signed-in user. Unless a logout is
+          // in flight: then just wait for signOut() to land.
+          if (!isSigningOut.value) {
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _restoreSession(signedInUser),
+            );
+          }
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
