@@ -335,6 +335,11 @@ export const onVerificationRequestSubmitted = onDocumentWritten(
     const before = event.data?.before.data();
     const after = event.data?.after.data();
     if (!after || after.status !== "pending" || before?.status === "pending") return;
+    // giggre-admin's Undo puts a reviewed request back to pending and stamps
+    // reviewUndoneAt; that isn't a new submission, so no bell.
+    const undone = after.reviewUndoneAt as admin.firestore.Timestamp | undefined;
+    const undoneBefore = before?.reviewUndoneAt as admin.firestore.Timestamp | undefined;
+    if (undone && !(undoneBefore && undone.isEqual(undoneBefore))) return;
     const name = (after.name as string) || (after.email as string) || "A user";
     const attempt = Number(after.attemptCount) || 1;
     try {
