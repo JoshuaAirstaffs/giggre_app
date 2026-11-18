@@ -326,6 +326,10 @@ class GroupChatService {
   static Future<void> leave(String groupId) =>
       _call('leaveGroup', {'groupId': groupId});
 
+  /// Admins only: deletes the group, its messages and files for everyone.
+  static Future<void> deleteGroup(String groupId) =>
+      _call('deleteGroup', {'groupId': groupId});
+
   static Future<void> rename(String groupId, String name) =>
       _call('updateGroup', {'groupId': groupId, 'name': name});
 

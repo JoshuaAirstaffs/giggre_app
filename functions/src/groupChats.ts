@@ -6,6 +6,7 @@ import {
   Timestamp,
   getFirestore,
 } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 import { involvesLiveSupport } from "./liveSupport"; // TEMP: live support
 import { sendPushToUser } from "./push";
 import { firestoreTriggerRegion } from "./region";
@@ -455,6 +456,38 @@ export const makeGroupAdmin = onCall(OPTS, async (request) => {
   await ref.update({ admins: FieldValue.arrayUnion(target) });
   return { ok: true };
 });
+
+/**
+ * { groupId } — admins only. Deletes the group for everyone: the group doc,
+ * all its messages, and its photos/attachments in Storage. Members' open
+ * chats switch to "You're no longer in this group" and it drops off their
+ * chat lists (both just stop being able to read the doc).
+ */
+export const deleteGroup = onCall(
+  { ...OPTS, timeoutSeconds: 300 },
+  async (request) => {
+    const uid = requireUid(request.auth);
+    const groupId = requireGroupId(request.data?.groupId);
+    const { ref, group } = await loadMember(groupId, uid);
+    requireAdmin(group, uid);
+
+    // Firestore first, so the group disappears for everyone right away.
+    await db().recursiveDelete(ref);
+
+    // Then the files. Nobody can read them once the doc is gone (storage.rules
+    // checks membership on it), so a failure here only leaves orphans.
+    const bucket = getStorage().bucket();
+    for (const prefix of [`group_attachments/${groupId}/`, `group_photos/${groupId}/`]) {
+      try {
+        await bucket.deleteFiles({ prefix, force: true });
+      } catch (e) {
+        logger.warn(`[deleteGroup] couldn't delete ${prefix}`, e);
+      }
+    }
+    logger.info(`[deleteGroup] ${groupId} deleted by ${uid}`);
+    return { deleted: true };
+  }
+);
 
 function previewOf(msg: Data): string {
   switch (msg.type) {

@@ -1513,6 +1513,7 @@ export {
   leaveGroup,
   updateGroup,
   makeGroupAdmin,
+  deleteGroup,
   onGroupMessageCreated,
 } from "./groupChats";
 

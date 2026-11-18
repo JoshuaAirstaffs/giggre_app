@@ -59,28 +59,110 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
     }
   }
 
+  /// Destructive confirm (remove / leave / delete), styled like the app's
+  /// other prompts (my_documents_screen): icon tile, centered text,
+  /// full-width buttons.
   Future<bool> _confirm({
     required String title,
     required String body,
     required String action,
+    required IconData icon,
   }) async {
+    // Deeper than redAccent so white button text stays readable (4.8:1).
+    const danger = Color(0xFFDC2626);
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Text(body),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+      builder: (ctx) {
+        final onSurface = Theme.of(ctx).colorScheme.onSurface;
+        return AlertDialog(
+          backgroundColor: Theme.of(ctx).cardColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-            child: Text(action),
+          contentPadding: const EdgeInsets.all(24),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: danger.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(icon, color: danger, size: 30),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                body,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.45,
+                  color: onSurface.withValues(alpha: 0.7),
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: danger,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: Text(
+                    action,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(
+                        color: onSurface.withValues(alpha: 0.15),
+                      ),
+                    ),
+                  ),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                      color: onSurface.withValues(alpha: 0.75),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
     return ok == true;
   }
@@ -239,6 +321,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
                         "They'll stop getting messages and won't see "
                         'the chat anymore.',
                     action: 'Remove',
+                    icon: Icons.person_remove_outlined,
                   );
                   if (ok) {
                     await _guard(
@@ -264,11 +347,30 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
           ? "You won't see this chat anymore. You're the only admin, so "
                 'the longest-standing member will become admin.'
           : "You won't see this chat or get its messages anymore.",
-      action: 'Leave',
+      action: 'Leave group',
+      icon: Icons.logout_rounded,
     );
     if (!ok) return;
     await _guard(() async {
       await GroupChatService.leave(widget.groupId);
+      if (!mounted) return;
+      // Back past the chat itself to wherever it was opened from.
+      var popped = 0;
+      Navigator.of(context).popUntil((_) => popped++ >= 2);
+    });
+  }
+
+  Future<void> _delete() async {
+    final ok = await _confirm(
+      title: 'Delete this group?',
+      body: 'The group and all its messages and photos will be deleted for '
+          "everyone. This can't be undone.",
+      action: 'Delete group',
+      icon: Icons.delete_outline_rounded,
+    );
+    if (!ok) return;
+    await _guard(() async {
+      await GroupChatService.deleteGroup(widget.groupId);
       if (!mounted) return;
       // Back past the chat itself to wherever it was opened from.
       var popped = 0;
@@ -511,20 +613,42 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
                   const SizedBox(height: 20),
                   _Section(
                     isDark: isDark,
-                    child: ListTile(
-                      leading: const Icon(
-                        Icons.logout_rounded,
-                        color: Colors.redAccent,
-                      ),
-                      title: const Text(
-                        'Leave group',
-                        style: TextStyle(
-                          color: Colors.redAccent,
-                          fontWeight: FontWeight.w600,
+                    child: Column(
+                      children: [
+                        ListTile(
+                          leading: const Icon(
+                            Icons.logout_rounded,
+                            color: Colors.redAccent,
+                          ),
+                          title: const Text(
+                            'Leave group',
+                            style: TextStyle(
+                              color: Colors.redAccent,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          onTap: () => _leave(
+                            lastAdmin: iAmAdmin && admins.length == 1,
+                          ),
                         ),
-                      ),
-                      onTap: () =>
-                          _leave(lastAdmin: iAmAdmin && admins.length == 1),
+                        if (iAmAdmin) ...[
+                          const Divider(height: 1),
+                          ListTile(
+                            leading: const Icon(
+                              Icons.delete_outline_rounded,
+                              color: Colors.redAccent,
+                            ),
+                            title: const Text(
+                              'Delete group',
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            onTap: _delete,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                   Padding(
