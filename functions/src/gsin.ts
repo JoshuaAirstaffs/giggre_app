@@ -103,6 +103,9 @@ async function skillTaskMap(): Promise<SkillTaskMap> {
 async function resolveTaskType(gig: FirebaseFirestore.DocumentData, skills?: SkillTaskMap): Promise<{ id: string | null; candidates: string[] }> {
   const direct = str(gig.taskTypeId);
   if (direct) return { id: direct, candidates: [] };
+  // Host chose "Other" and typed a task type that isn't in the library:
+  // don't guess one from the skill — an admin assigns it in All Gigs.
+  if (str(gig.customTaskType)) return { id: null, candidates: [] };
   const skill = skillOf(gig).toLowerCase();
   if (!skill) return { id: null, candidates: [] };
   const ids = [...((skills ?? (await skillTaskMap())).get(skill) ?? [])].sort();
@@ -201,8 +204,10 @@ export async function followSkillChange(
 ): Promise<string> {
   const newSkill = skillOf(after).toLowerCase();
   if (!newSkill || newSkill === skillOf(before).toLowerCase()) return "skill_unchanged";
-  const linked = [...((await skillTaskMap()).get(newSkill) ?? [])].sort();
   const current = str(after.taskTypeId);
+  // "Other" task type with no codes yet: still waiting for an admin.
+  if (!current && str(after.customTaskType)) return "custom_task_type";
+  const linked = [...((await skillTaskMap()).get(newSkill) ?? [])].sort();
   if (current && linked.includes(current)) return "kept";
   if (linked.length === 1) {
     const r = await assignGigCodes(collection, gigId, { taskTypeId: linked[0], force: true });

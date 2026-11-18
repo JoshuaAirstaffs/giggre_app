@@ -1,7 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/services/content_filter_service.dart';
 import '../../../../core/theme/app_colors.dart';
+
+/// [TaskTypeField] value for "Other": the host types a task type that isn't
+/// in the GSIN Library. The gig then saves `customTaskType` (that text) and
+/// no taskTypeId; an admin assigns a real one in All Gigs.
+const String kOtherTaskTypeId = '_other';
 
 /// One task type from the admin GSIN Library (gsin_task_types).
 class GsinTaskTypeOption {
@@ -87,6 +93,10 @@ class TaskTypeField extends StatefulWidget {
   final String? skill;
   final bool enabled;
   final String? originalSkill;
+  /// The typed task type when [value] is [kOtherTaskTypeId].
+  final String? customValue;
+  /// Offers "Other (not listed)" when set.
+  final ValueChanged<String>? onCustomChanged;
   const TaskTypeField({
     super.key,
     required this.value,
@@ -94,6 +104,8 @@ class TaskTypeField extends StatefulWidget {
     this.skill,
     this.enabled = true,
     this.originalSkill,
+    this.customValue,
+    this.onCustomChanged,
   });
 
   @override
@@ -103,6 +115,16 @@ class TaskTypeField extends StatefulWidget {
 class _TaskTypeFieldState extends State<TaskTypeField> {
   List<GsinTaskTypeOption>? _options;
   String? _autoPicked; // id we picked from the skill (replaced if the skill changes)
+  late final TextEditingController _customCtrl =
+      TextEditingController(text: widget.customValue ?? '');
+
+  bool get _isOther => widget.value == kOtherTaskTypeId;
+
+  @override
+  void dispose() {
+    _customCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -151,6 +173,7 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
 
   bool get _skillChanged =>
       !widget.enabled &&
+      !_isOther && // a typed "Other" stays as it is (gsin.ts)
       _norm(widget.skill).isNotEmpty &&
       _norm(widget.skill) != _norm(widget.originalSkill);
 
@@ -172,9 +195,24 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _TaskTypeSheet(options: _options ?? const [], selected: widget.value, skill: widget.skill),
+      builder: (_) => _TaskTypeSheet(
+        options: _options ?? const [],
+        selected: widget.value,
+        skill: widget.skill,
+        allowOther: widget.onCustomChanged != null,
+      ),
     );
-    if (picked != null) {
+    if (picked != null && picked.startsWith('$kOtherTaskTypeId:')) {
+      // "Other" picked from a search: start the text with what they typed.
+      final typed = picked.substring(kOtherTaskTypeId.length + 1).trim();
+      if (typed.isNotEmpty && _customCtrl.text.trim().isEmpty) {
+        _customCtrl.text = typed;
+        widget.onCustomChanged?.call(typed);
+      }
+      _autoPicked = null;
+      widget.onChanged(kOtherTaskTypeId);
+      field.didChange(kOtherTaskTypeId);
+    } else if (picked != null) {
       _autoPicked = null; // host's own choice from here on
       widget.onChanged(picked);
       field.didChange(picked);
@@ -192,8 +230,11 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
       padding: const EdgeInsets.only(bottom: 20),
       child: FormField<String>(
         initialValue: widget.value,
-        validator: (_) =>
-            widget.enabled && widget.value == null ? 'Pick the type of task' : null,
+        validator: (_) {
+          if (!widget.enabled) return null;
+          if (widget.value == null) return 'Pick the type of task';
+          return null;
+        },
         builder: (field) {
           final locked = !widget.enabled;
           final skillChanged = _skillChanged;
@@ -225,7 +266,23 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
                   child: Row(
                     children: [
                       Expanded(
-                        child: sel == null
+                        child: _isOther
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                      locked && (widget.customValue ?? '').trim().isNotEmpty
+                                          ? widget.customValue!.trim()
+                                          : 'Other (not listed)',
+                                      style: TextStyle(
+                                          color: locked ? textColor.withValues(alpha: 0.7) : textColor,
+                                          fontSize: 14)),
+                                  const SizedBox(height: 2),
+                                  Text(locked ? 'Other · reviewed by Giggre' : 'Type it below',
+                                      style: TextStyle(color: textColor.withValues(alpha: 0.5), fontSize: 11)),
+                                ],
+                              )
+                            : sel == null
                             ? Text(
                                 locked
                                     ? (skillChanged ? 'Assigned by Giggre' : 'Not set')
@@ -253,7 +310,30 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
                   ),
                 ),
               ),
-              if (locked)
+              if (_isOther && !locked)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: TextFormField(
+                    controller: _customCtrl,
+                    maxLength: 40,
+                    textCapitalization: TextCapitalization.words,
+                    onChanged: (v) => widget.onCustomChanged?.call(v.trim().replaceAll(RegExp(r'\s+'), ' ')),
+                    validator: (v) {
+                      final t = (v ?? '').trim();
+                      if (t.length < 2) return 'Type the task type (at least 2 characters)';
+                      if (ContentFilterService.instance.check(t)) return 'Please use a different word';
+                      return null;
+                    },
+                    style: TextStyle(color: textColor, fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: 'e.g. Pool cleaning',
+                      helperText: "Not in the list? Giggre will review and add it.",
+                      isDense: true,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              if (locked && !_isOther)
                 Padding(
                   padding: const EdgeInsets.only(top: 6, left: 12),
                   child: Text(
@@ -280,7 +360,8 @@ class _TaskTypeSheet extends StatefulWidget {
   final List<GsinTaskTypeOption> options;
   final String? selected;
   final String? skill;
-  const _TaskTypeSheet({required this.options, required this.selected, this.skill});
+  final bool allowOther;
+  const _TaskTypeSheet({required this.options, required this.selected, this.skill, this.allowOther = false});
 
   @override
   State<_TaskTypeSheet> createState() => _TaskTypeSheetState();
@@ -341,14 +422,42 @@ class _TaskTypeSheetState extends State<_TaskTypeSheet> {
               ),
               const SizedBox(height: 8),
               Expanded(
-                child: list.isEmpty
+                child: list.isEmpty && !widget.allowOther
                     ? Center(
                         child: Text('No match',
                             style: TextStyle(color: textColor.withValues(alpha: 0.5))),
                       )
                     : ListView.builder(
-                        itemCount: list.length,
+                        itemCount: list.length + (widget.allowOther ? 1 : 0),
                         itemBuilder: (_, i) {
+                          if (i == list.length) {
+                            // Last row: "Other" — type one that isn't listed.
+                            final typed = _q.trim();
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (list.isEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                                    child: Text('No match',
+                                        style: TextStyle(color: textColor.withValues(alpha: 0.5))),
+                                  ),
+                                Divider(height: 16, color: Theme.of(context).dividerColor),
+                                ListTile(
+                                  leading: const Icon(Icons.add_circle_outline_rounded, color: kAmber),
+                                  title: Text(
+                                      typed.isEmpty ? 'Other (not listed)' : 'Other: "$typed"',
+                                      style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w600)),
+                                  subtitle: Text('Type a task type that isn\'t in the list',
+                                      style: TextStyle(color: textColor.withValues(alpha: 0.5), fontSize: 11)),
+                                  trailing: widget.selected == kOtherTaskTypeId
+                                      ? const Icon(Icons.check_circle, color: kAmber)
+                                      : null,
+                                  onTap: () => Navigator.pop(context, '$kOtherTaskTypeId:$typed'),
+                                ),
+                              ],
+                            );
+                          }
                           final o = list[i];
                           final showGroup = i == 0 || groupOf(i - 1) != groupOf(i);
                           return Column(

@@ -7,7 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:http/http.dart' as http;
 import '../../../../core/models/rating_summary.dart';
 import '../../../../core/services/rating_service.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -2178,26 +2177,6 @@ class _GigMapSectionState extends State<GigMapSection> {
   }
 
   BitmapDescriptor _resolveGigPin(GigMarkerData g) {
-    // A gig with photos shows its first photo as the pin (Default display
-    // only — Salary / Distance keep their pills). Skill icon / dot until the
-    // photo bitmap is ready, or if it can't be loaded.
-    if (g.images.isNotEmpty) {
-      final photo = g.images.first;
-      final pkey = 'photo_${g.gigType}_$photo';
-      final cachedPhoto = _icons[pkey];
-      if (cachedPhoto != null) return cachedPhoto;
-      if (_skillPinRequested.add(pkey)) {
-        _makePhotoPinIcon(_colorForType(g.gigType), photo).then((icon) {
-          if (icon == null) return;
-          _icons[pkey] = icon;
-          if (mounted) setState(() {});
-        });
-      }
-    }
-    return _resolveSkillPin(g);
-  }
-
-  BitmapDescriptor _resolveSkillPin(GigMarkerData g) {
     final url = _skillIconUrlFor(g);
     if (url == null) return _gigIcon(g.gigType);
     final key = 'skill_${g.gigType}_$url';
@@ -2212,57 +2191,6 @@ class _GigMapSectionState extends State<GigMapSection> {
       });
     }
     return _gigIcon(g.gigType);
-  }
-
-  /// Round photo pin: the gig's first photo, ringed in the gig type's color.
-  Future<BitmapDescriptor?> _makePhotoPinIcon(Color color, String url) async {
-    try {
-      final res = await http.get(Uri.parse(url));
-      if (res.statusCode != 200) return null;
-      const px = 36.0;
-      const c = px / 2;
-      const rOuter = 16.5;
-      const rPhoto = 13.5;
-      final scale = _markerPixelRatio;
-      final codec = await ui.instantiateImageCodec(
-        res.bodyBytes,
-        targetWidth: (rPhoto * 2 * scale).ceil(),
-      );
-      final photo = (await codec.getNextFrame()).image;
-
-      final rec = ui.PictureRecorder();
-      final can = Canvas(rec)..scale(scale);
-      can.drawCircle(
-        const Offset(c, c + 0.8),
-        rOuter,
-        Paint()
-          ..color = Colors.black26
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2),
-      );
-      can.drawCircle(const Offset(c, c), rOuter, Paint()..color = Colors.white);
-      can.drawCircle(const Offset(c, c), rOuter - 1.2, Paint()..color = color);
-      // Cover-fit the photo into the inner circle.
-      final iw = photo.width.toDouble(), ih = photo.height.toDouble();
-      final side = iw < ih ? iw : ih;
-      final src = Rect.fromLTWH((iw - side) / 2, (ih - side) / 2, side, side);
-      final dst = Rect.fromCircle(center: const Offset(c, c), radius: rPhoto);
-      can.save();
-      can.clipPath(Path()..addOval(dst));
-      can.drawImageRect(photo, src, dst, Paint()..filterQuality = FilterQuality.medium);
-      can.restore();
-      photo.dispose();
-
-      final img = await rec.endRecording().toImage(
-        (px * scale).ceil(),
-        (px * scale).ceil(),
-      );
-      final data = await img.toByteData(format: ui.ImageByteFormat.png);
-      if (data == null) return null;
-      return BitmapDescriptor.bytes(data.buffer.asUint8List(), width: px, height: px);
-    } catch (e) {
-      debugPrint('[GigMap] photo pin ($url): $e');
-      return null;
-    }
   }
 
   Future<BitmapDescriptor?> _makeSkillPinIcon(Color color, String url) async {
@@ -3844,17 +3772,10 @@ class _GigMapSectionState extends State<GigMapSection> {
                       BoxShadow(color: Colors.black26, blurRadius: 4),
                     ],
                   ),
-                  // First photo when the gig has one, else its skill icon,
-                  // else the gig type's icon.
-                  clipBehavior: Clip.antiAlias,
+                  // Skill icon when it has one, else the gig type's icon.
+                  // (Photos show in the list only, not on the map.)
                   child: Center(
-                    child: gig.images.isNotEmpty
-                        ? GigThumb(
-                            url: gig.images.first,
-                            size: 32,
-                            fallback: Icon(_iconForType(gig.gigType), color: Colors.white, size: 16),
-                          )
-                        : gig.requiredSkills.isNotEmpty
+                    child: gig.requiredSkills.isNotEmpty
                         ? SkillIcon(
                             gig.requiredSkills.first,
                             color: Colors.white,
@@ -6297,6 +6218,21 @@ class _GigListCard extends StatelessWidget {
                             TextSpan(
                               children: [
                                 if (skill != null) ...[
+                                  // The tile shows the photo, so the skill's
+                                  // icon moves here, before its name.
+                                  if (gig.images.isNotEmpty)
+                                    WidgetSpan(
+                                      alignment: PlaceholderAlignment.middle,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(right: 4),
+                                        child: SkillIcon(
+                                          skill,
+                                          size: 13,
+                                          color: accentColor,
+                                          fallback: fallbackIcon,
+                                        ),
+                                      ),
+                                    ),
                                   TextSpan(
                                     text: skill,
                                     style: const TextStyle(

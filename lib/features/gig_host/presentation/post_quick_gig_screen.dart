@@ -80,6 +80,8 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 
   // GSIN task type (admin catalog) — gives the gig its GSINS/GSKU codes.
   String? _taskTypeId;
+  // Typed under "Other" (task type not in the GSIN Library).
+  String _customTaskType = '';
 
   // Currency of the gig's location, so the ₱/$ shown while filling the form
   // matches what the gig is saved with. Looked up per source (GPS / map pin);
@@ -467,7 +469,10 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           .collection('quick_gigs')
           .add({
             ...gig.toMap(),
-            if (_taskTypeId != null) 'taskTypeId': _taskTypeId,
+            if (_taskTypeId != null && _taskTypeId != kOtherTaskTypeId)
+              'taskTypeId': _taskTypeId,
+            if (_taskTypeId == kOtherTaskTypeId && _customTaskType.isNotEmpty)
+              'customTaskType': _customTaskType,
             if (images.isNotEmpty) 'images': images,
             if (place != null && place.parts.isNotEmpty) 'place': place.parts,
           });
@@ -690,6 +695,8 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 TaskTypeField(
                   value: _taskTypeId,
                   onChanged: (v) => setState(() => _taskTypeId = v),
+                  customValue: _customTaskType,
+                  onCustomChanged: (v) => _customTaskType = v,
                 ),
 
                 // ── Description ───────────────────────────────────

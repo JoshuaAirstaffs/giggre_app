@@ -136,6 +136,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   String? _selectedSkill;
   // GSIN task type (admin catalog) — gives the gig its GSINS/GSKU codes.
   String? _taskTypeId;
+  // Typed under "Other" (task type not in the GSIN Library).
+  String _customTaskType = '';
 
   // Experience level
   String _experienceLevel = 'entry';
@@ -216,6 +218,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     _selectedSkill = _editSkill;
     _experienceLevel = d['experienceLevel'] as String? ?? 'entry';
     _taskTypeId = d['taskTypeId'] as String?;
+    _customTaskType = (d['customTaskType'] as String?) ?? '';
+    if (_taskTypeId == null && _customTaskType.isNotEmpty) _taskTypeId = kOtherTaskTypeId;
     final scheduled = (d['scheduledDate'] as Timestamp?)?.toDate();
     if (scheduled != null) {
       _scheduledDate = DateTime(scheduled.year, scheduled.month, scheduled.day);
@@ -736,7 +740,10 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
           .collection('offered_gigs')
           .add({
             ...gig.toMap(),
-            if (_taskTypeId != null) 'taskTypeId': _taskTypeId,
+            if (_taskTypeId != null && _taskTypeId != kOtherTaskTypeId)
+              'taskTypeId': _taskTypeId,
+            if (_taskTypeId == kOtherTaskTypeId && _customTaskType.isNotEmpty)
+              'customTaskType': _customTaskType,
             if (images.isNotEmpty) 'images': images,
             if (place != null && place.parts.isNotEmpty) 'place': place.parts,
             // Picked "Other" (not one of the workers' skills) — admins can spot these.
@@ -1052,6 +1059,8 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                   enabled: !_isEditing,
                   originalSkill: widget.editData?['skillRequired'] as String?,
                   onChanged: (v) => setState(() => _taskTypeId = v),
+                  customValue: _customTaskType,
+                  onCustomChanged: (v) => _customTaskType = v,
                 ),
 
                 // ── Experience Level ──────────────────────────────
