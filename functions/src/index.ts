@@ -1505,6 +1505,18 @@ export {
   onMessageRequestAccepted,
 } from "./directMessages";
 
+// Group chats. See functions/src/groupChats.ts.
+export {
+  createGroup,
+  addGroupMembers,
+  removeGroupMember,
+  leaveGroup,
+  updateGroup,
+  makeGroupAdmin,
+  deleteGroup,
+  onGroupMessageCreated,
+} from "./groupChats";
+
 // ── Gig Points ──────────────────────────────────────────────────────────────
 // Awards points to workers on host-approved gig completion, plus admin-only
 // adjustment and blocked-award retry callables. See functions/src/gigPoints.ts.
@@ -1550,6 +1562,7 @@ export { refreshFxRates, adminRefreshFxRates } from "./fx";
 export { adminUnverifiedUsage } from "./unverifiedLimits";
 // Pre-sign-in lookups (users/{uid} is no longer publicly readable).
 export { checkAccountExists, lookupReferralCode } from "./publicLookups";
+export { onReferralJoined } from "./referralCounts";
 export {
   adminSavePromoCode, adminSetPromoActive, adminDeletePromoCode, redeemPromoCode,
   adminSendPromoToGroup, adminFindPromoUser, adminCreateRestrictedCodes,

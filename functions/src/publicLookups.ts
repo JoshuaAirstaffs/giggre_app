@@ -12,7 +12,8 @@ import { firestoreTriggerRegion } from "./region";
 //                                 or a new sign-up?
 //   lookupReferralCode({code})    validate a referral code at sign-up
 
-const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
+// Sign-up path: sized for a few hundred people registering at once.
+const OPTS = { region: firestoreTriggerRegion(), maxInstances: 50 } as const;
 const db = () => admin.firestore();
 
 export const checkAccountExists = onCall(OPTS, async (request) => {

@@ -499,32 +499,6 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       // users/{uid} isn't readable before sign-in — the server checks it.
       PublicLookupService.lookupReferral(code);
 
-  Future<void> _updateReferralLevel(String referrerId) async {
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(referrerId)
-          .get();
-      if (!doc.exists) return;
-      final count =
-          (doc.data()?['referrals']?['referrals_count'] ?? 0) as int;
-      const milestones = [
-        1, 3, 5, 10, 20, 30, 50, 75, 100, 125,
-        150, 175, 200, 300, 350, 400, 450, 500,
-        550, 600, 700, 800, 900, 1000,
-      ];
-      int level = 0;
-      for (int i = 0; i < milestones.length; i++) {
-        if (count >= milestones[i]) level = i + 1;
-      }
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(referrerId)
-          .update({'referrals.referral_level': level});
-    } catch (e) {
-      debugPrint('Failed to update referral level: $e');
-    }
-  }
 
   Future<void> _saveProfile() async {
     final name = _nameController.text.trim();
@@ -708,18 +682,11 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
           'referral_code_used': referralCode,
           'isVerified'        : 'unverified',
         });
-        final referrerRef = FirebaseFirestore.instance
-            .collection('users')
-            .doc(referrerId);
-        batch.update(referrerRef, {
-          'referrals.referrals_count'        : FieldValue.increment(1),
-          'referrals.not_verified_referrals' : FieldValue.increment(1),
-        });
-        await batch.commit();
-        await _updateReferralLevel(referrerId);
-      } else {
-        await batch.commit();
       }
+      // The referrer's counters + level are updated server-side
+      // (onReferralJoined), so many sign-ups on one referral code at once
+      // never contend on the referrer's doc and fail this batch.
+      await batch.commit();
 
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
@@ -1223,32 +1190,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       // users/{uid} isn't readable before sign-in — the server checks it.
       PublicLookupService.lookupReferral(code);
 
-  Future<void> _updateReferralLevel(String referrerId) async {
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(referrerId)
-          .get();
-      if (!doc.exists) return;
-      final count =
-          (doc.data()?['referrals']?['referrals_count'] ?? 0) as int;
-      const milestones = [
-        1, 3, 5, 10, 20, 30, 50, 75, 100, 125,
-        150, 175, 200, 300, 350, 400, 450, 500,
-        550, 600, 700, 800, 900, 1000,
-      ];
-      int level = 0;
-      for (int i = 0; i < milestones.length; i++) {
-        if (count >= milestones[i]) level = i + 1;
-      }
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(referrerId)
-          .update({'referrals.referral_level': level});
-    } catch (e) {
-      debugPrint('Failed to update referral level: $e');
-    }
-  }
 
   Future<void> register() async {
     final email = _emailController.text.trim();
@@ -1383,18 +1324,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'referral_code_used': referralCode,
           'isVerified'        : 'unverified',
         });
-        final referrerRef = FirebaseFirestore.instance
-            .collection('users')
-            .doc(referrerId);
-        batch.update(referrerRef, {
-          'referrals.referrals_count'        : FieldValue.increment(1),
-          'referrals.not_verified_referrals' : FieldValue.increment(1),
-        });
-        await batch.commit();
-        await _updateReferralLevel(referrerId);
-      } else {
-        await batch.commit();
       }
+      // The referrer's counters + level are updated server-side
+      // (onReferralJoined), so many sign-ups on one referral code at once
+      // never contend on the referrer's doc and fail this batch.
+      await batch.commit();
 
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(

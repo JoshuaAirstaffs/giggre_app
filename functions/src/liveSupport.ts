@@ -7,7 +7,8 @@ import { getFirestore } from "firebase-admin/firestore";
 // it hides from search. Configured per project in
 //   general_config/live_support { enabled: bool, supportUid: string }
 //
-// To remove: delete this file and its one use in directMessages.ts.
+// To remove: delete this file and its uses in directMessages.ts and
+// groupChats.ts.
 
 const CACHE_MS = 60 * 1000;
 let cached: { uid: string | null; at: number } | null = null;

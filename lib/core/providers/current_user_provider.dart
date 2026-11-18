@@ -11,6 +11,7 @@ import 'package:giggre_app/features/gig_host/presentation/widgets/gig_detail_she
 import 'package:giggre_app/features/gig_points/presentation/gig_points_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/verification_screen.dart';
 import 'package:giggre_app/features/gig_worker/presentation/widgets/toolchest_sheet.dart';
+import 'package:giggre_app/features/group_chat/group_chat_screen.dart';
 import 'package:giggre_app/screens/chat/chat.dart';
 import '../services/currency_service.dart';
 import '../services/push_notification_service.dart';
@@ -621,6 +622,16 @@ class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
       // own Firestore listener surfaces the change. For incoming_call
       // specifically, that's _listenToIncomingCall showing the full-screen
       // ring UI with its own (already working) Answer/Decline buttons.
+      return;
+    }
+
+    if (data['type'] == 'group_message') {
+      final groupId = data['groupId'] as String? ?? '';
+      if (groupId.isEmpty) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => GroupChatScreen(groupId: groupId)),
+      );
       return;
     }
 

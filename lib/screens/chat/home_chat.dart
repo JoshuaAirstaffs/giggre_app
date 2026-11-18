@@ -11,6 +11,10 @@ import 'package:giggre_app/main.dart' show navigatorKey;
 import 'package:giggre_app/screens/chat/chat.dart';
 import 'package:giggre_app/features/chat/message_requests.dart';
 import 'package:giggre_app/features/chat/user_search_screen.dart';
+import 'package:giggre_app/features/group_chat/create_group_screen.dart';
+import 'package:giggre_app/features/group_chat/group_chat_screen.dart';
+import 'package:giggre_app/features/group_chat/group_chat_service.dart';
+import 'package:giggre_app/features/group_chat/group_widgets.dart';
 import 'package:giggre_app/features/live_support/live_support_bubble.dart'; // TEMP: live support
 
 // Support auto-replies are authored as HTML (rendered properly inside the
@@ -53,6 +57,8 @@ class _HomeChatState extends State<HomeChat>
   late final TabController _tabController;
   bool _hasUnread = false;
   bool _hasUnreadGig = false;
+  bool _hasUnreadGroup = false;
+  StreamSubscription<bool>? _groupUnreadSub;
   final _resetSearch = ValueNotifier<int>(0);
 
   @override
@@ -72,15 +78,25 @@ class _HomeChatState extends State<HomeChat>
     _tabController = TabController(length: 2, vsync: this)
       ..addListener(() {
         // Leaving Gig Chats (for Support) clears its search too.
-        if (!_tabController.indexIsChanging) _resetSearch.value++;
+        if (!_tabController.indexIsChanging) {
+          _resetSearch.value++;
+          if (mounted) setState(() {});
+        }
       });
     _listenForUnread();
     _listenForUnreadGig();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _groupUnreadSub = GroupChatService.anyUnread(uid).listen(
+        (v) => mounted ? setState(() => _hasUnreadGroup = v) : null,
+      );
+    }
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _groupUnreadSub?.cancel();
     _resetSearch.dispose();
     for (final sub in _roomSubs) sub.cancel();
     _gigRoomsStreamSub?.cancel();
@@ -268,6 +284,48 @@ class _HomeChatState extends State<HomeChat>
     );
   }
 
+  /// New chat (find someone on Giggre) or New group.
+  void _showNewSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _NewOption(
+                icon: Icons.person_add_alt_1_rounded,
+                title: 'New chat',
+                subtitle: 'Find someone on Giggre',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const UserSearchScreen()),
+                  );
+                },
+              ),
+              _NewOption(
+                icon: Icons.group_add_rounded,
+                title: 'New group',
+                subtitle: "With people you've already chatted with",
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const CreateGroupScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
@@ -286,13 +344,6 @@ class _HomeChatState extends State<HomeChat>
           ),
         ),
         actions: [
-          IconButton(
-            icon: Icon(Icons.search_rounded, color: onSurface),
-            tooltip: 'Find people',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const UserSearchScreen()),
-            ),
-          ),
           IconButton(
             icon: Icon(Icons.info_outline_rounded, color: onSurface),
             tooltip: 'About deleting messages',
@@ -314,7 +365,7 @@ class _HomeChatState extends State<HomeChat>
                 clipBehavior: Clip.none,
                 children: [
                   const Icon(Icons.chat_bubble_outline_rounded),
-                  if (_hasUnreadGig)
+                  if (_hasUnreadGig || _hasUnreadGroup)
                     Positioned(
                       top: -2,
                       right: -2,
@@ -356,6 +407,21 @@ class _HomeChatState extends State<HomeChat>
           ],
         ),
       ),
+      floatingActionButton:
+          _tabController.index == 0 &&
+              MediaQuery.viewInsetsOf(context).bottom == 0
+          ? FloatingActionButton.extended(
+              heroTag: 'chats_new',
+              backgroundColor: kBlue,
+              foregroundColor: Colors.white,
+              onPressed: () => _showNewSheet(context),
+              icon: const Icon(Icons.edit_square, size: 20),
+              label: const Text(
+                'New',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            )
+          : null,
       body: TabBarView(
         controller: _tabController,
         children: [_GigChatsTab(resetSearch: _resetSearch), const _SupportTab()],
@@ -365,6 +431,8 @@ class _HomeChatState extends State<HomeChat>
 }
 
 // ── Gig Chats Tab ─────────────────────────────────────────────────────────────
+
+enum _ChatFilter { all, groups, missed }
 
 class _GigChatsTab extends StatefulWidget {
   const _GigChatsTab({required this.resetSearch});
@@ -378,10 +446,12 @@ class _GigChatsTab extends StatefulWidget {
 
 class _GigChatsTabState extends State<_GigChatsTab> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
-  // "Missed calls" filter — rooms where the peer's last call to me went
-  // unanswered and hasn't been followed up by another call since (see
-  // missedCallFor in call_log.dart).
-  bool _missedOnly = false;
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _groupStream;
+  // All / Groups / Missed calls. "Missed calls" = rooms where the peer's last
+  // call to me went unanswered and hasn't been followed up by another call
+  // since (see missedCallFor in call_log.dart).
+  _ChatFilter _filter = _ChatFilter.all;
+  bool get _missedOnly => _filter == _ChatFilter.missed;
   final _search = TextEditingController();
   String _query = '';
   Timer? _searchDebounce;
@@ -423,10 +493,31 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               .collection('chat_rooms')
               .where('participants', arrayContains: uid)
               .snapshots();
+    _groupStream = uid == null
+        ? const Stream.empty()
+        : GroupChatService.myGroups(uid);
   }
 
   @override
   Widget build(BuildContext context) {
+    // Groups (group_chats) are listed together with the one-to-one rooms.
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _groupStream,
+      builder: (context, groupSnap) {
+        if (groupSnap.hasError) {
+          debugPrint('GigChatsTab groups error: ${groupSnap.error}');
+        }
+        final groups = groupSnap.data?.docs ??
+            const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+        return _buildRooms(context, groups);
+      },
+    );
+  }
+
+  Widget _buildRooms(
+    BuildContext context,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> groups,
+  ) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _stream,
       builder: (context, snap) {
@@ -478,7 +569,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
           ),
         );
 
-        if (docs.isEmpty) {
+        if (docs.isEmpty && groups.isEmpty) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -495,7 +586,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Tap the search icon to find people',
+                  'Tap New to message someone or start a group',
                   style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
                 ),
                 if (requestCount > 0) ...[
@@ -517,13 +608,30 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                 if (bTime == null) return -1;
                 return bTime.compareTo(aTime);
               });
-        final byTab = _missedOnly ? missedDocs : docs;
+        final byTab = switch (_filter) {
+          _ChatFilter.all => docs,
+          _ChatFilter.groups =>
+            const <QueryDocumentSnapshot<Map<String, dynamic>>>[],
+          _ChatFilter.missed => missedDocs,
+        };
         final q = _query.trim().toLowerCase();
         final shown = q.isEmpty
             ? byTab
             : byTab
                   .where(
                     (d) => _peerName(d.data(), myUid).toLowerCase().contains(q),
+                  )
+                  .toList();
+        // Groups are listed under All and Groups, and searched by group name.
+        final shownGroups = _missedOnly
+            ? const <QueryDocumentSnapshot<Map<String, dynamic>>>[]
+            : q.isEmpty
+            ? groups
+            : groups
+                  .where(
+                    (g) => ((g.data()['name'] as String?) ?? '')
+                        .toLowerCase()
+                        .contains(q),
                   )
                   .toList();
 
@@ -549,22 +657,70 @@ class _GigChatsTabState extends State<_GigChatsTab> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              // Left-aligned (a bare Wrap would be centered by the Column)
+              // and compact: smaller text, padding and tap area.
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Theme(
+                  data: Theme.of(context).copyWith(
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    // Explicit label colors: a size-only labelStyle drops the
+                    // theme's text color and left the labels faint in light
+                    // mode. Selected = white on blue, unselected = onSurface.
+                    chipTheme: Theme.of(context).chipTheme.copyWith(
+                      selectedColor: kBlue,
+                      labelStyle: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: WidgetStateColor.resolveWith(
+                          (states) => states.contains(WidgetState.selected)
+                              ? Colors.white
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    ),
+                  ),
+                  child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
                 children: [
                   ChoiceChip(
                     showCheckmark: false,
                     label: const Text('All'),
-                    selected: !_missedOnly,
-                    onSelected: (_) => setState(() => _missedOnly = false),
+                    selected: _filter == _ChatFilter.all,
+                    onSelected: (_) =>
+                        setState(() => _filter = _ChatFilter.all),
                   ),
-                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    showCheckmark: false,
+                    avatar: Icon(
+                      Icons.groups_rounded,
+                      size: 14,
+                      color: _filter == _ChatFilter.groups
+                          ? Colors.white
+                          : Theme.of(context).colorScheme.onSurface,
+                    ),
+                    label: Text(
+                      groups.isEmpty ? 'Groups' : 'Groups (${groups.length})',
+                    ),
+                    selected: _filter == _ChatFilter.groups,
+                    onSelected: (_) =>
+                        setState(() => _filter = _ChatFilter.groups),
+                  ),
                   ChoiceChip(
                     showCheckmark: false,
                     avatar: Icon(
                       Icons.call_missed_rounded,
-                      size: 16,
-                      color: missedDocs.isEmpty ? null : Colors.red,
+                      size: 14,
+                      color: _missedOnly
+                          ? Colors.white
+                          : missedDocs.isEmpty
+                          ? Theme.of(context).colorScheme.onSurface
+                          : Colors.red,
                     ),
                     label: Text(
                       missedDocs.isEmpty
@@ -572,13 +728,16 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                           : 'Missed calls (${missedDocs.length})',
                     ),
                     selected: _missedOnly,
-                    onSelected: (_) => setState(() => _missedOnly = true),
+                    onSelected: (_) =>
+                        setState(() => _filter = _ChatFilter.missed),
                   ),
                 ],
+                  ),
+                ),
               ),
             ),
             Expanded(
-              child: shown.isEmpty && q.isNotEmpty
+              child: shown.isEmpty && shownGroups.isEmpty && q.isNotEmpty
                   ? Center(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -599,32 +758,46 @@ class _GigChatsTabState extends State<_GigChatsTab> {
                                 fontSize: 14,
                               ),
                             ),
+                            const SizedBox(height: 20),
+                            _FindOnGiggre(query: _query.trim()),
                           ],
                         ),
                       ),
                     )
-                  : shown.isEmpty
+                  : shown.isEmpty && shownGroups.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(
-                            Icons.call_missed_rounded,
+                          Icon(
+                            _missedOnly
+                                ? Icons.call_missed_rounded
+                                : Icons.groups_rounded,
                             size: 48,
                             color: Colors.grey,
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'No missed calls',
+                            _missedOnly ? 'No missed calls' : 'No groups yet',
                             style: TextStyle(
                               color: Colors.grey.shade400,
                               fontSize: 14,
                             ),
                           ),
+                          if (!_missedOnly) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Tap New to start a group',
+                              style: TextStyle(
+                                color: Colors.grey.shade400,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     )
-                  : _buildList(shown),
+                  : _buildList(shown, shownGroups, findQuery: q.isEmpty ? null : _query.trim()),
             ),
           ],
         );
@@ -643,13 +816,56 @@ class _GigChatsTabState extends State<_GigChatsTab> {
         : sendTo;
   }
 
-  Widget _buildList(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  Widget _buildList(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> rooms,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> groups, {
+    String? findQuery,
+  }) {
+    // Rooms arrive already sorted (or in missed-call order); groups are
+    // slotted in by their latest message.
+    final docs = [...rooms];
+    if (groups.isNotEmpty) {
+      DateTime? at(QueryDocumentSnapshot<Map<String, dynamic>> d) =>
+          (d.data()['lastMessageAt'] as Timestamp?)?.toDate();
+      docs
+        ..addAll(groups)
+        ..sort((a, b) {
+          final ta = at(a), tb = at(b);
+          if (ta == null && tb == null) return 0;
+          if (ta == null) return 1;
+          if (tb == null) return -1;
+          return tb.compareTo(ta);
+        });
+    }
+    final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
     return RefreshIndicator(
       onRefresh: () async => setState(() {}),
       child: ListView.builder(
-        padding: const EdgeInsets.all(8),
-        itemCount: docs.length,
+        // Bottom room so the New button never covers the last chat.
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 96),
+        itemCount: docs.length + (findQuery == null ? 0 : 1),
         itemBuilder: (context, i) {
+          if (i == docs.length) {
+            // After the matching chats: the same name among everyone.
+            return Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: _FindOnGiggre(query: findQuery!),
+            );
+          }
+          if (docs[i].reference.parent.id == 'group_chats') {
+            final id = docs[i].id;
+            return GroupListTile(
+              key: ValueKey('group_$id'),
+              groupId: id,
+              group: docs[i].data(),
+              myUid: myUid,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => GroupChatScreen(groupId: id),
+                ),
+              ),
+            );
+          }
           final data = docs[i].data();
           final rawDate = _missedOnly
               ? (data['missedCallAt'] ?? data['lastMessageAt'])
@@ -697,6 +913,93 @@ class _GigChatsTabState extends State<_GigChatsTab> {
           );
         },
       ),
+    );
+  }
+}
+
+/// "Find "ana" on Giggre": takes a chat search over to people search.
+class _FindOnGiggre extends StatelessWidget {
+  const _FindOnGiggre({required this.query});
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: isDark ? kCard : Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => UserSearchScreen(initialQuery: query),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: blueText(context).withValues(alpha: 0.12),
+                child: Icon(Icons.person_search_rounded, color: blueText(context)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    text: 'Find ',
+                    children: [
+                      TextSpan(
+                        text: '"$query"',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const TextSpan(text: ' on Giggre'),
+                    ],
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: blueText(context),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: blueText(context)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NewOption extends StatelessWidget {
+  const _NewOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      leading: CircleAvatar(
+        radius: 22,
+        backgroundColor: blueText(context).withValues(alpha: 0.12),
+        child: Icon(icon, color: blueText(context)),
+      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(subtitle),
+      onTap: onTap,
     );
   }
 }
