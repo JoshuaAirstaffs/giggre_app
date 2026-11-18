@@ -54,6 +54,9 @@ class GigWorkerScreen extends StatefulWidget {
   // False while another tab of the worker shell is showing (the dashboard
   // stays mounted underneath): the carousel's videos stop.
   final bool isTabActive;
+  // False while ModeShell shows Host mode (this stays mounted, hidden): the
+  // worker goes offline and pop-ups wait until Worker mode is shown again.
+  final bool modeActive;
 
   const GigWorkerScreen({
     super.key,
@@ -63,6 +66,7 @@ class GigWorkerScreen extends StatefulWidget {
     this.onGoHome,
     this.animationGeneration = 0,
     this.isTabActive = true,
+    this.modeActive = true,
   });
 
   @override
@@ -175,7 +179,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onDashboardScroll);
     _listenToProfile();
-    _setOnlineStatus(true);
+    if (widget.modeActive) _setOnlineStatus(true);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
       _activeGigBarStream = watchActiveWorkerGig(uid);
@@ -183,9 +187,38 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
       _listenToBookmarks(uid);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
+      if (mounted && widget.modeActive) {
         context.read<TutorialController>().startIfNeeded(gigWorkerHomeFlow);
       }
+    });
+  }
+
+  // Pop-ups raised while Host mode is showing, run when Worker mode returns.
+  // Keyed so a repeat (e.g. the same suspension) only shows once.
+  final Map<String, VoidCallback> _whenShown = {};
+
+  void _runWhenShown(String key, VoidCallback fn) {
+    if (widget.modeActive) {
+      fn();
+    } else {
+      _whenShown[key] = fn;
+    }
+  }
+
+  @override
+  void didUpdateWidget(GigWorkerScreen old) {
+    super.didUpdateWidget(old);
+    if (old.modeActive == widget.modeActive) return;
+    _setOnlineStatus(widget.modeActive);
+    if (!widget.modeActive) return;
+    final pending = List<VoidCallback>.of(_whenShown.values);
+    _whenShown.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final fn in pending) {
+        fn();
+      }
+      context.read<TutorialController>().startIfNeeded(gigWorkerHomeFlow);
     });
   }
 
@@ -210,7 +243,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _setOnlineStatus(true);
+      if (widget.modeActive) _setOnlineStatus(true);
       // Restore WorkingUI if worker has an ongoing gig they came back to
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null && widget.restoreActiveGigOnEntry)
@@ -850,6 +883,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
   void _showAssignedPopup(GigMarkerData gig) {
     if (!mounted) return;
+    if (!widget.modeActive) {
+      _runWhenShown('assigned_${gig.id}', () => _showAssignedPopup(gig));
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       showDialog(
@@ -1728,6 +1765,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
 
   void _showSuspensionDialog() {
     if (!mounted || _suspendedUntil == null) return;
+    if (!widget.modeActive) {
+      _runWhenShown('suspension', _showSuspensionDialog);
+      return;
+    }
     final until = _suspendedUntil!;
     final dateStr =
         '${until.day} ${_monthName(until.month)} ${until.year}'

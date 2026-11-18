@@ -26,7 +26,12 @@ const _kNavInactive = Color(0xFF9AA5B5);
 //  above the bar, and back from those returns into the shell as usual.
 // ─────────────────────────────────────────────────────────────────────────────
 class WorkerShell extends StatefulWidget {
-  const WorkerShell({super.key});
+  /// False while ModeShell is showing Host mode (this stays mounted hidden).
+  final bool modeActive;
+  /// Switch to Host mode. Set by ModeShell; without it a HostShell page
+  /// replaces this one.
+  final VoidCallback? onSwitchMode;
+  const WorkerShell({super.key, this.modeActive = true, this.onSwitchMode});
 
   @override
   State<WorkerShell> createState() => _WorkerShellState();
@@ -184,18 +189,28 @@ class _WorkerShellState extends State<WorkerShell> {
     await performSignOut(context);
   }
 
+  void _switchToHost() {
+    final cb = widget.onSwitchMode;
+    if (cb != null) {
+      cb();
+      return;
+    }
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const HostShell()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final tabs = [
       GigWorkerScreen(
         isTabRoot: true,
-        onSwitchToHost: () => Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const HostShell()),
-        ),
+        onSwitchToHost: _switchToHost,
         onGoHome: () => goToHome(context),
         animationGeneration: _homeVisitGen,
-        isTabActive: _index == 0,
+        isTabActive: _index == 0 && widget.modeActive,
+        modeActive: widget.modeActive,
       ),
       SavedScreen(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
       HomeChat(showBackButton: false, visitGeneration: _chatVisitGen),
@@ -203,10 +218,7 @@ class _WorkerShellState extends State<WorkerShell> {
         body: ProfileTab(
           initialRole: 'worker',
           isTabRoot: true,
-          onSwitchRole: () => Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const HostShell()),
-          ),
+          onSwitchRole: _switchToHost,
           onLogout: _performLogout,
           animationGeneration: _profileVisitGen,
         ),

@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/dashboard_header_bar.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/widgets/keep_alive.dart';
@@ -21,8 +22,6 @@ import '../../../core/services/gms_availability.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/map_style.dart';
 import '../../../core/widgets/entrance_animation.dart';
-import '../../../core/widgets/mode_switch.dart';
-import '../../../core/widgets/header_home_button.dart';
 import 'post_quick_gig_screen.dart';
 import 'post_open_gig_screen.dart';
 import 'post_offered_gig_screen.dart';
@@ -243,172 +242,68 @@ class _HostHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Gold gradient band — bottom corners curve, matching the worker
-        // dashboard's header, so the banner below can overlap the curve.
-        ClipRRect(
-          borderRadius: const BorderRadius.only(
-            bottomLeft: Radius.circular(26),
-            bottomRight: Radius.circular(26),
-          ),
-          child: Container(
-            width: double.infinity,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [kGold, Color(0xFFD88810)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 4, 44),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ── Action row ──────────────────────────────
-                    Row(
-                      children: [
-                        // Home (house) — leaves for the Home screen
-                        if (onGoHome != null) ...[
-                          HeaderHomeButton(onTap: onGoHome!),
-                          const SizedBox(width: 10),
-                        ],
-                        // Left: back (when pushed) + "Gig Host / Dashboard" label
-                        Expanded(
-                          child: GestureDetector(
-                          onTap: showBackButton
-                              ? () => Navigator.pop(context)
-                              : null,
-                          child: Row(
-                            children: [
-                              if (showBackButton) ...[
-                                Container(
-                                  width: 34,
-                                  height: 34,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.18),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(
-                                    Icons.arrow_back_ios_new_rounded,
-                                    color: Colors.white,
-                                    size: 15,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                              ],
-                              const Flexible(
-                                child: Text(
-                                  'Dashboard',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: -0.3,
-                                  ),
-                                ),
-                              ),
-                            ],
+        // Gold band — the same DashboardHeaderBar as the worker dashboard,
+        // so switching mode doesn't shift anything in the header.
+        StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('open_gigs')
+              .where('hostId', isEqualTo: uid)
+              .where('status', isEqualTo: 'open')
+              .snapshots(),
+          builder: (context, snap) {
+            final docs = snap.data?.docs ?? const [];
+            var waiting = 0;
+            for (final d in docs) {
+              final applicants =
+                  (d.data() as Map<String, dynamic>)['applicants'] as List?;
+              if (applicants != null && applicants.isNotEmpty) waiting++;
+            }
+            final open = docs.length;
+            return DashboardHeaderBar(
+              colors: const [kGold, Color(0xFFD88810)],
+              isHost: true,
+              onGoHome: onGoHome,
+              showBack: showBackButton,
+              onSwitchMode: onSwitchToWorker,
+              // Same height as the worker's earnings line.
+              subtitle: snap.hasData
+                  ? Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: '$open open ${open == 1 ? 'gig' : 'gigs'}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                        ),
-                        const SizedBox(width: 6),
-                        // Right: action icons (white)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Bell with unread dot
-                            StreamBuilder<QuerySnapshot>(
-                              stream: FirebaseFirestore.instance
-                                  .collection('open_gigs')
-                                  .where('hostId', isEqualTo: uid)
-                                  .where('status', isEqualTo: 'open')
-                                  .snapshots(),
-                              builder: (context, snap) {
-                                final hasApplicants =
-                                    snap.data?.docs.any((d) {
-                                      final applicants =
-                                          (d.data()
-                                                  as Map<
-                                                    String,
-                                                    dynamic
-                                                  >)['applicants']
-                                              as List?;
-                                      return applicants != null &&
-                                          applicants.isNotEmpty;
-                                    }) ??
-                                    false;
-                                return Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Notifications',
-                                      icon: const Icon(
-                                        Icons.notifications_outlined,
-                                        size: 19,
-                                      ),
-                                      onPressed: () =>
-                                          NotificationsSheet.show(context),
-                                      style: IconButton.styleFrom(
-                                        foregroundColor: Colors.white,
-                                        backgroundColor: Colors.white
-                                            .withValues(alpha: 0.18),
-                                        shape: const CircleBorder(),
-                                        fixedSize: const Size(38, 38),
-                                      ),
-                                    ),
-                                    if (hasApplicants)
-                                      Positioned(
-                                        top: 8,
-                                        right: 8,
-                                        child: Container(
-                                          width: 8,
-                                          height: 8,
-                                          decoration: const BoxDecoration(
-                                            color: Colors.red,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                );
-                              },
-                            ),
-                            const SizedBox(width: 4),
-                            IconButton(
-                              tooltip: 'Save Template',
-                              icon: const Icon(
-                                Icons.bookmark_add_outlined,
-                                size: 19,
-                              ),
-                              onPressed: onTemplates,
-                              style: IconButton.styleFrom(
-                                foregroundColor: Colors.white,
-                                backgroundColor: Colors.white.withValues(
-                                  alpha: 0.18,
-                                ),
-                                shape: const CircleBorder(),
-                                fixedSize: const Size(38, 38),
-                              ),
-                            ),
-                            // Worker ⇄ Host mini toggle (current mode named)
-                            if (onSwitchToWorker != null) ...[
-                              const SizedBox(width: 6),
-                              ModeSwitch(isHost: true, onSwitch: onSwitchToWorker!),
-                              const SizedBox(width: 8),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
-                  ],
+                          TextSpan(
+                            text: waiting == 0
+                                ? ' · no applicants waiting'
+                                : ' · $waiting with applicants waiting',
+                          ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    )
+                  : null,
+              actions: [
+                HeaderCircleButton(
+                  icon: Icons.notifications_outlined,
+                  tooltip: 'Notifications',
+                  showDot: waiting > 0,
+                  onTap: () => NotificationsSheet.show(context),
                 ),
-              ),
-            ),
-          ),
+                HeaderCircleButton(
+                  icon: Icons.bookmark_add_outlined,
+                  tooltip: 'Save Template',
+                  onTap: onTemplates,
+                ),
+              ],
+            );
+          },
         ),
         // Workers-online card — always shown, overlapping the header's
         // curved bottom edge, translated up by exactly half its own height

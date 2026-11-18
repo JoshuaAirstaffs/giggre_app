@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/models/rating_summary.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
-import '../../../../core/widgets/mode_switch.dart';
-import '../../../../core/widgets/header_home_button.dart';
+import '../../../../core/widgets/dashboard_header_bar.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Worker Header — blue gradient band
@@ -45,119 +44,32 @@ class WorkerHeader extends StatelessWidget {
     // nothing to pop to (e.g. if ever shown at the root of the navigator).
     final showBack = showBackButton && Navigator.canPop(context);
 
-    return ClipRRect(
-      borderRadius: const BorderRadius.only(
-        bottomLeft: Radius.circular(26),
-        bottomRight: Radius.circular(26),
-      ),
-      child: Container(
-        width: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF2B6FB5), Color(0xFF1F4D80)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+    // Same bar as the Gig Host dashboard (DashboardHeaderBar), so switching
+    // mode doesn't shift anything in the header.
+    return DashboardHeaderBar(
+      colors: const [Color(0xFF2B6FB5), Color(0xFF1F4D80)],
+      isHost: false,
+      onGoHome: onGoHome,
+      showBack: showBack,
+      onSwitchMode: onSwitchToHost,
+      subtitle: subtitle,
+      actions: [
+        if (onTutorial != null)
+          HeaderCircleButton(
+            icon: Icons.school_outlined,
+            tooltip: 'Tutorial',
+            onTap: onTutorial,
           ),
-        ),
-        child: SafeArea(
-          bottom: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 44),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── Title row ────────────────────────────────────────────
-                Row(
-                  children: [
-                    if (onGoHome != null) ...[
-                      HeaderHomeButton(onTap: onGoHome!),
-                      const SizedBox(width: 10),
-                    ],
-                    if (showBack) ...[
-                      GestureDetector(
-                        onTap: () => Navigator.pop(context),
-                        child: Container(
-                          width: 34,
-                          height: 34,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(
-                            Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white,
-                            size: 15,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                    ],
-                    const Expanded(
-                      child: Text(
-                        'Dashboard',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.3,
-                        ),
-                      ),
-                    ),
-                    if (onTutorial != null) ...[
-                      GestureDetector(
-                        onTap: onTutorial,
-                        child: Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.18),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.school_outlined,
-                            color: Colors.white,
-                            size: 19,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    if (onNotifications != null) ...[
-                      GestureDetector(
-                        onTap: onNotifications,
-                        child: TutorialAnchor(
-                          id: 'workerHome.notificationsBell',
-                          child: Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.18),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.notifications_outlined,
-                              color: Colors.white,
-                              size: 19,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    // Worker ⇄ Host mini toggle (current mode named)
-                    if (onSwitchToHost != null) ...[
-                      const SizedBox(width: 8),
-                      ModeSwitch(isHost: false, onSwitch: onSwitchToHost!),
-                    ],
-                  ],
-                ),
-                if (subtitle != null) ...[const SizedBox(height: 6), subtitle!],
-              ],
+        if (onNotifications != null)
+          TutorialAnchor(
+            id: 'workerHome.notificationsBell',
+            child: HeaderCircleButton(
+              icon: Icons.notifications_outlined,
+              tooltip: 'Notifications',
+              onTap: onNotifications,
             ),
           ),
-        ),
-      ),
+      ],
     );
   }
 }

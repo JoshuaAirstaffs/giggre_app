@@ -36,7 +36,12 @@ const _kFlatBarHeight = 64.0;
 //  old dashboard's "Post a Gig" cards used to.
 // ─────────────────────────────────────────────────────────────────────────────
 class HostShell extends StatefulWidget {
-  const HostShell({super.key});
+  /// False while ModeShell is showing Worker mode (this stays mounted hidden).
+  final bool modeActive;
+  /// Switch to Worker mode. Set by ModeShell; without it a WorkerShell page
+  /// replaces this one.
+  final VoidCallback? onSwitchMode;
+  const HostShell({super.key, this.modeActive = true, this.onSwitchMode});
 
   @override
   State<HostShell> createState() => _HostShellState();
@@ -265,16 +270,26 @@ class _HostShellState extends State<HostShell>
     final navBarHeight =
         _kFlatBarHeight + MediaQuery.of(context).padding.bottom;
 
+    void switchToWorker() {
+      final cb = widget.onSwitchMode;
+      if (cb != null) {
+        if (_dialOpen) _closeDial();
+        cb();
+        return;
+      }
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const WorkerShell()),
+      );
+    }
+
     final tabs = [
       GigHostScreen(
         isTabRoot: true,
-        onSwitchToWorker: () => Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const WorkerShell()),
-        ),
+        onSwitchToWorker: switchToWorker,
         onGoHome: () => goToHome(context),
         animationGeneration: _homeVisitGen,
-        isTabActive: _tabIndex == 0,
+        isTabActive: _tabIndex == 0 && widget.modeActive,
       ),
       HostGigsScreen(uid: uid, isTabRoot: true),
       HomeChat(showBackButton: false, visitGeneration: _chatVisitGen),
@@ -282,10 +297,7 @@ class _HostShellState extends State<HostShell>
         body: ProfileTab(
           initialRole: 'host',
           isTabRoot: true,
-          onSwitchRole: () => Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const WorkerShell()),
-          ),
+          onSwitchRole: switchToWorker,
           onLogout: _performLogout,
           animationGeneration: _profileVisitGen,
         ),

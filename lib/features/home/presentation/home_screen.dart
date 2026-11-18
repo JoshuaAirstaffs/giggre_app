@@ -26,8 +26,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/profile_tab_theme.dart';
 import '../../../services/delete_acc_service.dart';
 import '../../auth/presentation/welcome_screen.dart';
-import '../../../screens/host/host_shell.dart';
-import '../../../screens/worker/worker_shell.dart';
+import '../../../screens/mode_shell.dart';
 import '../../../widgets/active_gig_bar.dart';
 import '../../../widgets/content_carousel.dart';
 import '../../wallet/presentation/wallet_screen.dart';
@@ -711,19 +710,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   height: 52,
                   child: ElevatedButton(
                     onPressed: () {
-                      if (_selectedRole == 'host') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => const HostShell()),
-                        );
-                      } else {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const WorkerShell(),
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ModeShell(
+                            startAsHost: _selectedRole == 'host',
                           ),
-                        );
-                      }
+                        ),
+                      );
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _selectedRole == 'worker'
