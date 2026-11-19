@@ -147,6 +147,8 @@ class ProfileTab extends StatefulWidget {
 
 class _ProfileTabState extends State<ProfileTab> {
   late String _viewRole;
+  // True once the page is scrolled: the pinned title bar shows a divider.
+  final ValueNotifier<bool> _scrolled = ValueNotifier(false);
   bool _loading = true;
 
   String _uid = '';
@@ -206,6 +208,7 @@ class _ProfileTabState extends State<ProfileTab> {
 
   @override
   void dispose() {
+    _scrolled.dispose();
     _profileSub?.cancel();
     _quickGigsSub?.cancel();
     _openGigsSub?.cancel();
@@ -898,38 +901,68 @@ class _ProfileTabState extends State<ProfileTab> {
       color: tokens.screenBg,
       child: SafeArea(
         bottom: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        child: Column(
+          children: [
+            // ── Title (pinned) ─────────────────────────────────────────
+            // Stays at the top while the page scrolls, so the back button
+            // is always in reach. A thin divider appears once scrolled.
+            ValueListenableBuilder<bool>(
+              valueListenable: _scrolled,
+              builder: (context, scrolled, child) => AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                decoration: BoxDecoration(
+                  color: tokens.screenBg,
+                  border: Border(
+                    bottom: BorderSide(
+                      color: scrolled
+                          ? Theme.of(context).dividerColor
+                          : Theme.of(context).dividerColor.withValues(alpha: 0),
+                    ),
+                  ),
+                ),
+                child: child,
+              ),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(widget.isTabRoot ? 20 : 8, 6, 20, 6),
+                child: SizedBox(
+                  height: 44,
+                  child: Row(
+                    children: [
+                      if (!widget.isTabRoot)
+                        IconButton(
+                          tooltip: 'Back',
+                          onPressed: () => Navigator.maybePop(context),
+                          icon: Icon(
+                            Icons.arrow_back_ios_new_rounded,
+                            size: 17,
+                            color: tokens.textPrimary,
+                          ),
+                        ),
+                      Text(
+                        'Profile',
+                        style: TextStyle(
+                          color: tokens.textPrimary,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (n) {
+                  if (n.depth == 0) _scrolled.value = n.metrics.pixels > 4;
+                  return false;
+                },
+                child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 32),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Title ──────────────────────────────────────────────────
-              Row(
-                children: [
-                  if (!widget.isTabRoot)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: GestureDetector(
-                        onTap: () => Navigator.maybePop(context),
-                        child: Icon(
-                          Icons.arrow_back_ios_new_rounded,
-                          size: 17,
-                          color: tokens.textPrimary,
-                        ),
-                      ),
-                    ),
-                  Text(
-                    'Profile',
-                    style: TextStyle(
-                      color: tokens.textPrimary,
-                      fontSize: 19,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
 
               // ── Profile Header Card ──────────────────────────────────────
               EntranceAnimation(
@@ -1266,6 +1299,10 @@ class _ProfileTabState extends State<ProfileTab> {
               ),
             ],
           ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

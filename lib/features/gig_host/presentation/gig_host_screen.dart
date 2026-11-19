@@ -68,10 +68,99 @@ class _GigHostScreenState extends State<GigHostScreen> {
   String _userName = '';
   final GlobalKey<_WorkerMapSectionState> _workerMapKey = GlobalKey<_WorkerMapSectionState>();
 
+  // Host's open gigs: count + how many have applicants waiting (header
+  // subtitle and the bell's dot). One listener shared by band and bar.
+  StreamSubscription<QuerySnapshot>? _openGigsSub;
+  final _openCounts = ValueNotifier<({int open, int waiting})?>(null);
+  // Page scrolled at all → the pinned title bar turns solid.
+  final _headerSolid = ValueNotifier<bool>(false);
+
   @override
   void initState() {
     super.initState();
     _loadUser();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _openGigsSub = FirebaseFirestore.instance
+          .collection('open_gigs')
+          .where('hostId', isEqualTo: uid)
+          .where('status', isEqualTo: 'open')
+          .snapshots()
+          .listen((snap) {
+        var waiting = 0;
+        for (final d in snap.docs) {
+          final applicants = d.data()['applicants'] as List?;
+          if (applicants != null && applicants.isNotEmpty) waiting++;
+        }
+        _openCounts.value = (open: snap.docs.length, waiting: waiting);
+      }, onError: (e) => debugPrint('[GigHost] open gigs stream error: $e'));
+    }
+  }
+
+  @override
+  void dispose() {
+    _openGigsSub?.cancel();
+    _openCounts.dispose();
+    _headerSolid.dispose();
+    super.dispose();
+  }
+
+  // The header band scrolls away; its title row (home, bell, templates,
+  // Worker ⇄ Host) stays pinned on top ([DashboardHeaderPart.bar]).
+  Widget _headerPart(DashboardHeaderPart part, {bool solid = false}) {
+    return ValueListenableBuilder<({int open, int waiting})?>(
+      valueListenable: _openCounts,
+      builder: (context, counts, _) {
+        final open = counts?.open ?? 0;
+        final waiting = counts?.waiting ?? 0;
+        return DashboardHeaderBar(
+          colors: const [kGold, Color(0xFFD88810)],
+          isHost: true,
+          part: part,
+          solid: solid,
+          onGoHome: widget.onGoHome,
+          showBack: !widget.isTabRoot,
+          onSwitchMode: widget.onSwitchToWorker,
+          // Same height as the worker's earnings line.
+          subtitle: counts == null || part == DashboardHeaderPart.bar
+              ? null
+              : Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '$open open ${open == 1 ? 'gig' : 'gigs'}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      TextSpan(
+                        text: waiting == 0
+                            ? ' · no applicants waiting'
+                            : ' · $waiting with applicants waiting',
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+          actions: [
+            HeaderCircleButton(
+              icon: Icons.notifications_outlined,
+              tooltip: 'Notifications',
+              showDot: waiting > 0,
+              onTap: () => NotificationsSheet.show(context),
+            ),
+            HeaderCircleButton(
+              icon: Icons.bookmark_add_outlined,
+              tooltip: 'Save Template',
+              onTap: _showTemplates,
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _loadUser() async {
@@ -118,11 +207,22 @@ class _GigHostScreenState extends State<GigHostScreen> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: CustomScrollView(
+      body: NotificationListener<ScrollNotification>(
+        onNotification: (n) {
+          if (n.depth == 0) {
+            final solid = n.metrics.pixels > 6;
+            if (solid != _headerSolid.value) _headerSolid.value = solid;
+          }
+          return false;
+        },
+        child: Stack(
+          children: [
+      CustomScrollView(
         slivers: [
           // ── Gold header band + overlapping stat cards ──────────
           SliverToBoxAdapter(
             child: _HostHeader(
+              band: _headerPart(DashboardHeaderPart.band),
               uid: uid,
               showBackButton: !widget.isTabRoot,
               onTemplates: _showTemplates,
@@ -213,6 +313,20 @@ class _GigHostScreenState extends State<GigHostScreen> {
           ),
         ],
       ),
+            // Pinned title row (see _headerPart).
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: ValueListenableBuilder<bool>(
+                valueListenable: _headerSolid,
+                builder: (context, solid, _) =>
+                    _headerPart(DashboardHeaderPart.bar, solid: solid),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -227,8 +341,10 @@ class _HostHeader extends StatelessWidget {
   final VoidCallback onViewWorkers;
   final VoidCallback? onSwitchToWorker;
   final VoidCallback? onGoHome;
+  final Widget band;
 
   const _HostHeader({
+    required this.band,
     required this.uid,
     required this.showBackButton,
     required this.onTemplates,
@@ -242,69 +358,8 @@ class _HostHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Gold band — the same DashboardHeaderBar as the worker dashboard,
-        // so switching mode doesn't shift anything in the header.
-        StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('open_gigs')
-              .where('hostId', isEqualTo: uid)
-              .where('status', isEqualTo: 'open')
-              .snapshots(),
-          builder: (context, snap) {
-            final docs = snap.data?.docs ?? const [];
-            var waiting = 0;
-            for (final d in docs) {
-              final applicants =
-                  (d.data() as Map<String, dynamic>)['applicants'] as List?;
-              if (applicants != null && applicants.isNotEmpty) waiting++;
-            }
-            final open = docs.length;
-            return DashboardHeaderBar(
-              colors: const [kGold, Color(0xFFD88810)],
-              isHost: true,
-              onGoHome: onGoHome,
-              showBack: showBackButton,
-              onSwitchMode: onSwitchToWorker,
-              // Same height as the worker's earnings line.
-              subtitle: snap.hasData
-                  ? Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: '$open open ${open == 1 ? 'gig' : 'gigs'}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          TextSpan(
-                            text: waiting == 0
-                                ? ' · no applicants waiting'
-                                : ' · $waiting with applicants waiting',
-                          ),
-                        ],
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white70, fontSize: 13),
-                    )
-                  : null,
-              actions: [
-                HeaderCircleButton(
-                  icon: Icons.notifications_outlined,
-                  tooltip: 'Notifications',
-                  showDot: waiting > 0,
-                  onTap: () => NotificationsSheet.show(context),
-                ),
-                HeaderCircleButton(
-                  icon: Icons.bookmark_add_outlined,
-                  tooltip: 'Save Template',
-                  onTap: onTemplates,
-                ),
-              ],
-            );
-          },
-        ),
+        // Gold band (title row pinned separately — see GigHostScreen).
+        band,
         // Workers-online card — always shown, overlapping the header's
         // curved bottom edge, translated up by exactly half its own height
         // (52/2) so the curve crosses its vertical center, matching the

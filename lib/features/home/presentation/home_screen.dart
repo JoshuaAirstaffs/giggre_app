@@ -17,6 +17,7 @@ import 'package:giggre_app/screens/app_contents/privacy_policy.dart';
 import 'package:giggre_app/screens/app_contents/terms_and_conditions.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:giggre_app/core/widgets/app_update_checker.dart';
 import 'package:giggre_app/core/widgets/update_card.dart';
 import 'package:giggre_app/core/widgets/entrance_animation.dart';
@@ -31,6 +32,7 @@ import '../../../widgets/active_gig_bar.dart';
 import '../../../widgets/content_carousel.dart';
 import '../../wallet/presentation/wallet_screen.dart';
 import 'profile_tab.dart';
+import 'widgets/role_illustrations.dart';
 import '../../gig_points/presentation/gig_points_button.dart';
 import '../../gig_points/presentation/gig_points_screen.dart';
 
@@ -970,6 +972,11 @@ class _IconSquareButton extends StatelessWidget {
 // ─────────────────────────────────────────────
 //  Role segmented control
 // ─────────────────────────────────────────────
+// Gig Worker / Gig Host picker (Option A of the role-picker mockup): two
+// tinted square tiles side by side, each with a 3D-style illustration, a
+// small pill on top ("Earn" / "Hire") and the name + one line below. The
+// picked tile gets a ring in its mode colour and a check badge; the
+// Continue button under it names the choice.
 class _RoleSegmentedControl extends StatelessWidget {
   final String? selectedRole;
   final ValueChanged<String> onSelect;
@@ -981,141 +988,182 @@ class _RoleSegmentedControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cardColor = Theme.of(context).cardColor;
-    final borderColor = Theme.of(context).dividerColor;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(15),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: _RoleHalf(
-                  icon: Icons.work_outline_rounded,
-                  label: 'Gig Worker',
-                  subtitle: 'Find gigs & earn money',
-                  isSelected: selectedRole == 'worker',
-                  selectedColor: kBlue,
-                  selectedForeground: Colors.white,
-                  // White subtitle too: white70 on kBlue drops under 4.5:1
-                  selectedSubtle: Colors.white,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(15),
-                    bottomLeft: Radius.circular(15),
-                  ),
-                  onTap: () => onSelect('worker'),
-                ),
-              ),
-              Container(width: 1, color: borderColor),
-              Expanded(
-                child: _RoleHalf(
-                  icon: Icons.storefront_outlined,
-                  label: 'Gig Host',
-                  subtitle: 'Post gigs & find talent',
-                  isSelected: selectedRole == 'host',
-                  selectedColor: kGold,
-                  // White by design choice, matching the Worker card, though
-                  // white on kGold is ~2.0:1 (below 4.5:1)
-                  selectedForeground: Colors.white,
-                  selectedSubtle: Colors.white,
-                  borderRadius: const BorderRadius.only(
-                    topRight: Radius.circular(15),
-                    bottomRight: Radius.circular(15),
-                  ),
-                  onTap: () => onSelect('host'),
-                ),
-              ),
-            ],
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _RoleTile(
+            svg: kRoleWorkerSvg,
+            label: 'Gig Worker',
+            subtitle: 'Find gigs & earn money',
+            pill: 'Earn',
+            pillColor: kBlue,
+            tint: const Color(0xFFE3EEFB),
+            accent: kBlue,
+            isSelected: selectedRole == 'worker',
+            onTap: () => onSelect('worker'),
           ),
         ),
-      ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: _RoleTile(
+            svg: kRoleHostSvg,
+            label: 'Gig Host',
+            subtitle: 'Post gigs & find talent',
+            pill: 'Hire',
+            // Deeper than kGold so the white pill text stays readable
+            pillColor: const Color(0xFFB06E00),
+            tint: const Color(0xFFFFF1D6),
+            accent: kGold,
+            isSelected: selectedRole == 'host',
+            onTap: () => onSelect('host'),
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _RoleHalf extends StatelessWidget {
-  final IconData icon;
+class _RoleTile extends StatelessWidget {
+  final String svg;
   final String label;
   final String subtitle;
+  final String pill;
+  final Color pillColor;
+  final Color tint;
+  final Color accent;
   final bool isSelected;
-  final Color selectedColor;
-  // Label/icon and subtitle colours on the selected fill
-  final Color selectedForeground;
-  final Color selectedSubtle;
-  final BorderRadius borderRadius;
   final VoidCallback onTap;
 
-  const _RoleHalf({
-    required this.icon,
+  const _RoleTile({
+    required this.svg,
     required this.label,
     required this.subtitle,
+    required this.pill,
+    required this.pillColor,
+    required this.tint,
+    required this.accent,
     required this.isSelected,
-    required this.selectedColor,
-    required this.selectedForeground,
-    required this.selectedSubtle,
-    required this.borderRadius,
     required this.onTap,
   });
 
+  static const _pillOverlap = 11.0;
+  static const _anim = Duration(milliseconds: 200);
+
   @override
   Widget build(BuildContext context) {
-    final textColor = isSelected
-        ? selectedForeground
-        : Theme.of(context).colorScheme.onSurface;
-    final unselectedSubtle = Theme.of(
-      context,
-    ).extension<ProfileTabTokens>()!.textSecondary;
-    final subColor = isSelected ? selectedSubtle : unselectedSubtle;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final subtle = Theme.of(context).extension<ProfileTabTokens>()!.textSecondary;
+    final ground = Theme.of(context).scaffoldBackgroundColor;
 
-    // Selection is otherwise only the fill colour; say it for screen readers
     return Semantics(
       button: true,
       selected: isSelected,
       label: '$label, $subtitle',
       excludeSemantics: true,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? selectedColor
-                : selectedColor.withValues(alpha: 0),
-            borderRadius: borderRadius,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                color: isSelected ? selectedForeground : unselectedSubtle,
-                size: 26,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
+        child: Column(
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: _pillOverlap),
+                  child: AnimatedScale(
+                    scale: isSelected ? 1.0 : 0.97,
+                    duration: _anim,
+                    curve: Curves.easeOutBack,
+                    child: AnimatedContainer(
+                      duration: _anim,
+                      height: 132,
+                      width: double.infinity,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: tint,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: isSelected ? accent : accent.withValues(alpha: 0),
+                          width: 3,
+                        ),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: accent.withValues(alpha: 0.28),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 6),
+                                ),
+                              ]
+                            : const [],
+                      ),
+                      child: SvgPicture.string(svg, width: 96, height: 96),
+                    ),
+                  ),
                 ),
+                // Pill on top, centred over the tile's edge
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: pillColor,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: ground, width: 2),
+                      ),
+                      child: Text(
+                        pill,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // Check badge on the picked tile
+                Positioned(
+                  top: _pillOverlap + 10,
+                  right: 10,
+                  child: AnimatedScale(
+                    scale: isSelected ? 1 : 0,
+                    duration: _anim,
+                    curve: Curves.easeOutBack,
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: accent,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      child: const Icon(Icons.check_rounded, color: Colors.white, size: 15),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: TextStyle(
+                color: onSurface,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
               ),
-              const SizedBox(height: 3),
-              Text(
-                subtitle,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: subColor, fontSize: 11),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              style: TextStyle(color: subtle, fontSize: 12),
+            ),
+          ],
         ),
       ),
     );

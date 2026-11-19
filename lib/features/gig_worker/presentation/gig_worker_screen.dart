@@ -12,6 +12,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import 'package:provider/provider.dart';
 import '../../../core/widgets/entrance_animation.dart';
+import '../../../core/widgets/dashboard_header_bar.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/cancellation_request.dart';
@@ -155,12 +156,16 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
   // scrolled about a screen down (e.g. deep into the infinite gig list).
   final _scrollController = ScrollController();
   final _showScrollToTop = ValueNotifier<bool>(false);
+  // Page scrolled at all → the pinned title bar turns solid.
+  final _headerSolid = ValueNotifier<bool>(false);
   static const double _kScrollToTopThreshold = 800;
 
   void _onDashboardScroll() {
     if (!_scrollController.hasClients) return;
     final show = _scrollController.offset > _kScrollToTopThreshold;
     if (show != _showScrollToTop.value) _showScrollToTop.value = show;
+    final solid = _scrollController.offset > 6;
+    if (solid != _headerSolid.value) _headerSolid.value = solid;
   }
 
   void _scrollToTop() {
@@ -235,6 +240,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     _suspensionTimer?.cancel();
     _scrollController.dispose();
     _showScrollToTop.dispose();
+    _headerSolid.dispose();
     _setOnlineStatus(false);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -1900,6 +1906,33 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                     activeGigForBar != null &&
                     _dispatchedGig == null &&
                     _pendingOfferedGig == null;
+                // The header band scrolls away; its title row (home,
+                // tutorial, bell, Worker ⇄ Host) stays pinned on top.
+                Widget header(DashboardHeaderPart part, {bool solid = false}) =>
+                    WorkerHeader(
+                      userId: _userId,
+                      email: _email,
+                      phone: _phone,
+                      rating: _rating,
+                      memberSince: _memberSince,
+                      isDark: isDark,
+                      showBackButton: !widget.isTabRoot,
+                      onNotifications: () =>
+                          WorkerNotificationsSheet.show(context),
+                      onSwitchToHost: widget.onSwitchToHost,
+                      onGoHome: widget.onGoHome,
+                      onTutorial: () => context
+                          .read<TutorialController>()
+                          .restart(gigWorkerHomeFlow),
+                      subtitle: part == DashboardHeaderPart.bar
+                          ? null
+                          : EarningsHeaderLine(
+                              totalByCurrency: _earningsByCode,
+                              weeklyByCurrency: _weeklyByCode,
+                            ),
+                      part: part,
+                      solid: solid,
+                    );
                 return Stack(
                   children: [
                     CustomScrollView(
@@ -1912,26 +1945,8 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                         SliverToBoxAdapter(
                           child: Column(
                             children: [
-                              WorkerHeader(
-                                userId: _userId,
-                                email: _email,
-                                phone: _phone,
-                                rating: _rating,
-                                memberSince: _memberSince,
-                                isDark: isDark,
-                                showBackButton: !widget.isTabRoot,
-                                onNotifications: () =>
-                                    WorkerNotificationsSheet.show(context),
-                                onSwitchToHost: widget.onSwitchToHost,
-                                onGoHome: widget.onGoHome,
-                                onTutorial: () => context
-                                    .read<TutorialController>()
-                                    .restart(gigWorkerHomeFlow),
-                                subtitle: EarningsHeaderLine(
-                                  totalByCurrency: _earningsByCode,
-                                  weeklyByCurrency: _weeklyByCode,
-                                ),
-                              ),
+                              // Title row is pinned over the page (below).
+                              header(DashboardHeaderPart.band),
                               Transform.translate(
                                 offset: const Offset(0, -24),
                                 child: Padding(
@@ -2040,6 +2055,17 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                           ),
                         ),
                       ],
+                    ),
+                    // Pinned title row (see header() above).
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: _headerSolid,
+                        builder: (context, solid, _) =>
+                            header(DashboardHeaderPart.bar, solid: solid),
+                      ),
                     ),
                     if (_dispatchedGig != null)
                       Positioned(

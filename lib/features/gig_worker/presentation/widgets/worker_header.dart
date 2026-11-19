@@ -21,6 +21,9 @@ class WorkerHeader extends StatelessWidget {
   final VoidCallback? onTutorial;
   // Optional line under the title (the worker's earnings)
   final Widget? subtitle;
+  // band + a pinned bar over the page: see DashboardHeaderPart.
+  final DashboardHeaderPart part;
+  final bool solid;
 
   const WorkerHeader({
     super.key,
@@ -36,6 +39,8 @@ class WorkerHeader extends StatelessWidget {
     this.onGoHome,
     this.onTutorial,
     this.subtitle,
+    this.part = DashboardHeaderPart.full,
+    this.solid = false,
   });
 
   @override
@@ -53,6 +58,8 @@ class WorkerHeader extends StatelessWidget {
       showBack: showBack,
       onSwitchMode: onSwitchToHost,
       subtitle: subtitle,
+      part: part,
+      solid: solid,
       actions: [
         if (onTutorial != null)
           HeaderCircleButton(

@@ -3,6 +3,15 @@ import 'package:flutter/material.dart';
 import 'header_home_button.dart';
 import 'mode_switch.dart';
 
+/// Which part of the dashboard header to draw.
+/// - [full]: the band with its title row (scrolls away with the page).
+/// - [band]: the band with an empty slot where the title row goes — pair it
+///   with a [bar] pinned over the top of the page.
+/// - [bar]: only the title row, for pinning: see-through at the top of the
+///   page (the band shows through, looking identical), solid with a shadow
+///   once the page is scrolled ([solid]).
+enum DashboardHeaderPart { full, band, bar }
+
 /// Shared gradient band for the Gig Worker and Gig Host dashboards. Both use
 /// the same layout — same padding, same 38 px title row, same button sizes,
 /// the mode toggle at the same spot and a subtitle line of the same height —
@@ -16,6 +25,9 @@ class DashboardHeaderBar extends StatelessWidget {
   final bool isHost;
   final VoidCallback? onSwitchMode;
   final Widget? subtitle;
+  final DashboardHeaderPart part;
+  /// [DashboardHeaderPart.bar] only: page scrolled → solid background.
+  final bool solid;
 
   const DashboardHeaderBar({
     super.key,
@@ -26,13 +38,49 @@ class DashboardHeaderBar extends StatelessWidget {
     this.actions = const [],
     this.onSwitchMode,
     this.subtitle,
+    this.part = DashboardHeaderPart.full,
+    this.solid = false,
   });
 
   static const double rowHeight = 38;
   static const double subtitleMinHeight = 20;
+  static const double _top = 12;
+
+  Widget _titleRow(BuildContext context) => SizedBox(
+        height: rowHeight,
+        child: Row(
+          children: [
+            if (onGoHome != null) ...[
+              HeaderHomeButton(onTap: onGoHome!),
+              const SizedBox(width: 10),
+            ],
+            if (showBack) ...[
+              _BackButton(onTap: () => Navigator.pop(context)),
+              const SizedBox(width: 10),
+            ],
+            const Expanded(
+              child: Text(
+                'Dashboard',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                ),
+              ),
+            ),
+            for (final a in actions) ...[a, const SizedBox(width: 8)],
+            if (onSwitchMode != null)
+              ModeSwitch(isHost: isHost, onSwitch: onSwitchMode!),
+          ],
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
+    if (part == DashboardHeaderPart.bar) return _bar(context);
     return ClipRRect(
       borderRadius: const BorderRadius.only(
         bottomLeft: Radius.circular(26),
@@ -50,41 +98,13 @@ class DashboardHeaderBar extends StatelessWidget {
         child: SafeArea(
           bottom: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 44),
+            padding: const EdgeInsets.fromLTRB(16, _top, 16, 44),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(
-                  height: rowHeight,
-                  child: Row(
-                    children: [
-                      if (onGoHome != null) ...[
-                        HeaderHomeButton(onTap: onGoHome!),
-                        const SizedBox(width: 10),
-                      ],
-                      if (showBack) ...[
-                        _BackButton(onTap: () => Navigator.pop(context)),
-                        const SizedBox(width: 10),
-                      ],
-                      const Expanded(
-                        child: Text(
-                          'Dashboard',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                          ),
-                        ),
-                      ),
-                      for (final a in actions) ...[a, const SizedBox(width: 8)],
-                      if (onSwitchMode != null)
-                        ModeSwitch(isHost: isHost, onSwitch: onSwitchMode!),
-                    ],
-                  ),
-                ),
+                part == DashboardHeaderPart.band
+                    ? const SizedBox(height: rowHeight)
+                    : _titleRow(context),
                 const SizedBox(height: 6),
                 ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: subtitleMinHeight),
@@ -98,6 +118,47 @@ class DashboardHeaderBar extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  // Pinned title row. Same padding as the band, so at the top of the page it
+  // sits exactly where the band's own row would be.
+  Widget _bar(BuildContext context) {
+    const anim = Duration(milliseconds: 180);
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              opacity: solid ? 1 : 0,
+              duration: anim,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: colors,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(18),
+                    bottomRight: Radius.circular(18),
+                  ),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x33000000), blurRadius: 12, offset: Offset(0, 4)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, _top, 16, 10),
+            child: _titleRow(context),
+          ),
+        ),
+      ],
     );
   }
 }
