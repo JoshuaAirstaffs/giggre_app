@@ -48,33 +48,8 @@ class DashboardHeaderBar extends StatelessWidget {
 
   Widget _titleRow(BuildContext context) => SizedBox(
         height: rowHeight,
-        child: Row(
-          children: [
-            if (onGoHome != null) ...[
-              HeaderHomeButton(onTap: onGoHome!),
-              const SizedBox(width: 10),
-            ],
-            if (showBack) ...[
-              _BackButton(onTap: () => Navigator.pop(context)),
-              const SizedBox(width: 10),
-            ],
-            const Expanded(
-              child: Text(
-                'Dashboard',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                ),
-              ),
-            ),
-            for (final a in actions) ...[a, const SizedBox(width: 8)],
-            if (onSwitchMode != null)
-              ModeSwitch(isHost: isHost, onSwitch: onSwitchMode!),
-          ],
+        child: LayoutBuilder(
+          builder: (context, c) => _titleRowContent(context, c.maxWidth),
         ),
       );
 
@@ -161,6 +136,65 @@ class DashboardHeaderBar extends StatelessWidget {
       ],
     );
   }
+
+  static const _titleStyle = TextStyle(
+    color: Colors.white,
+    fontSize: 17,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.3,
+  );
+
+  // Title row. On narrow screens the "Dashboard" title is dropped rather
+  // than cut to "Dashbo…" (the nav bar already says where you are), and on
+  // the narrowest (folded phones, ~280 dp) the gaps tighten so the mode
+  // toggle never runs off the edge.
+  Widget _titleRowContent(BuildContext context, double maxWidth) {
+    const button = 38.0;
+    final leading = (onGoHome != null ? 1 : 0) + (showBack ? 1 : 0);
+    final fixed =
+        (leading + actions.length) * button +
+        (onSwitchMode != null ? ModeSwitch.width : 0);
+    final roomyGaps = leading * 10.0 + actions.length * 8.0;
+
+    final painter = TextPainter(
+      text: const TextSpan(text: 'Dashboard', style: _titleStyle),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final titleWidth = painter.width;
+    painter.dispose();
+    final showTitle = maxWidth - fixed - roomyGaps >= titleWidth + 4;
+    // Without the title: shrink gaps from 10/8 to 4 when space is tight.
+    final tight = !showTitle && maxWidth - fixed - roomyGaps < 8;
+    final gap = tight ? 4.0 : null;
+
+    return Row(
+      children: [
+        if (onGoHome != null) ...[
+          HeaderHomeButton(onTap: onGoHome!),
+          SizedBox(width: gap ?? 10),
+        ],
+        if (showBack) ...[
+          _BackButton(onTap: () => Navigator.pop(context)),
+          SizedBox(width: gap ?? 10),
+        ],
+        Expanded(
+          child: showTitle
+              ? const Text(
+                  'Dashboard',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _titleStyle,
+                )
+              : const SizedBox.shrink(),
+        ),
+        for (final a in actions) ...[a, SizedBox(width: gap ?? 8)],
+        if (onSwitchMode != null)
+          ModeSwitch(isHost: isHost, onSwitch: onSwitchMode!),
+      ],
+    );
+  }
 }
 
 /// Round translucent 38 px header button, with an optional red dot.
@@ -205,13 +239,18 @@ class HeaderCircleButton extends StatelessWidget {
               child: Container(
                 width: 8,
                 height: 8,
-                decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
               ),
             ),
           ),
       ],
     );
-    return tooltip == null ? withDot : Tooltip(message: tooltip!, child: withDot);
+    return tooltip == null
+        ? withDot
+        : Tooltip(message: tooltip!, child: withDot);
   }
 }
 
@@ -230,7 +269,11 @@ class _BackButton extends StatelessWidget {
           color: Colors.white.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 15),
+        child: const Icon(
+          Icons.arrow_back_ios_new_rounded,
+          color: Colors.white,
+          size: 15,
+        ),
       ),
     );
   }

@@ -5175,51 +5175,60 @@ class _GigMapSectionState extends State<GigMapSection> {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final offeredCount = _visibleOfferedGigs.length;
 
+    // On narrow phones (< 360 dp) the heading gets its own line so it
+    // isn't cut to "Gigs N…" by the view toggle and filter.
+    final narrow = MediaQuery.sizeOf(context).width < 360;
+    final heading = Text(
+      'Gigs Near You',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: onSurface,
+        fontSize: 17,
+        fontWeight: FontWeight.bold,
+      ),
+    );
+    final controls = <Widget>[
+      if (offeredCount > 0)
+        Container(
+          margin: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 4,
+          ),
+          decoration: BoxDecoration(
+            color: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
+            ),
+          ),
+          child: Text(
+            '$offeredCount Offered',
+            style: const TextStyle(
+              color: Color(0xFF8B5CF6),
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      _buildViewModeToggle(),
+      const SizedBox(width: 8),
+      _buildFilterButton(context, onSurface: onSurface),
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Gigs Near You',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: onSurface,
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            if (offeredCount > 0)
-              Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
-                  ),
-                ),
-                child: Text(
-                  '$offeredCount Offered',
-                  style: const TextStyle(
-                    color: Color(0xFF8B5CF6),
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            _buildViewModeToggle(),
-            const SizedBox(width: 8),
-            _buildFilterButton(context, onSurface: onSurface),
-          ],
-        ),
+        if (narrow) ...[
+          heading,
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: controls,
+          ),
+        ] else
+          Row(children: [Expanded(child: heading), ...controls]),
         const SizedBox(height: 12),
         if (_showsMap) ...[
           _buildFallbackBanners(),

@@ -760,6 +760,24 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
   }
 
   // ── Build ────────────────────────────────────────────────────────────────────
+  /// Two equal buttons side by side; stacked on folded/narrow phones
+  /// (< 340 dp) so their labels aren't cut to "Pick a d…".
+  Widget _pair(Widget a, Widget b) {
+    if (MediaQuery.sizeOf(context).width < 340) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [a, const SizedBox(height: 10), b],
+      );
+    }
+    return Row(
+      children: [
+        Expanded(child: a),
+        const SizedBox(width: 10),
+        Expanded(child: b),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
@@ -780,26 +798,34 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         ),
         title: Row(
           children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: kBlue.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
+            // The badge is decoration; drop it on folded/narrow phones so
+            // the title fits instead of overflowing the bar.
+            if (MediaQuery.sizeOf(context).width >= 340) ...[
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: kBlue.withValues(alpha: 0.18),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.workspace_premium_outlined,
+                  color: kBlue,
+                  size: 17,
+                ),
               ),
-              child: const Icon(
-                Icons.workspace_premium_outlined,
-                color: kBlue,
-                size: 17,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              _isEditing ? 'Edit Open Gig' : 'Post Open Gig',
+              const SizedBox(width: 10),
+            ],
+            Flexible(
+              child: Text(
+                _isEditing ? 'Edit Open Gig' : 'Post Open Gig',
+                maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: onSurface,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
+                  color: onSurface,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
             ),
           ],
@@ -1235,9 +1261,15 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    '• $lvSub',
-                    style: const TextStyle(color: kSub, fontSize: 12),
+                  // Shortened with … on narrow phones instead of
+                  // running under the dropdown arrow.
+                  Flexible(
+                    child: Text(
+                      '• $lvSub',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: kSub, fontSize: 12),
+                    ),
                   ),
                 ],
               ),
@@ -1383,107 +1415,100 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
         : 'Pick a date';
     final timeLabel = timeSet ? _scheduledTime!.format(context) : 'Pick a time';
 
-    return Row(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: _pickDate,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-              decoration: BoxDecoration(
-                color: dateSet ? kBlue.withValues(alpha: 0.08) : cardColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: dateSet ? kBlue.withValues(alpha: 0.6) : borderColor,
-                  width: dateSet ? 1.5 : 1,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.calendar_today_rounded,
-                    color: dateSet ? kBlue : kSub,
-                    size: 16,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      dateLabel,
-                      style: TextStyle(
-                        color: dateSet ? onSurface : kSub,
-                        fontSize: 13,
-                        fontWeight: dateSet
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (dateSet)
-                    GestureDetector(
-                      onTap: () => setState(() => _scheduledDate = null),
-                      child: const Icon(
-                        Icons.close_rounded,
-                        color: kSub,
-                        size: 14,
-                      ),
-                    ),
-                ],
-              ),
+    return _pair(
+      GestureDetector(
+        onTap: _pickDate,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: dateSet ? kBlue.withValues(alpha: 0.08) : cardColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: dateSet ? kBlue.withValues(alpha: 0.6) : borderColor,
+              width: dateSet ? 1.5 : 1,
             ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: GestureDetector(
-            onTap: _pickTime,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-              decoration: BoxDecoration(
-                color: timeSet ? kBlue.withValues(alpha: 0.08) : cardColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: timeSet ? kBlue.withValues(alpha: 0.6) : borderColor,
-                  width: timeSet ? 1.5 : 1,
+          child: Row(
+            children: [
+              Icon(
+                Icons.calendar_today_rounded,
+                color: dateSet ? kBlue : kSub,
+                size: 16,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  dateLabel,
+                  style: TextStyle(
+                    color: dateSet ? onSurface : kSub,
+                    fontSize: 13,
+                    fontWeight: dateSet
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.access_time_rounded,
-                    color: timeSet ? kBlue : kSub,
-                    size: 16,
+              if (dateSet)
+                GestureDetector(
+                  onTap: () => setState(() => _scheduledDate = null),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: kSub,
+                    size: 14,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      timeLabel,
-                      style: TextStyle(
-                        color: timeSet ? onSurface : kSub,
-                        fontSize: 13,
-                        fontWeight: timeSet
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                  if (timeSet)
-                    GestureDetector(
-                      onTap: () => setState(() => _scheduledTime = null),
-                      child: const Icon(
-                        Icons.close_rounded,
-                        color: kSub,
-                        size: 14,
-                      ),
-                    ),
-                ],
-              ),
-            ),
+                ),
+            ],
           ),
         ),
-      ],
+      ),
+      GestureDetector(
+        onTap: _pickTime,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: timeSet ? kBlue.withValues(alpha: 0.08) : cardColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: timeSet ? kBlue.withValues(alpha: 0.6) : borderColor,
+              width: timeSet ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.access_time_rounded,
+                color: timeSet ? kBlue : kSub,
+                size: 16,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  timeLabel,
+                  style: TextStyle(
+                    color: timeSet ? onSurface : kSub,
+                    fontSize: 13,
+                    fontWeight: timeSet
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                  ),
+                ),
+              ),
+              if (timeSet)
+                GestureDetector(
+                  onTap: () => setState(() => _scheduledTime = null),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: kSub,
+                    size: 14,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1587,36 +1612,29 @@ class _PostOpenGigScreenState extends State<PostOpenGigScreen> {
           ),
         ),
         const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _LocationModeButton(
-                icon: Icons.my_location_rounded,
-                label: 'Use My Location',
-                active: !_useMapLocation,
-                accentColor: kBlue,
-                onTap: () {
-                  setState(() {
-                    _useMapLocation = false;
-                    if (_gpsPosition != null && _gpsAddress.isNotEmpty) {
-                      _address = _gpsAddress;
-                    }
-                  });
-                  if (_gpsPosition == null) _fetchGpsLocation();
-                },
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _LocationModeButton(
-                icon: Icons.map_outlined,
-                label: 'Select on Map',
-                active: _useMapLocation,
-                accentColor: kBlue,
-                onTap: _openMapPicker,
-              ),
-            ),
-          ],
+        _pair(
+          _LocationModeButton(
+            icon: Icons.my_location_rounded,
+            label: 'Use My Location',
+            active: !_useMapLocation,
+            accentColor: kBlue,
+            onTap: () {
+              setState(() {
+                _useMapLocation = false;
+                if (_gpsPosition != null && _gpsAddress.isNotEmpty) {
+                  _address = _gpsAddress;
+                }
+              });
+              if (_gpsPosition == null) _fetchGpsLocation();
+            },
+          ),
+          _LocationModeButton(
+            icon: Icons.map_outlined,
+            label: 'Select on Map',
+            active: _useMapLocation,
+            accentColor: kBlue,
+            onTap: _openMapPicker,
+          ),
         ),
       ],
     );

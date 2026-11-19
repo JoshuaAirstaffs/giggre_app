@@ -170,14 +170,33 @@ export async function assignGigCodes(
 
 // ── New gigs get their codes automatically ─────────────────────────────────
 
+// Errors worth another try. Many gigs of one task type posted at once all
+// take the next number from the same gsin_task_types counter doc, so their
+// transactions collide; without a retry ~8% of a 200-gig burst were left
+// with no code (load test on dev, 2026-11-18).
+const RETRYABLE = new Set<unknown>([
+  4, 8, 10, 14, // gRPC DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED, ABORTED, UNAVAILABLE
+  "deadline-exceeded", "resource-exhausted", "aborted", "unavailable",
+]);
+const RETRY_WINDOW_MS = 60 * 60 * 1000;
+
 function makeGskuTrigger(collection: GigCollection) {
-  return onDocumentCreated({ ...OPTS, document: `${collection}/{gigId}` }, async (event) => {
+  // retry: safe because assignGigCodes keeps an existing gsku ("kept").
+  return onDocumentCreated({ ...OPTS, document: `${collection}/{gigId}`, retry: true }, async (event) => {
+    const gigId = event.params.gigId;
     try {
-      const r = await assignGigCodes(collection, event.params.gigId);
-      if (r.status === "no_task_type") logger.info("[gsin] no task type yet", { collection, gigId: event.params.gigId });
+      const r = await assignGigCodes(collection, gigId);
+      if (r.status === "no_task_type") logger.info("[gsin] no task type yet", { collection, gigId });
     } catch (err) {
-      // e.g. deleted by the word filter right after creation
-      logger.warn("[gsin] assign failed", { collection, gigId: event.params.gigId, error: String(err) });
+      const code = (err as { code?: unknown })?.code;
+      const fresh = Date.now() - Date.parse(event.time) < RETRY_WINDOW_MS;
+      if (RETRYABLE.has(code) && fresh) {
+        logger.info("[gsin] counter busy, retrying", { collection, gigId, code });
+        throw err; // Eventarc redelivers with backoff
+      }
+      // e.g. deleted by the word filter right after creation, or an
+      // incomplete task type — retrying won't help.
+      logger.warn("[gsin] assign failed", { collection, gigId, error: String(err) });
     }
   });
 }

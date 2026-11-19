@@ -1495,8 +1495,9 @@ class _ProfileCard extends StatelessWidget {
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.5,
                   ),
+                  // Long names wrap to a 2nd line instead of being cut.
                   overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
+                  maxLines: 2,
                 ),
                 if (_subtitle.isNotEmpty) ...[
                   const SizedBox(height: 3),
@@ -1504,7 +1505,7 @@ class _ProfileCard extends StatelessWidget {
                     _subtitle,
                     style: TextStyle(color: tokens.textMuted, fontSize: 11),
                     overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
+                    maxLines: 2,
                   ),
                 ],
                 const SizedBox(height: 14),
@@ -1837,7 +1838,7 @@ class _StatsCard extends StatelessWidget {
                             fontSize: 11,
                             color: tokens.textSecondary,
                           ),
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -1950,17 +1951,25 @@ class _ActionRow extends StatelessWidget {
               child: Icon(icon, color: iconColor, size: 18),
             ),
             const SizedBox(width: 14),
+            // Shrinks slightly on folded phones rather than breaking a
+            // word in two ("Verificati / on").
             Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: labelColor ?? tokens.textPrimary,
-                  fontSize: 14,
-                  fontWeight: labelWeight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: labelColor ?? tokens.textPrimary,
+                    fontSize: 14,
+                    fontWeight: labelWeight,
+                  ),
                 ),
               ),
             ),
             if (badge != null) ...[
+              const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(

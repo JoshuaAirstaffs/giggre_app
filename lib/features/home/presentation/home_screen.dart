@@ -737,16 +737,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       mainAxisAlignment: MainAxisAlignment.center,
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        // Shrinks a little on folded phones instead of
+                        // cutting to "Continue as Gig Wo…".
                         Flexible(
-                          child: Text(
-                            _selectedRole == 'worker'
-                                ? 'Continue as Gig Worker'
-                                : 'Continue as Gig Host',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              _selectedRole == 'worker'
+                                  ? 'Continue as Gig Worker'
+                                  : 'Continue as Gig Host',
+                              maxLines: 1,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                         ),
