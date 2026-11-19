@@ -24,7 +24,9 @@ admin.initializeApp();
 // a Firestore document trigger must sit in a region compatible with the
 // database it watches. This was hardcoded to asia-east2, which is correct for
 // dev and silently wrong for prod — the 20 document triggers below inherit it.
-setGlobalOptions({ region: firestoreTriggerRegion(), maxInstances: 10 });
+// maxInstances: most copies of one function running at once (a cost cap).
+// Sized for ~500 users active together — see the per-file OPTS for overrides.
+setGlobalOptions({ region: firestoreTriggerRegion(), maxInstances: 100 });
 
 // Every user doc in the dev Firebase project belongs to a closed-testing
 // tester by definition, so tester-broadcast tooling below needs no per-user

@@ -6,7 +6,7 @@ import { firestoreTriggerRegion } from "./region";
 import { findUser, userInfo, currencySymbol, walletCurrency, type UserInfo } from "./gigPointsRequests";
 import { loadFx, fromUsd, convertDown, perUsd } from "./fx";
 
-const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
+const OPTS = { region: firestoreTriggerRegion(), maxInstances: 50 } as const;
 
 // ── Gig Wallet requests: Top Up (deposit), Send (transfer), Withdraw ───────
 // Users REQUEST a wallet movement; an admin approves or rejects it in

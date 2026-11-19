@@ -7,7 +7,7 @@ import { loadFx, perUsd } from "./fx";
 
 // Same region pinning as gigPoints.ts (imports are hoisted above
 // setGlobalOptions in index.ts).
-const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
+const OPTS = { region: firestoreTriggerRegion(), maxInstances: 50 } as const;
 
 // ── Gig Points ⇄ GigCash conversion ────────────────────────────────────────
 // Users REQUEST a conversion between Gig Points (gig_points/{uid}) and their

@@ -28,7 +28,7 @@ import { containsBlockedTerm, logAutoModeration } from "./wordFilter";
 // Membership only changes here; firestore.rules lets members write messages,
 // their own lastRead entry and their own mute, nothing else.
 
-const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
+const OPTS = { region: firestoreTriggerRegion(), maxInstances: 100 } as const;
 const db = () => getFirestore();
 
 export const MAX_GROUP_MEMBERS = 50;

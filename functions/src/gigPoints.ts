@@ -11,7 +11,7 @@ import { requireGigPointsAdmin } from "./gigPointsRequests";
 // module is evaluated (imports are hoisted) before that call runs. Same
 // reasoning as ratings.ts / badges.ts.
 const TRIGGER_REGION = firestoreTriggerRegion();
-const OPTS = { region: TRIGGER_REGION, maxInstances: 10 } as const;
+const OPTS = { region: TRIGGER_REGION, maxInstances: 50 } as const;
 
 // ── Gig Points ──────────────────────────────────────────────────────────────
 // Workers earn Gig Points for every gig the host has approved as complete.

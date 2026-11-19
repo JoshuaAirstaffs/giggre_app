@@ -30,7 +30,7 @@ import { firestoreTriggerRegion } from "./region";
 
 // Same hoisting reason as gigPoints.ts / ratings.ts: setGlobalOptions in
 // index.ts runs after this module is evaluated.
-const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
+const OPTS = { region: firestoreTriggerRegion(), maxInstances: 100 } as const;
 
 const db = () => getFirestore();
 

@@ -42,7 +42,7 @@ import { sendPushToUser } from "./push";
 // Clients never read or write these docs directly (firestore.rules): users
 // redeem through redeemPromoCode, admins save through adminSavePromoCode.
 
-const OPTS = { region: firestoreTriggerRegion(), maxInstances: 10 } as const;
+const OPTS = { region: firestoreTriggerRegion(), maxInstances: 50 } as const;
 const db = () => admin.firestore();
 const FV = admin.firestore.FieldValue;
 const ADMIN_PERMISSION = "promotions";
