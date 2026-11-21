@@ -35,6 +35,7 @@ import '../../../reports/report_service.dart';
 import '../../../tutorial/widgets/tutorial_anchor.dart';
 import '../../../../core/widgets/skill_icon.dart';
 import '../../../../core/services/skill_icon_service.dart';
+import '../../../../core/services/viewed_gigs_store.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
@@ -2377,6 +2378,8 @@ class _GigMapSectionState extends State<GigMapSection> {
   void initState() {
     super.initState();
     _userProvider = context.read<CurrentUserProvider>();
+    ViewedGigsStore.instance.load(widget.uid);
+    ViewedGigsStore.instance.viewed.addListener(_onViewedChanged);
     _myLocation =
         (_userProvider.lastLat != null && _userProvider.lastLng != null)
         ? LatLng(_userProvider.lastLat!, _userProvider.lastLng!)
@@ -2783,6 +2786,7 @@ class _GigMapSectionState extends State<GigMapSection> {
   @override
   void didUpdateWidget(GigMapSection old) {
     super.didUpdateWidget(old);
+    if (old.uid != widget.uid) ViewedGigsStore.instance.load(widget.uid);
     // Skills load after this screen opens, and a worker can add their
     // first skill later: keep untouched defaults in step with them.
     if (_usingDefaultFilters &&
@@ -3265,6 +3269,7 @@ class _GigMapSectionState extends State<GigMapSection> {
     _userProvider.removeListener(_onProviderLocationChanged);
     DistanceUnits.region.removeListener(_onRegionChanged);
     SkillIconService.instance.icons.removeListener(_onSkillIconsChanged);
+    ViewedGigsStore.instance.viewed.removeListener(_onViewedChanged);
     widget.externalFocusRequest?.removeListener(_handleExternalFocusRequest);
     _googleMapController?.dispose();
     _osmController.dispose();
@@ -3889,7 +3894,14 @@ class _GigMapSectionState extends State<GigMapSection> {
   // ─────────────────────────────────────────────────────────────────────────
   //  Bottom sheet: single gig
   // ─────────────────────────────────────────────────────────────────────────
+  void _onViewedChanged() {
+    if (mounted) setState(() {});
+  }
+
   void _showGigSheet(BuildContext context, GigMarkerData gig) {
+    // Opening a gig (list card or map pin) marks it viewed: its list title
+    // turns from bold to regular.
+    ViewedGigsStore.instance.markViewed(widget.uid, gig.id);
     showFullGigDetailSheet(
       context,
       gig: gig,
@@ -5436,6 +5448,7 @@ class _GigMapSectionState extends State<GigMapSection> {
   }
 
   Widget _buildListMode(BuildContext context) {
+    final viewedIds = ViewedGigsStore.instance.viewed.value;
     final gigs = _allGigs;
     final queryWords = _searchWords(_searchQuery);
     final searching = queryWords.isNotEmpty;
@@ -5546,6 +5559,7 @@ class _GigMapSectionState extends State<GigMapSection> {
                     hasMore: hasMore,
                     child: _GigListCard(
                       gig: entry.value!,
+                      isViewed: viewedIds.contains(entry.value!.id),
                       accentColor: cardAccentForType(entry.value!.gigType),
                       typeLabel: gigTypeLabel(entry.value!.gigType),
                       distanceLabel: _myLocation != null
@@ -6035,6 +6049,8 @@ class _GigListCard extends StatelessWidget {
   final VoidCallback onTap;
   final bool isBookmarked;
   final VoidCallback? onToggleBookmark;
+  /// Opened before: title drops from bold to regular weight.
+  final bool isViewed;
 
   const _GigListCard({
     required this.gig,
@@ -6044,6 +6060,7 @@ class _GigListCard extends StatelessWidget {
     this.distanceLabel,
     this.isBookmarked = false,
     this.onToggleBookmark,
+    this.isViewed = false,
   });
 
   // Addresses are stored as full "street, barangay/municipality, province"
@@ -6082,11 +6099,21 @@ class _GigListCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      // Viewed gigs sink slightly into the page (like read mail); unseen
+      // ones keep the bright card. Icon and badges stay full colour so the
+      // card never looks disabled.
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         width: double.infinity,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: _listSurfaceColor(context),
+          color: isViewed
+              ? Color.lerp(
+                  _listSurfaceColor(context),
+                  Theme.of(context).scaffoldBackgroundColor,
+                  0.55,
+                )
+              : _listSurfaceColor(context),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Theme.of(context).dividerColor),
         ),
@@ -6137,11 +6164,19 @@ class _GigListCard extends StatelessWidget {
                             gig.title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                            // Not viewed: bold. Viewed: regular and a touch
+                            // softer, like read mail.
                             style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface,
+                              color: Theme.of(context).colorScheme.onSurface
+                                  .withValues(alpha: isViewed ? 0.78 : 1),
                               fontSize: 13.5,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: isViewed
+                                  ? FontWeight.w500
+                                  : FontWeight.w800,
                             ),
+                            semanticsLabel: isViewed
+                                ? gig.title
+                                : '${gig.title}, not viewed',
                           ),
                         ),
                         const SizedBox(width: 6),
