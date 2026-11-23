@@ -907,34 +907,22 @@ void showFullGigDetailSheet(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Stack(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10, bottom: 14),
-                    child: Center(
-                      child: Container(
-                        width: 36,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: isDark ? kBorder : const Color(0xFFD5DCE6),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
+              // Drag handle
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 10),
+                child: Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? kBorder : const Color(0xFFD5DCE6),
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                  Positioned(
-                    top: 0,
-                    right: 0,
-                    child: IconButton(
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      icon: Icon(Icons.close_rounded, color: kSub, size: 22),
-                      onPressed: () => Navigator.pop(ctx),
-                    ),
-                  ),
-                ],
+                ),
               ),
-              // Status pill + actions row
+              // Status pill + actions row (save · report · close), all the
+              // same 40 px round buttons on one line.
               Row(
                 children: [
                   Container(
@@ -973,8 +961,8 @@ void showFullGigDetailSheet(
                   if (onToggleBookmark != null)
                     StatefulBuilder(
                       builder: (sbCtx, setIconState) => IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
+                        tooltip: isSaved ? 'Remove from saved' : 'Save gig',
+                        style: _sheetActionStyle,
                         icon: Icon(
                           isSaved
                               ? Icons.bookmark_rounded
@@ -990,8 +978,8 @@ void showFullGigDetailSheet(
                     ),
                   if (gig.hostId != uid)
                     IconButton(
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
+                      tooltip: 'Report gig',
+                      style: _sheetActionStyle,
                       icon: const Icon(
                         Icons.flag_outlined,
                         color: kSub,
@@ -1015,6 +1003,12 @@ void showFullGigDetailSheet(
                         );
                       },
                     ),
+                  IconButton(
+                    tooltip: 'Close',
+                    style: _sheetActionStyle,
+                    icon: const Icon(Icons.close_rounded, color: kSub, size: 22),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -6516,3 +6510,14 @@ class GigThumb extends StatelessWidget {
     );
   }
 }
+
+
+// Round 40 px buttons for the gig sheet's top row (save, report, close):
+// same size, spacing and tap area, so they line up.
+final ButtonStyle _sheetActionStyle = IconButton.styleFrom(
+  fixedSize: const Size(40, 40),
+  minimumSize: const Size(40, 40),
+  padding: EdgeInsets.zero,
+  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  shape: const CircleBorder(),
+);
