@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/theme/app_colors.dart';
 import 'widgets/host_gig_card.dart';
@@ -193,9 +194,7 @@ class _HostGigsScreenState extends State<HostGigsScreen> {
         ),
       ),
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: kAmber, strokeWidth: 2),
-            )
+          ? const SkeletonCards()
           : Column(
               children: [
                 // ── Stat cards (moved here from the dashboard) ───

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/providers/current_user_provider.dart';
@@ -69,7 +70,7 @@ class _VideoTutorialsScreenState extends State<VideoTutorialsScreen> {
           stream: _stream,
           builder: (context, snap) {
             if (!snap.hasData && !snap.hasError) {
-              return const Center(child: CircularProgressIndicator());
+              return const SkeletonCards();
             }
             final all = snap.data ?? const <TutorialVideo>[];
             // Search the full video (both languages), then show the user's version.

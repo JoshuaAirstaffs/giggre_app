@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 
 import '../../../core/theme/profile_tab_theme.dart';
 import 'transaction_details_screen.dart';
@@ -94,12 +95,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                     );
                   }
                   if (!snap.hasData) {
-                    return Center(
-                      child: CircularProgressIndicator(
-                        color: accent,
-                        strokeWidth: 2,
-                      ),
-                    );
+                    return const SkeletonList(circle: false);
                   }
                   final txs = collapseRefunds(
                     snap.data!.docs.map(WalletTx.fromDoc).toList(),

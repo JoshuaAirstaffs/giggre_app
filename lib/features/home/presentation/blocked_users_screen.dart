@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 
 import '../../../core/theme/app_colors.dart';
 
@@ -84,7 +85,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
                   .snapshots(),
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const SkeletonList();
                 }
                 final blockedIds =
                     (snap.data?.data()?['blockedUsers'] as List<dynamic>? ??
@@ -136,7 +137,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
                   ),
                   builder: (context, userSnap) {
                     if (userSnap.connectionState != ConnectionState.done) {
-                      return const Center(child: CircularProgressIndicator());
+                      return const SkeletonList();
                     }
                     final docs = userSnap.data ?? [];
                     return ListView.separated(

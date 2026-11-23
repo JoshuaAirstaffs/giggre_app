@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:giggre_app/core/services/rating_service.dart' show RateeRole;
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:giggre_app/core/theme/profile_tab_theme.dart';
@@ -211,7 +212,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
 
   Widget _body(ProfileTabTokens tokens) {
     if (_loading && _results.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return const SkeletonList();
     }
     if (_error != null) return _note(tokens, Icons.wifi_off_rounded, _error!);
     if (UserSearchService.normalize(_lastQuery).length < 2) {

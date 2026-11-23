@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -2266,7 +2267,7 @@ class _ChatState extends State<Chat>
           // ── Message list ─────────────────────────────────────────────────
           Expanded(
             child: _isLoadingInitial
-                ? const Center(child: CircularProgressIndicator())
+                ? const SkeletonChat()
                 : _msgs.isEmpty
                 ? Center(
                     child: Text(
@@ -2286,9 +2287,7 @@ class _ChatState extends State<Chat>
                       if (_isLoadingMore && i == 0) {
                         return const Padding(
                           padding: EdgeInsets.only(bottom: 8),
-                          child: Center(
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
+                          child: SkeletonChat(count: 2),
                         );
                       }
                       final j = _isLoadingMore ? i - 1 : i;
@@ -3096,7 +3095,7 @@ class _ImageAttachmentBubble extends StatelessWidget {
         width: 220,
         height: 160,
         color: Colors.grey.shade300,
-        child: const Center(child: CircularProgressIndicator()),
+        child: const SkeletonBox.expand(),
       );
     }
     return Semantics(
@@ -3122,7 +3121,7 @@ class _ImageAttachmentBubble extends StatelessWidget {
               : const SizedBox(
                   width: 220,
                   height: 160,
-                  child: Center(child: CircularProgressIndicator()),
+                  child: SkeletonBox.expand(),
                 ),
           errorBuilder: (_, _, _) => Container(
             width: 220,

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../../core/widgets/skeleton.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -453,8 +454,7 @@ class _WorkerNotificationsSheetState
             // ── Body ────────────────────────────────────────────────
             if (_loading)
               const Expanded(
-                child: Center(
-                    child: CircularProgressIndicator(color: purple)),
+                child: SkeletonList(),
               )
             else if (activities.isEmpty)
               Expanded(

@@ -3,6 +3,7 @@ import 'package:giggre_app/core/services/unverified_limit.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' show LatLng;
 import 'package:provider/provider.dart';
 
@@ -336,7 +337,7 @@ class _SavedScreenState extends State<SavedScreen> {
           stream: _savedRef.orderBy('savedAt', descending: true).snapshots(),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
+              return const SkeletonCards();
             }
             final docs = snapshot.data!.docs;
             if (docs.isEmpty) {
@@ -394,7 +395,7 @@ class _SavedScreenState extends State<SavedScreen> {
               future: _fetchGigs(gigTypeById),
               builder: (context, gigsSnap) {
                 if (!gigsSnap.hasData) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const SkeletonCards();
                 }
                 final gigsById = gigsSnap.data!;
                 // A blocked host's bookmarked gig should disappear here too,

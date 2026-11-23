@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/models/rating_summary.dart';
@@ -771,7 +772,7 @@ class _GigHostProfileScreenState extends State<GigHostProfileScreen> {
         ),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: kAmber))
+          ? const SkeletonProfile()
           : SafeArea(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(

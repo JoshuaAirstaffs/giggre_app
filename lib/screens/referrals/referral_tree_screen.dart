@@ -1,5 +1,6 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:giggre_app/core/utils/currency_formatter.dart';
 import 'package:giggre_app/main.dart' show flavor;
 
@@ -249,7 +250,7 @@ class _ReferralTreeScreenState extends State<ReferralTreeScreen> {
       ),
       body: SafeArea(
         child: _loading
-            ? const Center(child: CircularProgressIndicator())
+            ? const SkeletonList()
             : RefreshIndicator(
                 onRefresh: _load,
                 color: primaryColor,

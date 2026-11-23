@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:giggre_app/core/services/unverified_limit.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/models/rating_summary.dart';
@@ -1868,9 +1869,7 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: (_loading || _awaitingActiveGigRestore)
-          ? const Center(
-              child: CircularProgressIndicator(color: kBlue, strokeWidth: 2),
-            )
+          ? const SkeletonDashboard()
           : !_workingUIRouteActive && _activeQuickGig != null
           ? WorkingUI(
               gig: _activeQuickGig!,

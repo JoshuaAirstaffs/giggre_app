@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -522,7 +523,7 @@ class _GigChatsTabState extends State<_GigChatsTab> {
       stream: _stream,
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const SkeletonList();
         }
 
         if (snap.hasError) {
@@ -1140,7 +1141,7 @@ class _MessageRequestsScreenState extends State<_MessageRequestsScreen> {
         stream: _stream,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const SkeletonList();
           }
           final docs = (snap.data?.docs ?? const [])
               .where(
@@ -1767,7 +1768,7 @@ class _SupportTabState extends State<_SupportTab> {
           if (i == _rooms.length) {
             return const Padding(
               padding: EdgeInsets.symmetric(vertical: 16),
-              child: Center(child: CircularProgressIndicator()),
+              child: SkeletonList(count: 1, padding: EdgeInsets.zero),
             );
           }
 

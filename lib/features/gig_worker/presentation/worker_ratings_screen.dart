@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/models/rating_summary.dart';
@@ -110,7 +111,7 @@ class _WorkerRatingsScreenState extends State<WorkerRatingsScreen> {
           ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: kAmber))
+                ? const SkeletonList()
                 : _items.isEmpty
                 ? _EmptyState(onSurface: onSurface)
                 : RefreshIndicator(

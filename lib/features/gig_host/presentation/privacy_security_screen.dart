@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -84,9 +85,7 @@ class _PrivacySecurityScreenState extends State<PrivacySecurityScreen> {
       ),
       body: SafeArea(
         child: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(strokeWidth: 2, color: kBlue),
-              )
+            ? const SkeletonList(circle: false)
             : SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
                 child: Column(

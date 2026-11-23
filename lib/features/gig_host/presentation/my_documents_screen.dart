@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -748,15 +749,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                       if (progress == null) return child;
                       return SizedBox(
                         height: 300,
-                        child: Center(
-                          child: CircularProgressIndicator(
-                            value: progress.expectedTotalBytes != null
-                                ? progress.cumulativeBytesLoaded /
-                                    progress.expectedTotalBytes!
-                                : null,
-                            color: _indeedBlue,
-                          ),
-                        ),
+                        child: const SkeletonBox.expand(radius: 12),
                       );
                     },
                     errorBuilder: (_, __, ___) => const SizedBox(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
@@ -216,7 +217,7 @@ class _GigHistoryScreenState extends State<GigHistoryScreen> {
             ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: kBlue))
+                ? const SkeletonCards()
                 : filtered.isEmpty
                     ? _EmptyState(onSurface: onSurface)
                     : RefreshIndicator(

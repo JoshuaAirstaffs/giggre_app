@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -73,7 +74,7 @@ class _AboutGiggreState extends State<AboutGiggre> {
       ),
       body: SafeArea(
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? const SkeletonArticle()
             : SingleChildScrollView(
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),

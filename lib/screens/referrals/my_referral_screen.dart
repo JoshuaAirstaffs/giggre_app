@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -255,7 +256,7 @@ class _ReferralCodeTabState extends State<_ReferralCodeTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Center(child: CircularProgressIndicator());
+    if (_isLoading) return const SkeletonDetail();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = isDark
@@ -907,7 +908,7 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
 
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const SkeletonList();
     }
 
     if (_referrals.isEmpty) {
@@ -1195,7 +1196,7 @@ class _PeopleReferredTabState extends State<_PeopleReferredTab> {
                 if (index == _referrals.length) {
                   return const Padding(
                     padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Center(child: CircularProgressIndicator()),
+                    child: SkeletonList(count: 1, padding: EdgeInsets.zero),
                   );
                 }
 
@@ -1458,7 +1459,7 @@ class _ReferralRoadmapTabState extends State<_ReferralRoadmapTab> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const SkeletonList();
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;

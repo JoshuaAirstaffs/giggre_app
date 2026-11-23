@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
@@ -94,7 +95,7 @@ List<Widget> activitySlivers(
       boxed(
         const Padding(
           padding: EdgeInsets.all(28),
-          child: Center(child: CircularProgressIndicator(color: kGold)),
+          child: SkeletonList(count: 3, circle: false, padding: EdgeInsets.zero),
         ),
       ),
     ];

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/models/rating_summary.dart';
@@ -830,10 +831,7 @@ class _ProfileTabState extends State<ProfileTab> {
     final goldText = isDark ? kGold : _kGoldTextLight;
 
     if (_loading) {
-      final accentColor = _viewRole == 'worker' ? kBlue : kGold;
-      return Center(
-        child: CircularProgressIndicator(color: accentColor, strokeWidth: 2),
-      );
+      return const SkeletonProfile();
     }
 
     final defaultCurrencyCode = context

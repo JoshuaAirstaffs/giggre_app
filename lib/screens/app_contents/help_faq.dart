@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:giggre_app/core/theme/theme_provider.dart';
 import 'package:giggre_app/screens/app_contents/contact_us.dart';
@@ -82,7 +83,7 @@ final response = await FirebaseFirestore.instance
       ),
       body: SafeArea(
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: kBlue))
+            ? const SkeletonArticle()
             : SingleChildScrollView(
                 child: Padding(
                   padding: const EdgeInsets.all(24),

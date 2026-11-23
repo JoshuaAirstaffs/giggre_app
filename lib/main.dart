@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'core/widgets/skeleton.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -347,7 +348,7 @@ class _AuthGateState extends State<AuthGate> {
             _restoringSession ||
             isCompletingRegistration.value) {
           return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+            body: SkeletonSplash(),
           );
         }
 
@@ -427,7 +428,7 @@ class _AuthGateState extends State<AuthGate> {
             );
           }
           return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+            body: SkeletonSplash(),
           );
         }
 
@@ -648,7 +649,7 @@ class _MaintenanceGate extends StatelessWidget {
         // Hold on splash-style loader until we have a definitive answer
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+            body: SkeletonSplash(),
           );
         }
 

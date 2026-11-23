@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:flutter/services.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -414,9 +415,7 @@ class _GroupChatScreenState extends State<GroupChatScreen>
                         stream: _messageStream,
                         builder: (context, snap) {
                           if (!snap.hasData) {
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
+                            return const SkeletonChat();
                           }
                           return _messageList(snap.data!.docs, isDark);
                         },
@@ -859,7 +858,7 @@ class _ImageMessage extends StatelessWidget {
               height: 260,
               color: Colors.grey.withValues(alpha: 0.2),
               alignment: Alignment.center,
-              child: const CircularProgressIndicator(strokeWidth: 2),
+              child: const SkeletonBox.expand(),
             ),
             errorWidget: (_, _, _) => Container(
               width: 220,

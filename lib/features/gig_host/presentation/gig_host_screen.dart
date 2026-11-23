@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import '../../../core/widgets/dashboard_header_bar.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -1237,12 +1238,7 @@ class _GigPreviewListState extends State<_GigPreviewList> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: CircularProgressIndicator(color: kAmber, strokeWidth: 2),
-        ),
-      );
+      return const SkeletonCards(count: 3, padding: EdgeInsets.zero);
     }
 
     final preview = _latest;

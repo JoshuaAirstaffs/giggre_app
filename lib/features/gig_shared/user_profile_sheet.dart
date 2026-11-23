@@ -5,6 +5,7 @@ import '../../core/models/rating_summary.dart';
 import '../../core/services/rating_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -118,7 +119,7 @@ Future<void> showUserProfileSheet(
                 child: snap.connectionState != ConnectionState.done
                     ? const SizedBox(
                         height: 160,
-                        child: Center(child: CircularProgressIndicator()),
+                        child: SkeletonProfile(compact: true, padding: EdgeInsets.zero),
                       )
                     : blocked
                     ? Column(

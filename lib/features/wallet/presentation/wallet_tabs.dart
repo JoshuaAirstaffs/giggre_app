@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
@@ -540,7 +541,7 @@ List<Widget> walletActivitySlivers(
       chips,
       boxed(Padding(
         padding: const EdgeInsets.all(28),
-        child: Center(child: CircularProgressIndicator(color: accent)),
+        child: const SkeletonList(count: 3, circle: false, padding: EdgeInsets.zero),
       )),
     ];
   }
@@ -760,7 +761,7 @@ class WalletRequestsList extends StatelessWidget {
     if (list == null && !hasError) {
       return Padding(
         padding: const EdgeInsets.all(32),
-        child: Center(child: CircularProgressIndicator(color: accent)),
+        child: const SkeletonList(count: 3, circle: false, padding: EdgeInsets.zero),
       );
     }
     if (hasError && (list == null || list.isEmpty)) {

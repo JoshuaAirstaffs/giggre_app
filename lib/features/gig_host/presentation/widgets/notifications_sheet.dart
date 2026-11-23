@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../../core/widgets/skeleton.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -444,7 +445,7 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
             if (_loading)
               const Expanded(
                 child:
-                    Center(child: CircularProgressIndicator(color: kAmber)),
+                    SkeletonList(),
               )
             else if (activities.isEmpty)
               Expanded(

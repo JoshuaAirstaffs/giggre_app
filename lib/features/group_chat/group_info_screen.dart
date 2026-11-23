@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:giggre_app/core/services/rating_service.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:giggre_app/features/chat/user_search_screen.dart'
@@ -394,7 +395,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen>
             return const Center(child: Text("This group isn't available."));
           }
           if (group == null) {
-            return const Center(child: CircularProgressIndicator());
+            return const SkeletonProfile();
           }
           final members = List<String>.from(group['participants'] as List);
           final admins = Set<String>.from(group['admins'] as List? ?? const []);
@@ -777,7 +778,7 @@ class _AddMembersScreenState extends State<_AddMembersScreen> {
         future: _contacts,
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return const SkeletonList();
           }
           if (snap.hasError) {
             return const Center(

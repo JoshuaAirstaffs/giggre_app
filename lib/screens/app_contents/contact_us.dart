@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
 import 'package:giggre_app/core/services/content_filter_service.dart';
@@ -618,7 +619,7 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
           // ── List ────────────────────────────────────────────────────────
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? const SkeletonList(circle: false)
                 : filtered.isEmpty
                     ? Center(
                         child: Column(
@@ -650,9 +651,7 @@ class _MyTicketsTabState extends State<_MyTicketsTab> {
                             if (i == filtered.length) {
                               return const Padding(
                                 padding: EdgeInsets.symmetric(vertical: 16),
-                                child: Center(
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                ),
+                                child: SkeletonList(count: 1, circle: false, padding: EdgeInsets.zero),
                               );
                             }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/widgets/skeleton.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/providers/current_user_provider.dart';
@@ -408,12 +409,7 @@ class _PaymentHistorySheetState extends State<PaymentHistorySheet> {
               )
             else if (_loading)
               Expanded(
-                child: Center(
-                  child: CircularProgressIndicator(
-                    color: green,
-                    strokeWidth: 2,
-                  ),
-                ),
+                child: const SkeletonList(circle: false),
               )
             else
               Expanded(

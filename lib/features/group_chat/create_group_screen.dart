@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:giggre_app/features/group_chat/group_chat_screen.dart';
 import 'package:giggre_app/features/group_chat/group_chat_service.dart';
@@ -89,7 +90,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
             ),
           ),
           body: snap.connectionState != ConnectionState.done
-              ? const Center(child: CircularProgressIndicator())
+              ? const SkeletonList()
               : snap.hasError
               ? const Center(
                   child: Text("Couldn't load your chats. Try again."),

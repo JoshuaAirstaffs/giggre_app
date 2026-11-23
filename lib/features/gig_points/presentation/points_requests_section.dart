@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -94,7 +95,7 @@ class PointsRequestsList extends StatelessWidget {
         if (snap.data == null && !snap.hasError) {
           return const Padding(
             padding: EdgeInsets.all(32),
-            child: Center(child: CircularProgressIndicator(color: kGold)),
+            child: SkeletonList(count: 3, circle: false, padding: EdgeInsets.zero),
           );
         }
         if (snap.hasError && snap.data == null) {

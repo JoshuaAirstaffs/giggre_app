@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/skeleton.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../models/gig_points_models.dart';
@@ -27,9 +28,7 @@ class GigPointsEarnTab extends StatelessWidget {
               child: !loaded
                   ? const Padding(
                       padding: EdgeInsets.all(12),
-                      child: Center(
-                        child: CircularProgressIndicator(color: kGold),
-                      ),
+                      child: SkeletonList(count: 3, circle: false, padding: EdgeInsets.zero),
                     )
                   : c == null
                   ? const Text(

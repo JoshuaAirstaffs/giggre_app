@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../../../../core/widgets/skeleton.dart';
 import 'gig_images_picker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -1542,9 +1543,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
           elevation: 0,
           foregroundColor: activeGigTextPrimary(isDark),
         ),
-        body: const Center(
-          child: CircularProgressIndicator(color: kAmber, strokeWidth: 2),
-        ),
+        body: const SkeletonDetail(),
       );
     }
 
@@ -4604,12 +4603,7 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
             if (!snap.hasData) {
               return const Padding(
                 padding: EdgeInsets.symmetric(vertical: 20),
-                child: Center(
-                  child: CircularProgressIndicator(
-                    color: kAmber,
-                    strokeWidth: 2,
-                  ),
-                ),
+                child: SkeletonList(count: 2, padding: EdgeInsets.zero),
               );
             }
             // Cancelled slots are done — the cancelled worker's own device

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../core/widgets/skeleton.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
@@ -375,9 +376,7 @@ class ContentCarouselState extends State<ContentCarousel> with RouteAware {
           height: widget.height,
           child: Container(
             color: Theme.of(context).cardColor,
-            child: const Center(
-              child: CircularProgressIndicator(color: kGold, strokeWidth: 2),
-            ),
+            child: const SkeletonBox.expand(),
           ),
         ),
       );
@@ -534,9 +533,7 @@ class _SlideItem extends StatelessWidget {
           width: double.infinity,
           placeholder: (context, url) => Container(
             color: Theme.of(context).cardColor,
-            child: const Center(
-              child: CircularProgressIndicator(color: kGold, strokeWidth: 2),
-            ),
+            child: const SkeletonBox.expand(),
           ),
           errorWidget: (context, url, error) =>
               Container(color: Theme.of(context).cardColor),
@@ -895,12 +892,7 @@ class _VideoSlideItemState extends State<_VideoSlideItem>
                 color: Theme.of(context).cardColor,
                 child: _ready
                     ? null
-                    : const Center(
-                        child: CircularProgressIndicator(
-                          color: kGold,
-                          strokeWidth: 2,
-                        ),
-                      ),
+                    : const SkeletonBox.expand(),
               ),
             if (_ready && controller != null)
               // Tapping the video pauses it and brings up the controls, which

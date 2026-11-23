@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/widgets/skeleton.dart';
 import 'package:giggre_app/core/theme/app_colors.dart';
 import 'package:giggre_app/core/theme/theme_provider.dart';
 import 'package:giggre_app/features/dev_tools/widgets/dev_mode_entry_point.dart';
@@ -91,12 +92,7 @@ class _PrivacyPolicyState extends State<PrivacyPolicy> {
         SafeArea(
         child:
         _isLoading
-        ? Center(
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: kBlue,
-          ),
-        )
+        ? const SkeletonArticle()
         : SingleChildScrollView(
           child: Padding(
             padding: const EdgeInsets.all(16.0),
