@@ -1,0 +1,13 @@
+{
+  "$comment": "List prices used for ESTIMATES only (not billing). Verify before any billable run: https://cloud.google.com/firestore/pricing , https://firebase.google.com/pricing , https://cloud.google.com/functions/pricing , https://mapsplatform.google.com/pricing/ . Prices vary by region; these are the asia-east2 (Hong Kong) / multi-region tier upper bounds so estimates err high.",
+  "verifiedOn": "UNVERIFIED — check the URLs above and update this date before a billable run",
+  "currency": "USD",
+  "firestore": { "readsPer100k": 0.06, "writesPer100k": 0.18, "deletesPer100k": 0.02, "freeReadsPerDay": 50000, "freeWritesPerDay": 20000, "applyFreeTier": false },
+  "auth": { "emailPasswordPerMau": 0.0, "freeMau": 50000, "$note": "Email/password is free under the Identity Platform free MAU tier; phone/SMS is not used." },
+  "functions": { "invocationsPerMillion": 0.40, "gbSecondPrice": 0.0000025, "avgGbSecondsPerInvocation": 0.1 },
+  "maps": {
+    "placesAutocompletePer1000": 2.83,
+    "placeDetailsPer1000": 17.0,
+    "$note": "The load test sends ZERO Google Maps Platform requests: map rendering on mobile is SDK-only (unbilled), and Places calls are only made from a real device in the optional integration test. Estimates for real-world Places usage are reported separately."
+  }
+}

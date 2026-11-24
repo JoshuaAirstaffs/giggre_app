@@ -1,0 +1,15 @@
+{
+  "name": "giggre-loadtest",
+  "private": true,
+  "type": "module",
+  "description": "Giggre virtual-user load simulator (Firebase client SDK) with stage approval gates. See README.md.",
+  "engines": { "node": ">=20" },
+  "bin": { "giggre-loadtest": "./cli.mjs" },
+  "scripts": {
+    "status": "node cli.mjs status",
+    "validate": "node cli.mjs validate"
+  },
+  "dependencies": {
+    "firebase": "13.2.0"
+  }
+}

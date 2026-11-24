@@ -1,0 +1,35 @@
+{
+  "$comment": "Hard stops enforced by the runner. Any breach aborts the stage immediately and writes an ABORTED report.",
+  "rampUpMin": 5,
+  "maxRunMinutesOverPlan": 15,
+  "abortOnUnexpectedErrorRate": 0.05,
+  "errorRateWindowSec": 60,
+  "minOpsBeforeErrorAbort": 200,
+  "abortOnP95LatencyMs": 15000,
+  "abortIfEstimatedCostUsdExceeds": "approved",
+  "$readLimitNote": "About 1.5x each stage's planned estimate (node cli.mjs plan). Re-check after changing workload.json.",
+  "maxReadsPerStage": {
+    "1": 1300000,
+    "2": 18000000,
+    "3": 52000000,
+    "4": 96000000
+  },
+  "maxWritesPerStage": {
+    "1": 300000,
+    "2": 1500000,
+    "3": 3000000,
+    "4": 4500000
+  },
+  "approvalTtlMinutes": 60,
+  "syntheticEmailDomain": "loadtest.giggre.invalid",
+  "syntheticMarkerField": "loadTestRunId",
+  "syntheticGeoSandbox": {
+    "$comment": "Synthetic gigs and users are placed here (Metro Manila box). In 'staging' set a box with no real dev testers nearby, because onOpenGigPosted pushes to available users within 10 km.",
+    "latMin": 14.5,
+    "latMax": 14.7,
+    "lngMin": 120.95,
+    "lngMax": 121.1
+  },
+  "latencyAbortOnEmulator": false,
+  "$latencyAbortNote": "User decision 2026-11-23: on the emulator, latency reflects one local JVM (saturates ~50-60 concurrent sessions), so it never aborts a run there. Error-rate, read/write and run-time stops still apply. Billable environments keep abortOnP95LatencyMs."
+}

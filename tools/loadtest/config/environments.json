@@ -1,0 +1,41 @@
+{
+  "$comment": "Where a stage may run. Production is hard-disabled: synthetic gigs would appear to real workers and fire real push notifications. 'staging' points at the dev project, which real testers use too; prefer a dedicated staging project (set projectId + config + enabled).",
+  "emulator": {
+    "enabled": true,
+    "billable": false,
+    "projectId": "demo-giggre-loadtest",
+    "hosts": {
+      "auth": "127.0.0.1:9099",
+      "firestore": "127.0.0.1:8080",
+      "functions": "127.0.0.1:5001"
+    },
+    "functionsRegion": "us-central1",
+    "authMode": "password",
+    "$functionsNote": "functions/src/region.ts deploys to us-central1 for any project that is not simpleproject-8ff7a, which includes this demo project."
+  },
+  "staging": {
+    "enabled": false,
+    "billable": true,
+    "projectId": "simpleproject-8ff7a",
+    "functionsRegion": "asia-east2",
+    "authMode": "password",
+    "webConfig": {
+      "$comment": "Fill from lib/firebase_options.dart (web) for the staging project. Web API keys are not secrets but are restricted by referrer/API.",
+      "apiKey": "",
+      "authDomain": "",
+      "projectId": "simpleproject-8ff7a",
+      "appId": ""
+    },
+    "warnings": [
+      "Shared with real dev testers: synthetic gigs appear in their gig lists.",
+      "onOpenGigPosted reads every available user per gig and may push to real dev devices within 10 km of synthetic gig locations.",
+      "Email/password sign-in must be enabled in this project for synthetic accounts."
+    ]
+  },
+  "production": {
+    "enabled": false,
+    "locked": true,
+    "projectId": "giggre-prod",
+    "reason": "Never load-test production. The runner refuses this environment even with an approval."
+  }
+}

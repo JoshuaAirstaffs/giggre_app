@@ -1,0 +1,45 @@
+{
+  "$comment": "Stage presets. 'users' = unique users in the simulated day, NOT concurrent users. The simulated 24h day is compressed into 'compressedDurationMin' of real time. Peak concurrency is computed by `plan` and hard-capped by maxConcurrency. Edit freely; any change invalidates outstanding approvals.",
+  "stages": {
+    "1": {
+      "users": 1000,
+      "defaultEnvironment": "emulator",
+      "compressedDurationMin": 60,
+      "maxConcurrency": 175,
+      "maxOpsPerSec": 40,
+      "maxRegistrationsPerMin": 30,
+      "generatorProcesses": 3
+    },
+    "2": {
+      "users": 5000,
+      "defaultEnvironment": "emulator",
+      "compressedDurationMin": 120,
+      "maxConcurrency": 450,
+      "maxOpsPerSec": 100,
+      "maxRegistrationsPerMin": 60,
+      "generatorProcesses": 2
+    },
+    "3": {
+      "users": 10000,
+      "defaultEnvironment": "emulator",
+      "compressedDurationMin": 180,
+      "maxConcurrency": 600,
+      "maxOpsPerSec": 160,
+      "maxRegistrationsPerMin": 90,
+      "generatorProcesses": 3
+    },
+    "4": {
+      "users": 15000,
+      "defaultEnvironment": "emulator",
+      "compressedDurationMin": 240,
+      "maxConcurrency": 650,
+      "maxOpsPerSec": 220,
+      "maxRegistrationsPerMin": 120,
+      "generatorProcesses": 4
+    }
+  },
+  "fullDayMode": {
+    "$comment": "Pass --full-day to plan/approve/run to simulate in real time (compressedDurationMin = 1440).",
+    "compressedDurationMin": 1440
+  }
+}

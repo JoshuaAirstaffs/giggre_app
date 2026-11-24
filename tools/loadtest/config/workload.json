@@ -1,0 +1,121 @@
+{
+  "$comment": "ASSUMPTIONS, not measured: the app has no analytics (no firebase_analytics). Replace with real numbers when available (users.availableForGigs ratio, posts/day, messages/day). Every value here is printed in the plan and report under 'Assumptions'.",
+  "roles": {
+    "worker": 0.8,
+    "host": 0.2
+  },
+  "population": {
+    "newUserShare": 0.05,
+    "returningUserShare": 0.95,
+    "sessionsPerUser": {
+      "1": 0.55,
+      "2": 0.3,
+      "3": 0.15
+    }
+  },
+  "hourlyArrivalWeights": {
+    "$comment": "Share of session starts per local hour 0..23 (Asia/Manila). Morning commute, lunch, evening peak, quiet overnight.",
+    "weights": [
+      0.6,
+      0.4,
+      0.3,
+      0.3,
+      0.5,
+      1.2,
+      2.8,
+      4.5,
+      5.5,
+      5.5,
+      5.2,
+      5.8,
+      6.5,
+      5.8,
+      5.2,
+      5.0,
+      5.2,
+      6.0,
+      7.2,
+      8.0,
+      7.6,
+      6.0,
+      3.6,
+      1.8
+    ]
+  },
+  "sessionLength": {
+    "$comment": "Real-time session duration (seconds) is lognormal; think time between actions is uniform. Sessions are NOT compressed \u2014 only the gaps between sessions are \u2014 so per-session behaviour is realistic and concurrency reflects real dwell time.",
+    "medianSec": 150,
+    "sigma": 0.6,
+    "maxSec": 900,
+    "thinkTimeSec": [
+      3,
+      12
+    ]
+  },
+  "primaryIntent": {
+    "$comment": "What the session is mainly for. Sessions also do secondary actions (below), so these are not exclusive.",
+    "browse": 0.35,
+    "explore": 0.2,
+    "apply": 0.15,
+    "chat": 0.15,
+    "post": 0.1,
+    "register": 0.05
+  },
+  "intentRoleFit": {
+    "$comment": "Intents a role can't perform are remapped: a host's 'apply' becomes 'manage' (review applicants/accept), a worker's 'post' becomes 'browse'.",
+    "worker": {
+      "post": "browse"
+    },
+    "host": {
+      "apply": "manage",
+      "browse": "manage"
+    }
+  },
+  "secondaryActionProbability": {
+    "openNotifications": 0.35,
+    "openChatList": 0.4,
+    "viewProfile": 0.15,
+    "updateProfile": 0.05,
+    "switchToMap": 0.45,
+    "openGigDetail": 0.7,
+    "refreshList": 0.3
+  },
+  "gigMix": {
+    "$comment": "Host posting mix (open/offered). quick_gigs dispatch runs on the host phone against all online users and is simulated as a read-only matching query (see audit).",
+    "open": 0.75,
+    "offered": 0.25,
+    "multiSlotShare": 0.25,
+    "slotsRange": [
+      2,
+      5
+    ],
+    "flexibleShare": 0.15
+  },
+  "chat": {
+    "messagesPerChatSession": [
+      2,
+      8
+    ],
+    "pairedDeliveryShare": 0.5,
+    "$note": "Paired sessions run both participants in one generator process so delivery latency uses one clock."
+  },
+  "contention": {
+    "$comment": "Deliberate race scenario per stage: N single-slot gigs, each hit by K workers applying and the host accepting two applicants concurrently. Verifies duplicate assignment is impossible.",
+    "raceGigsPerStage": 20,
+    "applicantsPerRaceGig": 8
+  },
+  "seedData": {
+    "$comment": "Pre-existing marketplace state created before the stage starts (emulator only by default).",
+    "existingOpenGigsPerThousandUsers": 60,
+    "existingChatRoomsPerThousandUsers": 120,
+    "historyMessagesPerRoom": [
+      5,
+      40
+    ]
+  },
+  "sessionEnd": {
+    "$comment": "Share of sessions where the app is killed instead of paused, so isOnline stays true (the app only clears it on pause/detach/dispose).",
+    "killedShare": 0.05
+  },
+  "securityProbeShare": 0.02
+}

@@ -1,0 +1,62 @@
+{
+  "$comment": "Provisional engineering targets, not Firebase SLOs. 'pass' = all met; 'warning' = any warn breached but no fail; 'fail' = any fail breached or a correctness violation. Latencies in ms, measured client-side from operation start to SDK promise resolution (see reference/metrics.md).",
+  "latencyP95": {
+    "browse.list": {
+      "warn": 1500,
+      "fail": 2000
+    },
+    "browse.map": {
+      "warn": 1500,
+      "fail": 2000
+    },
+    "gig.detail": {
+      "warn": 1000,
+      "fail": 2000
+    },
+    "gig.apply": {
+      "warn": 2000,
+      "fail": 3000
+    },
+    "gig.accept": {
+      "warn": 2000,
+      "fail": 3000
+    },
+    "gig.post": {
+      "warn": 2000,
+      "fail": 3000
+    },
+    "auth.login": {
+      "warn": 2000,
+      "fail": 4000
+    },
+    "auth.register": {
+      "warn": 3000,
+      "fail": 6000
+    },
+    "chat.send": {
+      "warn": 1000,
+      "fail": 2000
+    },
+    "chat.delivery": {
+      "warn": 1500,
+      "fail": 3000
+    }
+  },
+  "unexpectedErrorRate": {
+    "warn": 0.005,
+    "fail": 0.01
+  },
+  "correctness": {
+    "maxDuplicateExclusiveAssignments": 0,
+    "maxUnauthorizedAccessSuccesses": 0,
+    "maxMissingMessages": 0,
+    "maxOutOfOrderMessages": 0
+  },
+  "generator": {
+    "$comment": "If the load generator itself is saturated the latency numbers are not trustworthy; the stage becomes WARNING at least.",
+    "maxEventLoopP99Ms": 200,
+    "maxCpuPercent": 85
+  },
+  "latencyVerdictOnEmulator": "note",
+  "$latencyVerdictNote": "'note' = on the emulator, latency thresholds are reported but do not affect PASS/WARNING/FAIL (user decision 2026-11-23). Set to 'enforce' to restore."
+}

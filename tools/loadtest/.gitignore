@@ -1,0 +1,10 @@
+node_modules/
+# Local run state: approvals, pids, stop flags, run manifests. Never commit.
+state/
+# Raw per-run metric dumps (reports/*.md are kept).
+reports/raw/
+# Reports: keep only the ones worth sharing (smoke runs and aborted
+# attempts stay local). Un-ignore a report explicitly to commit it.
+reports/*.md
+!reports/comparison.md
+!reports/stage-1-1000-users-20261123211322-s1-72211c.md
