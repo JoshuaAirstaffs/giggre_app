@@ -836,14 +836,37 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     final workerSlots = (data?['workerSlots'] as num?)?.toInt() ?? 1;
     final workerId = applicant['workerId'] as String;
 
-    // Legacy single-worker path — unchanged behavior, plus removing the
-    // now-assigned worker from `applicants` so they don't linger as if
-    // still pending (they're also no longer eligible to withdraw).
+    // Single-worker path. A transaction re-reads the gig so a double tap or
+    // a second device can't assign it twice (previously a plain update, and
+    // the second select silently replaced the first worker after they had
+    // already been told they got the gig). Also removes the assigned worker
+    // from `applicants` so they don't linger as if still pending.
     if (workerSlots <= 1) {
-      await FirebaseFirestore.instance
-          .collection(_collection)
-          .doc(widget.gigId)
-          .update({
+      final db = FirebaseFirestore.instance;
+      final gigRef = db.collection(_collection).doc(widget.gigId);
+      String? failureMsg;
+      try {
+        await db.runTransaction((tx) async {
+          final gigSnap = await tx.get(gigRef);
+          final gigData = gigSnap.data() ?? {};
+          final assigned = gigData['workerId'] as String?;
+          if (assigned != null && assigned.isNotEmpty) {
+            failureMsg = assigned == workerId
+                ? '$workerName is already selected for this gig.'
+                : 'Another worker has already been selected for this gig.';
+            return;
+          }
+          if (gigData['status'] != 'open') {
+            failureMsg = 'This gig is no longer open for selection.';
+            return;
+          }
+          final stillApplied = ((gigData['applicants'] as List?) ?? const [])
+              .any((a) => a is Map && a['workerId'] == workerId);
+          if (!stillApplied) {
+            failureMsg = '$workerName is no longer applying for this gig.';
+            return;
+          }
+          tx.update(gigRef, {
             'workerId': workerId,
             'assignedWorkerId': workerId,
             'assignedWorkerName': workerName,
@@ -851,6 +874,15 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             'selectedAt': FieldValue.serverTimestamp(),
             'applicants': FieldValue.arrayRemove([applicant]),
           });
+        });
+      } catch (e) {
+        failureMsg = 'Could not select this worker. Please try again.';
+      }
+      if (failureMsg != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(failureMsg!), backgroundColor: Colors.redAccent),
+        );
+      }
       return;
     }
 

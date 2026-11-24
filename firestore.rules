@@ -824,17 +824,51 @@ service cloud.firestore {
     allow create: if isAuth() &&
       request.resource.data.hostId == request.auth.uid &&
       (!setsGigPointsReward() || canWriteGigPointsReward()) && !setsGigCodes();
+    // An applicant may only add or remove THEIR OWN entry in `applicants`
+    // and touch nothing else. Previously any signed-in user could change
+    // any field of an open / partially_filled gig (found by the load test's
+    // security probe). Apply = applyToOpenGig (gig_map_section.dart), only
+    // while the gig accepts applicants; withdraw = cancelGigApplication,
+    // allowed in any status (the app has no status guard on it).
+    function isOwnApplicantChange() {
+      let before = resource.data.get('applicants', []);
+      let after = request.resource.data.get('applicants', []);
+      let added = after.removeAll(before);
+      let removed = before.removeAll(after);
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['applicants']) && (
+        (added.size() == 1 && removed.size() == 0 &&
+          added[0].workerId == request.auth.uid &&
+          added[0].keys().hasOnly(['workerId', 'workerName']) &&
+          resource.data.status in ['open', 'partially_filled'] &&
+          resource.data.get('slotsClosed', false) != true) ||
+        (added.size() == 0 && removed.size() == 1 &&
+          removed[0].workerId == request.auth.uid)
+      );
+    }
+
+    // Single-slot assignment can't be overwritten: `workerId` may be set
+    // only while empty, or cleared (worker cancel, gig_worker_screen.dart
+    // _cancelOpenGig). A host double tap / second device therefore can't
+    // hand an already-assigned gig to another worker — Firestore applies
+    // writes to one doc in order, so the second select sees workerId set.
+    // Also protects older app versions that select without a transaction.
+    function workerIdChangeOk() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['workerId']) ||
+        resource.data.get('workerId', null) == null ||
+        request.resource.data.get('workerId', null) == null ||
+        isAdmin();
+    }
+
     allow update: if (!changesGigPointsReward() || canWriteGigPointsReward()) && !changesGigCodes() && isAuth() &&
-        !writesHostApprovalAsNonHost() && (
+        !writesHostApprovalAsNonHost() && workerIdChangeOk() && (
       resource.data.hostId == request.auth.uid ||
       resource.data.workerId == request.auth.uid ||
-      resource.data.assignedWorkerId == request.auth.uid ||
-      resource.data.status == 'open' ||
-      // Multi-worker gigs keep accepting applicants (arrayUnion on
-      // `applicants`) past the first assignment, once status has moved off
-      // 'open' to 'partially_filled' — see acceptingMoreSlots in
-      // gig_detail_sheet.dart / _applyToOpenGig in gig_map_section.dart.
-      resource.data.status == 'partially_filled' ||
+      // assignedWorkerId is never cleared when a single-slot gig reopens
+      // (only workerId is), so it alone must not keep a former worker's
+      // edit rights on the reopened gig.
+      (resource.data.assignedWorkerId == request.auth.uid &&
+        !(resource.data.status in ['open', 'partially_filled'])) ||
+      isOwnApplicantChange() ||
       // Multi-worker gigs: a worker confirming payment (QR/code entry in
       // worker_payment_confirm_sheet.dart) bumps slotsCompleted/status on
       // the parent doc directly — identify them by having their own slot

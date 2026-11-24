@@ -6093,11 +6093,10 @@ class _GigListCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
-      // Viewed gigs sink slightly into the page (like read mail); unseen
-      // ones keep the bright card. Icon and badges stay full colour so the
-      // card never looks disabled.
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+      // Viewed cards get only a faint tint toward the page colour (18%): a
+      // stronger blend (55%) read as "disabled". The title weight below is
+      // the main unseen marker.
+      child: Container(
         width: double.infinity,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
@@ -6105,7 +6104,7 @@ class _GigListCard extends StatelessWidget {
               ? Color.lerp(
                   _listSurfaceColor(context),
                   Theme.of(context).scaffoldBackgroundColor,
-                  0.55,
+                  0.18,
                 )
               : _listSurfaceColor(context),
           borderRadius: BorderRadius.circular(14),
@@ -6158,11 +6157,10 @@ class _GigListCard extends StatelessWidget {
                             gig.title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            // Not viewed: bold. Viewed: regular and a touch
-                            // softer, like read mail.
+                            // Not viewed: bold. Viewed: regular weight, same
+                            // colour, like read mail.
                             style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface
-                                  .withValues(alpha: isViewed ? 0.78 : 1),
+                              color: Theme.of(context).colorScheme.onSurface,
                               fontSize: 13.5,
                               fontWeight: isViewed
                                   ? FontWeight.w500
