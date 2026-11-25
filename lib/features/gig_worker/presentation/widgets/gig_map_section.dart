@@ -6137,22 +6137,37 @@ class _GigListCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
-      // Viewed cards get only a faint tint toward the page colour (18%): a
-      // stronger blend (55%) read as "disabled". The title weight below is
-      // the main unseen marker.
+      // Same background for every card (a tint on viewed cards read as
+      // "disabled"). Unseen = outline + bold title; viewed = no outline +
+      // regular title.
       child: Container(
         width: double.infinity,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: isViewed
-              ? Color.lerp(
-                  _listSurfaceColor(context),
-                  Theme.of(context).scaffoldBackgroundColor,
-                  0.18,
-                )
-              : _listSurfaceColor(context),
+          color: _listSurfaceColor(context),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Theme.of(context).dividerColor),
+          // Unseen cards keep the outline; viewed ones drop it (transparent,
+          // not removed, so the card keeps its exact size when it flips).
+          // Dark mode: the theme divider (#2D3F55) is almost the card colour
+          // (#2A3B52) and vanished, so unseen cards get a lighter outline.
+          border: Border.all(
+            color: isViewed
+                ? Colors.transparent
+                : isDark
+                ? Colors.white.withValues(alpha: 0.30)
+                : const Color(0xFFCBD5E1), // one step darker than the divider
+          ),
+          // Unseen cards sit slightly raised (not opened yet); viewed ones
+          // lie flat. Kept soft so it reads as depth, not a heavy drop.
+          boxShadow: isViewed
+              ? const []
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? 0.55 : 0.14),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
         ),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -6287,50 +6302,79 @@ class _GigListCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    // Row 2: host name ── pay
+                    // Row 2: skill, then host on its own line ── pay.
+                    // Separate lines so a long skill name can't push the
+                    // host name out of view; each ellipsizes on its own.
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          // Skill name then host. One Text.rich so the line
-                          // ellipsizes as one.
-                          child: Text.rich(
-                            TextSpan(
-                              children: [
-                                if (skill != null) ...[
-                                  // The tile shows the photo, so the skill's
-                                  // icon moves here, before its name.
-                                  if (gig.images.isNotEmpty)
-                                    WidgetSpan(
-                                      alignment: PlaceholderAlignment.middle,
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(right: 4),
-                                        child: SkillIcon(
-                                          skill,
-                                          size: 13,
-                                          color: accentColor,
-                                          fallback: fallbackIcon,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (skill != null)
+                                Text.rich(
+                                  TextSpan(
+                                    children: [
+                                      // The tile shows the photo, so the
+                                      // skill's icon moves here, before its
+                                      // name.
+                                      if (gig.images.isNotEmpty)
+                                        WidgetSpan(
+                                          alignment:
+                                              PlaceholderAlignment.middle,
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(
+                                              right: 4,
+                                            ),
+                                            child: SkillIcon(
+                                              skill,
+                                              size: 13,
+                                              color: accentColor,
+                                              fallback: fallbackIcon,
+                                            ),
+                                          ),
+                                        ),
+                                      TextSpan(text: skill),
+                                    ],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: kSub,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              if (gig.hostName.isNotEmpty) ...[
+                                if (skill != null) const SizedBox(height: 2),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.person_outline_rounded,
+                                      size: 13,
+                                      color: kSub,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        gig.hostName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: kSub,
+                                          fontSize: 11,
                                         ),
                                       ),
                                     ),
-                                  TextSpan(
-                                    text: skill,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  if (gig.hostName.isNotEmpty)
-                                    const TextSpan(text: ' · '),
-                                ],
-                                if (gig.hostName.isNotEmpty)
-                                  TextSpan(text: gig.hostName)
-                                else if (skill == null)
-                                  const TextSpan(text: '—'),
-                              ],
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: kSub, fontSize: 11),
+                                  ],
+                                ),
+                              ] else if (skill == null)
+                                const Text(
+                                  '—',
+                                  style: TextStyle(color: kSub, fontSize: 11),
+                                ),
+                            ],
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -6369,16 +6413,36 @@ class _GigListCard extends StatelessWidget {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const Icon(
-                          Icons.location_on_outlined,
-                          size: 13,
-                          color: kSub,
-                        ),
-                        const SizedBox(width: 4),
+                        // The pin stays on the FIRST line of the address
+                        // when it wraps (not centred on the whole block);
+                        // only the chevron centres on the row.
                         Expanded(
-                          child: Text(
-                            metaParts.isNotEmpty ? metaParts.join(' · ') : '—',
-                            style: const TextStyle(color: kSub, fontSize: 10.5),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Padding(
+                                // 10.5 px text ≈ 13 px line box; nudge the
+                                // 13 px icon onto the line's centre.
+                                padding: EdgeInsets.only(top: 0.5),
+                                child: Icon(
+                                  Icons.location_on_outlined,
+                                  size: 13,
+                                  color: kSub,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  metaParts.isNotEmpty
+                                      ? metaParts.join(' · ')
+                                      : '—',
+                                  style: const TextStyle(
+                                    color: kSub,
+                                    fontSize: 10.5,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(width: 6),

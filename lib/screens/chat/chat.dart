@@ -2000,6 +2000,11 @@ class _ChatState extends State<Chat>
   bool get _isLiveSupportPeer =>
       isLiveSupportAccount(widget.gigChatParams?.peerUid);
 
+  // TEMP: live support — the intro sits above the oldest message, so only
+  // once there's no older page left to load.
+  bool get _showSupportIntroOnTop =>
+      _isLiveSupportPeer && !_hasMore && !_isLoadingMore;
+
   bool get _canCallPeer =>
       _isGigChat &&
       widget.gigChatParams != null &&
@@ -2269,20 +2274,31 @@ class _ChatState extends State<Chat>
             child: _isLoadingInitial
                 ? const SkeletonChat()
                 : _msgs.isEmpty
-                ? Center(
-                    child: Text(
-                      'No messages yet.\nSay hello! 👋',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.grey.shade400,
-                        fontSize: 14,
-                      ),
-                    ),
-                  )
+                ? (_isLiveSupportPeer // TEMP: live support
+                      ? ListView(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                          children: [_SupportIntro(isDark: isDark)],
+                        )
+                      : Center(
+                          child: Text(
+                            'No messages yet.\nSay hello! 👋',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.grey.shade400,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ))
                 : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                    itemCount: _msgs.length + (_isLoadingMore ? 1 : 0),
+                    // Support chats open with Giggre Support's introduction,
+                    // shown above the oldest message once the whole history
+                    // is loaded (never between pages).
+                    itemCount:
+                        _msgs.length +
+                        (_isLoadingMore ? 1 : 0) +
+                        (_showSupportIntroOnTop ? 1 : 0),
                     itemBuilder: (ctx, i) {
                       if (_isLoadingMore && i == 0) {
                         return const Padding(
@@ -2290,7 +2306,12 @@ class _ChatState extends State<Chat>
                           child: SkeletonChat(count: 2),
                         );
                       }
-                      final j = _isLoadingMore ? i - 1 : i;
+                      if (_showSupportIntroOnTop && i == 0) {
+                        return _SupportIntro(isDark: isDark);
+                      }
+                      final j = i -
+                          (_isLoadingMore ? 1 : 0) -
+                          (_showSupportIntroOnTop ? 1 : 0);
                       final msg = _msgs[j];
                       final prev = j > 0 ? _msgs[j - 1] : null;
 
@@ -3460,6 +3481,93 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
 
 // ── File attachment card ──────────────────────────────────────────────────────
 // ── Date divider ───────────────────────────────────────────────────────────────
+// TEMP: live support — Giggre Support introduces itself at the top of the
+// chat (the "pre-chat"). Display only: nothing is written to Firestore, so it
+// costs no reads/writes and shows the same for every user and every visit.
+class _SupportIntro extends StatelessWidget {
+  const _SupportIntro({required this.isDark});
+
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final fullName = context.read<CurrentUserProvider>().currentName ?? '';
+    final firstName = fullName.trim().split(RegExp(r'\s+')).first;
+    final hi = firstName.isEmpty ? 'Hi there! 👋' : 'Hi $firstName! 👋';
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    // Same look as a real incoming message in this chat (_MessageBubble).
+    final bubbleColor = isDark ? Colors.grey.shade800 : Colors.grey.shade200;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12, bottom: 16),
+      child: Column(
+        children: [
+          // Who you're talking to.
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
+            child: const CircleAvatar(
+              radius: 26,
+              backgroundColor: Colors.white,
+              backgroundImage: liveSupportAvatar,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Giggre Support',
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            'The Giggre team',
+            style: TextStyle(color: kSub, fontSize: 12),
+          ),
+          const SizedBox(height: 14),
+          // The introduction, styled as an incoming message.
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.sizeOf(context).width * 0.78,
+              ),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                decoration: BoxDecoration(
+                  color: bubbleColor,
+                  border: Border.all(
+                    color: const Color(0xFF3B82F6),
+                    width: 1.5,
+                  ),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                    bottomRight: Radius.circular(16),
+                    bottomLeft: Radius.circular(4),
+                  ),
+                ),
+                child: Text(
+                  '$hi I\'m Giggre Support.\n\n'
+                  'Tell me anything about Giggre, or if you have a concern, '
+                  'a question or something isn\'t working, just send me a '
+                  'message. I\'m here to help!',
+                  style: TextStyle(color: onSurface, fontSize: 14, height: 1.4),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DateDivider extends StatelessWidget {
   const _DateDivider({required this.label, required this.isDark});
 
