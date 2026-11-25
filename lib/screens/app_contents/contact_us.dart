@@ -1,4 +1,10 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../core/widgets/skeleton.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:giggre_app/core/providers/current_user_provider.dart';
@@ -1048,6 +1054,30 @@ class _CopyContainer extends StatelessWidget {
 
 // ── Forms ─────────────────────────────────────────────────────────────────────
 
+// A file attached to a Contact us message, uploaded after the ticket's chat
+// room exists. Same types, size caps and message shape as chat.dart's
+// attachments, so the ticket thread (Chat screen) shows them normally.
+class _PickedAttachment {
+  _PickedAttachment(this.file, this.name, this.type, this.size);
+  final File file;
+  final String name;
+  final String type; // 'image' | 'video' | 'file'
+  final int size;
+}
+
+const _kMaxContactFiles = 5;
+const _kContactSizeCap = {
+  'image': 10 * 1024 * 1024,
+  'video': 50 * 1024 * 1024,
+  'file': 20 * 1024 * 1024,
+};
+const _kContactVideoExt = {'.mp4', '.mov', '.avi', '.mkv', '.3gp', '.webm'};
+const _kContactFileExt = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'zip'];
+
+String _contactSizeLabel(int bytes) => bytes < 1024 * 1024
+    ? '${(bytes / 1024).ceil()} KB'
+    : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+
 class _Forms extends StatefulWidget {
   const _Forms();
 
@@ -1062,6 +1092,7 @@ class _FormsState extends State<_Forms> {
   final _messageController = TextEditingController();
   bool _isLoading = false;
   bool _prefilled = false;
+  final List<_PickedAttachment> _attachments = [];
 
   @override
   void didChangeDependencies() {
@@ -1081,6 +1112,135 @@ class _FormsState extends State<_Forms> {
     _subjectController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// Adds picked files, enforcing the per-type size caps and the file limit.
+  Future<void> _addPicked(List<({File file, String name, String type})> picked) async {
+    for (final p in picked) {
+      if (_attachments.length >= _kMaxContactFiles) {
+        _snack('You can attach up to $_kMaxContactFiles files.');
+        break;
+      }
+      final size = await p.file.length();
+      final cap = _kContactSizeCap[p.type]!;
+      if (size > cap) {
+        _snack('${p.name} is too large — the limit is ${cap ~/ (1024 * 1024)}MB.');
+        continue;
+      }
+      if (!mounted) return;
+      setState(() => _attachments.add(_PickedAttachment(p.file, p.name, p.type, size)));
+    }
+  }
+
+  Future<void> _pickAttachment() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: kBlue),
+              title: const Text('Photo or Video'),
+              onTap: () => Navigator.pop(ctx, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined, color: kBlue),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.pop(ctx, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.insert_drive_file_outlined, color: kBlue),
+              title: const Text('File'),
+              onTap: () => Navigator.pop(ctx, 'file'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+    try {
+      switch (choice) {
+        case 'gallery':
+          final media = await ImagePicker().pickMultipleMedia(
+            limit: _kMaxContactFiles - _attachments.length,
+          );
+          await _addPicked([
+            for (final m in media)
+              (
+                file: File(m.path),
+                name: m.name,
+                type: _kContactVideoExt.any((e) => m.path.toLowerCase().endsWith(e))
+                    ? 'video'
+                    : 'image',
+              ),
+          ]);
+        case 'camera':
+          final photo = await ImagePicker().pickImage(source: ImageSource.camera);
+          if (photo != null) {
+            await _addPicked([(file: File(photo.path), name: photo.name, type: 'image')]);
+          }
+        case 'file':
+          final result = await FilePicker.platform.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: _kContactFileExt,
+            allowMultiple: true,
+          );
+          await _addPicked([
+            for (final f in result?.files ?? const <PlatformFile>[])
+              if (f.path != null) (file: File(f.path!), name: f.name, type: 'file'),
+          ]);
+      }
+    } catch (e) {
+      debugPrint('Contact us attachment pick error: $e');
+      _snack("Couldn't open the picker. Please try again.");
+    }
+  }
+
+  /// Uploads one attachment into the ticket's chat room (storage.rules lets
+  /// the room's userId upload to chat_attachments/{roomId}/).
+  Future<void> _uploadAttachment(
+    DocumentReference<Map<String, dynamic>> roomRef,
+    String uid,
+    String name,
+    _PickedAttachment a,
+  ) async {
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final ref = FirebaseStorage.instance
+        .ref()
+        .child('chat_attachments/${roomRef.id}/${ts}_${a.name}');
+    await ref.putFile(a.file);
+    final url = await ref.getDownloadURL();
+    final text = a.type == 'image'
+        ? '📷 Photo'
+        : a.type == 'video'
+        ? '🎥 Video'
+        : '📎 ${a.name}';
+    await roomRef.collection('messages').add({
+      'senderId': uid,
+      'isSupport': false,
+      'name': name,
+      'text': text,
+      'attachmentUrl': url,
+      'attachmentType': a.type,
+      'attachmentName': a.name,
+      'hasSeen': true,
+      'hasSeenByAdmin': false,
+      'isAutoReply': false,
+      'isDeleted': false,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    await roomRef.update({
+      'lastMessage': text,
+      'lastMessageSender': 'You',
+      'lastMessageAt': FieldValue.serverTimestamp(),
+    });
   }
 
   Future<void> _submitTicket() async {
@@ -1111,6 +1271,7 @@ class _FormsState extends State<_Forms> {
     }
 
     setState(() => _isLoading = true);
+    final failedFiles = <String>[];
 
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -1195,6 +1356,17 @@ class _FormsState extends State<_Forms> {
           'isAutoReply': false,
         });
 
+        // Attachments go in after the text and before the auto-reply, so
+        // the thread reads: message, files, "Thank you for contacting us".
+        for (final a in List.of(_attachments)) {
+          try {
+            await _uploadAttachment(roomRef, uid, name, a);
+          } catch (e) {
+            debugPrint('Contact us attachment upload error: $e');
+            failedFiles.add(a.name);
+          }
+        }
+
         await Future.delayed(const Duration(seconds: 2));
 
         if (isAutoReplyEnabled) {
@@ -1219,13 +1391,16 @@ class _FormsState extends State<_Forms> {
 
       _subjectController.clear();
       _messageController.clear();
+      if (mounted) setState(() => _attachments.clear());
 
       if (mounted) {
         _showModal(
           context,
           title: 'Ticket Submitted!',
-          message:
-              "We've received your message and will respond within 24–48 hours.",
+          message: failedFiles.isEmpty
+              ? "We've received your message and will respond within 24–48 hours."
+              : "We've received your message and will respond within 24–48 hours.\n\n"
+                    "Couldn't upload: ${failedFiles.join(', ')}. You can send it in the ticket's chat.",
           isSuccess: true,
         );
       }
@@ -1371,6 +1546,79 @@ class _FormsState extends State<_Forms> {
               icon: Icons.message,
             ),
           ),
+          // Attachments need the ticket's chat room, which only signed-in
+          // users get (the maintenance-mode guest path creates no room).
+          // dart:io File uploads aren't available on the web build.
+          if (!kIsWeb && FirebaseAuth.instance.currentUser != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _isLoading || _attachments.length >= _kMaxContactFiles
+                  ? null
+                  : _pickAttachment,
+              icon: const Icon(Icons.attach_file_rounded, size: 18),
+              label: const Text('Attach files'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: kBlue,
+                side: BorderSide(
+                  color: isDark ? Colors.white24 : Colors.grey.shade300,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Optional · up to $_kMaxContactFiles files (photos 10MB, videos 50MB, documents 20MB)',
+              style: TextStyle(fontSize: 11, color: kSub),
+            ),
+            for (var i = 0; i < _attachments.length; i++)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isDark ? Colors.white12 : Colors.grey.shade300,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _attachments[i].type == 'image'
+                          ? Icons.image_outlined
+                          : _attachments[i].type == 'video'
+                          ? Icons.videocam_outlined
+                          : Icons.insert_drive_file_outlined,
+                      size: 18,
+                      color: kSub,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _attachments[i].name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _contactSizeLabel(_attachments[i].size),
+                      style: const TextStyle(fontSize: 11, color: kSub),
+                    ),
+                    IconButton(
+                      tooltip: 'Remove ${_attachments[i].name}',
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      onPressed: _isLoading
+                          ? null
+                          : () => setState(() => _attachments.removeAt(i)),
+                    ),
+                  ],
+                ),
+              ),
+          ],
           const SizedBox(height: 16),
           GestureDetector(
             onTap: _isLoading ? null : _submitTicket,
