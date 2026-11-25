@@ -282,7 +282,11 @@ class ContentCarouselState extends State<ContentCarousel> with RouteAware {
   bool _onPlayStart(String videoUrl) {
     final replay = _playedVideos.contains(videoUrl);
     _playedVideos.add(videoUrl);
-    final startMuted = _chosenMuted ?? (replay || !widget.soundOnFirstPlay);
+    // Dashboards (soundOnFirstPlay false): every video starts muted, even
+    // after the viewer unmuted an earlier one — unmute applies to the video
+    // playing now. Home: first play with sound, replays muted, or the
+    // viewer's mute choice.
+    final startMuted = !widget.soundOnFirstPlay || (_chosenMuted ?? replay);
     if (_muted != startMuted && mounted) setState(() => _muted = startMuted);
     return startMuted;
   }
@@ -292,7 +296,9 @@ class ContentCarouselState extends State<ContentCarousel> with RouteAware {
   // otherwise the sound the video had when it was left.
   bool _onResume(String slideId, bool wasMuted) {
     if (_resumeId == slideId) _resumeId = null;
-    final m = _chosenMuted ?? wasMuted;
+    // Dashboards never come back with sound on their own (e.g. a video left
+    // unmuted when the dashboard closed): muted until the viewer unmutes.
+    final m = widget.soundOnFirstPlay ? (_chosenMuted ?? wasMuted) : true;
     if (_muted != m && mounted) setState(() => _muted = m);
     return m;
   }
