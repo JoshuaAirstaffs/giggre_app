@@ -49,13 +49,23 @@ export function estimateUsage({ spec, cfg, schedule, conc, intents, roleCount })
   const gigFanoutReads = gigUpdateEvents * avgConc;
   const onlineFanoutReads = onlineUserDocWrites * avgConc;
 
+  // Quick-gig dispatch (audit §8 risk 8): each dispatch attempt re-runs the
+  // same unbounded isOnline+availableForGigs+seekingQuickGigs+slot scan the
+  // host's own device would run. avgDispatchAttempts is a workload
+  // assumption (quickGigs.mjs bounds attempts at maxDispatchAttempts but
+  // most searches succeed well before that).
+  const quickPosts = count('post') * (workload.gigMix.quick ?? 0);
+  const seekingWorkers = roleCount.worker * (workload.quickGigs?.seekingShare ?? 0);
+  const avgDispatchAttempts = 2;
   const breakdown = {
     baseline: S * (BASELINE_MIN1_QUERIES + 2 * roomsPerUser),
     browse: S * avgOpenGigs + gigFanoutReads, // the global open_gigs listener
     onlineUsers: S * avgOnlineWorkers + onlineFanoutReads, // global users isOnline==true listener
+    quickGigDispatch: quickPosts * avgDispatchAttempts * seekingWorkers,
     intents: 0,
   };
-  let writes = workerSessions * (BASELINE_WRITES_WORKER + LOCATION_WRITE_WORKER) + (S - workerSessions) * BASELINE_WRITES_HOST;
+  let writes = workerSessions * (BASELINE_WRITES_WORKER + LOCATION_WRITE_WORKER) + (S - workerSessions) * BASELINE_WRITES_HOST +
+    quickPosts * (1 + avgDispatchAttempts * 3); // post + per-attempt (dispatch + candidate response writes)
   let msgs = 0;
   for (const [k, n] of Object.entries(intents)) {
     const m = INTENT[k.split(':')[1]];

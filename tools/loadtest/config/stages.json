@@ -4,20 +4,20 @@
     "1": {
       "users": 1000,
       "defaultEnvironment": "emulator",
-      "compressedDurationMin": 60,
+      "compressedDurationMin": 210,
       "maxConcurrency": 175,
       "maxOpsPerSec": 40,
       "maxRegistrationsPerMin": 30,
-      "generatorProcesses": 3
+      "generatorProcesses": 8
     },
     "2": {
-      "users": 5000,
+      "users": 1500,
       "defaultEnvironment": "emulator",
-      "compressedDurationMin": 120,
+      "compressedDurationMin": 330,
       "maxConcurrency": 450,
       "maxOpsPerSec": 100,
       "maxRegistrationsPerMin": 60,
-      "generatorProcesses": 2
+      "generatorProcesses": 8
     },
     "3": {
       "users": 10000,

@@ -133,28 +133,47 @@ class QuickGigMatchingService {
   }
 
   // ── Dispatch gig to a worker (legacy single-worker gig) ─────────────────────
-  static Future<void> _dispatchToWorker({
+  // Transactional: without this, two hosts' searches can both read the same
+  // worker as 'AVAILABLE' (findBestWorker is read-only) and both dispatch to
+  // them before either write lands, locking one worker into two gigs at once
+  // (found by the load test's race.quickGigNoDoubleDispatch check). The
+  // transaction re-reads the worker's slot immediately before locking it, so
+  // only the first dispatch to actually commit succeeds; the loser gets
+  // `false` back and must treat this candidate as unavailable, same as if
+  // they'd never been eligible.
+  static Future<bool> _dispatchToWorker({
     required String gigId,
     required String workerId,
     required String workerName,
   }) async {
     final db = FirebaseFirestore.instance;
-    await Future.wait([
-      db.collection('quick_gigs').doc(gigId).update({
-        'status': 'in_progress',
-        'assignedWorkerId': workerId,
-        'assignedWorkerName': workerName,
-        'dispatchedAt': FieldValue.serverTimestamp(),
-      }),
-      db.collection('users').doc(workerId).update({'slot': 'LOCKED'}),
-    ]);
+    try {
+      await db.runTransaction((tx) async {
+        final workerRef = db.collection('users').doc(workerId);
+        final workerSnap = await tx.get(workerRef);
+        if (workerSnap.data()?['slot'] != 'AVAILABLE') {
+          throw StateError('worker-no-longer-available');
+        }
+        tx.update(workerRef, {'slot': 'LOCKED'});
+        tx.update(db.collection('quick_gigs').doc(gigId), {
+          'status': 'in_progress',
+          'assignedWorkerId': workerId,
+          'assignedWorkerName': workerName,
+          'dispatchedAt': FieldValue.serverTimestamp(),
+        });
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ── Dispatch gig to a candidate slot (multi-worker gig) ──────────────────────
   // Creates the candidate's own `workers/{workerId}` doc instead of writing
   // singular fields on the gig doc, so this candidate's offer/response never
   // touches any other slot already filled/in-flight on the same gig.
-  static Future<void> _dispatchToWorkerSlot({
+  // Transactional for the same reason as `_dispatchToWorker` above.
+  static Future<bool> _dispatchToWorkerSlot({
     required String gigId,
     required String workerId,
     required String workerName,
@@ -164,28 +183,38 @@ class QuickGigMatchingService {
     required String currencyCode,
   }) async {
     final db = FirebaseFirestore.instance;
-    await Future.wait([
-      db
-          .collection('quick_gigs')
-          .doc(gigId)
-          .collection('workers')
-          .doc(workerId)
-          .set(
-            WorkerSlotModel(
-              workerId: workerId,
-              workerName: workerName,
-              gigId: gigId,
-              gigCollection: 'quick_gigs',
-              hostId: hostId,
-              hostName: hostName,
-              rate: rate,
-              currencyCode: currencyCode,
-              status: 'in_progress',
-            ).toMap()
-              ..['dispatchedAt'] = FieldValue.serverTimestamp(),
-          ),
-      db.collection('users').doc(workerId).update({'slot': 'LOCKED'}),
-    ]);
+    try {
+      await db.runTransaction((tx) async {
+        final workerRef = db.collection('users').doc(workerId);
+        final workerSnap = await tx.get(workerRef);
+        if (workerSnap.data()?['slot'] != 'AVAILABLE') {
+          throw StateError('worker-no-longer-available');
+        }
+        tx.update(workerRef, {'slot': 'LOCKED'});
+        tx.set(
+          db
+              .collection('quick_gigs')
+              .doc(gigId)
+              .collection('workers')
+              .doc(workerId),
+          WorkerSlotModel(
+            workerId: workerId,
+            workerName: workerName,
+            gigId: gigId,
+            gigCollection: 'quick_gigs',
+            hostId: hostId,
+            hostName: hostName,
+            rate: rate,
+            currencyCode: currencyCode,
+            status: 'in_progress',
+          ).toMap()
+            ..['dispatchedAt'] = FieldValue.serverTimestamp(),
+        );
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ── Search liveness ────────────────────────────────────────────────────────
@@ -373,11 +402,20 @@ class QuickGigMatchingService {
 
         // ── Dispatch ───────────────────────────────────────
         dispatchAttempts++;
-        await _dispatchToWorker(
+        final dispatched = await _dispatchToWorker(
           gigId: gigId,
           workerId: worker['id'] as String,
           workerName: worker['name'] as String,
         );
+        if (!dispatched) {
+          // Lost the race to lock this worker to a concurrent search — they
+          // were never actually offered the gig, so exclude without the
+          // decline penalty and try the next candidate.
+          await gigRef.update({
+            'exclusionList': FieldValue.arrayUnion([worker['id'] as String]),
+          });
+          continue;
+        }
 
         // ── Wait for worker response ───────────────────────
         final reviewDeadline = DateTime.now().add(config.reviewWindow);
@@ -567,7 +605,7 @@ class QuickGigMatchingService {
 
         // ── Dispatch to this candidate's own slot doc ────────────────────
         dispatchAttempts++;
-        await _dispatchToWorkerSlot(
+        final dispatched = await _dispatchToWorkerSlot(
           gigId: gigId,
           workerId: candidateId,
           workerName: candidateName,
@@ -576,6 +614,12 @@ class QuickGigMatchingService {
           rate: ratePerSlot,
           currencyCode: currencyCode,
         );
+        if (!dispatched) {
+          await gigRef.update({
+            'exclusionList': FieldValue.arrayUnion([candidateId]),
+          });
+          continue;
+        }
         if (filledSlotCount == 0) {
           await gigRef.update({'status': 'scanning'});
         }
@@ -764,7 +808,7 @@ class QuickGigMatchingService {
         final candidateName = worker['name'] as String;
 
         dispatchAttempts++;
-        await _dispatchToWorkerSlot(
+        final dispatched = await _dispatchToWorkerSlot(
           gigId: gigId,
           workerId: candidateId,
           workerName: candidateName,
@@ -775,6 +819,12 @@ class QuickGigMatchingService {
               0,
           currencyCode: gigData['currencyCode'] as String? ?? 'USD',
         );
+        if (!dispatched) {
+          await gigRef.update({
+            'exclusionList': FieldValue.arrayUnion([candidateId]),
+          });
+          continue;
+        }
 
         final slotRef = gigRef.collection('workers').doc(candidateId);
         final reviewDeadline = DateTime.now().add(config.reviewWindow);

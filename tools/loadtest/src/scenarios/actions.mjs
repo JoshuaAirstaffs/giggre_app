@@ -11,6 +11,7 @@ import {
 } from '../firebase.mjs';
 import { gigContent, chatText, distanceKm } from '../synthetic.mjs';
 import { ACTIVE } from './session.mjs';
+import { postQuickGig } from './quickGigs.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const GIG_COLS = ['quick_gigs', 'open_gigs', 'offered_gigs'];
@@ -203,6 +204,7 @@ export async function postGig(vu) {
   if (vu.person.role !== 'host') return;
   const { db } = vu.client;
   const w = vu.world;
+  if (vu.r.chance(w.cfg.workload.gigMix.quick ?? 0)) return postQuickGig(vu);
   const flexible = vu.r.chance(w.cfg.workload.gigMix.flexibleShare);
   const c = gigContent(vu.r, { gigMix: w.cfg.workload.gigMix, flexible });
   const loc = { lat: vu.person.lat + vu.r.float(-0.02, 0.02), lng: vu.person.lng + vu.r.float(-0.02, 0.02) };

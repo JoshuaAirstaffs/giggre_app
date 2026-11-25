@@ -223,6 +223,7 @@ function bottlenecks(merged, plan, ev) {
   if (top && top[1] / Math.max(1, c.reads) > 0.3) out.push(`\`${top[0]}\` accounts for ${pct(top[1] / c.reads)} of all reads.`);
   if ((rb.onlineUsersGlobal ?? 0) > 0) out.push(`Global \`users where isOnline == true\` listener: ${f0(rb.onlineUsersGlobal)} reads. Every online/offline/location/FCM write by any worker is pushed to every open session, so this grows with concurrency².`);
   if ((rb.openGigsGlobal ?? 0) > 0) out.push(`Global open-gigs listener: ${f0(rb.openGigsGlobal)} reads (${f0(rb.openGigsGlobal / Math.max(1, merged.sessions.started))} per session). Grows with total open gigs × sessions, not with what a worker can reach.`);
+  if ((rb.quickGigScanGlobal ?? 0) > 0) out.push(`Quick-gig dispatch: ${f0(rb.quickGigScanGlobal)} reads scanning for an eligible worker, re-run on every dispatch attempt by every searching host at once (audit §8 risk 8).`);
   const retries = merged.ops['gig.accept.retries'] ?? merged.ops['race.select.retries'];
   if (retries) out.push(`Transaction retries on gig selection: ${f0(retries.ok)} retried transactions.`);
   if (merged.queued > 0) out.push(`${f0(merged.queued)} session starts waited for the concurrency cap (${plan.maxConcurrency}); real users would not wait — raise the cap or add generator processes to test true peak.`);
@@ -236,6 +237,7 @@ function recommendations(merged, ev, plan) {
   if ((rb.openGigsGlobal ?? 0) > 0) r.push('Bound the worker gig listener geographically (geohash range on a `geohash` field written at post time, e.g. 5-char cells around the worker) and add `limit()`; keep the 10 km filter client-side for exactness.');
   if ((rb.onlineUsersGlobal ?? 0) > 0) r.push('Replace the host dashboard\'s global `users where isOnline == true` listeners with a geohash-bounded, limited query (or a server-maintained "online workers nearby" count), and stop mounting the Host shell\'s listeners while in Worker mode.');
   r.push('`onOpenGigPosted` reads every `availableForGigs` user for each new open gig; query by geohash range instead so cost stays proportional to nearby workers.');
+  if ((rb.quickGigScanGlobal ?? 0) > 0) r.push('Bound quick-gig dispatch\'s worker search by geohash range too (it is the same unbounded-scan shape as the open-gigs/online-users listeners, just run from the host\'s device per dispatch attempt instead of as a standing listener).');
   if (ev.checks.some((c) => c.name.startsWith('race.single') && c.failed)) r.push('Make single-slot selection a transaction that requires `status == "open"` and no `workerId` (same pattern as the multi-slot path), so a double tap or a second device cannot reassign.');
   if (ev.checks.some((c) => c.name === 'security.editForeignOpenGig' && c.failed)) r.push('Tighten the `open_gigs` update rule: while `status == "open"`, a non-host should only be able to change `applicants` (affectedKeys().hasOnly([\'applicants\'])).');
   r.push('Write `isOnline` and `location` less often (or to a separate small doc) — each write to `users/{uid}` also triggers ~5 Cloud Functions.');

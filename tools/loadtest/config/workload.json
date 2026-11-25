@@ -81,15 +81,24 @@
     "refreshList": 0.3
   },
   "gigMix": {
-    "$comment": "Host posting mix (open/offered). quick_gigs dispatch runs on the host phone against all online users and is simulated as a read-only matching query (see audit).",
+    "$comment": "Host posting mix. `quick` is an independent first roll (postGig checks it before the open/offered split below), so `open`+`offered` still sum to 1 on their own — effective overall shares are quick 0.2, open 0.8*0.75=0.6, offered 0.8*0.25=0.2. quick_gigs dispatch runs on the host phone (see quickGigs block + audit §8 risk 8).",
     "open": 0.75,
     "offered": 0.25,
+    "quick": 0.2,
     "multiSlotShare": 0.25,
     "slotsRange": [
       2,
       5
     ],
     "flexibleShare": 0.15
+  },
+  "quickGigs": {
+    "$comment": "quick_gig_matching_service.dart defaults: reviewWindow 30s, searchTimeout 5min, maxDispatchAttempts 10, retry 15s, poll 3s. retryIntervalMs/responseDelayMs here are compressed representative delays (see quickGigs.mjs header) — the attempt count and scan shape are kept faithful, the real wall-clock wait per attempt is not.",
+    "seekingShare": 0.3,
+    "maxDispatchAttempts": 10,
+    "retryIntervalMs": 2000,
+    "responseDelayMs": 1500,
+    "acceptShare": 0.6
   },
   "chat": {
     "messagesPerChatSession": [
@@ -102,7 +111,9 @@
   "contention": {
     "$comment": "Deliberate race scenario per stage: N single-slot gigs, each hit by K workers applying and the host accepting two applicants concurrently. Verifies duplicate assignment is impossible.",
     "raceGigsPerStage": 20,
-    "applicantsPerRaceGig": 8
+    "applicantsPerRaceGig": 8,
+    "quickGigRacePairs": 5,
+    "candidatesPerQuickGigRace": 4
   },
   "seedData": {
     "$comment": "Pre-existing marketplace state created before the stage starts (emulator only by default).",
