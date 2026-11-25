@@ -1,6 +1,7 @@
 {
   "$comment": "List prices used for ESTIMATES only (not billing). Verify before any billable run: https://cloud.google.com/firestore/pricing , https://firebase.google.com/pricing , https://cloud.google.com/functions/pricing , https://mapsplatform.google.com/pricing/ . Prices vary by region; these are the asia-east2 (Hong Kong) / multi-region tier upper bounds so estimates err high.",
-  "verifiedOn": "UNVERIFIED — check the URLs above and update this date before a billable run",
+  "verifiedOn": "2026-11-25",
+  "$verifiedNote": "Checked 2026-11-25: Firestore Standard on-demand lists reads $0.03, writes $0.09, deletes $0.01 per 100k (free 50k reads / 20k writes / 20k deletes per day). Values below are kept at ~2x those as a safety margin, so estimates err high. Cloud Run (functions v2): $0.40 per 1M requests, memory $0.0000025 per GiB-s, CPU $0.000024 per vCPU-s (CPU is not modelled here, so the functions estimate runs low); asia-east2 is a Tier 2 region.",
   "currency": "USD",
   "firestore": { "readsPer100k": 0.06, "writesPer100k": 0.18, "deletesPer100k": 0.02, "freeReadsPerDay": 50000, "freeWritesPerDay": 20000, "applyFreeTier": false },
   "auth": { "emailPasswordPerMau": 0.0, "freeMau": 50000, "$note": "Email/password is free under the Identity Platform free MAU tier; phone/SMS is not used." },

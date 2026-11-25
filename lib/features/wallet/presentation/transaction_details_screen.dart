@@ -136,7 +136,7 @@ class TransactionDetailsScreen extends StatelessWidget {
                     _divider(tokens),
                     _DetailRow(
                       label: 'Amount',
-                      value: tx.formatAmount(fallbackCurrency, signed: false),
+                      value: tx.formatAmount(fallbackCurrency, signed: false, shown: false),
                       tokens: tokens,
                     ),
                     if (tx.balanceAfter != null) ...[

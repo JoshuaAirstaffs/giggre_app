@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/services/display_currency.dart';
 import '../services/wallet_currency.dart';
 import '../services/wallet_requests_service.dart';
 import 'cash_in_methods_screen.dart';
@@ -252,7 +253,11 @@ class _WalletScreenState extends State<WalletScreen> {
     final userCurrency = _walletCcy ?? context.watch<CurrentUserProvider>().currencyCode;
     final uid = _uid;
 
-    return Scaffold(
+    // Amounts are shown in the user's location currency (≈ converted when
+    // the wallet is held in the other one), so redraw when rates arrive.
+    return ListenableBuilder(
+      listenable: DisplayCurrency.changes,
+      builder: (context, _) => Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
         backgroundColor: bg,
@@ -292,6 +297,7 @@ class _WalletScreenState extends State<WalletScreen> {
                                   symbol: CurrencyFormatter.symbol(
                                     d?['currencyCode'] as String? ?? userCurrency,
                                   ),
+                                  currencyCode: d?['currencyCode'] as String? ?? userCurrency,
                                   fromCache: snap.data?.metadata.isFromCache ?? false,
                                   pending: _pending,
                                   onTopUp: _topUp,
@@ -358,6 +364,7 @@ class _WalletScreenState extends State<WalletScreen> {
                 ),
               ),
             ),
+    ),
     );
   }
 

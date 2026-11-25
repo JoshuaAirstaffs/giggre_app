@@ -89,9 +89,22 @@ export async function seedStage({ plan, schedule, cfg, env, runId, log }) {
 
   log(`Seeding ${people.filter((p) => !p.isNew).length} returning users...`);
   const tokens = new Map();
-  await pool(people.filter((p) => !p.isNew), 40, async (p) => {
+  // Billable environments: Firebase Auth allows only ~100 password sign-ins
+  // per second per project (QUOTA_EXCEEDED beyond that), so sign in fewer at
+  // a time and retry with backoff when the quota answers.
+  const authPool = env.hosts ? 40 : 8;
+  const authWithRetry = async (p) => {
+    for (let attempt = 0; ; attempt++) {
+      try { return await signUpOrIn(env, p.email, password(p.email)); }
+      catch (e) {
+        if (attempt >= 6 || !/QUOTA_EXCEEDED|TOO_MANY_ATTEMPTS/.test(String(e.message))) throw e;
+        await new Promise((ok) => setTimeout(ok, 1500 * (attempt + 1) + Math.random() * 1000));
+      }
+    }
+  };
+  await pool(people.filter((p) => !p.isNew), authPool, async (p) => {
     try {
-      const res = await signUpOrIn(env, p.email, password(p.email));
+      const res = await authWithRetry(p);
       p.uid = res.localId; tokens.set(p.uid, res.idToken); counters.authAccounts++;
       await commit(env, [writeOp(env, `users/${p.uid}`, {
         userId: `LT${String(p.index).padStart(7, '0')}`, email: p.email, name: p.name, legalAgeConfirmed: true,

@@ -1,3 +1,4 @@
+import '../services/display_currency.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:audioplayers/audioplayers.dart';
@@ -17,6 +18,15 @@ import '../services/currency_service.dart';
 import '../services/push_notification_service.dart';
 
 class CurrentUserProvider extends ChangeNotifier with WidgetsBindingObserver {
+  // Keep DisplayCurrency (gig pay conversion) in step with the user's
+  // location currency, and start the live rates once someone is signed in.
+  @override
+  void notifyListeners() {
+    DisplayCurrency.setCode(_currencyCode);
+    if (_uid != null) DisplayCurrency.start();
+    super.notifyListeners();
+  }
+
   CurrentUserProvider() {
     WidgetsBinding.instance.addObserver(this);
     _listenToGigVisibilityRules();

@@ -14,17 +14,19 @@
     "$functionsNote": "functions/src/region.ts deploys to us-central1 for any project that is not simpleproject-8ff7a, which includes this demo project."
   },
   "staging": {
-    "enabled": false,
+    "enabled": true,
     "billable": true,
     "projectId": "simpleproject-8ff7a",
     "functionsRegion": "asia-east2",
     "authMode": "password",
     "webConfig": {
       "$comment": "Fill from lib/firebase_options.dart (web) for the staging project. Web API keys are not secrets but are restricted by referrer/API.",
-      "apiKey": "",
-      "authDomain": "",
+      "apiKey": "AIzaSyCoUiwYLiHhU8EutBBjJBKNm8DzCBi7-tc",
+      "authDomain": "simpleproject-8ff7a.firebaseapp.com",
       "projectId": "simpleproject-8ff7a",
-      "appId": ""
+      "appId": "1:770115931871:web:78b42c9d11ff04371de36a",
+      "storageBucket": "simpleproject-8ff7a.firebasestorage.app",
+      "messagingSenderId": "770115931871"
     },
     "warnings": [
       "Shared with real dev testers: synthetic gigs appear in their gig lists.",

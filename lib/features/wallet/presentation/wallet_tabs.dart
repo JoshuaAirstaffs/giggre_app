@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/services/display_currency.dart';
 import '../services/wallet_requests_service.dart';
 import 'transaction_details_screen.dart';
 import 'widgets/wallet_transaction.dart';
@@ -35,6 +36,7 @@ class WalletHero extends StatelessWidget {
     required this.hasError,
     required this.balance,
     required this.symbol,
+    this.currencyCode,
     required this.fromCache,
     required this.pending,
     required this.onTopUp,
@@ -48,6 +50,10 @@ class WalletHero extends StatelessWidget {
   final bool hasError;
   final double balance;
   final String symbol;
+  /// The wallet's own currency. When the user's location currency differs,
+  /// the balance is shown converted ("≈ ₱ 628.53") with the real amount in a
+  /// "Held in USD" chip.
+  final String? currencyCode;
   final bool fromCache;
   final WalletRequest? pending;
   final VoidCallback onTopUp;
@@ -61,6 +67,13 @@ class WalletHero extends StatelessWidget {
     final deep = colors.last;
     final white80 = Colors.white.withValues(alpha: 0.82);
     final number = NumberFormat.currency(symbol: '', decimalDigits: 2);
+    final held = currencyCode;
+    final showIn = DisplayCurrency.code.value;
+    final converted = held == null || held == showIn
+        ? null
+        : DisplayCurrency.convert(balance, held, showIn);
+    final shownSymbol = converted == null ? symbol : '≈ ${CurrencyFormatter.symbol(showIn)}';
+    final shownBalance = converted ?? balance;
 
     return Container(
       decoration: BoxDecoration(
@@ -141,12 +154,12 @@ class WalletHero extends StatelessWidget {
                         textBaseline: TextBaseline.alphabetic,
                         children: [
                           Text(
-                            symbol,
+                            shownSymbol,
                             style: TextStyle(color: white80, fontSize: 22, fontWeight: FontWeight.w700),
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            number.format(balance).trim(),
+                            number.format(shownBalance).trim(),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 40,
@@ -163,6 +176,12 @@ class WalletHero extends StatelessWidget {
                     spacing: 8,
                     runSpacing: 6,
                     children: [
+                      // Converted: the real balance and the wallet's currency.
+                      if (converted != null)
+                        _HeroChip(
+                          icon: Icons.currency_exchange_rounded,
+                          text: 'Held in $held · ${formatMoney(balance, held!)}',
+                        ),
                       if (pending != null)
                         _HeroChip(
                           icon: Icons.schedule_rounded,
@@ -360,7 +379,7 @@ class WalletStatsStrip extends StatelessWidget {
         moneyOut += -t.amount;
       }
     }
-    String f(double v) => list == null ? '–' : formatMoney(v, currency);
+    String f(double v) => list == null ? '–' : formatMoneyShown(v, currency);
     final divider = Container(width: 1, height: 34, color: Theme.of(context).dividerColor);
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),

@@ -45,6 +45,18 @@ export async function signIn(env, email, password) {
 }
 
 export async function signUpOrIn(env, email, password) {
+  // Billable environments: the accounts are bulk-imported beforehand
+  // (prepare-accounts.mjs + firebase auth:import), so sign in first and
+  // only sign up when the account really isn't there. Sign-up is limited to
+  // ~100 new accounts per hour per IP and answers TOO_MANY_ATTEMPTS_TRY_LATER
+  // even for e-mails that already exist, so trying it first fails them all.
+  if (!env.hosts) {
+    try { return await signIn(env, email, password); }
+    catch (err) {
+      if (!/EMAIL_NOT_FOUND|INVALID_LOGIN_CREDENTIALS/.test(String(err.message))) throw err;
+      return signUp(env, email, password);
+    }
+  }
   try { return await signUp(env, email, password); }
   catch (err) {
     if (String(err.message).includes('EMAIL_EXISTS')) return signIn(env, email, password);

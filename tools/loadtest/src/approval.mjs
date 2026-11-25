@@ -15,7 +15,7 @@
 // Honest limit: this stops accidental and stale runs. It is not a security
 // boundary against someone who can edit files in this repo.
 import { writeFileSync, readFileSync, readdirSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
-import { askOnTty } from './tty.mjs';
+import { askOnTty, normalizeTyped } from './tty.mjs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { STATE_DIR } from './config.mjs';
@@ -31,8 +31,8 @@ export async function mintApproval(plan, { ttlMinutes }) {
   const typed = await askOnTty(
     `\nTo approve exactly this run, type:\n\n  ${phrase}\n\n> `,
   );
-  if (typed.trim() !== phrase) {
-    throw new Error('Phrase did not match. Nothing was approved.');
+  if (normalizeTyped(typed) !== normalizeTyped(phrase)) {
+    throw new Error(`Phrase did not match. Nothing was approved.\n  expected: ${phrase}\n  got:      ${normalizeTyped(typed) || '(nothing)'}`);
   }
   const now = Date.now();
   const approval = {

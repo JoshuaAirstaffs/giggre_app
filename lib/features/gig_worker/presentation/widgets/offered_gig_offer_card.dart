@@ -46,7 +46,7 @@ class OfferedGigOfferCard extends StatelessWidget {
       _InfoChip(
         null, // Icons.attach_money_rounded
         'PAY',
-        CurrencyFormatter.format(gig.budget, gig.currencyCode),
+        CurrencyFormatter.pay(gig.budget, gig.currencyCode, withOriginal: true),
       ),
       _InfoChip(
         Icons.event_rounded,

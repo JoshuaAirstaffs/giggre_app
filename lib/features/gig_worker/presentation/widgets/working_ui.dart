@@ -1469,7 +1469,7 @@ class _GigHostCard extends StatelessWidget {
                 text: TextSpan(
                   children: [
                     TextSpan(
-                      text: CurrencyFormatter.format(
+                      text: CurrencyFormatter.pay(
                         gig.payType == 'hourly' && gig.hourlyRate != null
                             ? gig.hourlyRate!
                             : gig.budget,
@@ -1491,6 +1491,19 @@ class _GigHostCard extends StatelessWidget {
                         color: activeGigTextMuted(isDark),
                         fontSize: 10,
                         fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    // Converted from another currency: the original amount.
+                    TextSpan(
+                      text: CurrencyFormatter.origSuffix(
+                        gig.payType == 'hourly' && gig.hourlyRate != null
+                            ? gig.hourlyRate!
+                            : gig.budget,
+                        gig.currencyCode,
+                      ),
+                      style: TextStyle(
+                        color: activeGigTextMuted(isDark),
+                        fontSize: 10,
                       ),
                     ),
                   ],

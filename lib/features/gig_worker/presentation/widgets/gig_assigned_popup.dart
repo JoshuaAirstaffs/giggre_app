@@ -32,9 +32,9 @@ class GigAssignedDialog extends StatelessWidget {
   // everywhere else pay is displayed in the app.
   String get _payLabel {
     if (gig.payType == 'hourly' && gig.hourlyRate != null) {
-      return '${CurrencyFormatter.format(gig.hourlyRate!, gig.currencyCode)}/hr';
+      return '${CurrencyFormatter.pay(gig.hourlyRate!, gig.currencyCode)}/hr${CurrencyFormatter.origSuffix(gig.hourlyRate!, gig.currencyCode)}';
     }
-    return '${CurrencyFormatter.format(gig.budget, gig.currencyCode)}/day';
+    return '${CurrencyFormatter.pay(gig.budget, gig.currencyCode)}/day${CurrencyFormatter.origSuffix(gig.budget, gig.currencyCode)}';
   }
 
   @override

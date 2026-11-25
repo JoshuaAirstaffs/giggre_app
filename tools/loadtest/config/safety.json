@@ -21,15 +21,16 @@
     "4": 4500000
   },
   "approvalTtlMinutes": 60,
-  "syntheticEmailDomain": "loadtest.giggre.invalid",
+  "syntheticEmailDomain": "lt2.loadtest.giggre.invalid",
   "syntheticMarkerField": "loadTestRunId",
   "syntheticGeoSandbox": {
-    "$comment": "Synthetic gigs and users are placed here (Metro Manila box). In 'staging' set a box with no real dev testers nearby, because onOpenGigPosted pushes to available users within 10 km.",
-    "latMin": 14.5,
-    "latMax": 14.7,
-    "lngMin": 120.95,
-    "lngMax": 121.1
+    "$comment": "Synthetic gigs and users are placed here. Moved 2026-11-25 from Metro Manila to a small box near Basco, Batanes (far from the team's dev testers), because staging = the shared dev project and onOpenGigPosted pushes to available users within 10 km.",
+    "latMin": 20.4,
+    "latMax": 20.48,
+    "lngMin": 121.94,
+    "lngMax": 122.0
   },
   "latencyAbortOnEmulator": false,
-  "$latencyAbortNote": "User decision 2026-11-23: on the emulator, latency reflects one local JVM (saturates ~50-60 concurrent sessions), so it never aborts a run there. Error-rate, read/write and run-time stops still apply. Billable environments keep abortOnP95LatencyMs."
+  "$latencyAbortNote": "User decision 2026-11-23: on the emulator, latency reflects one local JVM (saturates ~50-60 concurrent sessions), so it never aborts a run there. Error-rate, read/write and run-time stops still apply. Billable environments keep abortOnP95LatencyMs.",
+  "$syntheticEmailDomainNote": "Changed 2026-11-25 from loadtest.giggre.invalid: ~500 accounts on dev under the old domain were created by earlier failed runs with a different LOADTEST_PASSWORD_SALT and can't be signed in to. The new domain gives a clean set (prepare-accounts.mjs + firebase auth:import). Old-domain accounts still need removing from dev Authentication."
 }

@@ -190,7 +190,7 @@ class _WorkerNotificationsSheetState
           'createdAt',
           _ActivityType.newOffer,
           'New Gig Offer',
-          '"$gigTitle" from $hostName · ${CurrencyFormatter.format(budget, currencyCode)}',
+          '"$gigTitle" from $hostName · ${CurrencyFormatter.pay(budget, currencyCode)}',
         );
       }
 

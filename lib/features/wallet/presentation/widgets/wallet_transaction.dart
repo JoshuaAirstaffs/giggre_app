@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/theme/profile_tab_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/services/display_currency.dart';
 
 /// One entry from wallets/{uid}/transactions (written only by
 /// postLedgerEntry in functions/src/wallet.ts).
@@ -51,8 +52,11 @@ class WalletTx {
     );
   }
 
-  String formatAmount(String fallbackCurrency, {bool signed = true}) {
-    final money = formatMoney(amount.abs(), currencyCode ?? fallbackCurrency);
+  /// [shown] (default): in the user's location currency, "≈" converted when
+  /// the wallet is held in another one. false: the real ledger amount.
+  String formatAmount(String fallbackCurrency, {bool signed = true, bool shown = true}) {
+    final ccy = currencyCode ?? fallbackCurrency;
+    final money = shown ? formatMoneyShown(amount.abs(), ccy) : formatMoney(amount.abs(), ccy);
     return signed ? '${isIn ? '+' : '−'} $money' : money;
   }
 }
@@ -61,6 +65,17 @@ String formatMoney(double value, String currencyCode) => NumberFormat.currency(
   symbol: '${CurrencyFormatter.symbol(currencyCode)} ',
   decimalDigits: 2,
 ).format(value);
+
+/// [value] (held in [currencyCode]) as the user sees it: in their location
+/// currency (DisplayCurrency — Philippines ₱, US/elsewhere $), "≈" converted
+/// at the live rate when the wallet is in the other currency. Display only:
+/// the wallet keeps its own currency for every top up, withdraw and send.
+String formatMoneyShown(double value, String currencyCode) {
+  final to = DisplayCurrency.code.value;
+  if (to == currencyCode) return formatMoney(value, currencyCode);
+  final c = DisplayCurrency.convert(value, currencyCode, to);
+  return c == null ? formatMoney(value, currencyCode) : '≈ ${formatMoney(c, to)}';
+}
 
 const kWalletIn = Color(0xFF2BB673);
 const kWalletOut = Colors.redAccent;

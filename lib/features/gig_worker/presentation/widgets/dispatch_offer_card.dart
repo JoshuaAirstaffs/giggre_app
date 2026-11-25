@@ -236,9 +236,10 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
               const SizedBox(width: 16),
               // const Icon(Icons.attach_money_rounded, color: kAmber, size: 14),
               Text(
-                CurrencyFormatter.format(
+                CurrencyFormatter.pay(
                   widget.gig.budget,
                   widget.gig.currencyCode,
+                  withOriginal: true,
                 ),
                 style: const TextStyle(
                   color: kAmber,

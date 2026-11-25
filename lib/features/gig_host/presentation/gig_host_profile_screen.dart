@@ -2125,7 +2125,7 @@ class _GigHistoryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  CurrencyFormatter.format(budget, currencyCode),
+                  CurrencyFormatter.pay(budget, currencyCode),
                   style: TextStyle(
                     color: onSurface,
                     fontSize: 15,
@@ -2352,7 +2352,7 @@ class _GigHistoryDetailSheetState extends State<_GigHistoryDetailSheet> {
                 _HistoryDetailRow(
                   icon: Icons.attach_money_rounded,
                   label: isMultiWorker ? 'Rate per worker' : 'Budget',
-                  value: CurrencyFormatter.format(budget, currencyCode),
+                  value: CurrencyFormatter.pay(budget, currencyCode, withOriginal: true),
                   valueColor: kAmber,
                   onSurface: onSurface,
                 ),

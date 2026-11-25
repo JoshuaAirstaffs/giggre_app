@@ -92,6 +92,20 @@ export async function runStage(stage, opts) {
     try { spawn('caffeinate', ['-i', '-s', '-w', String(process.pid)], { stdio: 'ignore', detached: true }).unref(); log('Sleep prevention on for this run (caffeinate).'); }
     catch { log('WARNING: could not start caffeinate; keep the Mac awake manually.'); }
   }
+  // Windows: same idea. A hidden PowerShell asks Windows not to sleep
+  // (SetThreadExecutionState ES_CONTINUOUS|ES_SYSTEM_REQUIRED) until this
+  // run's process exits. A sleep/shutdown mid-run loses every measurement,
+  // because metrics are only written at the end (2026-11-25).
+  if (process.platform === 'win32') {
+    const ps = `$sig='[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);';` +
+      `$k=Add-Type -MemberDefinition $sig -Name K -Namespace W -PassThru;` +
+      `$null=$k::SetThreadExecutionState([uint32]2147483649);` +
+      `try { Wait-Process -Id ${process.pid} } catch {}`;
+    try {
+      spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps], { stdio: 'ignore', detached: true, windowsHide: true }).unref();
+      log('Sleep prevention on for this run (Windows). Keep the PC plugged in; this does not stop shutdowns or Windows Update restarts.');
+    } catch { log('WARNING: could not turn on sleep prevention; set Windows Sleep to Never for this run.'); }
+  }
 
   let abortReason = null;
   const gens = [];

@@ -499,7 +499,7 @@ class _SavedScreenState extends State<SavedScreen> {
                                   ),
                                 ),
                                 Text(
-                                  CurrencyFormatter.format(
+                                  CurrencyFormatter.pay(
                                     budget,
                                     currencyCode,
                                   ),

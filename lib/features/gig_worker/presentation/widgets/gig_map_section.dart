@@ -24,6 +24,7 @@ import '../../../../core/theme/map_style.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/services/display_currency.dart';
 import '../../../../core/utils/distance_units.dart';
 import '../../../gig_host/presentation/widgets/gig_images_picker.dart';
 import '../../../../helpers/snackbar_helper.dart';
@@ -1047,7 +1048,7 @@ void showFullGigDetailSheet(
                           text: TextSpan(
                             children: [
                               TextSpan(
-                                text: CurrencyFormatter.format(
+                                text: CurrencyFormatter.pay(
                                   gig.payType == 'hourly' &&
                                           gig.hourlyRate != null
                                       ? gig.hourlyRate!
@@ -1067,6 +1068,21 @@ void showFullGigDetailSheet(
                                 style: const TextStyle(
                                   color: kSub,
                                   fontSize: 10,
+                                ),
+                              ),
+                              // Converted from another currency: the
+                              // host's original amount, small.
+                              TextSpan(
+                                text: CurrencyFormatter.origSuffix(
+                                  gig.payType == 'hourly' &&
+                                          gig.hourlyRate != null
+                                      ? gig.hourlyRate!
+                                      : gig.budget,
+                                  gig.currencyCode,
+                                ),
+                                style: const TextStyle(
+                                  color: kSub,
+                                  fontSize: 11,
                                 ),
                               ),
                             ],
@@ -2361,9 +2377,9 @@ class _GigMapSectionState extends State<GigMapSection> {
   // — same distinction as the PAY cell in the gig detail sheet.
   String _salaryLabel(GigMarkerData gig) {
     if (gig.payType == 'hourly' && gig.hourlyRate != null) {
-      return '${CurrencyFormatter.format(gig.hourlyRate!, gig.currencyCode)}/hr';
+      return '${CurrencyFormatter.pay(gig.hourlyRate!, gig.currencyCode)}/hr';
     }
-    return '${CurrencyFormatter.format(gig.budget, gig.currencyCode)}/day';
+    return '${CurrencyFormatter.pay(gig.budget, gig.currencyCode)}/day';
   }
 
   late final CurrentUserProvider _userProvider;
@@ -2389,6 +2405,8 @@ class _GigMapSectionState extends State<GigMapSection> {
     if (DistanceUnits.miles) _radiusKm = DistanceUnits.toKm(10);
     _loadBaseIcons();
     SkillIconService.instance.icons.addListener(_onSkillIconsChanged);
+    // Converted "≈" prices refresh when rates arrive or the currency changes.
+    DisplayCurrency.changes.addListener(_onSkillIconsChanged);
     SkillIconService.instance.ensureLoaded();
     _fetchAllSkills();
     _applyDefaultFilters();
@@ -3263,6 +3281,7 @@ class _GigMapSectionState extends State<GigMapSection> {
     _userProvider.removeListener(_onProviderLocationChanged);
     DistanceUnits.region.removeListener(_onRegionChanged);
     SkillIconService.instance.icons.removeListener(_onSkillIconsChanged);
+    DisplayCurrency.changes.removeListener(_onSkillIconsChanged);
     ViewedGigsStore.instance.viewed.removeListener(_onViewedChanged);
     widget.externalFocusRequest?.removeListener(_handleExternalFocusRequest);
     _googleMapController?.dispose();
@@ -3277,10 +3296,28 @@ class _GigMapSectionState extends State<GigMapSection> {
   List<GigMarkerData> get _visibleOfferedGigs =>
       _offeredGigs.where((g) => !_blockedHostIds.contains(g.hostId)).toList();
 
-  List<GigMarkerData> get _unfilteredGigs => [
-    ..._openGigs,
-    ..._offeredGigs,
-  ].where((g) => !_blockedHostIds.contains(g.hostId)).toList();
+  // Region: workers in the Philippines only see Philippine gigs, workers in
+  // the US (and anywhere else — USD is the default) only see US gigs. The
+  // worker's region is their location currency (CurrentUserProvider: PH →
+  // PHP, else USD, re-detected on every app resume). A gig's region is the
+  // country saved when it was posted (place.countryCode), or its currency
+  // for older gigs without one. Gigs a host offered to this worker directly
+  // always show.
+  bool get _viewerInPh => _userProvider.currencyCode == 'PHP';
+
+  static bool _isPhGig(GigMarkerData g) {
+    final c = g.place['countryCode'];
+    if (c != null && c.isNotEmpty) return c.toUpperCase() == 'PH';
+    return g.currencyCode == 'PHP';
+  }
+
+  List<GigMarkerData> get _unfilteredGigs {
+    final inPh = _viewerInPh;
+    return [
+      ..._openGigs.where((g) => _isPhGig(g) == inPh),
+      ..._offeredGigs,
+    ].where((g) => !_blockedHostIds.contains(g.hostId)).toList();
+  }
 
   bool _matchesSkill(String skill, String other) =>
       skill.toLowerCase().trim() == other.toLowerCase().trim();
@@ -3350,14 +3387,17 @@ class _GigMapSectionState extends State<GigMapSection> {
         gigs = gigs.where((g) => g.payType != 'hourly').toList();
     }
 
-    // Gigs in another currency can't be compared, so a range hides them.
+    // Pay range is in the worker's currency; gigs in another currency are
+    // compared at their converted amount (the "≈" price they see). Only when
+    // no rate is known yet are they left out.
     if (_hasPayRange) {
       final min = _payMin, max = _payMax, ccy = _payCurrency;
       gigs = gigs.where((g) {
-        if (g.currencyCode != ccy) return false;
-        final pay = g.payType == 'hourly' && g.hourlyRate != null
+        final raw = g.payType == 'hourly' && g.hourlyRate != null
             ? g.hourlyRate!
             : g.budget;
+        final pay = DisplayCurrency.convert(raw, g.currencyCode, ccy);
+        if (pay == null) return false;
         return (min == null || pay >= min) && (max == null || pay <= max);
       }).toList();
     }
@@ -3414,10 +3454,14 @@ class _GigMapSectionState extends State<GigMapSection> {
         ? null
         : Geolocator.distanceBetween(
             me.latitude, me.longitude, g.position.latitude, g.position.longitude);
-    // Shown pay in the worker's currency; other currencies can't be ranked.
-    double? pay(GigMarkerData g) => g.currencyCode != ccy
-        ? null
-        : (g.payType == 'hourly' && g.hourlyRate != null ? g.hourlyRate! : g.budget);
+    // Shown pay in the worker's currency.
+    // Pay in the worker's currency (converted the same way as the "≈"
+    // prices shown); unknown rate → sorted last.
+    double? pay(GigMarkerData g) => DisplayCurrency.convert(
+          g.payType == 'hourly' && g.hourlyRate != null ? g.hourlyRate! : g.budget,
+          g.currencyCode,
+          ccy,
+        );
     final now = DateTime.now();
     // Upcoming dates first (soonest), then flexible, then past dates.
     DateTime? start(GigMarkerData g) {
@@ -6294,7 +6338,7 @@ class _GigListCard extends StatelessWidget {
                           text: TextSpan(
                             children: [
                               TextSpan(
-                                text: CurrencyFormatter.format(
+                                text: CurrencyFormatter.pay(
                                   gig.payType == 'hourly' &&
                                           gig.hourlyRate != null
                                       ? gig.hourlyRate!
