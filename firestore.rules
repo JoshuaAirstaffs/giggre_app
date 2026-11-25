@@ -547,11 +547,13 @@ service cloud.firestore {
         // Same participant check as above, plus: reject if the recipient has
         // blocked the sender (client-side blocking only hides/disables the
         // composer — this is what actually stops a blocked user's messages).
-        allow create: if isAuth() && (
+        // Admins (giggre-admin → Support replies) may always post; blocking
+        // and message requests only apply between users.
+        allow create: if isAdmin() || (isAuth() && (
           get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.userId == request.auth.uid
           || request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(roomId)).data.participants
         ) && !isBlockedSender(roomId, request.auth.uid)
-          && requestAllowsMessage(roomId, request.auth.uid);
+          && requestAllowsMessage(roomId, request.auth.uid));
       }
     }
 
