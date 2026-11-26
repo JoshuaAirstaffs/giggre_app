@@ -31,15 +31,15 @@ Future<void> showApplicationSentModal(
           ),
           const SizedBox(height: 16),
           const Text(
-            'Good luck!',
+            'Application sent! 🎉',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           Text(
             title.isEmpty
-                ? "Your application for this gig is in. We'll let you know as soon as the host picks a worker."
-                : "Your application for \"$title\" is in. We'll let you know as soon as the host picks a worker.",
+                ? "You applied for this gig! We'll let you know as soon as the host picks someone."
+                : "You applied for \"$title\"! We'll let you know as soon as the host picks someone.",
             style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
             textAlign: TextAlign.center,
           ),
@@ -56,7 +56,7 @@ Future<void> showApplicationSentModal(
               ),
               onPressed: () => Navigator.of(dialogContext).pop(),
               child: const Text(
-                'Got it',
+                'Sounds good',
                 style: TextStyle(color: Colors.white),
               ),
             ),
