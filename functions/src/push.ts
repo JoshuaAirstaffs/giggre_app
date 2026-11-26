@@ -10,6 +10,9 @@ export interface PushPayload {
   // (Android's sound is fixed per-channelId instead, at channel creation).
   // Defaults to the system default sound.
   iosSound?: string;
+  // Pushes sharing a collapseKey replace each other in the notification tray
+  // (Android tag + collapse_key, iOS apns-collapse-id) instead of stacking.
+  collapseKey?: string;
 }
 
 /**
@@ -103,12 +106,17 @@ export async function sendPushToUser(
     data: { ...(payload.data ?? {}), channelId: payload.channelId },
     android: {
       priority: "high",
+      ...(payload.collapseKey ? { collapseKey: payload.collapseKey } : {}),
       notification: {
         channelId: payload.channelId,
         sound: "default",
+        ...(payload.collapseKey ? { tag: payload.collapseKey } : {}),
       },
     },
     apns: {
+      ...(payload.collapseKey
+        ? { headers: { "apns-collapse-id": payload.collapseKey } }
+        : {}),
       payload: {
         aps: {
           sound: payload.iosSound ?? "default",

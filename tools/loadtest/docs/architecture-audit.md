@@ -48,7 +48,7 @@ The simulator opens all of these (`src/scenarios/session.mjs → appOpen`):
 | Register (`register_screen.dart:1277-1331`) | `userId` collision query, referral-code query, then a **WriteBatch** that sets `users/{uid}` (plus `users/{referrer}/referrals_list/{uid}`). Starts `isVerified:'unverified'`, `availableForGigs:true`, `slot:'AVAILABLE'`. | none needed |
 | Post open gig (`post_open_gig_screen.dart:594`) | `open_gigs.add` with hostId, title, requiredSkills[1], budget, payType, location GeoPoint, status 'open', workerSlots, filledSlotCount 0, and `scheduledDate` (omitted for Flexible). | — |
 | Post offered gig (`post_offered_gig_screen.dart:739-771`) | `offered_gigs.add`. A single recipient goes in `workerId` on the gig. Multiple recipients get a separate **batch** of `workers/{uid}` slot docs, which is not atomic with the add. | — |
-| Quick gig | `quick_gigs.add` (status 'scanning'). Matching then runs **on the host's phone**: it queries all users where isOnline, availableForGigs, seekingQuickGigs and slot AVAILABLE, with no limit, and polls `get()` every 3 s. | in-memory only |
+| Quick gig | `quick_gigs.add` (status 'scanning'). Matching then runs **on the host's phone**: it queries all users where isOnline, availableForGigs, seekingQuickGigs and slot AVAILABLE, with no limit, and polls `get()` every 3 s. Simulated in `src/scenarios/quickGigs.mjs` — same unbounded scan, same dispatch/accept/decline fields and rules path; polling/timeout wall-clock is compressed to a short representative delay (see that file's header for the full list of simplifications). | in-memory only |
 | Apply (`gig_map_section.dart:396-670`) | Limit-guard reads, gig get, 4+4 busy checks, then `update({applicants: arrayUnion(...)})` and a `notifications.add` (new_applicant). | **none**; arrayUnion on one hot doc |
 | Select, single slot (`gig_detail_sheet.dart:841-853`) | Plain `update({workerId, assignedWorkerId, status:'navigating', ...})`. | **none: a race can reassign** |
 | Select, multi slot (`:859-912`) | `runTransaction`: checks filled < slots and that the slot doc doesn't exist, then sets the slot and increments filledSlotCount. | transaction |
@@ -106,7 +106,7 @@ Profile photos are 512 px, quality 80. Gig photos are up to 5 at 1600 px, qualit
 | 5 | `open_gigs` rule allows any field edit while open | Integrity and abuse | `security.editForeignOpenGig` |
 | 6 | Apply = arrayUnion on one gig doc | Hot-document write contention on popular gigs | `race.noLostApplications`, apply p95 |
 | 7 | Per-room unread listeners | Listener count grows with chat rooms per user | `readsBy.roomUnread` |
-| 8 | Quick-gig matching on the host phone | Unbounded online-user query every 15 s per searching host | not simulated (documented) |
+| 8 | Quick-gig matching on the host phone | Unbounded online-user query every 15 s per searching host | `readsBy.quickGigScanGlobal`; also `race.quickGigNoDoubleDispatch` (the dispatch write has no transaction guarding `users.slot`) |
 
 ## 9. Workload assumptions (no analytics exist)
 

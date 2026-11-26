@@ -178,6 +178,11 @@ export async function appOpen(vu) {
     await cUpdate(vu, me, { isOnline: true }, 'open.setOnline');
     vu.online = true;
     await cUpdate(vu, me, { location: new GeoPoint(vu.person.lat, vu.person.lng) }, 'open.location');
+    // Dashboard toggle (gig_worker_screen.dart _seekingQuickGigs), default
+    // off — only a share of workers opt in, same as the real app.
+    if (vu.r.chance(vu.world.cfg.workload.quickGigs?.seekingShare ?? 0)) {
+      await cUpdate(vu, me, { seekingQuickGigs: true }, 'open.setOnline');
+    }
   }
   vu.m.sample('session.appOpenReady', performance.now() - t0);
 }

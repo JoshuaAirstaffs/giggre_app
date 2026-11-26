@@ -10,7 +10,7 @@ import { Metrics } from './metrics.mjs';
 import { Limiter, PerMinute, stopRequested } from './safety.mjs';
 import { loadPopulation, passwordFn } from './seed.mjs';
 import { runSession } from './scenarios/session.mjs';
-import { runRaces } from './scenarios/race.mjs';
+import { runRaces, runQuickGigRaces } from './scenarios/race.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const send = (msg) => process.send?.(msg);
@@ -61,6 +61,9 @@ async function main(job) {
   const t0 = Date.now();
   if (me === 0 && cfg.workload.contention.raceGigsPerStage > 0) {
     setTimeout(() => runRaces(world, log).catch((e) => log(`race failed: ${e.message}`)), plan.compressedDurationMin * 60_000 * 0.3);
+  }
+  if (me === 0 && cfg.workload.contention.quickGigRacePairs > 0) {
+    setTimeout(() => runQuickGigRaces(world, log).catch((e) => log(`quick-gig race failed: ${e.message}`)), plan.compressedDurationMin * 60_000 * 0.4);
   }
 
   const running = new Set();

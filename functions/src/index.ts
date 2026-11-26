@@ -114,6 +114,40 @@ export const onChatMessageCreated = onDocumentCreated(
 // quick_gig_matching_service.dart, so "nearby" means the same thing here as
 // it does for quick-gig auto-dispatch matching.
 const NEARBY_WORKER_RADIUS_KM = 10;
+// A worker gets at most one "New Gig Nearby" push per window, however many
+// gigs are posted near them — 40 hosts posting at once is one alert, not 40.
+// The app's gig list shows every new gig anyway; the push is only a nudge.
+const NEARBY_PUSH_COOLDOWN_MS = 15 * 60 * 1000;
+
+/**
+ * Claims this worker's nearby-gig push slot. Returns true (and stamps the
+ * time) only if they haven't had one within NEARBY_PUSH_COOLDOWN_MS. A
+ * transaction, so simultaneous gig posts can't both claim it. Kept in its
+ * own collection (server-only; no client rules) rather than on users/{uid},
+ * so it doesn't wake every listener on the user doc.
+ */
+async function claimNearbyPushSlot(uid: string): Promise<boolean> {
+  const db = admin.firestore();
+  const ref = db.collection("nearby_push_state").doc(uid);
+  try {
+    return await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const last = snap.get("lastSentAt") as
+        | admin.firestore.Timestamp
+        | undefined;
+      if (last && Date.now() - last.toMillis() < NEARBY_PUSH_COOLDOWN_MS) {
+        return false;
+      }
+      tx.set(ref, { lastSentAt: admin.firestore.Timestamp.now() });
+      return true;
+    });
+  } catch (e) {
+    // Heavy contention on one worker's slot means other gigs are claiming
+    // it right now — one of them will notify, so skipping is correct.
+    console.warn("nearby push slot claim failed; skipping", uid, String(e));
+    return false;
+  }
+}
 
 function distanceKm(
   a: admin.firestore.GeoPoint,
@@ -177,14 +211,16 @@ export const onOpenGigPosted = onDocumentCreated(
       .map((doc) => doc.id);
 
     await Promise.all(
-      nearbyWorkerIds.map((uid) =>
-        sendPushToUser(uid, {
+      nearbyWorkerIds.map(async (uid) => {
+        if (!(await claimNearbyPushSlot(uid))) return;
+        await sendPushToUser(uid, {
           title: "New Gig Nearby",
           body: "A new gig matches your skills. Check it out!",
           channelId: "nearby_gigs_v2",
+          collapseKey: "nearby_gig",
           data: { type: "nearby_gig", gigId: event.params.gigId },
-        })
-      )
+        });
+      })
     );
   }
 );

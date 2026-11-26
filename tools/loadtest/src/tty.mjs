@@ -5,29 +5,23 @@ import { openSync, closeSync, createReadStream, createWriteStream } from 'node:f
 import readline from 'node:readline';
 
 export async function askOnTty(promptText) {
-  // Windows has no /dev/tty. There, ask on the console itself, but only when
-  // stdin AND stdout are a real interactive console (PowerShell, cmd, the
-  // VS Code terminal). An agent or a pipe has no TTY there either, so the
-  // "a person must type this" guarantee still holds.
-  if (process.platform === 'win32') {
-    if (!process.stdin.isTTY || !process.stdout.isTTY) {
-      throw new Error('No interactive terminal. This step must be typed by a person: run the command yourself in a terminal (not through an agent).');
-    }
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    try {
-      return await new Promise((resolve) => rl.question(promptText, resolve));
-    } finally {
-      rl.close();
-    }
-  }
-  let fd;
+  // On Windows there is no /dev/tty; the console is two separate devices.
+  let inFd, outFd;
   try {
-    fd = openSync('/dev/tty', 'r+');
+    if (process.platform === 'win32') {
+      // A bare 'CONIN$' is resolved relative to cwd by Node before hitting the
+      // Win32 API, which breaks the special device name. The \\.\ device
+      // namespace prefix forces an absolute, cwd-independent device path.
+      inFd = openSync('\\\\.\\CONIN$', 'r');
+      outFd = openSync('\\\\.\\CONOUT$', 'w');
+    } else {
+      inFd = outFd = openSync('/dev/tty', 'r+');
+    }
   } catch {
     throw new Error('No interactive terminal. This step must be typed by a person: run the command yourself in a terminal (not through an agent).');
   }
-  const input = createReadStream(null, { fd, autoClose: false });
-  const output = createWriteStream(null, { fd, autoClose: false });
+  const input = createReadStream(null, { fd: inFd, autoClose: false });
+  const output = createWriteStream(null, { fd: outFd, autoClose: false });
   const rl = readline.createInterface({ input, output, terminal: true });
   try {
     return await new Promise((resolve) => rl.question(promptText, resolve));
@@ -35,7 +29,8 @@ export async function askOnTty(promptText) {
     rl.close();
     input.destroy();
     output.destroy();
-    try { closeSync(fd); } catch { /* already closed */ }
+    try { closeSync(inFd); } catch { /* already closed */ }
+    if (outFd !== inFd) { try { closeSync(outFd); } catch { /* already closed */ } }
   }
 }
 

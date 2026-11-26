@@ -1686,6 +1686,44 @@ class _SupportTabState extends State<_SupportTab> {
   bool _isLoading = false;
   bool _hasMore = true;
 
+  // Preview for rooms whose saved lastMessage is empty — e.g. Support's
+  // last message was a file and the room was saved without a text label.
+  // Built from the room's newest message (one read per room, per session).
+  final Map<String, String> _fallbackPreview = {};
+
+  Future<void> _loadFallbackPreview(String roomId) async {
+    if (roomId.isEmpty || _fallbackPreview.containsKey(roomId)) return;
+    _fallbackPreview[roomId] = ''; // in flight / nothing found
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('chat_rooms')
+          .doc(roomId)
+          .collection('messages')
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return;
+      final m = snap.docs.first.data();
+      final type = m['attachmentType'] as String? ?? '';
+      final hasFile = (m['attachmentUrl'] as String? ?? '').isNotEmpty;
+      final rawText = m['text'] as String? ?? '';
+      String label = _stripHtml(rawText);
+      if (type == 'image' || (!hasFile && rawText.contains('<img'))) {
+        label = '📷 Photo';
+      } else if (type == 'video' || (!hasFile && rawText.contains('<video'))) {
+        label = '🎥 Video';
+      } else if (hasFile && label.isEmpty) {
+        final name = m['attachmentName'] as String? ?? '';
+        label = '📎 ${name.isNotEmpty ? name : 'File'}';
+      }
+      if (label.isNotEmpty && mounted) {
+        setState(() => _fallbackPreview[roomId] = label);
+      }
+    } catch (e) {
+      debugPrint('Support preview fallback failed for $roomId: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1776,8 +1814,22 @@ class _SupportTabState extends State<_SupportTab> {
           final rawDate = room['lastMessageAt'] ?? room['createdAt'];
           final date = rawDate != null ? (rawDate as Timestamp).toDate() : null;
           final sender = room['lastMessageSender'] as String? ?? '';
-          final lastMessage = _stripHtml(room['lastMessage'] as String? ?? '');
-          final displayMessage = sender.isNotEmpty
+          final rawLast = room['lastMessage'] as String? ?? '';
+          var lastMessage = _stripHtml(rawLast);
+          if (lastMessage.isEmpty) {
+            if (rawLast.contains('<img')) {
+              lastMessage = '📷 Photo';
+            } else if (rawLast.contains('<video')) {
+              lastMessage = '🎥 Video';
+            } else {
+              final roomId = room['roomId'] as String? ?? '';
+              lastMessage = _fallbackPreview[roomId] ?? '';
+              if (!_fallbackPreview.containsKey(roomId)) {
+                _loadFallbackPreview(roomId);
+              }
+            }
+          }
+          final displayMessage = sender.isNotEmpty && lastMessage.isNotEmpty
               ? '$sender: $lastMessage'
               : lastMessage;
 

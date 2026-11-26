@@ -13,7 +13,7 @@
 //   cleanup  --env NAME             delete synthetic data (typed confirmation for non-emulator)
 //
 // opts: --env emulator|staging   --full-day   --with-functions   --seed N
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, execFileSync, spawnSync } from 'node:child_process';
 import { writeFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { loadConfig, validateConfig, ROOT, STATE_DIR } from './src/config.mjs';
@@ -145,11 +145,26 @@ function emulator() {
   const cfg = loadConfig();
   const env = cfg.environments.emulator;
   const only = flag('with-functions') ? 'auth,firestore,functions' : 'auth,firestore';
-  const jbr = '/Applications/Android Studio.app/Contents/jbr/Contents/Home';
+  // firebase-tools requires a JDK; Android Studio bundles a compatible one (JBR) we can fall
+  // back to when the system `java` is missing or too old.
+  const MIN_JAVA = 21;
+  const jbrCandidates = process.platform === 'win32'
+    ? ['C:\\Program Files\\Android\\Android Studio\\jbr']
+    : ['/Applications/Android Studio.app/Contents/jbr/Contents/Home'];
   const childEnv = { ...process.env };
-  let hasJava = true;
-  try { execFileSync('java', ['-version'], { stdio: 'pipe' }); } catch { hasJava = false; }
-  if (!hasJava && existsSync(jbr)) { childEnv.JAVA_HOME = jbr; childEnv.PATH = `${jbr}/bin:${childEnv.PATH}`; log(`Using Android Studio's Java: ${jbr}`); }
+  const sysJava = spawnSync('java', ['-version'], { encoding: 'utf8' });
+  const versionMatch = `${sysJava.stdout || ''}${sysJava.stderr || ''}`.match(/version "(\d+)(?:\.(\d+))?/);
+  const sysJavaMajor = versionMatch ? (versionMatch[1] === '1' ? Number(versionMatch[2]) : Number(versionMatch[1])) : null;
+  if (sysJavaMajor == null || sysJavaMajor < MIN_JAVA) {
+    const jbr = jbrCandidates.find(existsSync);
+    if (jbr) {
+      childEnv.JAVA_HOME = jbr;
+      childEnv.PATH = `${path.join(jbr, 'bin')}${path.delimiter}${childEnv.PATH}`;
+      log(`System Java (${sysJavaMajor ?? 'not found'}) is below the required ${MIN_JAVA}; using Android Studio's JDK: ${jbr}`);
+    } else {
+      log(`Warning: system Java is ${sysJavaMajor ?? 'not found'}, but firebase-tools requires ${MIN_JAVA}+. No Android Studio JDK found at ${jbrCandidates.join(' or ')} — the emulator will likely fail to start.`);
+    }
+  }
   if (flag('with-functions')) {
     log('Building functions (npm --prefix functions run build)...');
     execFileSync('npm', ['--prefix', path.join(ROOT, '..', '..', 'functions'), 'run', 'build'], { stdio: 'inherit' });
@@ -159,7 +174,7 @@ function emulator() {
   // from inside the config's folder): same rules/indexes/functions as the app,
   // plus the auth + emulator sections the app's firebase.json doesn't have.
   // The app's firebase.json is never touched.
-  const child = spawn('firebase', ['emulators:start', '--config', 'firebase.loadtest.json', '--project', env.projectId, '--only', only], { cwd: path.join(ROOT, '..', '..'), env: childEnv, stdio: 'inherit' });
+  const child = spawn('firebase', ['emulators:start', '--config', 'firebase.loadtest.json', '--project', env.projectId, '--only', only], { cwd: path.join(ROOT, '..', '..'), env: childEnv, stdio: 'inherit', shell: process.platform === 'win32' });
   child.on('exit', (c) => process.exit(c ?? 0));
 }
 

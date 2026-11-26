@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:giggre_app/core/widgets/application_sent_modal.dart';
+import 'package:giggre_app/core/widgets/withdraw_application_modal.dart';
 import 'package:giggre_app/core/services/unverified_limit.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -650,13 +652,7 @@ Future<void> applyToOpenGig(
     );
 
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Application submitted! Waiting for host selection.'),
-          backgroundColor: Color(0xFF22C55E),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      unawaited(showApplicationSentModal(context, gigTitle: gig.title));
     }
   } catch (e) {
     debugPrint('[GigMap] apply to open gig error: $e');
@@ -1526,36 +1522,12 @@ void showFullGigDetailSheet(
                               }
                             : isAppliedPending
                             ? () async {
-                                final confirm = await showDialog<bool>(
-                                  context: ctx,
-                                  builder: (dCtx) => AlertDialog(
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(18),
-                                    ),
-                                    title: const Text('Withdraw?'),
-                                    content: const Text(
-                                      'You can take it again later if this gig is still open.',
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(dCtx, false),
-                                        child: const Text('Cancel'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(dCtx, true),
-                                        child: const Text(
-                                          'Withdraw',
-                                          style: TextStyle(
-                                            color: Colors.redAccent,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                                if (confirm == true && ctx.mounted) {
+                                final confirm =
+                                    await showWithdrawApplicationModal(
+                                      ctx,
+                                      gigTitle: gig.title,
+                                    );
+                                if (confirm && ctx.mounted) {
                                   Navigator.pop(ctx);
                                   cancelGigApplication(context, uid, gig);
                                 }
@@ -3223,13 +3195,7 @@ class _GigMapSectionState extends State<GigMapSection> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Application submitted! Waiting for host selection.'),
-            backgroundColor: Color(0xFF22C55E),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        unawaited(showApplicationSentModal(context, gigTitle: gig.title));
       }
     } catch (e) {
       debugPrint('[GigMap] apply to open gig error: $e');
