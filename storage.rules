@@ -116,7 +116,8 @@ service firebase.storage {
 
     match /chat_attachments/{roomId}/{file} {
       allow read: if inRoom(roomId) || isAdmin();
-      allow create: if inRoom(roomId) && maxMB(25);
+      // Admins (giggre-admin → Support) may send attachments in any chat.
+      allow create: if (inRoom(roomId) || isAdmin()) && maxMB(25);
       allow delete: if isAdmin();
     }
 
