@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/gig_area.dart';
 import 'gig_map_section.dart';
 import '../../../gig_host/presentation/widgets/gig_images_picker.dart';
 import '../../../../core/widgets/skill_icon.dart';
@@ -68,11 +69,12 @@ class OfferedGigOfferCard extends StatelessWidget {
           skillRequired,
           skill: skillRequired,
         ),
-      if (gig.address.isNotEmpty)
+      // Not accepted yet: only the general area, not the street.
+      if (gigAreaLabel(gig.address, gig.place).isNotEmpty)
         _InfoChip(
           Icons.location_on_outlined,
-          'LOCATION',
-          gig.address,
+          'AREA',
+          gigAreaLabel(gig.address, gig.place),
           allowWrap: true,
         ),
     ];

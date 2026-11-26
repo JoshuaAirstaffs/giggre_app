@@ -232,7 +232,7 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
         initialValue: widget.value,
         validator: (_) {
           if (!widget.enabled) return null;
-          if (widget.value == null) return 'Pick the type of task';
+          if (widget.value == null) return 'Choose what kind of task this is';
           return null;
         },
         builder: (field) {
@@ -243,8 +243,16 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Task Type',
+              // Required while it can be picked: red * like the other
+              // required fields on the post screens.
+              Text.rich(
+                TextSpan(
+                  text: 'Task Type',
+                  children: [
+                    if (!locked)
+                      const TextSpan(text: ' *', style: TextStyle(color: Color(0xFFE53935))),
+                  ],
+                ),
                 style: TextStyle(color: textColor, fontSize: 15, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 10),
@@ -320,7 +328,7 @@ class _TaskTypeFieldState extends State<TaskTypeField> {
                     onChanged: (v) => widget.onCustomChanged?.call(v.trim().replaceAll(RegExp(r'\s+'), ' ')),
                     validator: (v) {
                       final t = (v ?? '').trim();
-                      if (t.length < 2) return 'Type the task type (at least 2 characters)';
+                      if (t.length < 2) return 'Type the task type (at least 2 letters)';
                       if (ContentFilterService.instance.check(t)) return 'Please use a different word';
                       return null;
                     },

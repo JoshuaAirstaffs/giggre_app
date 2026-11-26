@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/utils/gig_area.dart';
 import '../../../core/utils/cancellation_request.dart';
 import '../../../core/utils/worker_active_gig.dart';
 import 'widgets/gig_map_section.dart';
@@ -441,7 +442,19 @@ class _SavedScreenState extends State<SavedScreen> {
                     }
                     final title = data['title'] as String? ?? 'Untitled Gig';
                     final hostName = data['hostName'] as String? ?? '';
-                    final address = data['address'] as String? ?? '';
+                    // Street address only once this worker is on the gig;
+                    // otherwise just the area (city, province).
+                    final rawAddress = data['address'] as String? ?? '';
+                    final onGig = data['workerId'] == widget.uid ||
+                        data['assignedWorkerId'] == widget.uid;
+                    final place = <String, String>{
+                      for (final MapEntry(:key, :value)
+                          in ((data['place'] as Map?) ?? const {}).entries)
+                        if (key is String && value is String) key: value,
+                    };
+                    final address = onGig
+                        ? rawAddress
+                        : gigAreaLabel(rawAddress, place);
                     final budget = (data['budget'] as num?)?.toDouble() ?? 0;
                     final currencyCode =
                         (data['currencyCode'] as String?) ?? 'USD';

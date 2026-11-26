@@ -24,6 +24,7 @@ import '../../../../core/theme/map_style.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/gig_area.dart';
 import '../../../../core/services/display_currency.dart';
 import '../../../../core/utils/distance_units.dart';
 import '../../../gig_host/presentation/widgets/gig_images_picker.dart';
@@ -879,6 +880,8 @@ void showFullGigDetailSheet(
   final locationLabel = distanceM != null
       ? 'LOCATION · ${formatGigDistance(distanceM).toUpperCase()}'
       : 'LOCATION';
+  // Full street address only for the worker already on this gig.
+  final fullAddress = uid.isNotEmpty && gig.assignedWorkerId == uid;
 
   openMarkerSheet(context, (ctx) {
     final isDark = Theme.of(ctx).brightness == Brightness.dark;
@@ -1173,30 +1176,56 @@ void showFullGigDetailSheet(
                 ),
               ],
               const SizedBox(height: 12),
+              // Before the worker is accepted: only the general area (city,
+              // province) and an approximate map — never the street address.
               _InfoGridCell(
                 icon: Icons.location_on_outlined,
                 label: locationLabel,
-                child: Text(
-                  gig.address.isNotEmpty ? dedupAddress(gig.address) : '—',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fullAddress
+                          ? (gig.address.isNotEmpty ? dedupAddress(gig.address) : '—')
+                          : gigAreaOrHidden(gig.address, gig.place),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (!fullAddress) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Exact address shown once you\'re accepted',
+                        style: TextStyle(color: kSub.withValues(alpha: 0.9), fontSize: 11),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               const SizedBox(height: 6),
               Padding(
                 padding: const EdgeInsets.only(left: 38),
                 child: GestureDetector(
-                  onTap: () => _openGigLocationInMaps(gig.position),
+                  onTap: () {
+                    if (fullAddress) {
+                      _openGigLocationInMaps(gig.position);
+                    } else {
+                      final (lat, lng) = approximateCoords(
+                        gig.position.latitude,
+                        gig.position.longitude,
+                      );
+                      _openGigLocationInMaps(LatLng(lat, lng));
+                    }
+                  },
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(Icons.map_rounded, color: kBlue, size: 14),
-                      SizedBox(width: 4),
+                    children: [
+                      const Icon(Icons.map_rounded, color: kBlue, size: 14),
+                      const SizedBox(width: 4),
                       Text(
-                        'View map',
+                        fullAddress ? 'View map' : 'View area',
                         style: TextStyle(
                           color: kBlue,
                           fontSize: 12,
@@ -6101,18 +6130,8 @@ class _GigListCard extends StatelessWidget {
     this.isViewed = false,
   });
 
-  // Addresses are stored as full "street, barangay/municipality, province"
-  // strings — the card only has room for the municipality + province, so
-  // keep just the last two comma-separated segments for display.
-  static String _summarizeAddress(String address) {
-    final parts = address
-        .split(',')
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty)
-        .toList();
-    if (parts.length <= 2) return parts.join(', ');
-    return parts.sublist(parts.length - 2).join(', ');
-  }
+  // The card shows only the gig's general area (gigAreaLabel: city,
+  // province) — the street address is for accepted workers only.
 
   @override
   Widget build(BuildContext context) {
@@ -6120,7 +6139,7 @@ class _GigListCard extends StatelessWidget {
         ? DateFormat('EEE, h:mm a').format(gig.scheduledDate!)
         : 'Flexible';
     final metaParts = [
-      if (gig.address.isNotEmpty) _summarizeAddress(gig.address),
+      if (gigAreaLabel(gig.address, gig.place).isNotEmpty) gigAreaLabel(gig.address, gig.place),
       scheduleText,
       ?distanceLabel,
     ];

@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/gig_area.dart';
 import 'gig_map_section.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -274,7 +275,8 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
               ],
             ),
           ],
-          if (widget.gig.address.isNotEmpty) ...[
+          // Not accepted yet: only the general area, not the street.
+          if (gigAreaLabel(widget.gig.address, widget.gig.place).isNotEmpty) ...[
             const SizedBox(height: 4),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -283,7 +285,7 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    widget.gig.address,
+                    gigAreaLabel(widget.gig.address, widget.gig.place),
                     style: const TextStyle(color: kSub, fontSize: 12),
                   ),
                 ),

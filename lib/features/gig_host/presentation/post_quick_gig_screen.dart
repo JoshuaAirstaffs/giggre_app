@@ -326,7 +326,13 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 
   // ── Submit ───────────────────────────────────────────────────────────────────
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      _showSnack(
+        'Some required fields (*) are missing or invalid. Check the fields marked in red.',
+        isError: true,
+      );
+      return;
+    }
     if (!await guardUnverifiedLimit(
       context,
       amount: (double.tryParse(_budgetCtrl.text.trim()) ?? 0) * _workerSlots,
@@ -347,13 +353,13 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
         ? _mapPosition != null
         : _gpsPosition != null;
     if (!hasLocation) {
-      _showSnack('Location is required. Please enable GPS or select on map.');
+      _showSnack('Add the gig location: turn on GPS or pick a spot on the map.', isError: true);
       return;
     }
 
     if (_scheduledDate == null) {
       _showSnack(
-        'Schedule is required. Please pick a date and time.',
+        'Pick a date and time for the gig.',
         isError: true,
       );
       return;
@@ -370,7 +376,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
       );
       if (scheduledCheck.isBefore(DateTime.now())) {
         _showSnack(
-          'That time has already passed. Please choose a time in the future.',
+          'That time has already passed. Pick a later time or another day.',
           isError: true,
         );
         return;
@@ -489,17 +495,24 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _posting = false);
-      _showSnack('Failed to post gig. Please try again.');
+      _showSnack('Couldn\'t post your gig. Check your connection and try again.');
     }
   }
 
   void _showSnack(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          msg,
-          style: isError ? const TextStyle(color: Colors.white) : null,
-        ),
+        content: isError
+            ? Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(msg, style: const TextStyle(color: Colors.white)),
+                  ),
+                ],
+              )
+            : Text(msg),
         backgroundColor: isError
             ? Colors.redAccent
             : Theme.of(context).cardColor,
@@ -567,7 +580,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
   Future<void> _saveAsTemplate() async {
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) {
-      _showSnack('Enter a title before saving as template.');
+      _showSnack('Add a title before saving this as a template.', isError: true);
       return;
     }
     if (ContentFilterService.instance.check(title) ||
@@ -577,7 +590,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
     }
     final budgetVal = double.tryParse(_budgetCtrl.text.trim()) ?? 0;
     if (budgetVal <= 0) {
-      _showSnack('Enter a valid amount before saving as template.');
+      _showSnack('Enter an amount greater than 0 before saving this as a template.', isError: true);
       return;
     }
     // Capture before async gap.
@@ -610,7 +623,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
           );
       if (mounted) _showSnack('Template saved!');
     } catch (_) {
-      if (mounted) _showSnack('Failed to save template.');
+      if (mounted) _showSnack('Couldn\'t save the template. Try again.', isError: true);
     }
   }
 
@@ -703,7 +716,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // ── Title ────────────────────────────────────────
-                _SectionLabel('Title'),
+                _SectionLabel('Title', required: true),
                 const SizedBox(height: 10),
                 TutorialAnchor(
                   id: 'postGig.title',
@@ -711,7 +724,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                     controller: _titleCtrl,
                     hint: 'e.g. Wash dishes after event',
                     validator: (v) => v == null || v.trim().isEmpty
-                        ? 'Title is required'
+                        ? 'Add a title so workers know what the gig is'
                         : null,
                   ),
                 ),
@@ -760,6 +773,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 // ── Amount ────────────────────────────────────────
                 _SectionLabel(
                   _payType == 'hourly' ? 'Hourly Rate (per hour)' : 'Amount',
+                  required: true,
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -786,9 +800,9 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                       ),
                     ],
                     validator: (v) {
-                      if (v == null || v.trim().isEmpty) return 'Enter amount';
+                      if (v == null || v.trim().isEmpty) return 'Enter how much you\'ll pay';
                       final n = double.tryParse(v.trim());
-                      if (n == null || n <= 0) return 'Enter a valid amount';
+                      if (n == null || n <= 0) return 'Enter an amount greater than 0';
                       return null;
                     },
                     prefix: Text(
@@ -856,14 +870,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 // ── Schedule ──────────────────────────────────────
                 Row(
                   children: [
-                    Text(
-                      'Schedule',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    _SectionLabel('Schedule', required: true),
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -874,7 +881,7 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
                 const SizedBox(height: 20),
 
                 // ── Location ──────────────────────────────────────
-                _SectionLabel('Location'),
+                _SectionLabel('Location', required: true),
                 const SizedBox(height: 10),
                 TutorialAnchor(
                   id: 'postGig.location',
@@ -1359,20 +1366,36 @@ class _PostQuickGigScreenState extends State<PostQuickGigScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 class _SectionLabel extends StatelessWidget {
   final String text;
-  const _SectionLabel(this.text);
+  /// Shows a red * after the label (field must be filled to post).
+  final bool required;
+  const _SectionLabel(this.text, {this.required = false});
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: TextStyle(
-        color: Theme.of(context).colorScheme.onSurface,
-        fontSize: 15,
-        fontWeight: FontWeight.bold,
+    final style = TextStyle(
+      color: Theme.of(context).colorScheme.onSurface,
+      fontSize: 15,
+      fontWeight: FontWeight.bold,
+    );
+    if (!required) return Text(text, style: style);
+    return Semantics(
+      label: '$text, required',
+      excludeSemantics: true,
+      child: Text.rich(
+        TextSpan(
+          text: text,
+          children: const [
+            TextSpan(text: ' *', style: TextStyle(color: _kRequiredRed)),
+          ],
+        ),
+        style: style,
       ),
     );
   }
 }
+
+/// Red for the required-field asterisk (readable on light and dark).
+const _kRequiredRed = Color(0xFFE53935);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Stepper Button (worker slots +/-)
