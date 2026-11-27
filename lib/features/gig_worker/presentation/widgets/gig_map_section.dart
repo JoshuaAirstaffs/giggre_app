@@ -3919,6 +3919,11 @@ class _GigMapSectionState extends State<GigMapSection> {
             ? _toLL(_myLocation!)
             : const ll.LatLng(14.5995, 120.9842),
         initialZoom: _pendingCameraTarget != null ? 19.0 : _zoom,
+        // On the dashboard the map is a preview: a finger on it scrolls the
+        // page; tapping opens the full-screen map (see _buildMapBlock).
+        interactionOptions: widget.fullScreen
+            ? const fm.InteractionOptions()
+            : const fm.InteractionOptions(flags: fm.InteractiveFlag.none),
         onMapReady: () {
           if (!mounted) return;
           setState(() => _osmMapReady = true);
@@ -5326,14 +5331,18 @@ class _GigMapSectionState extends State<GigMapSection> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: _kCardBorder),
             ),
+            // Preview only: no map gestures here, so dragging over the map
+            // scrolls the dashboard instead of moving the map. Tapping it
+            // opens the full-screen map (overlay below).
             child: _useGoogleMaps
                 ? GoogleMap(
                     style: _workerMapStyle(context),
-                    gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-                      Factory<OneSequenceGestureRecognizer>(
-                        () => EagerGestureRecognizer(),
-                      ),
-                    },
+                    scrollGesturesEnabled: false,
+                    zoomGesturesEnabled: false,
+                    rotateGesturesEnabled: false,
+                    tiltGesturesEnabled: false,
+                    compassEnabled: false,
+                    mapToolbarEnabled: false,
                     onMapCreated: (controller) {
                       _googleMapController = controller;
                       final pending = _pendingCameraTarget;
@@ -5376,6 +5385,18 @@ class _GigMapSectionState extends State<GigMapSection> {
                 : _buildOsmMap(),
           ),
         ),
+        // Whole map = one big "open full screen" button. Only taps are
+        // caught, so vertical drags still reach the page and scroll it.
+        Positioned.fill(
+          child: Semantics(
+            button: true,
+            label: 'Open the map full screen',
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _openFullScreenMap(context),
+            ),
+          ),
+        ),
         // Legend overlay chip — same info as the old standalone legend row
         Positioned(
           top: 8,
@@ -5413,9 +5434,20 @@ class _GigMapSectionState extends State<GigMapSection> {
                   color: Colors.black.withValues(alpha: 0.45),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Text(
-                  'Tap a pin for details',
-                  style: TextStyle(color: Colors.white, fontSize: 10.5),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.open_in_full_rounded, color: Colors.white, size: 12),
+                    SizedBox(width: 5),
+                    Text(
+                      'Tap to explore map',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

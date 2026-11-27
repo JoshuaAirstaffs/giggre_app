@@ -1856,7 +1856,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
     }).toSet();
   }
 
-  Widget _buildOsmMap() {
+  Widget _buildOsmMap({bool interactive = true}) {
     final ctx = _context;
     final clusters = _buildClusters();
     final osmMarkers = <fm.Marker>[];
@@ -1958,6 +1958,10 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
             ? ll.LatLng(_myLocation!.latitude, _myLocation!.longitude)
             : const ll.LatLng(14.5995, 120.9842),
         initialZoom: _zoom,
+        // Dashboard preview: no dragging/zooming (the page scrolls instead).
+        interactionOptions: interactive
+            ? const fm.InteractionOptions()
+            : const fm.InteractionOptions(flags: fm.InteractiveFlag.none),
         onMapReady: () {
           if (mounted) setState(() => _osmMapReady = true);
         },
@@ -2474,11 +2478,21 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                     style: Theme.of(context).brightness == Brightness.dark
                         ? kDarkMapStyle
                         : null,
-                    gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-                      Factory<OneSequenceGestureRecognizer>(
-                        () => EagerGestureRecognizer(),
-                      ),
-                    },
+                    // Full screen: the map takes every gesture. Dashboard:
+                    // preview only — drags scroll the page, a tap opens it
+                    // full screen (overlay below).
+                    gestureRecognizers: isFullScreen
+                        ? <Factory<OneSequenceGestureRecognizer>>{
+                            Factory<OneSequenceGestureRecognizer>(
+                              () => EagerGestureRecognizer(),
+                            ),
+                          }
+                        : const <Factory<OneSequenceGestureRecognizer>>{},
+                    scrollGesturesEnabled: isFullScreen,
+                    zoomGesturesEnabled: isFullScreen,
+                    rotateGesturesEnabled: isFullScreen,
+                    tiltGesturesEnabled: isFullScreen,
+                    mapToolbarEnabled: isFullScreen,
                     onMapCreated: (controller) {
                       if (isFullScreen) {
                         _fullScreenGoogleMapController = controller;
@@ -2507,9 +2521,50 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
                       }
                     },
                   )
-                : _buildOsmMap(),
+                : _buildOsmMap(interactive: isFullScreen),
           ),
         ),
+        // Dashboard map = preview: the whole map is one "open full screen"
+        // button. Only taps are caught, so drags still scroll the page.
+        if (!isFullScreen)
+          Positioned.fill(
+            child: Semantics(
+              button: true,
+              label: 'Open the map full screen',
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _openFullScreen,
+              ),
+            ),
+          ),
+        if (!isFullScreen)
+          Positioned(
+            top: 10,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.open_in_full_rounded, color: Colors.white, size: 12),
+                      SizedBox(width: 5),
+                      Text(
+                        'Tap to explore map',
+                        style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
         // Recenter button
         Positioned(
           bottom: 12,
@@ -2664,7 +2719,7 @@ class _WorkerMapSectionState extends State<_WorkerMapSection> {
         const SizedBox(height: 8),
         Center(
           child: Text(
-            'Zoom in to see individual workers · Tap a pin for details',
+            'Tap the map to explore · Zoom in to see individual workers',
             style: TextStyle(color: kSub.withValues(alpha: 0.7), fontSize: 11),
           ),
         ),

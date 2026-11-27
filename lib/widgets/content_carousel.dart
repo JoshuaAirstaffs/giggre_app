@@ -684,6 +684,11 @@ class _VideoSlideItemState extends State<_VideoSlideItem>
     try {
       final controller = await widget.videos.obtain(widget.videoUrl);
       if (!mounted) return;
+      // A new player starts at full volume. Match the mute button right away,
+      // before the early return below — otherwise a later resume (which only
+      // calls play) could play sound while the button shows muted.
+      await controller.setVolume(widget.muted ? 0 : 1);
+      if (!mounted) return;
       if (!identical(controller, _controller)) {
         // First time here, or the cache swapped in the downloaded copy
         _controller?.removeListener(_onTick);
@@ -770,6 +775,8 @@ class _VideoSlideItemState extends State<_VideoSlideItem>
     if (!_paused.value &&
         !controller.value.isPlaying &&
         !controller.value.isCompleted) {
+      // Always resume at the volume the mute button shows.
+      controller.setVolume(widget.muted ? 0 : 1);
       controller.play();
       _finishedFired = false;
     }
@@ -846,7 +853,12 @@ class _VideoSlideItemState extends State<_VideoSlideItem>
     final controller = _controller;
     if (controller == null) return;
     _paused.value = !_paused.value;
-    _paused.value ? controller.pause() : controller.play();
+    if (_paused.value) {
+      controller.pause();
+    } else {
+      controller.setVolume(widget.muted ? 0 : 1);
+      controller.play();
+    }
   }
 
   @override
