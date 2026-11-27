@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Camera is used to take your profile photo or scan payment QR codes</string>
+	<string>Camera is used to take your profile photo, photos of delivery items, or scan payment QR codes</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Giggre needs microphone access for voice and video calls.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

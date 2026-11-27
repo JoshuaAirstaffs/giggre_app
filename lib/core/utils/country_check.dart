@@ -1,5 +1,9 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:geocoding/geocoding.dart' as geo;
 import 'package:http/http.dart' as http;
+
+import 'google_geocode.dart';
 
 // Reverse-geocodes a coordinate via Nominatim to find its 2-letter country
 // code. Works on every platform including web, unlike the `geocoding` plugin
@@ -88,8 +92,43 @@ class GigPlace {
 }
 
 // One reverse-geocode for both the gig's currency (country code) and its
-// searchable place parts. Null if the lookup fails.
+// searchable place parts. Google's Geocoding API first, then Nominatim
+// (works on web too); if both fail —
+// it rate-limits and times out, notably after the map picker's many
+// lookups — the phone's own geocoder (Apple / Google, via the `geocoding`
+// plugin; not on web). Null only if both fail.
 Future<GigPlace?> placeFromCoordinates(double lat, double lng) async {
+  final g = await googleReverseGeocode(lat, lng);
+  if (g != null && g.parts.isNotEmpty) return GigPlace(g.parts);
+  return await _placeFromNominatim(lat, lng) ?? await _placeFromDevice(lat, lng);
+}
+
+Future<GigPlace?> _placeFromDevice(double lat, double lng) async {
+  if (kIsWeb) return null;
+  try {
+    final marks = await geo
+        .placemarkFromCoordinates(lat, lng)
+        .timeout(const Duration(seconds: 8));
+    if (marks.isEmpty) return null;
+    final m = marks.first;
+    final parts = <String, String>{};
+    void put(String key, String? v) {
+      final t = v?.trim();
+      if (t != null && t.isNotEmpty) parts[key] = t;
+    }
+    put('country', m.country);
+    put('countryCode', m.isoCountryCode?.toUpperCase());
+    put('region', m.administrativeArea);
+    put('province', m.subAdministrativeArea);
+    put('city', m.locality);
+    put('postcode', m.postalCode);
+    return parts.isEmpty ? null : GigPlace(parts);
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<GigPlace?> _placeFromNominatim(double lat, double lng) async {
   try {
     final uri = Uri.parse('https://nominatim.openstreetmap.org/reverse')
         .replace(

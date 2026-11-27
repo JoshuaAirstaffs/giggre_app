@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -19,6 +20,8 @@ import '../../../../core/theme/map_style.dart';
 import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import 'gig_map_section.dart';
+import 'delivery_photo_step.dart';
+import '../../../../core/services/delivery_photo_service.dart';
 import 'worker_payment_confirm_sheet.dart';
 import '../../../../core/services/gms_availability.dart';
 import '../../../../core/widgets/gig_completion_celebration.dart';
@@ -192,6 +195,19 @@ class _WorkingUIState extends State<WorkingUI> {
 
   // Actual road route
   List<LatLng> _routePoints = [];
+
+  // Delivery / errand gigs have two legs: 'On my way' goes to the pick-up
+  // point (the gig's location), then once the job starts ('working') the
+  // map, route, distance and directions switch to the drop-off point.
+  bool get _onDeliveryLeg =>
+      widget.gig.hasDropoff && _step == GigStep.working;
+  bool get _isTravelling => _step == GigStep.navigating || _onDeliveryLeg;
+  GigMarkerData get _mapGig => _onDeliveryLeg
+      ? widget.gig.withPosition(
+          widget.gig.dropoffPosition!,
+          newAddress: widget.gig.dropoffAddress,
+        )
+      : widget.gig;
   LatLng? _lastRouteFetch;
   int? _routeEtaSeconds;
   List<_RouteStep> _routeSteps = [];
@@ -262,6 +278,8 @@ class _WorkingUIState extends State<WorkingUI> {
     _listenGig();
     _startLocation();
     _restoreElapsedIfWorking();
+    // Delivery photos that didn't finish uploading last time.
+    DeliveryPhotoService.retryPending();
   }
 
   Future<void> _resolveSlotRef() async {
@@ -321,11 +339,27 @@ class _WorkingUIState extends State<WorkingUI> {
       if (newStep != _step ||
           isCancelPending != _cancelPending ||
           cancelRequestedByHost != _cancelRequestedByHost) {
+        final legChanged =
+            widget.gig.hasDropoff &&
+            (newStep == GigStep.working) != (_step == GigStep.working);
         setState(() {
           _step = newStep;
           _cancelPending = isCancelPending;
           _cancelRequestedByHost = cancelRequestedByHost;
+          if (legChanged) {
+            // New destination: drop the old route and fetch the next leg.
+            _routePoints = [];
+            _lastRouteFetch = null;
+          }
         });
+        final here = _workerLocation;
+        if (legChanged && _isTravelling && here != null) {
+          _lastRouteFetch = here;
+          _fetchRoute(
+            here,
+            LatLng(_mapGig.position.latitude, _mapGig.position.longitude),
+          );
+        }
       }
 
       if (newStep == GigStep.working && !_stopwatch.isRunning) {
@@ -405,8 +439,9 @@ class _WorkingUIState extends State<WorkingUI> {
               final loc = LatLng(pos.latitude, pos.longitude);
               setState(() => _workerLocation = loc);
               _checkGeofence(pos);
-              // Re-fetch route only when navigating and moved >30 m from last fetch
-              if (_step == GigStep.navigating) {
+              // Re-fetch route only while travelling (to the gig, or on a
+              // delivery's drop-off leg) and moved >30 m from last fetch
+              if (_isTravelling) {
                 // Persist location to Firestore so host can track worker in real-time
                 _targetRef
                     .update({
@@ -415,8 +450,8 @@ class _WorkingUIState extends State<WorkingUI> {
                     .catchError((_) {});
 
                 final gigPos = LatLng(
-                  widget.gig.position.latitude,
-                  widget.gig.position.longitude,
+                  _mapGig.position.latitude,
+                  _mapGig.position.longitude,
                 );
                 final shouldFetch =
                     _lastRouteFetch == null ||
@@ -518,23 +553,54 @@ class _WorkingUIState extends State<WorkingUI> {
     } catch (_) {}
   }
 
-  /// Save workStartedAt + set status to 'working'.
+  /// Save workStartedAt + set status to 'working'. On a delivery gig the
+  /// worker first photographs the item at the pick-up; backing out of the
+  /// camera leaves the status unchanged.
   Future<void> _startWork() async {
+    final photo = await _takeDeliveryPhoto(DeliveryPhotoKind.pickup);
+    if (widget.gig.hasDropoff && photo == null) return;
     await _targetRef.update({
       'status': 'working',
       'workStartedAt': FieldValue.serverTimestamp(),
+      if (photo != null) ...DeliveryPhotoService.takenFields(DeliveryPhotoKind.pickup),
     });
+    if (photo != null) _uploadDeliveryPhoto(photo, DeliveryPhotoKind.pickup);
   }
 
-  /// Stop timer, save duration fields + set status to 'task_complete'.
+  /// Stop timer, save duration fields + set status to 'task_complete'. On a
+  /// delivery gig the worker first photographs the item at the drop-off.
   Future<void> _completeWork() async {
+    final photo = await _takeDeliveryPhoto(DeliveryPhotoKind.dropoff);
+    if (widget.gig.hasDropoff && photo == null) return;
     _stopwatch.stop();
     final total = _elapsedOffset + _stopwatch.elapsed;
     await _targetRef.update({
       'status': 'task_complete',
       'durationSeconds': total.inSeconds,
       'workCompletedAt': FieldValue.serverTimestamp(),
+      if (photo != null) ...DeliveryPhotoService.takenFields(DeliveryPhotoKind.dropoff),
     });
+    if (photo != null) _uploadDeliveryPhoto(photo, DeliveryPhotoKind.dropoff);
+  }
+
+  // ── Delivery proof photos (pick-up → drop-off gigs only) ──────────────────
+  Future<File?> _takeDeliveryPhoto(DeliveryPhotoKind kind) async {
+    if (!widget.gig.hasDropoff) return null;
+    return showDeliveryPhotoStep(context, kind: kind);
+  }
+
+  /// Fire-and-forget: the status already moved on, the photo follows.
+  void _uploadDeliveryPhoto(File photo, DeliveryPhotoKind kind) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    DeliveryPhotoService.upload(
+      file: photo,
+      progressRef: _targetRef,
+      collection: widget.gigCollection,
+      gigId: widget.gig.id,
+      workerUid: uid,
+      kind: kind,
+    );
   }
 
   // ── Cancel gig — show reason form, save to Firestore, await admin review ──
@@ -763,11 +829,30 @@ class _WorkingUIState extends State<WorkingUI> {
   @override
   Widget build(BuildContext context) {
     final stepIndex = GigStep.values.indexOf(_step);
-    final copy = workerInstructionFor(
+    final baseCopy = workerInstructionFor(
       _step,
       amount: widget.gig.budget,
       currencyCode: widget.gig.currencyCode,
     );
+    // Delivery / errand gigs: say which point each leg is heading to.
+    final copy = !widget.gig.hasDropoff
+        ? baseCopy
+        : _step == GigStep.navigating
+        ? const GigStepCopy(
+            'Head to the pick-up point',
+            "We'll detect your arrival automatically within 40 m — no need to check in.",
+          )
+        : _step == GigStep.arrived
+        ? const GigStepCopy(
+            "You're at the pick-up point",
+            'Collect the item, then tap Start Gig to head to the drop-off.',
+          )
+        : _step == GigStep.working
+        ? const GigStepCopy(
+            'Deliver to the drop-off point',
+            'Follow the map to the drop-off. Tap Gig Complete once it\'s handed over.',
+          )
+        : baseCopy;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final topInset = MediaQuery.of(context).padding.top;
 
@@ -778,27 +863,26 @@ class _WorkingUIState extends State<WorkingUI> {
           // ── Full-screen map, always underneath ──────────────────────
           Positioned.fill(
             child: _ActiveGigMapCard(
-              gig: widget.gig,
+              // Rebuilt per leg so it re-fits the camera on the new destination.
+              key: ValueKey(_onDeliveryLeg),
+              gig: _mapGig,
               workerLocation: _workerLocation,
               // Once arrived there's no more route to travel — drop the
               // polyline so the map isn't showing stale directions to a
               // place the worker is already at.
-              routePoints: _step == GigStep.navigating
-                  ? _routePoints
-                  : const [],
+              routePoints: _isTravelling ? _routePoints : const [],
               // Straight-line distance, not the OSRM driving-route distance
               // — this is what the 40m arrival geofence (_checkGeofence)
               // actually compares against, so the number shown here always
               // matches what triggers "arrived" instead of a road-distance
               // figure that can read as "already within range" while the
               // geofence (correctly) hasn't fired yet.
-              routeDistanceM:
-                  _step == GigStep.navigating && _workerLocation != null
+              routeDistanceM: _isTravelling && _workerLocation != null
                   ? Geolocator.distanceBetween(
                       _workerLocation!.latitude,
                       _workerLocation!.longitude,
-                      widget.gig.position.latitude,
-                      widget.gig.position.longitude,
+                      _mapGig.position.latitude,
+                      _mapGig.position.longitude,
                     )
                   : null,
               // Keeps the fitted route/markers centered in the strip still
@@ -969,6 +1053,9 @@ class _WorkingUIState extends State<WorkingUI> {
                                   !_cancelPending && _step == GigStep.working,
                               onGigComplete: _completeWork,
                               accent: kWorkerAccent,
+                              stepLabels: widget.gig.hasDropoff
+                                  ? kStepLabelsDelivery
+                                  : kStepLabels,
                             ),
                             const SizedBox(height: 16),
 
@@ -1065,6 +1152,7 @@ class _ActiveGigMapCard extends StatefulWidget {
   final double bottomPadding;
 
   const _ActiveGigMapCard({
+    super.key,
     required this.gig,
     required this.workerLocation,
     required this.routePoints,

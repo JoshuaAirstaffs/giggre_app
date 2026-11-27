@@ -18,6 +18,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/services/earnings_service.dart';
 import '../../../core/utils/cancellation_request.dart';
 import '../../../core/utils/worker_active_gig.dart';
+import '../../../core/utils/gig_route.dart';
 import '../../gig_host/services/quick_gig_matching_service.dart';
 import '../../tutorial/controller/tutorial_controller.dart';
 import '../../tutorial/flows/gig_worker_home_flow.dart';
@@ -459,6 +460,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
               position: LatLng(geo.latitude, geo.longitude),
+              dropoffPosition: dropoffLatLngOf(data),
+              dropoffAddress: GigDropoff.fromData(data)?.address ?? '',
+              routeDistanceKm: GigDropoff.fromData(data)?.distanceKm,
+              dropoffPlace: GigDropoff.fromData(data)?.place ?? const {},
               assignedWorkerId: uid,
               hostId: data['hostId'] as String? ?? '',
               workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
@@ -498,6 +503,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
               position: LatLng(geo.latitude, geo.longitude),
+              dropoffPosition: dropoffLatLngOf(data),
+              dropoffAddress: GigDropoff.fromData(data)?.address ?? '',
+              routeDistanceKm: GigDropoff.fromData(data)?.distanceKm,
+              dropoffPlace: GigDropoff.fromData(data)?.place ?? const {},
               assignedWorkerId: uid,
               hostId: data['hostId'] as String? ?? '',
               workerSlots: (data['workerSlots'] as num?)?.toInt() ?? 1,
@@ -536,6 +545,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
               hostName: data['hostName'] as String? ?? '',
               address: data['address'] as String? ?? '',
               position: LatLng(geo.latitude, geo.longitude),
+              dropoffPosition: dropoffLatLngOf(data),
+              dropoffAddress: GigDropoff.fromData(data)?.address ?? '',
+              routeDistanceKm: GigDropoff.fromData(data)?.distanceKm,
+              dropoffPlace: GigDropoff.fromData(data)?.place ?? const {},
               assignedWorkerId: uid,
               experienceLevel: data['experienceLevel'] as String? ?? '',
               requiredSkills: data['skillRequired'] != null
@@ -592,6 +605,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   '',
               address: gigData['address'] as String? ?? '',
               position: LatLng(geo.latitude, geo.longitude),
+              dropoffPosition: dropoffLatLngOf(gigData),
+              dropoffAddress: GigDropoff.fromData(gigData)?.address ?? '',
+              routeDistanceKm: GigDropoff.fromData(gigData)?.distanceKm,
+              dropoffPlace: GigDropoff.fromData(gigData)?.place ?? const {},
               assignedWorkerId: uid,
               hostId:
                   slot['hostId'] as String? ??
@@ -658,6 +675,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                 hostName: data['hostName'] as String? ?? '',
                 address: data['address'] as String? ?? '',
                 position: LatLng(geo.latitude, geo.longitude),
+                dropoffPosition: dropoffLatLngOf(data),
+                dropoffAddress: GigDropoff.fromData(data)?.address ?? '',
+                routeDistanceKm: GigDropoff.fromData(data)?.distanceKm,
+                dropoffPlace: GigDropoff.fromData(data)?.place ?? const {},
                 assignedWorkerId: uid,
                 experienceLevel: data['experienceLevel'] as String? ?? '',
                 requiredSkills: data['skillRequired'] != null
@@ -727,6 +748,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                       '',
                   address: gigData['address'] as String? ?? '',
                   position: LatLng(geo.latitude, geo.longitude),
+                  dropoffPosition: dropoffLatLngOf(gigData),
+                  dropoffAddress: GigDropoff.fromData(gigData)?.address ?? '',
+                  routeDistanceKm: GigDropoff.fromData(gigData)?.distanceKm,
+                  dropoffPlace: GigDropoff.fromData(gigData)?.place ?? const {},
                   assignedWorkerId: uid,
                   experienceLevel: gigData['experienceLevel'] as String? ?? '',
                   requiredSkills: gigData['skillRequired'] != null
@@ -796,6 +821,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                   hostName: data['hostName'] as String? ?? '',
                   address: data['address'] as String? ?? '',
                   position: LatLng(geo.latitude, geo.longitude),
+                  dropoffPosition: dropoffLatLngOf(data),
+                  dropoffAddress: GigDropoff.fromData(data)?.address ?? '',
+                  routeDistanceKm: GigDropoff.fromData(data)?.distanceKm,
+                  dropoffPlace: GigDropoff.fromData(data)?.place ?? const {},
                   assignedWorkerId: uid,
                   hostId: data['hostId'] as String? ?? '',
                   scheduledDate: (data['scheduledDate'] as Timestamp?)
@@ -876,6 +905,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             slot['hostName'] as String? ?? gigData['hostName'] as String? ?? '',
         address: gigData['address'] as String? ?? '',
         position: LatLng(geo.latitude, geo.longitude),
+        dropoffPosition: dropoffLatLngOf(gigData),
+        dropoffAddress: GigDropoff.fromData(gigData)?.address ?? '',
+        routeDistanceKm: GigDropoff.fromData(gigData)?.distanceKm,
+        dropoffPlace: GigDropoff.fromData(gigData)?.place ?? const {},
         assignedWorkerId: FirebaseAuth.instance.currentUser?.uid,
         hostId: slot['hostId'] as String? ?? gigData['hostId'] as String? ?? '',
         scheduledDate: (gigData['scheduledDate'] as Timestamp?)?.toDate(),
@@ -1134,6 +1167,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
             hostName: data['hostName'] as String? ?? '',
             address: data['address'] as String? ?? '',
             position: LatLng(geo.latitude, geo.longitude),
+            dropoffPosition: dropoffLatLngOf(data),
+            dropoffAddress: GigDropoff.fromData(data)?.address ?? '',
+            routeDistanceKm: GigDropoff.fromData(data)?.distanceKm,
+            dropoffPlace: GigDropoff.fromData(data)?.place ?? const {},
             assignedWorkerId: uid,
             hostId: data['hostId'] as String? ?? '',
             scheduledDate: (data['scheduledDate'] as Timestamp?)?.toDate(),
@@ -1196,6 +1233,10 @@ class _GigWorkerScreenState extends State<GigWorkerScreen>
                     '',
                 address: gigData['address'] as String? ?? '',
                 position: LatLng(geo.latitude, geo.longitude),
+                dropoffPosition: dropoffLatLngOf(gigData),
+                dropoffAddress: GigDropoff.fromData(gigData)?.address ?? '',
+                routeDistanceKm: GigDropoff.fromData(gigData)?.distanceKm,
+                dropoffPlace: GigDropoff.fromData(gigData)?.place ?? const {},
                 assignedWorkerId: uid,
                 hostId:
                     slot['hostId'] as String? ??

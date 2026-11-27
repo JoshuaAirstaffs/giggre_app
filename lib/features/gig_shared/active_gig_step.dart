@@ -43,6 +43,44 @@ const kStepLabelsHost = [
   'Completed',
 ];
 
+// Pick-up → drop-off (delivery / errand) gigs: same 6 statuses, worded for
+// the two legs. Getting paid / completed read the same as any other gig.
+const kStepLabelsDelivery = [
+  'To Pick-up',
+  'At Pick-up',
+  'Delivering',
+  'Delivered',
+  'Getting Paid',
+  'Completed',
+];
+const kStepLabelsHostDelivery = [
+  'Heading to Pick-up',
+  'At Pick-up',
+  'Delivering',
+  'Delivered',
+  'Awaiting Payout',
+  'Completed',
+];
+
+/// Host-facing status of a worker on a delivery gig — null for the steps
+/// that read the same as any gig (payment, completed), so callers fall back
+/// to their usual label.
+String? deliveryHostStatus(GigStep step) {
+  switch (step) {
+    case GigStep.navigating:
+      return 'Heading to pick-up';
+    case GigStep.arrived:
+      return 'At pick-up';
+    case GigStep.working:
+      return 'Delivering';
+    case GigStep.taskComplete:
+      return 'Delivered';
+    case GigStep.payment:
+    case GigStep.completed:
+      return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Final amount owed for an hourly gig — single source of truth for both
 //  sides of the payment-confirmation flow. Rounds the tracked work
@@ -105,7 +143,35 @@ GigStepCopy hostInstructionFor(
   required String workerName,
   required double amount,
   required String currencyCode,
+  bool delivery = false,
 }) {
+  if (delivery) {
+    switch (step) {
+      case GigStep.navigating:
+        return GigStepCopy(
+          '$workerName is heading to the pick-up',
+          "Live location is shared · you'll be notified when they get there.",
+        );
+      case GigStep.arrived:
+        return GigStepCopy(
+          '$workerName is at the pick-up',
+          "They'll take a photo of the item, then head to the drop-off.",
+        );
+      case GigStep.working:
+        return const GigStepCopy(
+          'Item on the way',
+          'Your item is being delivered to the drop-off point.',
+        );
+      case GigStep.taskComplete:
+        return const GigStepCopy(
+          'Item delivered',
+          'Check the drop-off photo, then proceed to payment.',
+        );
+      case GigStep.payment:
+      case GigStep.completed:
+        break;
+    }
+  }
   switch (step) {
     case GigStep.navigating:
       return GigStepCopy(

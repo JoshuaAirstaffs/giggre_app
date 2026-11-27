@@ -27,6 +27,7 @@ import '../../../../core/services/gms_availability.dart';
 import '../../../../core/utils/country_check.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/gig_area.dart';
+import '../../../../core/utils/gig_route.dart';
 import '../../../../core/services/display_currency.dart';
 import '../../../../core/utils/distance_units.dart';
 import '../../../gig_host/presentation/widgets/gig_images_picker.dart';
@@ -110,7 +111,55 @@ class GigMarkerData {
     this.workerSlots = 1,
     this.filledSlotCount = 0,
     this.place = const {},
+    this.dropoffPosition,
+    this.dropoffAddress = '',
+    this.routeDistanceKm,
+    this.dropoffPlace = const {},
   });
+
+  // Delivery / errand gigs: [position] / [address] are the pick-up point and
+  // these the drop-off (core/utils/gig_route.dart). Null for normal gigs.
+  final LatLng? dropoffPosition;
+  final String dropoffAddress;
+  final double? routeDistanceKm;
+  final Map<String, String> dropoffPlace;
+  bool get hasDropoff => dropoffPosition != null;
+
+  /// This gig with a different point as its location — the active-gig map
+  /// uses it to switch its destination to the drop-off for the delivery leg.
+  GigMarkerData withPosition(LatLng newPosition, {String? newAddress}) =>
+      GigMarkerData(
+        id: id,
+        title: title,
+        description: description,
+        gigType: gigType,
+        budget: budget,
+        currencyCode: currencyCode,
+        payType: payType,
+        hourlyRate: hourlyRate,
+        workDurationHours: workDurationHours,
+        status: status,
+        hostName: hostName,
+        address: newAddress ?? address,
+        position: newPosition,
+        assignedWorkerId: assignedWorkerId,
+        experienceLevel: experienceLevel,
+        requiredSkills: requiredSkills,
+        customSkill: customSkill,
+        images: images,
+        hostId: hostId,
+        hasApplied: hasApplied,
+        scheduledDate: scheduledDate,
+        createdAt: createdAt,
+        applicantCount: applicantCount,
+        workerSlots: workerSlots,
+        filledSlotCount: filledSlotCount,
+        place: place,
+        dropoffPosition: dropoffPosition,
+        dropoffAddress: dropoffAddress,
+        routeDistanceKm: routeDistanceKm,
+        dropoffPlace: dropoffPlace,
+      );
 
   // Country, region, state/province, city, ZIP saved when the gig was
   // posted (empty on older gigs). Used by the list search.
@@ -238,6 +287,12 @@ Widget _hostInitialAvatar(GigMarkerData gig) {
   );
 }
 
+/// Drop-off point of a gig doc as a map LatLng (null for normal gigs).
+LatLng? dropoffLatLngOf(Map<String, dynamic>? data) {
+  final d = GigDropoff.fromData(data);
+  return d == null ? null : LatLng(d.location.latitude, d.location.longitude);
+}
+
 GigMarkerData? gigMarkerFromDoc(
   String id,
   Map<String, dynamic> data,
@@ -246,6 +301,7 @@ GigMarkerData? gigMarkerFromDoc(
 }) {
   final geo = data['location'] as GeoPoint?;
   if (geo == null) return null;
+  final drop = GigDropoff.fromData(data);
   final applicants = List<dynamic>.from(data['applicants'] ?? []);
   final hasApplied =
       type == 'open' &&
@@ -284,6 +340,12 @@ GigMarkerData? gigMarkerFromDoc(
           in ((data['place'] as Map?) ?? const {}).entries)
         if (key is String && value is String) key: value,
     },
+    dropoffPosition: drop == null
+        ? null
+        : LatLng(drop.location.latitude, drop.location.longitude),
+    dropoffAddress: drop?.address ?? '',
+    routeDistanceKm: drop?.distanceKm,
+    dropoffPlace: drop?.place ?? const {},
   );
 }
 
@@ -873,9 +935,10 @@ void showFullGigDetailSheet(
           gig.position.longitude,
         )
       : null;
+  final pointWord = gig.hasDropoff ? 'PICK-UP' : 'LOCATION';
   final locationLabel = distanceM != null
-      ? 'LOCATION · ${formatGigDistance(distanceM).toUpperCase()}'
-      : 'LOCATION';
+      ? '$pointWord · ${formatGigDistance(distanceM).toUpperCase()}'
+      : pointWord;
   // Full street address only for the worker already on this gig.
   final fullAddress = uid.isNotEmpty && gig.assignedWorkerId == uid;
 
@@ -1182,7 +1245,9 @@ void showFullGigDetailSheet(
                   children: [
                     Text(
                       fullAddress
-                          ? (gig.address.isNotEmpty ? dedupAddress(gig.address) : '—')
+                          ? (addressOrPlace(gig.address, gig.place).isNotEmpty
+                                ? dedupAddress(addressOrPlace(gig.address, gig.place))
+                                : '—')
                           : gigAreaOrHidden(gig.address, gig.place),
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurface,
@@ -1232,6 +1297,18 @@ void showFullGigDetailSheet(
                   ),
                 ),
               ),
+              if (gig.hasDropoff) ...[
+                const SizedBox(height: 12),
+                _DropoffInfo(
+                  gig: gig,
+                  fullAddress: fullAddress,
+                  addressText: fullAddress
+                      ? (addressOrPlace(gig.dropoffAddress, gig.dropoffPlace).isNotEmpty
+                            ? dedupAddress(addressOrPlace(gig.dropoffAddress, gig.dropoffPlace))
+                            : '—')
+                      : gigAreaOrHidden(gig.dropoffAddress, gig.dropoffPlace),
+                ),
+              ],
               const SizedBox(height: 12),
               _InfoGridCell(
                 icon: Icons.bar_chart_rounded,
@@ -6104,8 +6181,17 @@ class _GigListCard extends StatelessWidget {
     final scheduleText = gig.scheduledDate != null
         ? DateFormat('EEE, h:mm a').format(gig.scheduledDate!)
         : 'Flexible';
+    // Delivery / errand gigs: "Makati → Pasig" (pick-up area → drop-off area).
+    final pickupArea = gigAreaLabel(gig.address, gig.place);
+    final dropoffArea =
+        gig.hasDropoff ? gigAreaLabel(gig.dropoffAddress, gig.dropoffPlace) : '';
+    final areaText = !gig.hasDropoff
+        ? pickupArea
+        : (pickupArea.isEmpty && dropoffArea.isEmpty)
+        ? ''
+        : '${pickupArea.isNotEmpty ? pickupArea : 'Pick-up'} → ${dropoffArea.isNotEmpty ? dropoffArea : 'Drop-off'}';
     final metaParts = [
-      if (gigAreaLabel(gig.address, gig.place).isNotEmpty) gigAreaLabel(gig.address, gig.place),
+      if (areaText.isNotEmpty) areaText,
       scheduleText,
       ?distanceLabel,
     ];
@@ -6612,3 +6698,85 @@ final ButtonStyle _sheetActionStyle = IconButton.styleFrom(
   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
   shape: const CircleBorder(),
 );
+
+
+// Drop-off row in the gig popup for delivery / errand gigs, under the
+// pick-up location. Same privacy as the pick-up: area only until the
+// worker is accepted.
+class _DropoffInfo extends StatelessWidget {
+  const _DropoffInfo({
+    required this.gig,
+    required this.fullAddress,
+    required this.addressText,
+  });
+
+  final GigMarkerData gig;
+  final bool fullAddress;
+  final String addressText;
+
+  @override
+  Widget build(BuildContext context) {
+    final pos = gig.dropoffPosition!;
+    final km = gig.routeDistanceKm;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _InfoGridCell(
+          icon: Icons.flag_rounded,
+          label: km != null
+              ? 'DROP-OFF · ${km.toStringAsFixed(1)} KM FROM PICK-UP'
+              : 'DROP-OFF',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                addressText,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (!fullAddress) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'Exact address shown once you\'re accepted',
+                  style: TextStyle(color: kSub.withValues(alpha: 0.9), fontSize: 11),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.only(left: 38),
+          child: GestureDetector(
+            onTap: () {
+              if (fullAddress) {
+                _openGigLocationInMaps(pos);
+              } else {
+                final (lat, lng) = approximateCoords(pos.latitude, pos.longitude);
+                _openGigLocationInMaps(LatLng(lat, lng));
+              }
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.map_rounded, color: kBlue, size: 14),
+                const SizedBox(width: 4),
+                Text(
+                  fullAddress ? 'View drop-off map' : 'View drop-off area',
+                  style: const TextStyle(
+                    color: kBlue,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

@@ -73,8 +73,18 @@ class OfferedGigOfferCard extends StatelessWidget {
       if (gigAreaLabel(gig.address, gig.place).isNotEmpty)
         _InfoChip(
           Icons.location_on_outlined,
-          'AREA',
+          gig.hasDropoff ? 'PICK-UP AREA' : 'AREA',
           gigAreaLabel(gig.address, gig.place),
+          allowWrap: true,
+        ),
+      // Delivery / errand gig: where it goes (area only until accepted).
+      if (gig.hasDropoff)
+        _InfoChip(
+          Icons.flag_rounded,
+          gig.routeDistanceKm != null
+              ? 'DROP-OFF · ${gig.routeDistanceKm!.toStringAsFixed(1)} KM'
+              : 'DROP-OFF',
+          gigAreaOrHidden(gig.dropoffAddress, gig.dropoffPlace),
           allowWrap: true,
         ),
     ];

@@ -6,6 +6,40 @@
 /// gig saved when it was posted; for older gigs without one, the address
 /// minus its street line (first part) and any part with a house number.
 /// Empty when nothing safe is left.
+/// Text the post-gig forms show while they can't look up a street address.
+/// Never a real address, so never shown on a card or saved as one.
+const _placeholderAddresses = {
+  'gps location ready',
+  'selected location',
+  'could not get address',
+  'location ready',
+  'detecting location...',
+};
+
+bool isPlaceholderAddress(String address) =>
+    address.trim().isEmpty ||
+    _placeholderAddresses.contains(address.trim().toLowerCase());
+
+/// The address to save or show: [address], or "City, Province" from [place]
+/// when the street lookup failed and [address] is only a placeholder.
+String addressOrPlace(String address, [Map<String, String>? place]) {
+  final a = stripPlusCode(address);
+  return isPlaceholderAddress(a) ? gigAreaLabel('', place ?? const {}) : a;
+}
+
+// Open Location Code ("MFF8+JFJ" / "7Q63MFF8+JFJ") at the start of an
+// address, plus the comma/space after it. Google returns these for rural
+// spots with no street ("MFF8+JFJ, Cordon, Isabela").
+final _plusCodePrefix = RegExp(
+  r'^[23456789CFGHJMPQRVWX]{2,8}\+[23456789CFGHJMPQRVWX]{0,3}[,\s]*',
+  caseSensitive: false,
+);
+
+/// [address] without a leading plus code — also cleans gigs saved before
+/// the geocoder dropped it.
+String stripPlusCode(String address) =>
+    address.trim().replaceFirst(_plusCodePrefix, '').trim();
+
 String gigAreaLabel(String address, [Map<String, String> place = const {}]) {
   final city = place['city'];
   final upper = place['province'] ?? place['state'] ?? place['region'] ?? place['county'];
@@ -14,6 +48,8 @@ String gigAreaLabel(String address, [Map<String, String> place = const {}]) {
     if (upper != null && upper.isNotEmpty && upper != city) upper,
   ];
   if (fromPlace.isNotEmpty) return fromPlace.join(', ');
+  address = stripPlusCode(address);
+  if (isPlaceholderAddress(address)) return '';
 
   final segs = address
       .split(',')

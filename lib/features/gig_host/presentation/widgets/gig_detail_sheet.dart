@@ -15,12 +15,15 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:provider/provider.dart';
 import '../../../../core/providers/current_user_provider.dart';
 import '../../../../core/services/gms_availability.dart';
+import 'delivery_photos_card.dart';
 import 'package:giggre_app/features/call/call_user_action.dart';
 import 'package:giggre_app/features/chat/gig_chat_action.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/map_style.dart';
 import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/gig_route.dart';
+import '../../../../core/utils/gig_area.dart';
 import '../../../../core/utils/worker_active_gig.dart';
 import '../../models/gig_template_model.dart';
 import '../../models/worker_slot_model.dart';
@@ -1724,6 +1727,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
         ? 'Searching for worker…'
         : (workerName.isNotEmpty ? workerName : 'Worker');
     final hostStep = gigStepFromStatus(progressStatus);
+    final isDeliveryGig = GigDropoff.fromData(data) != null;
     final hostStepIndex = GigStep.values.indexOf(hostStep);
     final hostCopy = isSearching
         ? const GigStepCopy(
@@ -1735,6 +1739,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             workerName: resolvedWorkerName,
             amount: budget,
             currencyCode: currencyCode,
+            delivery: isDeliveryGig,
           );
     final showCancelGig = ![
       'completed',
@@ -1762,7 +1767,11 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       final topInset = MediaQuery.of(context).padding.top;
       final statusLabel = isSearching
           ? 'Searching for worker…'
-          : _hostStatusChipLabel(hostStep, resolvedWorkerName);
+          : _hostStatusChipLabel(
+              hostStep,
+              resolvedWorkerName,
+              delivery: isDeliveryGig,
+            );
 
       final contentColumn = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1783,9 +1792,17 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 showGigComplete: isTaskComplete,
                 onGigComplete: _confirmCompleted,
                 accent: kHostAccent,
-                stepLabels: kStepLabelsHost,
+                stepLabels: isDeliveryGig
+                    ? kStepLabelsHostDelivery
+                    : kStepLabelsHost,
               ),
             ),
+            if (isDeliveryGig)
+              DeliveryPhotosCard(
+                collection: _collection,
+                gigId: widget.gigId,
+                margin: const EdgeInsets.only(top: 12),
+              ),
             if (isWorking && workStartedAt != null) ...[
               const SizedBox(height: 10),
               Container(
@@ -2203,6 +2220,8 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
       final contentColumn = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (GigDropoff.fromData(data) != null)
+            DeliveryPhotosCard(collection: _collection, gigId: widget.gigId),
           // ── Gig info — same "title + status dot" / info-grid layout
           // as the static (else) branch below, so multi-worker gigs
           // read the same as Open/Offered while active. _MultiWorkerSection
@@ -2328,9 +2347,21 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             const SizedBox(height: 14),
             _InfoGridCell(
               icon: Icons.location_on_outlined,
-              label: 'LOCATION',
+              label: GigDropoff.fromData(_data) != null ? 'PICK-UP' : 'LOCATION',
               isDark: isDark,
               value: dedupedAddress(address),
+            ),
+          ],
+          // Delivery / errand gig: where it goes.
+          if (GigDropoff.fromData(_data) case final drop?) ...[
+            const SizedBox(height: 14),
+            _InfoGridCell(
+              icon: Icons.flag_rounded,
+              label: drop.distanceKm != null
+                  ? 'DROP-OFF · ${drop.distanceKm!.toStringAsFixed(1)} KM'
+                  : 'DROP-OFF',
+              isDark: isDark,
+              value: addressOrPlace(drop.address, drop.place).isNotEmpty ? dedupedAddress(addressOrPlace(drop.address, drop.place)) : '—',
             ),
           ],
           // Photos the host attached when posting
@@ -2452,6 +2483,7 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
             onMarkPaid: _confirmWorkerSlotCompleted,
             onRequestCancellation: _requestWorkerSlotCancellation,
             buildMapArea: _buildMapArea,
+            isDelivery: GigDropoff.fromData(data) != null,
             showEmbeddedMap: gigLocation == null,
             selectedWorkerId: _selectedMultiWorkerId,
             onSelectWorker: _toggleMultiWorkerSelection,
@@ -2763,8 +2795,38 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
                 ),
               ],
             ),
+            // Delivery / errand gig: the drop-off under the pick-up.
+            if (GigDropoff.fromData(_data) case final drop?) ...[
+              const SizedBox(height: 6),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.flag_rounded,
+                    size: 16,
+                    color: activeGigTextMuted(isDark),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Drop-off: ${addressOrPlace(drop.address, drop.place).isNotEmpty ? dedupedAddress(addressOrPlace(drop.address, drop.place)) : '—'}',
+                      style: TextStyle(
+                        color: activeGigTextSecondary(isDark),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 16),
           ],
+
+          // ── Delivery photos (pick-up → drop-off gigs; hidden until the
+          // worker takes the first one) ───────────────────────────────────
+          if (GigDropoff.fromData(_data) != null)
+            DeliveryPhotosCard(collection: _collection, gigId: widget.gigId),
 
           // ── Applicants (open gig waiting for host to pick a worker) ──────
           if (acceptingMoreSlots) ...[
@@ -3914,7 +3976,15 @@ String _fmtScheduledShort(Timestamp ts) {
 // Host-perspective status chip label for the gold "Gig in Progress" header —
 // same 6-status source of truth as gigStepFromStatus, just worded for the
 // host reading about their worker instead of the worker reading about self.
-String _hostStatusChipLabel(GigStep step, String workerName) {
+String _hostStatusChipLabel(
+  GigStep step,
+  String workerName, {
+  bool delivery = false,
+}) {
+  if (delivery) {
+    final label = deliveryHostStatus(step);
+    if (label != null) return label;
+  }
   switch (step) {
     case GigStep.navigating:
       return "$workerName's on the way";
@@ -4415,7 +4485,14 @@ Color _workerStatusColor(String status) {
   }
 }
 
-String _workerStatusLabel(String status) {
+String _workerStatusLabel(String status, {bool delivery = false}) {
+  // Only the four statuses with delivery wording — gigStepFromStatus maps
+  // anything unknown (offered, in_progress…) to navigating.
+  if (delivery &&
+      const {'navigating', 'arrived', 'working', 'task_complete'}.contains(status)) {
+    final label = deliveryHostStatus(gigStepFromStatus(status));
+    if (label != null) return label;
+  }
   switch (status) {
     case 'in_progress':
       return 'Offer Waiting';
@@ -4469,6 +4546,8 @@ typedef _MapAreaBuilder =
 
 class _MultiWorkerSection extends StatefulWidget {
   final String gigId;
+  // Pick-up → drop-off gig: worker statuses read "Delivering" etc.
+  final bool isDelivery;
   final String gigCollection;
   final String gigTitle;
   final LatLng? gigLocation;
@@ -4491,6 +4570,7 @@ class _MultiWorkerSection extends StatefulWidget {
   final ValueChanged<String>? onSelectWorker;
 
   const _MultiWorkerSection({
+    this.isDelivery = false,
     required this.gigId,
     required this.gigCollection,
     required this.gigTitle,
@@ -4788,6 +4868,7 @@ class _MultiWorkerSectionState extends State<_MultiWorkerSection> {
                       gigId: widget.gigId,
                       gigCollection: widget.gigCollection,
                       gigTitle: widget.gigTitle,
+                      isDelivery: widget.isDelivery,
                       isSelected: w.workerId == effectiveSelectedId,
                       isTrackable: isTrackable,
                       onTap: isTrackable
@@ -4982,6 +5063,7 @@ class _WorkerSlotCard extends StatelessWidget {
   final String gigId;
   final String gigCollection;
   final String gigTitle;
+  final bool isDelivery;
   final bool isSelected;
   final bool isTrackable;
   final VoidCallback? onTap;
@@ -4989,6 +5071,7 @@ class _WorkerSlotCard extends StatelessWidget {
   final VoidCallback onRequestCancellation;
 
   const _WorkerSlotCard({
+    this.isDelivery = false,
     super.key,
     required this.worker,
     required this.number,
@@ -5092,7 +5175,7 @@ class _WorkerSlotCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    _workerStatusLabel(worker.status),
+                    _workerStatusLabel(worker.status, delivery: isDelivery),
                     style: TextStyle(
                       color: _workerStatusColor(worker.status),
                       fontSize: 10,

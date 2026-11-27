@@ -285,7 +285,27 @@ class _DispatchOfferCardState extends State<DispatchOfferCard> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    gigAreaLabel(widget.gig.address, widget.gig.place),
+                    widget.gig.hasDropoff
+                        ? 'Pick-up: ${gigAreaLabel(widget.gig.address, widget.gig.place)}'
+                        : gigAreaLabel(widget.gig.address, widget.gig.place),
+                    style: const TextStyle(color: kSub, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          // Delivery / errand gig: where it goes (area only until accepted).
+          if (widget.gig.hasDropoff) ...[
+            const SizedBox(height: 4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.flag_rounded, color: kSub, size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Drop-off: ${gigAreaOrHidden(widget.gig.dropoffAddress, widget.gig.dropoffPlace)}'
+                    '${widget.gig.routeDistanceKm != null ? ' · ${widget.gig.routeDistanceKm!.toStringAsFixed(1)} km' : ''}',
                     style: const TextStyle(color: kSub, fontSize: 12),
                   ),
                 ),

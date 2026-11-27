@@ -19,6 +19,7 @@ rules_version = '2';
 //   group_attachments/{groupId}/{file}          group chat photos
 //   group_photos/{groupId}/{file}               group avatar (admins)
 //   gig_images/{uid}/{file}                     gig photos (Post a gig, up to 5)
+//   delivery_photos/{coll}/{gigId}/{uid}/{kind}.jpg  delivery proof photos
 //   app_content/**                              giggre-admin CMS (carousel,
 //                                               tutorial videos, thumbnails)
 service firebase.storage {
@@ -84,6 +85,27 @@ service firebase.storage {
       allow create, update: if isOwner(uid) && maxMB(8) &&
         request.resource.contentType.matches('image/.*');
       allow delete: if isOwner(uid) || isAdmin();
+    }
+
+    // ── Delivery proof photos (pick-up → drop-off gigs) ─────────────────────
+    //   delivery_photos/{coll}/{gigId}/{workerUid}/{pickup|dropoff}.jpg
+    // The worker uploads their own (delivery_photo_service.dart); the gig's
+    // host, that worker and admins can view. Deleted after 60 days by
+    // cleanupDeliveryPhotos (functions/src/deliveryPhotos.ts).
+    function gigHostId(coll, gigId) {
+      return firestore.get(/databases/(default)/documents/$(coll)/$(gigId)).data.hostId;
+    }
+    match /delivery_photos/{coll}/{gigId}/{workerUid}/{file} {
+      allow read: if isOwner(workerUid) || isAdmin() || (
+        signedIn() &&
+        coll in ['quick_gigs', 'open_gigs', 'offered_gigs'] &&
+        gigHostId(coll, gigId) == request.auth.uid
+      );
+      allow create, update: if isOwner(workerUid) &&
+        coll in ['quick_gigs', 'open_gigs', 'offered_gigs'] &&
+        file in ['pickup.jpg', 'dropoff.jpg'] &&
+        isImage() && maxMB(5);
+      allow delete: if isAdmin();
     }
 
     // ── Skill request proofs ────────────────────────────────────────────────

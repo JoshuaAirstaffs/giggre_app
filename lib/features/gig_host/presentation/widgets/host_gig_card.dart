@@ -1,3 +1,4 @@
+import '../../../../core/utils/gig_route.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -149,6 +150,10 @@ String? _sublineFor({
         (data['assignedWorkerName'] as String?) ??
         (data['workerName'] as String?) ??
         'Worker';
+    if (GigDropoff.fromData(data) != null) {
+      final label = deliveryHostStatus(gigStepFromStatus(status));
+      if (label != null) return label;
+    }
     switch (gigStepFromStatus(status)) {
       case GigStep.navigating:
         return "$workerName's on the way";

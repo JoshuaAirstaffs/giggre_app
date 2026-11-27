@@ -27,6 +27,10 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/map_style.dart';
 import '../../../core/providers/current_user_provider.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/utils/gig_route.dart';
+import '../../../core/utils/google_geocode.dart';
+import '../../../core/utils/gig_area.dart';
+import '../../gig_shared/dropoff_point_field.dart';
 import '../../tutorial/controller/tutorial_controller.dart';
 import '../../tutorial/flows/offered_gig_flow.dart';
 import '../../tutorial/widgets/tutorial_anchor.dart';
@@ -134,6 +138,14 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
 
   // Skill (loaded from worker's skillsXP)
   String? _selectedSkill;
+
+  // Drop-off point for delivery / errand skills (see core/utils/gig_route.dart).
+  // The normal location above becomes the pick-up point.
+  GeoPoint? _dropoff;
+  String _dropoffAddress = '';
+  bool _dropoffError = false;
+
+  bool get _isRouteGig => RouteGigRules.instance.isRouteSkill(_selectedSkill);
   // GSIN task type (admin catalog) — gives the gig its GSINS/GSKU codes.
   String? _taskTypeId;
   // Typed under "Other" (task type not in the GSIN Library).
@@ -234,6 +246,11 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       _useMapLocation = true;
       _mapCurrency = d['currencyCode'] as String?;
     }
+    final drop = GigDropoff.fromData(d);
+    if (drop != null) {
+      _dropoff = drop.location;
+      _dropoffAddress = drop.address;
+    }
   }
 
   static String _fmtNum(num n) =>
@@ -283,6 +300,9 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
   @override
   void initState() {
     super.initState();
+    RouteGigRules.instance.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
     _fetchGpsLocation();
     if (_isEditing) {
       _seedFromGig(widget.editData!);
@@ -409,6 +429,18 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
       });
       _lookupGpsCurrency(pos.latitude, pos.longitude);
 
+      // Google first (core/utils/google_geocode.dart), then the device
+      // geocoder below if it fails.
+      final g = await googleReverseGeocode(pos.latitude, pos.longitude);
+      if (g != null && g.address.isNotEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _gpsAddress = g.address;
+          if (!_useMapLocation) _address = g.address;
+        });
+        return;
+      }
+
       String address = 'GPS location ready';
       try {
         final placemarks = await placemarkFromCoordinates(
@@ -529,6 +561,54 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
     }
   }
 
+  // ── Drop-off picker (delivery / errand skills) ──────────────────────────────
+  LatLng? get _pickupLatLng => _useMapLocation
+      ? _mapPosition
+      : (_gpsPosition != null
+            ? LatLng(_gpsPosition!.latitude, _gpsPosition!.longitude)
+            : null);
+
+  Future<void> _openDropoffPicker() async {
+    final initial = _dropoff != null
+        ? LatLng(_dropoff!.latitude, _dropoff!.longitude)
+        : _pickupLatLng;
+    final result = await Navigator.push<_PickedLocation>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _MapPickerScreen(initialPosition: initial),
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() {
+        _dropoff = GeoPoint(result.position.latitude, result.position.longitude);
+        _dropoffAddress = result.address;
+        _dropoffError = false;
+      });
+    }
+  }
+
+  double? get _dropoffDistanceKm {
+    final p = _pickupLatLng;
+    if (p == null || _dropoff == null) return null;
+    return routeDistanceKm(GeoPoint(p.latitude, p.longitude), _dropoff!);
+  }
+
+  Widget _buildDropoffSection() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const SizedBox(height: 20),
+      _SectionLabel('Drop-off point', required: true),
+      const SizedBox(height: 10),
+      DropoffPointField(
+        address: _dropoffAddress,
+        hasPoint: _dropoff != null,
+        distanceKm: _dropoffDistanceKm,
+        showError: _dropoffError,
+        onPick: _openDropoffPicker,
+      ),
+    ],
+  );
+
   // ── Submit ───────────────────────────────────────────────────────────────────
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) {
@@ -577,7 +657,17 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         ? _mapPosition != null
         : _gpsPosition != null;
     if (!hasLocation) {
-      _showSnack('Add the gig location: turn on GPS or pick a spot on the map.', isError: true);
+      _showSnack(
+        _isRouteGig
+            ? 'Add the pick-up point: turn on GPS or pick a spot on the map.'
+            : 'Add the gig location: turn on GPS or pick a spot on the map.',
+        isError: true,
+      );
+      return;
+    }
+    if (_isRouteGig && _dropoff == null) {
+      setState(() => _dropoffError = true);
+      _showSnack('Choose the drop-off point for this delivery.', isError: true);
       return;
     }
 
@@ -639,6 +729,11 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         geoPoint.latitude,
         geoPoint.longitude,
       );
+      // Drop-off's city / province too, so cards can name the area even if
+      // the street lookup failed (see gig_route.dart).
+      final dropPlace = _isRouteGig && _dropoff != null
+          ? await placeFromCoordinates(_dropoff!.latitude, _dropoff!.longitude)
+          : null;
       final gigCountry = place?.countryCode;
       final currency = gigCountry != null
           ? CurrencyFormatter.countryToCurrency(gigCountry)
@@ -682,7 +777,7 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
         hourlyRate: isHourly ? rate : null,
         workDurationHours: workDurationHours,
         location: geoPoint,
-        address: _address,
+        address: addressOrPlace(_address, place?.parts),
         scheduledDate: scheduledAt,
         workerSlots: _selectedWorkers.length,
         ratePerSlot: budget,
@@ -702,12 +797,19 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
               hourlyRate: isHourly ? rate : null,
               workDurationHours: workDurationHours,
               location: geoPoint,
-              address: _address,
+              address: addressOrPlace(_address, place?.parts),
               place: place?.parts,
               scheduledDate: scheduledAt,
               experienceLevel: _experienceLevel,
             ),
             'skillRequired': _selectedSkill!,
+            ...routeFields(
+              pickup: geoPoint,
+              dropoff: _isRouteGig ? _dropoff : null,
+              dropoffAddress: _dropoffAddress,
+              dropoffPlace: dropPlace?.parts,
+              isEdit: true,
+            ),
           },
           workerSlotIds: isSingle
               ? const []
@@ -746,6 +848,13 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
           .collection('offered_gigs')
           .add({
             ...gig.toMap(),
+            ...routeFields(
+              pickup: geoPoint,
+              dropoff: _isRouteGig ? _dropoff : null,
+              dropoffAddress: _dropoffAddress,
+              dropoffPlace: dropPlace?.parts,
+              isEdit: false,
+            ),
             if (_taskTypeId != null && _taskTypeId != kOtherTaskTypeId)
               'taskTypeId': _taskTypeId,
             if (_taskTypeId == kOtherTaskTypeId && _customTaskType.isNotEmpty)
@@ -1213,12 +1322,16 @@ class _PostOfferedGigScreenState extends State<PostOfferedGigScreen> {
                 const SizedBox(height: 20),
 
                 // ── Location ──────────────────────────────────────
-                _SectionLabel('Location', required: true),
+                _SectionLabel(
+                  _isRouteGig ? 'Pick-up point' : 'Location',
+                  required: true,
+                ),
                 const SizedBox(height: 10),
                 TutorialAnchor(
                   id: 'postGig.location',
                   child: _buildLocationSection(),
                 ),
+                if (_isRouteGig) _buildDropoffSection(),
                 const SizedBox(height: 36),
 
                 // ── Post Button ───────────────────────────────────
@@ -3155,6 +3268,16 @@ class _MapPickerScreenState extends State<_MapPickerScreen> {
     if (!mounted) return;
     final requestId = ++_geocodeRequestId;
     setState(() => _geocoding = true);
+    // Google first (core/utils/google_geocode.dart); Nominatim below if it fails.
+    final g = await googleReverseGeocode(pos.latitude, pos.longitude);
+    if (!mounted || requestId != _geocodeRequestId) return;
+    if (g != null && g.address.isNotEmpty) {
+      setState(() {
+        _address = g.address;
+        _geocoding = false;
+      });
+      return;
+    }
     try {
       final uri = Uri.parse(
         'https://nominatim.openstreetmap.org/reverse'
