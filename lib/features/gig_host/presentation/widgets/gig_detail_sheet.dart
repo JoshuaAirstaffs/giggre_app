@@ -21,6 +21,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/map_style.dart';
 import '../../../../core/utils/cancellation_request.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/worker_active_gig.dart';
 import '../../models/gig_template_model.dart';
 import '../../models/worker_slot_model.dart';
 import '../../services/quick_gig_matching_service.dart';
@@ -835,6 +836,42 @@ class _GigDetailSheetState extends State<GigDetailSheet> {
     final data = _data;
     final workerSlots = (data?['workerSlots'] as num?)?.toInt() ?? 1;
     final workerId = applicant['workerId'] as String;
+
+    // A worker can apply to several gigs but work only one at a time. If
+    // another host got them first, don't select them here too. The server
+    // (functions/src/applications.ts) withdraws their other applications
+    // when they start a gig; this covers the moment before that lands, and
+    // clears the stale application from this gig's list.
+    bool busy = false;
+    try {
+      busy = await workerHasActiveGig(workerId);
+    } catch (e) {
+      debugPrint('[selectWorker] active-gig check failed: $e');
+    }
+    if (!mounted) return;
+    if (busy) {
+      unawaited(
+        FirebaseFirestore.instance
+            .collection(_collection)
+            .doc(widget.gigId)
+            .update({
+              'applicants': FieldValue.arrayRemove([applicant]),
+            })
+            .catchError((Object e) {
+              debugPrint('[selectWorker] stale applicant removal failed: $e');
+            }),
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$workerName was just assigned to another gig, so they can\'t be selected.',
+          ),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     // Single-worker path. A transaction re-reads the gig so a double tap or
     // a second device can't assign it twice (previously a plain update, and

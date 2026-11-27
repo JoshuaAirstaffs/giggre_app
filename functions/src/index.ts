@@ -1548,6 +1548,21 @@ export {
   onMessageRequestAccepted,
 } from "./directMessages";
 
+// One active gig at a time: withdraw a worker's other Open Gig applications
+// once they start a gig. See functions/src/applications.ts.
+export {
+  syncApplicantIds,
+  withdrawOnQuickGigStart,
+  withdrawOnOpenGigStart,
+  withdrawOnOfferedGigStart,
+  withdrawOnQuickGigSlotStart,
+  withdrawOnOpenGigSlotStart,
+  withdrawOnOfferedGigSlotStart,
+} from "./applications";
+
+// General skills every user starts with. See functions/src/defaultSkills.ts.
+export { grantDefaultSkillsOnSignup } from "./defaultSkills";
+
 // Group chats. See functions/src/groupChats.ts.
 export {
   createGroup,
