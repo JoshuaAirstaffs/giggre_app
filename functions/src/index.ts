@@ -1335,8 +1335,13 @@ const AGORA_APP_ID = "75426b0c60784c2ebd9ab32cfcc5288f";
 
 const AGORA_TOKEN_EXPIRE_SECONDS = 3600;
 
+// Deployed to BOTH regions on every project. App builds up to 3.0.9 call it
+// in asia-east2 even on prod (hardcoded), while the rest of prod lives in
+// us-central1 — a callable doesn't watch Firestore, so it can run anywhere,
+// and keeping the asia-east2 copy keeps calls working on those installed
+// versions. Newer builds call their flavor's region (agora_token_service.dart).
 export const generateAgoraToken = onCall(
-  { secrets: [agoraAppCertificate] },
+  { secrets: [agoraAppCertificate], region: ["us-central1", "asia-east2"] },
   (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Must be signed in.");
