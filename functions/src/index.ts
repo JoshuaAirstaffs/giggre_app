@@ -1560,6 +1560,9 @@ export {
   withdrawOnOfferedGigSlotStart,
 } from "./applications";
 
+// General skills every user starts with. See functions/src/defaultSkills.ts.
+export { grantDefaultSkillsOnSignup } from "./defaultSkills";
+
 // Group chats. See functions/src/groupChats.ts.
 export {
   createGroup,
