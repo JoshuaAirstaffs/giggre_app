@@ -3300,10 +3300,29 @@ class _GigMapSectionState extends State<GigMapSection> {
   // always show.
   bool get _viewerInPh => _userProvider.currencyCode == 'PHP';
 
+  // Some gigs (e.g. bulk-created ones whose address lookup failed) have no
+  // saved country and a USD price even though they're in the Philippines,
+  // so the map position is checked before the currency.
   static bool _isPhGig(GigMarkerData g) {
     final c = g.place['countryCode'];
     if (c != null && c.isNotEmpty) return c.toUpperCase() == 'PH';
+    final country = g.place['country'];
+    if (country != null && country.isNotEmpty) {
+      return country.toLowerCase().contains('philippines');
+    }
+    if (g.address.toLowerCase().contains('philippines')) return true;
+    final inPhBox = _inPhilippines(g.position.latitude, g.position.longitude);
+    if (inPhBox != null) return inPhBox;
     return g.currencyCode == 'PHP';
+  }
+
+  /// Rough Philippines bounding box (Sabah, Malaysia carved out of the
+  /// south-west corner). null for 0,0 / missing coordinates.
+  static bool? _inPhilippines(double lat, double lng) {
+    if (lat == 0 && lng == 0) return null;
+    final inBox = lat >= 4.2 && lat <= 21.5 && lng >= 116.0 && lng <= 127.0;
+    final sabah = lat < 7.4 && lng < 119.3;
+    return inBox && !sabah;
   }
 
   List<GigMarkerData> get _unfilteredGigs {
